@@ -46,7 +46,9 @@ target-version = "py311"
 select = ["E", "F", "I", "UP", "B", "N"]
 
 [tool.mypy]
-python_version = "3.11"
+# No python_version pin: each CI job checks against its own interpreter. Pinning 3.11 made
+# mypy parse numpy >= 2.5 stubs (3.12-only `type` statements) as 3.11 code on 3.12 runners.
+# The 3.11 job and ruff's target-version still enforce 3.11 compatibility.
 strict = true
 packages = ["envelopelab"]
 
