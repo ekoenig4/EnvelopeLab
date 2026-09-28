@@ -15,6 +15,10 @@ All notable changes to this project will be documented in this file.
   with progress callbacks and cancellation; warm starts from a previous shape.
 - `envelopelab.solvers.model.model_from_rest_model`: solver model from a build pack's rest
   model (grain and zone per instance, one tape per seam `load_tape`, mouth fixed).
+- `envelopelab.solvers.results`: displacement, principal and warp/weft stress-resultant,
+  strain, wrinkle-state, released-compression and tape-tension fields with units; deformed
+  mesh (OBJ); global force-balance table; factors of safety by zone, seam and tape; JSON
+  export `envelopelab.preview-result` v1 with reproducibility metadata.
 - `envelopelab.materials.membrane`: `MembraneMaterial` and `TapeMaterial` with a unit and
   source tag on every value.
 - `envelopelab.io.pattern_import`: DXF pattern import with ezdxf, driven by a per-build-pack
