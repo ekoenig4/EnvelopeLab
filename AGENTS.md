@@ -202,6 +202,9 @@ The commit body must state, when they apply:
 
 ### 8.3 Branches and pull requests
 - Branch from `main`: `type/short-description` (e.g. `physics/isa-humidity`).
+  Branch names assigned by a tool or session (e.g. `claude/...`, `copilot/...`) are
+  allowed as-is; keep the assigned name rather than renaming it. The commit and PR rules
+  below apply to them unchanged.
 - Keep `main` green. Merge only through a pull request with CI passing on every OS and
   Python version in the matrix.
 - PR description: what changed and why, the commands run and their results (§5 step 6),
