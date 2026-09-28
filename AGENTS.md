@@ -26,12 +26,18 @@ never hidden. The builder is responsible for airworthiness.
 - If a requirement is ambiguous, ask ONE clarifying question before coding.
 
 ## 3. Repository layout
-envelopelab/   core library (geometry, atmosphere, assembly, solvers, io, export)
-solvers/       adapters for external solvers (Kratos, Gmsh, Meshroom)
-app/           PySide6 GUI
-tests/         unit/, property/, benchmarks/, regression/, gui/, fixtures/
-docs/          MkDocs site: user/, theory/, validation/, dev/, formats/, adr/
-scripts/       dev utilities (verify.py, build_docs.sh, release.py)
+    src/envelopelab/   core library, installed as `envelopelab`
+                       (now: atmosphere, geometry, mass_estimate, design, materials,
+                       commands, validation; planned: assembly, solvers, io, export)
+    tests/             unit/, property/, benchmarks/, regression/, fixtures/ (planned: gui/)
+    docs/              MkDocs site: theory/, validation/, dev/, formats/, adr/ (planned: user/)
+    scripts/           dev utilities: verify.py, generate_validation_docs.py,
+                       generate_design_schema_docs.py
+    solvers/           planned: adapters for external solvers (Kratos, Gmsh, Meshroom)
+    app/               planned: PySide6 GUI
+
+Paths written as `envelopelab/...` elsewhere in this file mean `src/envelopelab/...`.
+Create a planned directory only when the first code for it lands.
 
 ## 4. Environment setup
     python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
@@ -52,12 +58,18 @@ scripts/       dev utilities (verify.py, build_docs.sh, release.py)
 
 ### 6.1 Commands
     ruff check . && ruff format --check .      # lint + format
-    mypy envelopelab                           # types (strict for envelopelab/)
+    mypy src tests                             # types (strict; config in pyproject.toml)
     pytest -m "not slow" -q                    # fast suite, run after every change
     pytest -q                                  # full suite, run before every commit
-    pytest tests/benchmarks -q --benchmark-report docs/validation/_generated/
-    python scripts/verify.py                   # runs everything above + output QA
+    python scripts/generate_validation_docs.py # regenerate docs/validation/ benchmark pages
     mkdocs build --strict                      # docs must build without warnings
+    python scripts/verify.py                   # ruff, format, mypy, full pytest, mkdocs
+
+Mark tests that take more than a few seconds with `@pytest.mark.slow` (the marker is
+registered in `pyproject.toml`). Benchmark pages under `docs/validation/` are generated
+from `envelopelab.validation`; a test fails when a committed page is stale, so regenerate
+and commit it with any change that moves a benchmark value. Build-pack output QA (§6.6)
+will be added to `verify.py` together with the export code.
 
 ### 6.2 Verification rules
 - **Run it, don't assume it.** Never say code works without running it. Quote the

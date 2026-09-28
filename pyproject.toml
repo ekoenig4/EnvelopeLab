@@ -32,7 +32,10 @@ kratos = []
 scan = []
 
 [tool.pytest.ini_options]
-addopts = "-q"
+addopts = "-q --strict-markers"
+markers = [
+  "slow: long-running test, excluded from the fast suite with -m 'not slow'",
+]
 testpaths = ["tests"]
 
 [tool.ruff]
