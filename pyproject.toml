@@ -35,6 +35,9 @@ docs = [
 kratos = []
 scan = []
 
+[project.scripts]
+envelopelab-import = "envelopelab.assembly.pipeline:main"
+
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers"
 markers = [

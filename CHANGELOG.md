@@ -13,6 +13,8 @@ All notable changes to this project will be documented in this file.
   overrides, parts, seams, openings), seam graph with CSV/JSON export, seam-length audit
   with designed ease, Gmsh triangulation and virtual sewing into one tagged rest mesh,
   mesh validation, initial 3D guess and the `envelopelab.rest-model` v1 JSON file.
+- Import reports (panel inventory, seam audit, seam graph, mesh report, warnings) in
+  HTML/CSV/JSON and the `envelopelab-import` command.
 - `envelopelab.atmosphere`: ISA (0–32 km), ideal-gas density with optional humidity
   correction, gross lift and hydrostatic differential pressure.
 - `envelopelab.geometry.gore`: meridian profile (volume, area, height, width, length),
