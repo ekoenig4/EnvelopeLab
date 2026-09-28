@@ -11,7 +11,9 @@ requires-python = ">=3.11"
 license = {text = "GPL-3.0-only"}
 authors = [{name = "EnvelopeLab Contributors"}]
 dependencies = [
+  "numpy>=1.26",
   "pydantic>=2.9,<3",
+  "scipy>=1.12",
 ]
 
 [project.optional-dependencies]
@@ -44,6 +46,11 @@ select = ["E", "F", "I", "UP", "B", "N"]
 python_version = "3.11"
 strict = true
 packages = ["envelopelab"]
+
+[[tool.mypy.overrides]]
+# SciPy ships no type information; its results are converted with np.asarray at the call site.
+module = ["scipy", "scipy.*"]
+ignore_missing_imports = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/envelopelab"]
