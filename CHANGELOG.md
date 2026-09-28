@@ -3,6 +3,27 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- `calculix_adapter` (`solvers/calculix_adapter`, optional): verification solve of a
+  `SolverModel` with the external program CalculiX CrunchiX (`ccx`, GPL-2.0-or-later, not
+  bundled). M3D3 membranes with per-element orientation and anisotropic material, as-sewn
+  initial stress, tension-field wrinkling by iterative membrane properties that reproduce
+  the preview's law at convergence, tension-only SPRINGA tapes, hydrostatic pressure, cap
+  and dead loads as consistent nodal forces, fixed nodes and symmetry planes. Staged
+  passes (held prestress job, balanced release job with ramped continuation and
+  stabilisation), explicit convergence criteria, `not converged` findings otherwise.
+  `find_calculix` / `require_calculix` detect `ccx` (`ENVELOPELAB_CCX` or `PATH`) and
+  explain how to install it; nothing else in EnvelopeLab needs CalculiX.
+- `envelopelab.solvers.simulation.SimulationResult`: solver-independent result (nodes,
+  elements, stress resultants, tape tensions, reactions, residual and iteration history,
+  solver version, mesh size, elapsed time, findings); `from_preview` normalises a preview
+  result.
+- `envelopelab.solvers.manifest.RunManifest` (`envelopelab.run-manifest` v1): design and
+  model hash, material sources, solver settings, git commit, Python and dependency
+  versions, mesh settings, random seed; fingerprint and field-by-field differences.
+- `envelopelab.solvers.dynamic_relaxation.ModelEvaluator`: the preview model's
+  deformation, loads, volume and tape tensions at given positions (no numerical change).
+- CI installs `calculix-ccx` on Linux (CalculiX tests are skipped with a message
+  elsewhere); `mypy` now also checks `solvers/`.
 - `envelopelab.solvers`: interactive preview solver for the inflated equilibrium of an
   as-sewn envelope (`dynamic_relaxation.solve`). Dynamic relaxation with kinetic damping
   (viscous optional), orthotropic constant-strain membrane triangles in grain axes

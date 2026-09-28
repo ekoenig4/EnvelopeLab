@@ -628,6 +628,94 @@ class _System:
         return vol
 
 
+class ModelEvaluator:
+    """Public access to the model's kinematics and load definitions at given positions.
+
+    The verification solver adapters use it so that both solvers share one definition
+    of pressure, closures, dead loads, tape strain, volume and tension-field state.
+
+    Parameters
+    ----------
+    model : SolverModel
+        Model to evaluate.
+    settings : SolverSettings, optional
+        Only ``slack_stiffness_ratio`` and ``tension_field`` are used.
+    """
+
+    def __init__(self, model: SolverModel, settings: SolverSettings | None = None) -> None:
+        self.model = model
+        self._s = _System(model, settings or SolverSettings())
+
+    @property
+    def rest_area(self) -> FloatArray:
+        """Flat rest area of each triangle, m^2."""
+        return self._s.rest.area
+
+    @property
+    def stiffness(self) -> FloatArray:
+        """Plane-stress matrix per triangle in fabric axes, N/m, shape (m, 3, 3)."""
+        return self._s.c
+
+    @property
+    def compliance(self) -> FloatArray:
+        """Inverse of :attr:`stiffness`, m/N."""
+        return self._s.c_inv
+
+    @property
+    def start_positions(self) -> FloatArray:
+        """Initial positions with prescribed positions and symmetry projections applied, m."""
+        return self._s.x_start.copy()
+
+    @property
+    def closure_edges(self) -> dict[str, IntArray]:
+        """Directed boundary edges of each closure, shape (k, 2)."""
+        return dict(self._s.closures)
+
+    def deformation(self, x: FloatArray) -> tuple[FloatArray, FloatArray]:
+        """Deformation gradient (m, 3, 2) and Green strain (m, 2, 2) from rest to ``x`` (m)."""
+        f = deformation_gradient(x[self._s.tri], self._s.rest.grad_n)
+        return f, green_strain(f)
+
+    def volume(self, x: FloatArray) -> float:
+        """Enclosed volume at ``x``, m^3 (openings capped, symmetry planes closing)."""
+        return self._s.volume(x)
+
+    def closure_forces(self, x: FloatArray) -> dict[str, FloatArray]:
+        """Nodal cap-pressure forces per closure at ``x``, N, shape (n, 3) each."""
+        return self._s.closure_forces(x)
+
+    def tapes(self, x: FloatArray) -> tuple[dict[str, FloatArray], dict[str, FloatArray]]:
+        """Tension (N) and engineering strain (-) of every tape element at ``x``."""
+        if not len(self._s.cable_edges):
+            return {}, {}
+        tension, strain, _, _ = self._s.cables(x)
+        sl = self._s.cable_slices
+        return (
+            {k: tension[v] for k, v in sl.items()},
+            {k: strain[v] for k, v in sl.items()},
+        )
+
+    def dead_loads(self) -> dict[str, FloatArray]:
+        """Dead nodal loads (N, shape (n, 3)): fabric and tape weight, point, line, area."""
+        s = self._s
+        tri_w = s._scatter(s.tri.ravel(), np.repeat(s.weight_tri / 3.0, 3, axis=0))
+        out = {"fabric weight": tri_w if s.self_weight else np.zeros((s.n, 3))}
+        if len(s.cable_edges) and s.self_weight:
+            w = 0.5 * s.weight_cable
+            out["tape weight"] = s._scatter(s.cable_edges.T.ravel(), np.concatenate([w, w]))
+        else:
+            out["tape weight"] = np.zeros((s.n, 3))
+        for group in (s.point, s.line, s.distributed):
+            out.update(group)
+        return out
+
+    def pressure_resultant(self, x: FloatArray) -> FloatArray:
+        """Resultant of the membrane pressure load at ``x``, N, shape (3,)."""
+        f_p, _ = self._s.pressure_corners(x[self._s.tri])
+        out: FloatArray = f_p.sum(axis=(0, 1))
+        return out
+
+
 # --------------------------------------------------------------------------------------
 # Solve
 # --------------------------------------------------------------------------------------

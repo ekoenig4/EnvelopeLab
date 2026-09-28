@@ -15,3 +15,9 @@
 | types-PyYAML (dev) | type stubs for mypy | Apache-2.0 |
 | pymdown-extensions (via mkdocs-material) | `arithmatex` math in docs | MIT |
 | MathJax (loaded from jsDelivr by the docs site) | equation rendering | Apache-2.0 |
+
+## External programs (optional, not bundled)
+
+| Program | Use | License |
+|---|---|---|
+| CalculiX CrunchiX (`ccx`) | verification solver, run as a separate process by `solvers/calculix_adapter` (see `docs/dev/calculix-installation.md`); not linked, imported or distributed | GPL-2.0-or-later |

@@ -180,6 +180,59 @@ def _sym_eig(s11: FloatArray, s22: FloatArray, s12: FloatArray) -> tuple[FloatAr
     return s1, s2, np.cos(angle), np.sin(angle)
 
 
+def trial_principal(
+    strain: FloatArray, stiffness: FloatArray
+) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray]:
+    """Principal trial stress and the stretch along its major direction.
+
+    Parameters
+    ----------
+    strain : ndarray, shape (m, 2, 2)
+        Green-Lagrange strain in fabric axes, dimensionless.
+    stiffness : ndarray, shape (m, 3, 3)
+        Plane-stress resultant matrix, N/m.
+
+    Returns
+    -------
+    s1, s2 : ndarray, shape (m,)
+        Major and minor principal trial PK2 resultants :math:`\\mathbb{C}:E`, N/m.
+    direction : ndarray, shape (m, 2)
+        Unit major direction :math:`n` in fabric axes (the wrinkle direction).
+    eps_n : ndarray, shape (m,)
+        :math:`n^T E n`, dimensionless.
+    """
+    e = np.stack([strain[:, 0, 0], strain[:, 1, 1], 2.0 * strain[:, 0, 1]], axis=1)
+    s = (
+        stiffness[:, :, 0] * e[:, 0, None]
+        + stiffness[:, :, 1] * e[:, 1, None]
+        + stiffness[:, :, 2] * e[:, 2, None]
+    )
+    s1, s2, c, sn = _sym_eig(s[:, 0], s[:, 1], s[:, 2])
+    eps_n = c * c * e[:, 0] + sn * sn * e[:, 1] + c * sn * e[:, 2]
+    return s1, s2, np.column_stack([c, sn]), eps_n
+
+
+def uniaxial_stiffness(direction: FloatArray, compliance: FloatArray) -> FloatArray:
+    """Uniaxial resultant stiffness :math:`E_n = (v^T \\mathbb{C}^{-1} v)^{-1}` along ``direction``.
+
+    Parameters
+    ----------
+    direction : ndarray, shape (m, 2)
+        Unit directions in fabric axes.
+    compliance : ndarray, shape (m, 3, 3)
+        Inverse plane-stress matrix, m/N.
+
+    Returns
+    -------
+    ndarray, shape (m,)
+        :math:`E_n`, N/m (free lateral contraction).
+    """
+    c, sn = direction[:, 0], direction[:, 1]
+    v = np.stack([c * c, sn * sn, c * sn], axis=1)
+    out: FloatArray = 1.0 / np.einsum("mi,mij,mj->m", v, compliance, v)
+    return out
+
+
 def tension_field(
     strain: FloatArray,
     stiffness: FloatArray,

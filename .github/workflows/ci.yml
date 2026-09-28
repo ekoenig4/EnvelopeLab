@@ -26,6 +26,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libglu1-mesa libxcursor1 libxft2 libxinerama1
+      - name: Install CalculiX verification solver (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get install -y calculix-ccx
+          ccx -v || true  # prints the version; exits with a nonzero code
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip

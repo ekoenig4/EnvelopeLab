@@ -6,7 +6,7 @@ import sys
 COMMANDS: list[list[str]] = [
     [sys.executable, "-m", "ruff", "check", "."],
     [sys.executable, "-m", "ruff", "format", "--check", "."],
-    [sys.executable, "-m", "mypy", "src", "tests"],
+    [sys.executable, "-m", "mypy", "src", "solvers", "tests"],
     [sys.executable, "-m", "pytest"],
     [sys.executable, "-m", "mkdocs", "build", "--strict"],
 ]

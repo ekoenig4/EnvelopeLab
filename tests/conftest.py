@@ -1,4 +1,10 @@
-"""Shared helpers: write small synthetic DXF build packs for pattern-import tests."""
+"""Shared helpers: synthetic DXF build packs for pattern-import tests, and the ``ccx``
+fixture of the CalculiX verification tests.
+
+Tests that run CalculiX use the ``ccx`` fixture; without a ``ccx`` executable they are
+skipped with the installation message, so a missing solver is never reported as a
+verification that passed.
+"""
 
 from __future__ import annotations
 
@@ -9,6 +15,8 @@ from typing import Any
 import pytest
 import yaml
 from ezdxf.filemanagement import new as new_dxf
+
+from calculix_adapter import SETUP_MESSAGE, CalculixInstallation, find_calculix
 
 Point = tuple[float, float]
 Entity = tuple[str, str, Any]  # (layer, kind, data)
@@ -142,3 +150,12 @@ def ring_assembly(rows: Sequence[str], gores: int, **extra: Any) -> dict[str, An
     }
     cfg.update(extra)
     return cfg
+
+
+@pytest.fixture(scope="session")
+def ccx() -> CalculixInstallation:
+    """The installed CalculiX; skips the test (with the setup message) when it is missing."""
+    found = find_calculix()
+    if found is None:
+        pytest.skip("CalculiX verification tests skipped, ccx not installed.\n" + SETUP_MESSAGE)
+    return found
