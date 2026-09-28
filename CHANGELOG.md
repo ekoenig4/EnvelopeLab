@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- `envelopelab.solvers`: interactive preview solver for the inflated equilibrium of an
+  as-sewn envelope (`dynamic_relaxation.solve`). Dynamic relaxation with kinetic damping
+  (viscous optional), orthotropic constant-strain membrane triangles in grain axes
+  (isotropic default), tension-field wrinkling with probable-wrinkle-zone output,
+  tension-only tapes and cables, follower hydrostatic pressure
+  dp = (rho_amb - rho_int) g max(z - z_mouth, 0), pressure closures
+  (parachute, end caps), fabric and tape weight, point/line/distributed loads, fixed or
+  prescribed nodes and symmetry planes. Convergence at relative residual 1e-6; every other
+  stop is an explicit `not_converged` error. `SolverJob` runs a solve on a worker thread
+  with progress callbacks and cancellation; warm starts from a previous shape.
+- `envelopelab.solvers.model.model_from_rest_model`: solver model from a build pack's rest
+  model (grain and zone per instance, one tape per seam `load_tape`, mouth fixed).
+- `envelopelab.materials.membrane`: `MembraneMaterial` and `TapeMaterial` with a unit and
+  source tag on every value.
 - `envelopelab.io.pattern_import`: DXF pattern import with ezdxf, driven by a per-build-pack
   YAML mapping (layer roles for cut, sew, dimension, feature, tape, match-mark, notch,
   grain and label layers; label regular expressions; units; allowances); packs with cut
