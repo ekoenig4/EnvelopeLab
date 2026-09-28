@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+from envelopelab.validation.pages import page_differences
 from envelopelab.validation.preview_solver import (
     PreviewBenchmarks,
     render_markdown,
@@ -54,7 +55,10 @@ def test_required_benchmarks_are_present(bench: PreviewBenchmarks) -> None:
 
 @pytest.mark.slow
 def test_generated_page_is_current(bench: PreviewBenchmarks) -> None:
-    assert PAGE.read_text(encoding="utf-8") == render_markdown(bench), (
+    # Numbers are compared within the platform tolerance of envelopelab.validation.pages
+    # (wrinkled-fabric displacements differ by ~0.1 % between CPU architectures).
+    diffs = page_differences(PAGE.read_text(encoding="utf-8"), render_markdown(bench))
+    assert not diffs, (
         "docs/validation/preview-solver-benchmarks.md is stale; "
-        "run python scripts/generate_validation_docs.py preview"
+        "run python scripts/generate_validation_docs.py preview\n" + "\n".join(diffs)
     )

@@ -22,6 +22,7 @@ from calculix_adapter.validation import (
     richardson,
     run_validation,
 )
+from envelopelab.validation.pages import page_differences
 
 ROOT = Path(__file__).resolve().parents[2]
 DATA = ROOT / "docs" / "validation" / "preview-vs-calculix.json"
@@ -66,6 +67,7 @@ def test_richardson_recovers_a_known_order() -> None:
 def test_recomputed_results_reproduce_the_page(ccx: CalculixInstallation) -> None:
     data = run_validation(FIXTURE)
     assert data.passed, [b.name for b in data.benchmarks if not b.passed]
-    # CalculiX runs single-threaded; four significant digits on the page absorb
-    # platform-dependent round-off.
-    assert render_markdown(data) == PAGE.read_text(encoding="utf-8"), f"{PAGE.name} {STALE}"
+    # Numbers within the platform tolerance of envelopelab.validation.pages (other CPU
+    # architectures or CalculiX builds move the last digit of converged results).
+    diffs = page_differences(PAGE.read_text(encoding="utf-8"), render_markdown(data))
+    assert not diffs, f"{PAGE.name} {STALE}\n" + "\n".join(diffs)
