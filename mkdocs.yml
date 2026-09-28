@@ -1,22 +1,29 @@
 site_name: EnvelopeLab
 nav:
   - Home: index.md
+  - User guide:
+      - Importing patterns: user/importing-patterns.md
   - Developer:
       - Setup: dev/setup.md
   - Theory:
       - Atmosphere: theory/atmosphere.md
       - Gore geometry: theory/gore-geometry.md
+      - Virtual sewing: theory/virtual-sewing.md
   - Validation:
       - Analytic geometry: validation/analytic-geometry.md
+      - Pattern-import fixtures: validation/pattern-import-fixtures.md
   - Formats:
       - Design schema: formats/design-schema.md
+      - Pattern import mapping: formats/pattern-import-mapping.md
   - ADR:
       - ADR-0001: adr/ADR-0001-stack-choice.md
       - ADR-0002: adr/ADR-0002-gpl-3-licensing.md
+      - ADR-0003: adr/ADR-0003-pattern-import-and-virtual-sewing.md
 theme:
   name: material
 markdown_extensions:
   - admonition
+  - def_list
   - pymdownx.arithmatex:
       generic: true
 extra_javascript:
