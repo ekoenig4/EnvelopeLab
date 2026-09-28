@@ -26,12 +26,18 @@ never hidden. The builder is responsible for airworthiness.
 - If a requirement is ambiguous, ask ONE clarifying question before coding.
 
 ## 3. Repository layout
-envelopelab/   core library (geometry, atmosphere, assembly, solvers, io, export)
-solvers/       adapters for external solvers (Kratos, Gmsh, Meshroom)
-app/           PySide6 GUI
-tests/         unit/, property/, benchmarks/, regression/, gui/, fixtures/
-docs/          MkDocs site: user/, theory/, validation/, dev/, formats/, adr/
-scripts/       dev utilities (verify.py, build_docs.sh, release.py)
+    src/envelopelab/   core library, installed as `envelopelab`
+                       (now: atmosphere, geometry, mass_estimate, design, materials,
+                       commands, validation; planned: assembly, solvers, io, export)
+    tests/             unit/, property/, benchmarks/, regression/, fixtures/ (planned: gui/)
+    docs/              MkDocs site: theory/, validation/, dev/, formats/, adr/ (planned: user/)
+    scripts/           dev utilities: verify.py, generate_validation_docs.py,
+                       generate_design_schema_docs.py
+    solvers/           planned: adapters for external solvers (Kratos, Gmsh, Meshroom)
+    app/               planned: PySide6 GUI
+
+Paths written as `envelopelab/...` elsewhere in this file mean `src/envelopelab/...`.
+Create a planned directory only when the first code for it lands.
 
 ## 4. Environment setup
     python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
@@ -52,12 +58,18 @@ scripts/       dev utilities (verify.py, build_docs.sh, release.py)
 
 ### 6.1 Commands
     ruff check . && ruff format --check .      # lint + format
-    mypy envelopelab                           # types (strict for envelopelab/)
+    mypy src tests                             # types (strict; config in pyproject.toml)
     pytest -m "not slow" -q                    # fast suite, run after every change
     pytest -q                                  # full suite, run before every commit
-    pytest tests/benchmarks -q --benchmark-report docs/validation/_generated/
-    python scripts/verify.py                   # runs everything above + output QA
+    python scripts/generate_validation_docs.py # regenerate docs/validation/ benchmark pages
     mkdocs build --strict                      # docs must build without warnings
+    python scripts/verify.py                   # ruff, format, mypy, full pytest, mkdocs
+
+Mark tests that take more than a few seconds with `@pytest.mark.slow` (the marker is
+registered in `pyproject.toml`). Benchmark pages under `docs/validation/` are generated
+from `envelopelab.validation`; a test fails when a committed page is stale, so regenerate
+and commit it with any change that moves a benchmark value. Build-pack output QA (§6.6)
+will be added to `verify.py` together with the export code.
 
 ### 6.2 Verification rules
 - **Run it, don't assume it.** Never say code works without running it. Quote the
@@ -122,4 +134,80 @@ the reason in the commit body, a before/after numeric diff, and the `physics` or
 - Comments explain *why*, not *what*. No commented-out code.
 
 ### 7.2 Docs site (MkDocs + Material, `docs/`)
-- `user/`: how-to guides, workflow walk
+- `user/`: how-to guides, workflow walkthroughs and screenshots for builders. No derivations.
+- `theory/`: one page per physics or geometry module: governing equations, assumptions,
+  valid range, references. Keep it in step with the module docstrings.
+- `validation/`: benchmark and convergence results. Tables are generated from the test
+  suite (e.g. `scripts/generate_validation_docs.py`), never typed by hand; a test fails
+  when a generated page is stale.
+- `dev/`: setup, architecture, contributing and release notes for developers.
+- `formats/`: file formats (design schema, build-pack layout). Generated from code where
+  possible (`scripts/generate_design_schema_docs.py`).
+- `adr/`: Architecture Decision Records `ADR-NNNN-title.md` (Status, Date, Context,
+  Decision, Consequences). Add one for every new dependency with a runtime role, solver
+  choice, file-format change or change to a hard rule. Never rewrite an accepted ADR;
+  supersede it with a new one.
+- Every new page goes in the `mkdocs.yml` nav. Equations use `pymdownx.arithmatex`
+  (`\( \)` inline, `\[ \]` display).
+
+### 7.3 What to update with each change
+| Change | Update |
+|---|---|
+| New or changed physics/geometry | Docstrings, `theory/` page, benchmark + regenerated `validation/` page |
+| New public API | Docstrings; `user/` guide if builders use it |
+| Schema or file format | Migration + test, regenerated `formats/` page, ADR if breaking |
+| New dependency | `pyproject.toml`, `LICENSES.md` (same commit), ADR if it has a runtime role |
+| Any user-visible change | `CHANGELOG.md` under `[Unreleased]` |
+
+### 7.4 Changelog
+`CHANGELOG.md` follows Keep a Changelog. Add one line per user-visible change under
+`[Unreleased]`. Any change that alters numerical results (`physics` commits, golden updates)
+says what changed and by how much.
+
+## 8. Commits and branches
+
+### 8.1 Commit messages
+Use Conventional Commits: `type(scope): summary`, imperative mood, summary <= 72 characters.
+
+| Type | Use for |
+|---|---|
+| `feat` | New capability that does not change existing numerical results |
+| `physics` | Any change to an equation, constant, solver setting or tolerance that changes results |
+| `fix` | Bug fix (starts with a failing test, §6.2) |
+| `docs` | Documentation only |
+| `test` | Tests only |
+| `refactor` | No behavior change, results bit-identical |
+| `perf` | Faster, results unchanged within tolerance |
+| `build` / `ci` / `chore` | Packaging, CI, tooling |
+
+Scope is the package area: `atmosphere`, `geometry`, `solvers`, `io`, `export`, `app`,
+`materials`, `design`, `docs`.
+
+The commit body must state, when they apply:
+- why the change was made (not only what);
+- any tolerance change, skipped or `xfail` test, with the reason and the linked issue
+  (§6.2);
+- any golden-file update, with the reason and a before/after numeric diff (§6.7);
+- any new dependency and its license (§2);
+- any breaking change, as a `BREAKING CHANGE:` footer.
+
+### 8.2 Commit rules
+- One logical change per commit. Tests, docs and code for that change go in the same commit.
+- Run `pytest -q` (full suite) before every commit; `python scripts/verify.py` must pass
+  before pushing.
+- Never commit generated build output (`site/`, caches, `.venv/`), secrets or large
+  binaries. Generated docs pages that are part of the site (`validation/`, `formats/`)
+  are committed and must be current.
+- Never rewrite published history on a shared branch.
+
+### 8.3 Branches and pull requests
+- Branch from `main`: `type/short-description` (e.g. `physics/isa-humidity`).
+  Branch names assigned by a tool or session (e.g. `claude/...`, `copilot/...`) are
+  allowed as-is; keep the assigned name rather than renaming it. The commit and PR rules
+  below apply to them unchanged.
+- Keep `main` green. Merge only through a pull request with CI passing on every OS and
+  Python version in the matrix.
+- PR description: what changed and why, the commands run and their results (§5 step 6),
+  what is unfinished, known limitations, and links to issues for pending or skipped tests.
+- A `physics` PR lists every affected benchmark with its before/after values, and must
+  pass the §6.4 benchmarks.
