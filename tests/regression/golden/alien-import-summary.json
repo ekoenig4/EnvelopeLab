@@ -1,0 +1,142 @@
+{
+  "_comment": "Alien build pack import summary (regression fixture only). Areas per piece in m^2; update only per AGENTS.md 6.7.",
+  "pieces": {
+    "A": {
+      "quantity": 20,
+      "finished_area_m2": 1.3975583,
+      "cut_area_m2": 1.5194691
+    },
+    "B": {
+      "quantity": 20,
+      "finished_area_m2": 1.7798935,
+      "cut_area_m2": 1.9162058
+    },
+    "C": {
+      "quantity": 20,
+      "finished_area_m2": 2.1647886,
+      "cut_area_m2": 2.3156191
+    },
+    "D": {
+      "quantity": 20,
+      "finished_area_m2": 2.5529271,
+      "cut_area_m2": 2.7181735
+    },
+    "E": {
+      "quantity": 20,
+      "finished_area_m2": 2.9328913,
+      "cut_area_m2": 3.1118906
+    },
+    "F": {
+      "quantity": 20,
+      "finished_area_m2": 3.2710198,
+      "cut_area_m2": 3.4619996
+    },
+    "G": {
+      "quantity": 20,
+      "finished_area_m2": 3.5384641,
+      "cut_area_m2": 3.7387654
+    },
+    "H": {
+      "quantity": 20,
+      "finished_area_m2": 3.7185908,
+      "cut_area_m2": 3.9251284
+    },
+    "J": {
+      "quantity": 20,
+      "finished_area_m2": 3.7650143,
+      "cut_area_m2": 3.9726629
+    },
+    "K": {
+      "quantity": 20,
+      "finished_area_m2": 3.5902336,
+      "cut_area_m2": 3.7917462
+    },
+    "L": {
+      "quantity": 20,
+      "finished_area_m2": 3.275005,
+      "cut_area_m2": 3.4657821
+    },
+    "M": {
+      "quantity": 20,
+      "finished_area_m2": 2.8581461,
+      "cut_area_m2": 3.034286
+    },
+    "N": {
+      "quantity": 22,
+      "finished_area_m2": 2.376168,
+      "cut_area_m2": 2.5347506
+    },
+    "NOMEX": {
+      "quantity": 20,
+      "finished_area_m2": 1.0179043,
+      "cut_area_m2": 1.1255132
+    },
+    "O": {
+      "quantity": 20,
+      "finished_area_m2": 1.8494388,
+      "cut_area_m2": 1.9885855
+    },
+    "P": {
+      "quantity": 20,
+      "finished_area_m2": 1.3037612,
+      "cut_area_m2": 1.4224439
+    },
+    "antenna_cone": {
+      "quantity": 2,
+      "finished_area_m2": 4.2366011,
+      "cut_area_m2": 4.522296
+    },
+    "ball_gore": {
+      "quantity": 32,
+      "finished_area_m2": 0.4416351,
+      "cut_area_m2": 0.5650233
+    },
+    "eye_footprint": {
+      "quantity": 2,
+      "finished_area_m2": 34.1952637,
+      "cut_area_m2": 34.1952637
+    },
+    "eye_skin": {
+      "quantity": 2,
+      "finished_area_m2": 39.5045554,
+      "cut_area_m2": 40.7533898
+    },
+    "i": {
+      "quantity": 20,
+      "finished_area_m2": 3.8016325,
+      "cut_area_m2": 4.0108029
+    },
+    "mouth_g1": {
+      "quantity": 1,
+      "finished_area_m2": 1.0927444,
+      "cut_area_m2": 1.0927444
+    },
+    "mouth_g2": {
+      "quantity": 1,
+      "finished_area_m2": 0.6539249,
+      "cut_area_m2": 0.6539249
+    },
+    "mouth_g20": {
+      "quantity": 1,
+      "finished_area_m2": 0.6539249,
+      "cut_area_m2": 0.6539249
+    }
+  },
+  "seams": 662,
+  "openings": [
+    "antenna_neck_g18",
+    "antenna_neck_g4",
+    "envelope/H@19:eye_feed_hole",
+    "envelope/H@20:eye_feed_hole",
+    "envelope/H@2:eye_feed_hole",
+    "envelope/H@3:eye_feed_hole",
+    "envelope/N@18:antenna_feed_hole",
+    "envelope/N@4:antenna_feed_hole",
+    "envelope/i@18:eye_feed_hole",
+    "envelope/i@4:eye_feed_hole",
+    "mouth",
+    "parachute_opening",
+    "turning_vent_15_16",
+    "turning_vent_16_17"
+  ]
+}

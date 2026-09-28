@@ -8,6 +8,7 @@ nav:
       - Gore geometry: theory/gore-geometry.md
   - Validation:
       - Analytic geometry: validation/analytic-geometry.md
+      - Pattern-import fixtures: validation/pattern-import-fixtures.md
   - Formats:
       - Design schema: formats/design-schema.md
   - ADR:

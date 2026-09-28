@@ -1,0 +1,204 @@
+# EnvelopeLab build-pack mapping for the "Alien" special-shape regression fixture.
+#
+# TEST DATA ONLY. Everything specific to this build pack (layer names, label formats,
+# gore count, row order, feature placement, designed ease) lives in this file; the
+# importer and assembler contain no special cases for it. Values are taken from the pack's
+# own documents (pack/alien-balloon-00-BUILD-PACK-INDEX.pdf, -spec-summary.pdf,
+# -sewing-schedule.html, -eye-build.pdf, -antenna-instructions.pdf).
+
+import:
+  format_version: 1
+  mapping_version: alien-92K-final/1
+  units: auto                 # the DXF files declare $INSUNITS = 4 (mm)
+  seam_allowance_mm: 25       # pack: 25 mm (1 in) allowance
+  pattern_face: outside
+  up_axis: "+y"
+  default_material_zone: ripstop
+  # Pack: panels are cut with the ROW HEIGHT across the bolt and the gore width along the
+  # roll, so the warp (roll direction) runs along the pattern x axis.
+  default_grain: [1.0, 0.0]
+  layers:
+    cut: [CUT]
+    sew: [SEW]
+    feature: [FEATURE]
+    label: [TEXT]
+    # PIECING = cutting sub-division of the eye skin into bolt-width strips (strip seams
+    # are fabric to fabric and do not change the finished outline).
+    ignore: ["0", Defpoints, PIECING]
+  labels:
+    - pattern: '^PANEL\s+(?P<panel>\S+)\s+x(?P<quantity>\d+)'
+      kind: panel
+    - pattern: '^(?P<panel>EYE FOOTPRINT).*x(?P<quantity>\d+)'
+      piece_id: eye_footprint
+      kind: mark
+    - pattern: '^(?P<panel>EYE OUTER SKIN).*x(?P<quantity>\d+)\s*\((?P<mirror>mirror)'
+      piece_id: eye_skin
+      kind: appendage
+    - pattern: '^MOUTH GORE (?P<gore>\d+)'
+      piece_id: "mouth_g{gore}"
+      kind: appendage
+    - pattern: '^ANTENNA CONE SECTOR x(?P<quantity>\d+)'
+      piece_id: antenna_cone
+      kind: appendage
+    - pattern: '^BALL GORE x(?P<quantity>\d+) per ball'
+      piece_id: ball_gore
+      kind: appendage
+  sources:
+    - file: pack/alien-balloon-panel-templates.dxf
+    - file: pack/alien-balloon-appendage-patterns.dxf
+  pieces:
+    NOMEX:
+      material_zone: nomex
+    N:
+      notes: "x22 = 20 envelope panels + 2 antenna doublers (gores 18 and 4)"
+    ball_gore:
+      quantity: 32
+      notes: "label says x16 per ball; two balls"
+
+assembly:
+  kind: special_shape
+  rings:
+    - name: envelope
+      gore_count: 20
+      rows: [NOMEX, A, B, C, D, E, F, G, H, i, J, K, L, M, N, O, P]
+      bottom:
+        name: mouth
+        kind: mouth
+        hem: {stitch: "1 in turn-back over webbing", stitch_rows: 2, load_tape: "webbing"}
+      top:
+        name: parachute_opening
+        kind: parachute_opening
+        hem: {stitch: "1 in turn-back over tape", stitch_rows: 2, load_tape: "25 mm tape"}
+      horizontal_seam:
+        allowance_mm: 25
+        stitch: "5/8 in double French fell"
+        stitch_rows: 2
+        load_tape: "lightweight horizontal tape"
+        construction_order: 6
+      vertical_seam:
+        allowance_mm: 25
+        stitch: "5/8 in double French fell over load tape"
+        stitch_rows: 2
+        load_tape: "25 mm load tape"
+        construction_order: 7
+      open_seams:
+        - {name: turning_vent_15_16, gores: [15, 16], rows: [i, J], kind: vent}
+        - {name: turning_vent_16_17, gores: [16, 17], rows: [i, J], kind: vent}
+  instances:
+    # Eye-pod feed holes, cut in the envelope only: O450 cut / O500 finished.
+    - select: {ring: envelope, rows: [H], gores: [20, 2]}
+      openings:
+        - name: eye_feed_hole
+          kind: feed_hole
+          feature: {circle_radius_mm: 250, near_mm: [0, 450]}
+          hem: {stitch: "hem over Class 3 1/2 in tape", load_tape: "Class 3 1/2 in", construction_order: 5}
+    - select: {ring: envelope, rows: [H], gores: [19, 3]}
+      openings:
+        - name: eye_feed_hole
+          kind: feed_hole
+          feature: {circle_radius_mm: 250, near_mm: [0, 910]}
+          hem: {stitch: "hem over Class 3 1/2 in tape", load_tape: "Class 3 1/2 in", construction_order: 5}
+    - select: {ring: envelope, rows: [i], gores: [18, 4]}
+      openings:
+        - name: eye_feed_hole
+          kind: feed_hole
+          feature: {circle_radius_mm: 250, near_mm: [0, 850]}
+          hem: {stitch: "hem over Class 3 1/2 in tape", load_tape: "Class 3 1/2 in", construction_order: 5}
+    # Antenna bases: panel N doubled by a second panel N (explicitly modelled overlap:
+    # one mesh layer with its own material zone), O575 cut / O625 finished feed hole and
+    # the O875 cone base line marked on the panel.
+    - select: {ring: envelope, rows: [N], gores: [18, 4]}
+      material_zone: ripstop_doubled
+      openings:
+        - name: antenna_feed_hole
+          kind: feed_hole
+          feature: {circle_radius_mm: 312.5}
+          hem: {stitch: "double fold over Class 3 1/2 in tape", load_tape: "Class 3 1/2 in", construction_order: 5}
+      marks:
+        - name: antenna_base
+          feature: {circle_radius_mm: 437.5}
+  parts:
+    - {name: antenna_cone_g4, piece: antenna_cone, material_zone: ripstop_black}
+    - {name: antenna_cone_g18, piece: antenna_cone, material_zone: ripstop_black}
+    - name: eye_skin_left
+      piece: eye_skin
+      mesh: false
+      reason: >-
+        the pod rim is sewn along the footprint line, which crosses nine envelope panels;
+        embedding marked lines across several panels is not supported yet
+    - {name: eye_skin_right, piece: eye_skin, mirror: true, mesh: false, reason: "mirror of eye_skin_left (see there)"}
+    - {name: eye_footprint_left, piece: eye_footprint, mesh: false, reason: "marking outline, not a cut piece"}
+    - {name: eye_footprint_right, piece: eye_footprint, mirror: true, mesh: false, reason: "marking outline, not a cut piece"}
+  seams:
+    - name: antenna_cone_g4:closing
+      type: closing
+      a: [{instance: antenna_cone_g4, edge: right}]
+      b: [{instance: antenna_cone_g4, edge: left}]
+      allowance_mm: 25
+      stitch: "25 mm French fell"
+      construction_order: 10
+    - name: antenna_cone_g18:closing
+      type: closing
+      a: [{instance: antenna_cone_g18, edge: right}]
+      b: [{instance: antenna_cone_g18, edge: left}]
+      allowance_mm: 25
+      stitch: "25 mm French fell"
+      construction_order: 10
+    - name: antenna_base_g4
+      type: appendage
+      attachment: true
+      orientation: same
+      a: [{instance: envelope/N@4, mark: antenna_base}]
+      b: [{instance: antenna_cone_g4, edge: bottom}]
+      allowance_b_mm: 51
+      stitch: "twin-needle plus bar-tacks every 150 mm, through both plies"
+      load_tape: "Class 3 1/2 in"
+      construction_order: 10
+    - name: antenna_base_g18
+      type: appendage
+      attachment: true
+      orientation: same
+      a: [{instance: envelope/N@18, mark: antenna_base}]
+      b: [{instance: antenna_cone_g18, edge: bottom}]
+      allowance_b_mm: 51
+      stitch: "twin-needle plus bar-tacks every 150 mm, through both plies"
+      load_tape: "Class 3 1/2 in"
+      construction_order: 10
+    # Eye pods: skin rim eased onto the footprint line (pack: rim ease 1.24 m, 5.4 %).
+    - name: eye_rim_left
+      type: appendage
+      attachment: true
+      orientation: same
+      a: [{instance: eye_footprint_left, edge: e0}]
+      b: [{instance: eye_skin_left, edge: loop}]
+      allowance_a_mm: 0
+      allowance_b_mm: 51
+      designed_ease_mm: 1240
+      stitch: "lapped over Class 3 1/2 in tape, 2 rows"
+      load_tape: "Class 3 1/2 in"
+      construction_order: 9
+    - name: eye_rim_right
+      type: appendage
+      attachment: true
+      orientation: same
+      a: [{instance: eye_footprint_right, edge: e0}]
+      b: [{instance: eye_skin_right, edge: loop}]
+      allowance_a_mm: 0
+      allowance_b_mm: 51
+      designed_ease_mm: 1240
+      stitch: "lapped over Class 3 1/2 in tape, 2 rows"
+      load_tape: "Class 3 1/2 in"
+      construction_order: 9
+  openings:
+    - name: antenna_neck_g4
+      kind: feature_opening
+      edges: [{instance: antenna_cone_g4, edge: top}]
+      reason: >-
+        the cone neck joins the antenna ball, which is not assembled: the ball gores in the
+        DXF are full lenses and the neck/cap trimming exists only in the instructions
+    - name: antenna_neck_g18
+      kind: feature_opening
+      edges: [{instance: antenna_cone_g18, edge: top}]
+      reason: "see antenna_neck_g4"
+  mesh:
+    target_edge_length_mm: 400

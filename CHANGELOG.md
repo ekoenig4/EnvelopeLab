@@ -15,6 +15,8 @@ All notable changes to this project will be documented in this file.
   mesh validation, initial 3D guess and the `envelopelab.rest-model` v1 JSON file.
 - Import reports (panel inventory, seam audit, seam graph, mesh report, warnings) in
   HTML/CSV/JSON and the `envelopelab-import` command.
+- Generic standard-gore and special-shape fixtures and the Alien build pack as a
+  regression fixture; generated page `validation/pattern-import-fixtures.md`.
 - `envelopelab.atmosphere`: ISA (0–32 km), ideal-gas density with optional humidity
   correction, gross lift and hydrostatic differential pressure.
 - `envelopelab.geometry.gore`: meridian profile (volume, area, height, width, length),
