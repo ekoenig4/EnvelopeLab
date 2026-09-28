@@ -20,6 +20,9 @@ All notable changes to this project will be documented in this file.
 - `envelopelab.solvers.manifest.RunManifest` (`envelopelab.run-manifest` v1): design and
   model hash, material sources, solver settings, git commit, Python and dependency
   versions, mesh settings, random seed; fingerprint and field-by-field differences.
+- `envelopelab.validation.comparison.compare_results`: aligns two results and compares
+  height, maximum width, volume, displacement, stress resultants and tape tensions,
+  flagging differences above 5 %.
 - `envelopelab.solvers.dynamic_relaxation.ModelEvaluator`: the preview model's
   deformation, loads, volume and tape tensions at given positions (no numerical change).
 - CI installs `calculix-ccx` on Linux (CalculiX tests are skipped with a message

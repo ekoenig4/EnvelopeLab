@@ -51,7 +51,7 @@ def test_envelopelab_core_does_not_import_the_adapter() -> None:
 
     code = (
         "import sys, envelopelab.solvers.dynamic_relaxation, envelopelab.assembly.pipeline, "
-        "envelopelab.solvers.simulation; print('calculix_adapter' in sys.modules)"
+        "envelopelab.validation.comparison; print('calculix_adapter' in sys.modules)"
     )
     out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
     assert out.stdout.strip() == "False"
