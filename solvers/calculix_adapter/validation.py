@@ -722,12 +722,14 @@ def render_svg(data: ValidationData) -> str:
             f'text-anchor="middle">{size:g}</text>'
         )
     ticks = np.linspace(lo, hi, 5)
-    for v in ticks:
+    for tick in (float(v) for v in ticks):
         out.append(
-            f'<line x1="{left}" y1="{py(v):.1f}" x2="{width - right}" y2="{py(v):.1f}" '
+            f'<line x1="{left}" y1="{py(tick):.1f}" x2="{width - right}" y2="{py(tick):.1f}" '
             'stroke="#ddd"/>'
         )
-        out.append(f'<text x="{left - 5}" y="{py(v) + 4:.1f}" text-anchor="end">{v:.3f}</text>')
+        out.append(
+            f'<text x="{left - 5}" y="{py(tick) + 4:.1f}" text-anchor="end">{tick:.3f}</text>'
+        )
     out.append(
         f'<text x="{(left + width - right) / 2}" y="{height - 12}" '
         'text-anchor="middle">target edge length (mm), finer to the right</text>'
