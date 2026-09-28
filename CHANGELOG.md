@@ -16,7 +16,10 @@ All notable changes to this project will be documented in this file.
 - Import reports (panel inventory, seam audit, seam graph, mesh report, warnings) in
   HTML/CSV/JSON and the `envelopelab-import` command.
 - Generic standard-gore and special-shape fixtures and the Alien build pack as a
-  regression fixture; generated page `validation/pattern-import-fixtures.md`.
+  regression fixture; generated pages `validation/pattern-import-fixtures.md` and
+  `formats/pattern-import-mapping.md`.
+- New runtime dependencies: ezdxf, gmsh, PyYAML (ADR-0003). No existing numerical results
+  change.
 - `envelopelab.atmosphere`: ISA (0–32 km), ideal-gas density with optional humidity
   correction, gross lift and hydrostatic differential pressure.
 - `envelopelab.geometry.gore`: meridian profile (volume, area, height, width, length),

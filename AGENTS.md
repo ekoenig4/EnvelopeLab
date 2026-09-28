@@ -28,11 +28,11 @@ never hidden. The builder is responsible for airworthiness.
 ## 3. Repository layout
     src/envelopelab/   core library, installed as `envelopelab`
                        (now: atmosphere, geometry, mass_estimate, design, materials,
-                       commands, validation; planned: assembly, solvers, io, export)
+                       commands, validation, io, assembly; planned: solvers, export)
     tests/             unit/, property/, benchmarks/, regression/, fixtures/ (planned: gui/)
-    docs/              MkDocs site: theory/, validation/, dev/, formats/, adr/ (planned: user/)
+    docs/              MkDocs site: user/, theory/, validation/, dev/, formats/, adr/
     scripts/           dev utilities: verify.py, generate_validation_docs.py,
-                       generate_design_schema_docs.py
+                       generate_design_schema_docs.py, generate_pattern_mapping_docs.py
     solvers/           planned: adapters for external solvers (Kratos, Gmsh, Meshroom)
     app/               planned: PySide6 GUI
 
