@@ -11,11 +11,17 @@ ROOT = Path(__file__).resolve().parents[1]
 ANALYTIC = ROOT / "docs" / "validation" / "analytic-geometry.md"
 FIXTURES = ROOT / "docs" / "validation" / "pattern-import-fixtures.md"
 PREVIEW = ROOT / "docs" / "validation" / "preview-solver-benchmarks.md"
+CALCULIX = ROOT / "docs" / "validation" / "preview-vs-calculix"  # .json, .md, .svg
 ENVELOPE_FIXTURE = ROOT / "tests" / "fixtures" / "spherical_envelope" / "build-pack.yaml"
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Regenerate all pages, or only those named (``analytic``, ``fixtures``, ``preview``)."""
+    """Regenerate all pages, or only those named (``analytic``, ``fixtures``, ``preview``,
+    ``calculix``).
+
+    ``calculix`` runs the CalculiX verification study (needs ``ccx``, several minutes) and
+    is regenerated only when named.
+    """
     pages = set(argv if argv is not None else sys.argv[1:]) or {"analytic", "fixtures", "preview"}
     failed: list[str] = []
     ANALYTIC.parent.mkdir(parents=True, exist_ok=True)
@@ -31,6 +37,19 @@ def main(argv: list[str] | None = None) -> None:
         bench = preview_solver.run_benchmarks(ENVELOPE_FIXTURE)
         PREVIEW.write_text(preview_solver.render_markdown(bench), encoding="utf-8")
         failed += [r.name for r in bench.results if not r.passed]
+    if "calculix" in pages:
+        # Imported here: the adapter is optional and the other pages must not need it.
+        from calculix_adapter import validation as calculix_validation
+
+        data = calculix_validation.run_validation(ENVELOPE_FIXTURE, progress=print)
+        data.save(CALCULIX.with_suffix(".json"))
+        CALCULIX.with_suffix(".md").write_text(
+            calculix_validation.render_markdown(data), encoding="utf-8"
+        )
+        CALCULIX.with_suffix(".svg").write_text(
+            calculix_validation.render_svg(data), encoding="utf-8"
+        )
+        failed += [b.name for b in data.benchmarks if not b.passed]
     if failed:
         raise SystemExit(f"validation failed: {', '.join(failed)}")
 

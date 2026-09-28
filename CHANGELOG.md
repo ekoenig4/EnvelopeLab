@@ -25,6 +25,9 @@ All notable changes to this project will be documented in this file.
   flagging differences above 5 %.
 - `envelopelab.solvers.dynamic_relaxation.ModelEvaluator`: the preview model's
   deformation, loads, volume and tape tensions at given positions (no numerical change).
+- Generated page `validation/preview-vs-calculix.md` (+ `.json` data, `.svg` plot):
+  CalculiX sphere and cylinder benchmarks, preview vs CalculiX on the generic envelope and
+  a three-level CalculiX mesh-convergence study. No existing numerical results change.
 - CI installs `calculix-ccx` on Linux (CalculiX tests are skipped with a message
   elsewhere); `mypy` now also checks `solvers/`.
 - `envelopelab.solvers`: interactive preview solver for the inflated equilibrium of an
