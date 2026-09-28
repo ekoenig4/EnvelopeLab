@@ -1,0 +1,12 @@
+site_name: EnvelopeLab
+nav:
+  - Home: index.md
+  - Developer:
+      - Setup: dev/setup.md
+  - Formats:
+      - Design schema: formats/design-schema.md
+  - ADR:
+      - ADR-0001: adr/ADR-0001-stack-choice.md
+      - ADR-0002: adr/ADR-0002-gpl-3-licensing.md
+theme:
+  name: material
