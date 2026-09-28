@@ -9,5 +9,8 @@
 |---|---|---|
 | NumPy | array math (geometry, atmosphere) | BSD-3-Clause |
 | SciPy | cubic and smoothing splines (geometry) | BSD-3-Clause |
+| ezdxf | DXF pattern import (`envelopelab.io.pattern_import`) | MIT |
+| PyYAML | build-pack YAML mapping files | MIT |
+| types-PyYAML (dev) | type stubs for mypy | Apache-2.0 |
 | pymdown-extensions (via mkdocs-material) | `arithmatex` math in docs | MIT |
 | MathJax (loaded from jsDelivr by the docs site) | equation rendering | Apache-2.0 |
