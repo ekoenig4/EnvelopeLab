@@ -135,3 +135,26 @@ envelope, 100 °C, tolerance 1e-6):
 The [preview solver benchmarks](../validation/preview-solver-benchmarks.md) list the
 accuracy checks and the mesh-refinement study; the [theory page](../theory/dynamic-relaxation.md)
 gives the equations, assumptions and limitations.
+
+## Checking a final design with CalculiX
+
+For final design studies, cross-check the preview with the CalculiX verification solver
+(install it first: [CalculiX installation](../dev/calculix-installation.md)). Start it from
+the preview's result; it re-solves the same model with an independent finite-element code
+and reports `converged` only when its own equilibrium checks pass:
+
+```python
+from calculix_adapter import run_calculix
+from envelopelab.solvers.simulation import from_preview
+from envelopelab.validation.comparison import compare_results
+
+check = run_calculix(model, start_positions=result.positions)
+comparison = compare_results(from_preview(model, result), check)
+print(comparison.to_markdown())  # rows above 5 % are marked "beyond tolerance"
+```
+
+A result that is not `converged`, or a comparison with flagged rows, is not a
+verification: look at `check.findings` and at the
+[known differences](../validation/preview-vs-calculix.md#known-differences-and-limitations) before using
+the numbers. `check.manifest.save("run.json")` records everything needed to repeat the
+run.

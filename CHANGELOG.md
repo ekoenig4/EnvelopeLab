@@ -28,6 +28,9 @@ All notable changes to this project will be documented in this file.
 - Generated page `validation/preview-vs-calculix.md` (+ `.json` data, `.svg` plot):
   CalculiX sphere and cylinder benchmarks, preview vs CalculiX on the generic envelope and
   a three-level CalculiX mesh-convergence study. No existing numerical results change.
+- Documentation: `theory/verification-solver.md`, `dev/calculix-installation.md`, ADR-0005
+  (CalculiX verification solver; both solvers retained) and a CalculiX section in
+  `user/simulation-preview.md`.
 - CI installs `calculix-ccx` on Linux (CalculiX tests are skipped with a message
   elsewhere); `mypy` now also checks `solvers/`.
 - `envelopelab.solvers`: interactive preview solver for the inflated equilibrium of an

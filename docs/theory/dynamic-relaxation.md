@@ -209,7 +209,9 @@ factor defaults to 5 (tagged *assumed*: take it from the applicable airworthines
 - Explicit iterations grow roughly linearly with the number of elements across the
   envelope; very fine meshes are slow in pure NumPy.
 - No contact (fabric self-contact, basket, ground), no dynamic response, no deflation.
-- Verification against a high-fidelity solver (Kratos) is planned and not yet done.
+- Cross-checked against the CalculiX verification solver on the generic envelope (see
+  [verification solver](verification-solver.md) and
+  [preview vs CalculiX](../validation/preview-vs-calculix.md)).
 
 ## Valid range
 
