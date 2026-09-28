@@ -9,6 +9,10 @@ All notable changes to this project will be documented in this file.
   and sew lines or cut lines only; full provenance (file, layer, handle, mapping version).
 - `envelopelab.geometry.polygon`: outline validation (closed, simple, oriented, nonzero
   area), mitred allowance offsets with loop trimming, windowed corner detection.
+- `envelopelab.assembly`: finished panel outlines, assembly spec (gore rings, instance
+  overrides, parts, seams, openings), seam graph with CSV/JSON export, seam-length audit
+  with designed ease, Gmsh triangulation and virtual sewing into one tagged rest mesh,
+  mesh validation, initial 3D guess and the `envelopelab.rest-model` v1 JSON file.
 - `envelopelab.atmosphere`: ISA (0–32 km), ideal-gas density with optional humidity
   correction, gross lift and hydrostatic differential pressure.
 - `envelopelab.geometry.gore`: meridian profile (volume, area, height, width, length),

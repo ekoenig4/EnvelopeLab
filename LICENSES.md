@@ -8,8 +8,9 @@
 | Package | Use | License |
 |---|---|---|
 | NumPy | array math (geometry, atmosphere) | BSD-3-Clause |
-| SciPy | cubic and smoothing splines (geometry) | BSD-3-Clause |
+| SciPy | cubic and smoothing splines (geometry); sparse solves, KD-trees (assembly) | BSD-3-Clause |
 | ezdxf | DXF pattern import (`envelopelab.io.pattern_import`) | MIT |
+| Gmsh (Python API and library) | panel triangulation (`envelopelab.assembly.mesh`) | GPL-2.0-or-later (with linking exceptions) |
 | PyYAML | build-pack YAML mapping files | MIT |
 | types-PyYAML (dev) | type stubs for mypy | Apache-2.0 |
 | pymdown-extensions (via mkdocs-material) | `arithmatex` math in docs | MIT |

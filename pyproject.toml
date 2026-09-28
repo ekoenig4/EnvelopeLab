@@ -12,6 +12,7 @@ license = {text = "GPL-3.0-only"}
 authors = [{name = "EnvelopeLab Contributors"}]
 dependencies = [
   "ezdxf>=1.3",
+  "gmsh>=4.11",
   "numpy>=1.26",
   "pydantic>=2.9,<3",
   "pyyaml>=6.0",
@@ -58,6 +59,11 @@ packages = ["envelopelab"]
 [[tool.mypy.overrides]]
 # SciPy ships no type information; its results are converted with np.asarray at the call site.
 module = ["scipy", "scipy.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# The Gmsh Python API (a ctypes wrapper) ships no type information.
+module = ["gmsh"]
 ignore_missing_imports = true
 
 [tool.hatch.build.targets.wheel]

@@ -8,3 +8,9 @@ python -m pip install -e ".[dev,docs]"
 pre-commit install
 python scripts/verify.py
 ```
+
+On Linux the Gmsh wheel needs a few system libraries:
+
+```bash
+sudo apt-get install -y libglu1-mesa libxcursor1 libxft2 libxinerama1
+```
