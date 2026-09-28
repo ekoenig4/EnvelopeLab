@@ -25,6 +25,8 @@ All notable changes to this project will be documented in this file.
   page `validation/preview-solver-benchmarks.md` (sphere, cylinder, hydrostatic pressure,
   lift, elastic catenary, tension-field shear, global equilibrium, mesh refinement). No
   existing numerical results change.
+- Documentation: theory page `theory/dynamic-relaxation.md`, user guide
+  `user/simulation-preview.md` and ADR-0004 (dynamic relaxation for the preview solver).
 - `envelopelab.io.pattern_import`: DXF pattern import with ezdxf, driven by a per-build-pack
   YAML mapping (layer roles for cut, sew, dimension, feature, tape, match-mark, notch,
   grain and label layers; label regular expressions; units; allowances); packs with cut

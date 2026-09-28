@@ -3,12 +3,14 @@ nav:
   - Home: index.md
   - User guide:
       - Importing patterns: user/importing-patterns.md
+      - Simulation preview: user/simulation-preview.md
   - Developer:
       - Setup: dev/setup.md
   - Theory:
       - Atmosphere: theory/atmosphere.md
       - Gore geometry: theory/gore-geometry.md
       - Virtual sewing: theory/virtual-sewing.md
+      - Dynamic-relaxation solver: theory/dynamic-relaxation.md
   - Validation:
       - Analytic geometry: validation/analytic-geometry.md
       - Pattern-import fixtures: validation/pattern-import-fixtures.md
@@ -20,6 +22,7 @@ nav:
       - ADR-0001: adr/ADR-0001-stack-choice.md
       - ADR-0002: adr/ADR-0002-gpl-3-licensing.md
       - ADR-0003: adr/ADR-0003-pattern-import-and-virtual-sewing.md
+      - ADR-0004: adr/ADR-0004-preview-solver-dynamic-relaxation.md
 theme:
   name: material
 markdown_extensions:
