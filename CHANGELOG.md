@@ -21,6 +21,10 @@ All notable changes to this project will be documented in this file.
   export `envelopelab.preview-result` v1 with reproducibility metadata.
 - `envelopelab.materials.membrane`: `MembraneMaterial` and `TapeMaterial` with a unit and
   source tag on every value.
+- Generic spherical-envelope fixture (`tests/fixtures/spherical_envelope`) and generated
+  page `validation/preview-solver-benchmarks.md` (sphere, cylinder, hydrostatic pressure,
+  lift, elastic catenary, tension-field shear, global equilibrium, mesh refinement). No
+  existing numerical results change.
 - `envelopelab.io.pattern_import`: DXF pattern import with ezdxf, driven by a per-build-pack
   YAML mapping (layer roles for cut, sew, dimension, feature, tape, match-mark, notch,
   grain and label layers; label regular expressions; units; allowances); packs with cut

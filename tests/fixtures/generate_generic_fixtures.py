@@ -14,6 +14,12 @@ with $INSUNITS = 4:
   finished rim of a hole for a tube appendage), a TAPE line and a GRAIN arrow; plus a
   tube (developed cone frustum) whose base arc is 40 mm longer than the hole rim
   (designed ease) and a cap disc that closes the tube.
+* ``spherical_envelope/gores.dxf``: 12 gores x 5 rows of a sphere of radius 7 m between
+  latitudes -72 deg (mouth) and +78 deg (crown ring), CUT and SEW outlines. Used for the
+  preview-solver smoke solve and mesh-refinement study.
+
+Pass fixture names (``standard_gore``, ``special_shape``, ``spherical_envelope``) to
+regenerate only those; the default regenerates all.
 """
 
 from __future__ import annotations
@@ -147,8 +153,45 @@ def special_shape() -> None:
     doc.saveas(HERE / "special_shape" / "patterns.dxf")
 
 
+def spherical_envelope() -> None:
+    radius = 7.0
+    lat = np.radians(np.linspace(-72.0, 78.0, 1501))
+    profile = MeridianProfile.from_points(radius * np.cos(lat), radius * np.sin(lat))
+    labels = list("ABCDE")
+    height = math.floor(profile.meridian_length / len(labels) * 1e4) / 1e4
+    heights = [height] * (len(labels) - 1)
+    heights.append(profile.meridian_length - sum(heights))
+    rows = split_rows(
+        profile,
+        GoreWidthModel(n_gores=12, form="small_bulge"),
+        heights,
+        labels=labels,
+        allowance=SeamAllowance(side=ALLOWANCE, bottom=ALLOWANCE, top=ALLOWANCE),
+        corner="miter",
+    )
+    doc = _new_doc()
+    msp = doc.modelspace()
+    x = 0.0
+    for row in rows:
+        width = float(row.cut_outline[:, 0].max() - row.cut_outline[:, 0].min()) * MM
+        x += width / 2 + 200.0
+        _poly(msp, row.cut_outline, "CUT", (x, 0.0))
+        _poly(msp, row.finished_outline, "SEW", (x, 0.0))
+        _text(msp, f"PANEL {row.label} x12", (x - 150.0, row.finished_height * MM / 2))
+        x += width / 2
+    _text(msp, "GENERIC SPHERICAL ENVELOPE FIXTURE R 7 m 1:1 mm", (0.0, -600.0), 120.0)
+    doc.saveas(HERE / "spherical_envelope" / "gores.dxf")
+
+
+FIXTURES = {
+    "standard_gore": standard_gore,
+    "special_shape": special_shape,
+    "spherical_envelope": spherical_envelope,
+}
+
 if __name__ == "__main__":
-    (HERE / "standard_gore").mkdir(exist_ok=True)
-    (HERE / "special_shape").mkdir(exist_ok=True)
-    standard_gore()
-    special_shape()
+    import sys
+
+    for name in sys.argv[1:] or list(FIXTURES):
+        (HERE / name).mkdir(exist_ok=True)
+        FIXTURES[name]()
