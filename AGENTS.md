@@ -28,12 +28,15 @@ never hidden. The builder is responsible for airworthiness.
 ## 3. Repository layout
     src/envelopelab/   core library, installed as `envelopelab`
                        (now: atmosphere, geometry, mass_estimate, design, materials,
-                       commands, validation, io, assembly; planned: solvers, export)
+                       commands, validation, io, assembly, solvers (preview
+                       dynamic-relaxation solver); planned: export)
     tests/             unit/, property/, benchmarks/, regression/, fixtures/ (planned: gui/)
     docs/              MkDocs site: user/, theory/, validation/, dev/, formats/, adr/
     scripts/           dev utilities: verify.py, generate_validation_docs.py,
                        generate_design_schema_docs.py, generate_pattern_mapping_docs.py
-    solvers/           planned: adapters for external solvers (Kratos, Gmsh, Meshroom)
+    solvers/           adapters for external solvers: calculix_adapter (CalculiX
+                       verification solver, installed as `calculix_adapter`);
+                       planned: Gmsh, Meshroom
     app/               planned: PySide6 GUI
 
 Paths written as `envelopelab/...` elsewhere in this file mean `src/envelopelab/...`.
@@ -58,7 +61,7 @@ Create a planned directory only when the first code for it lands.
 
 ### 6.1 Commands
     ruff check . && ruff format --check .      # lint + format
-    mypy src tests                             # types (strict; config in pyproject.toml)
+    mypy src solvers tests                     # types (strict; config in pyproject.toml)
     pytest -m "not slow" -q                    # fast suite, run after every change
     pytest -q                                  # full suite, run before every commit
     python scripts/generate_validation_docs.py # regenerate docs/validation/ benchmark pages
@@ -87,7 +90,7 @@ will be added to `verify.py` together with the export code.
 | Property (hypothesis) | Invariants | save/load round trip is lossless |
 | Analytical benchmarks | Physics vs. closed form | see 6.4 |
 | Convergence | Mesh/step independence | 3 refinements, Richardson estimate |
-| Cross-solver | Preview solver vs. Kratos | agreement within stated tolerance |
+| Cross-solver | Preview solver vs. CalculiX | agreement within stated tolerance |
 | Regression (golden) | Detect unintended changes | reference fixture volume, seam audit |
 | Output QA | Build-pack correctness | calibration lines, labels, scale |
 | GUI smoke | App launches, main flows run | pytest-qt, headless |
@@ -102,7 +105,7 @@ will be added to `verify.py` together with the export code.
 - Global equilibrium: resultant pressure force = mouth/tape reactions within 0.5 %
 
 Default tolerances (override only with justification): geometry 1 mm or 0.1 %,
-volume/area 0.1 % (analytic cases), stresses 2 % (analytic), preview vs. Kratos 5 %,
+volume/area 0.1 % (analytic cases), stresses 2 % (analytic), preview vs. CalculiX 5 %,
 residual norm < 1e-6 relative.
 
 ### 6.5 Solver result requirements

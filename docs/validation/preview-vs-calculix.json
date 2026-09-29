@@ -1,0 +1,418 @@
+{
+ "format": "envelopelab.calculix-validation",
+ "version": 1,
+ "calculix_version": "2.21",
+ "benchmarks": [
+  {
+   "name": "CalculiX sphere R0=2 m, p=1 kPa, octant 24 div: mean N1 vs p r/2",
+   "value": 1007.1756018894542,
+   "reference": 1006.9970203692959,
+   "unit": "N/m",
+   "kind": "relative",
+   "tolerance": 0.02
+  },
+  {
+   "name": "CalculiX sphere R0=2 m, p=1 kPa, octant 24 div: mean N2 vs p r/2",
+   "value": 1004.4731536594085,
+   "reference": 1006.9970203692959,
+   "unit": "N/m",
+   "kind": "relative",
+   "tolerance": 0.02
+  },
+  {
+   "name": "CalculiX sphere R0=2 m, p=1 kPa, octant 24 div: converged (0 = yes)",
+   "value": 0.0,
+   "reference": 0.0,
+   "unit": "-",
+   "kind": "absolute",
+   "tolerance": 0.0
+  },
+  {
+   "name": "CalculiX sphere R0=2 m, p=1 kPa, octant 24 div: relative out-of-balance",
+   "value": 8.65086092148139e-06,
+   "reference": 0.0,
+   "unit": "-",
+   "kind": "absolute",
+   "tolerance": 1e-05
+  },
+  {
+   "name": "CalculiX cylinder R0=1 m, p=1 kPa, 48x16: mean hoop N vs p r",
+   "value": 1006.0691982027654,
+   "reference": 1008.4272532956089,
+   "unit": "N/m",
+   "kind": "relative",
+   "tolerance": 0.02
+  },
+  {
+   "name": "CalculiX cylinder R0=1 m, p=1 kPa, 48x16: mean axial N vs p r/2",
+   "value": 503.2138380812489,
+   "reference": 504.21362664780446,
+   "unit": "N/m",
+   "kind": "relative",
+   "tolerance": 0.02
+  },
+  {
+   "name": "CalculiX cylinder R0=1 m, p=1 kPa, 48x16: converged (0 = yes)",
+   "value": 0.0,
+   "reference": 0.0,
+   "unit": "-",
+   "kind": "absolute",
+   "tolerance": 0.0
+  },
+  {
+   "name": "CalculiX cylinder R0=1 m, p=1 kPa, 48x16: relative out-of-balance",
+   "value": 7.3246141778391405e-06,
+   "reference": 0.0,
+   "unit": "-",
+   "kind": "absolute",
+   "tolerance": 1e-05
+  },
+  {
+   "name": "Envelope, 600 mm mesh: CalculiX vs preview, height",
+   "value": 14.247483127719969,
+   "reference": 14.247483128828282,
+   "unit": "m",
+   "kind": "relative",
+   "tolerance": 0.05
+  },
+  {
+   "name": "Envelope, 600 mm mesh: CalculiX vs preview, volume",
+   "value": 1347.6784916241204,
+   "reference": 1347.6784914849338,
+   "unit": "m^3",
+   "kind": "relative",
+   "tolerance": 0.05
+  },
+  {
+   "name": "Envelope, 600 mm mesh: CalculiX vs preview, maximum tape tension",
+   "value": 147.31032583445992,
+   "reference": 147.31032104431387,
+   "unit": "N",
+   "kind": "relative",
+   "tolerance": 0.05
+  },
+  {
+   "name": "Envelope: levels not converged (preview or CalculiX)",
+   "value": 0.0,
+   "reference": 0.0,
+   "unit": "-",
+   "kind": "absolute",
+   "tolerance": 0.0
+  },
+  {
+   "name": "Envelope, CalculiX, last two levels: height",
+   "value": 14.247483128828282,
+   "reference": 14.243646747797387,
+   "unit": "m",
+   "kind": "relative",
+   "tolerance": 0.02
+  },
+  {
+   "name": "Envelope, CalculiX, last two levels: volume",
+   "value": 1347.6784914849338,
+   "reference": 1348.7178743896393,
+   "unit": "m^3",
+   "kind": "relative",
+   "tolerance": 0.02
+  }
+ ],
+ "levels": [
+  {
+   "target_mm": 1200.0,
+   "nodes": 1164,
+   "triangles": 2292,
+   "preview_converged": true,
+   "calculix_converged": true,
+   "calculix_passes": 1,
+   "calculix_elapsed": 12.701939734000916,
+   "calculix_movement": 2.708333994461758e-08,
+   "preview": {
+    "height": 14.24639956938609,
+    "maximum width": 14.051245918350919,
+    "volume": 1346.1816311575415,
+    "maximum tape tension": 101.68921769141414,
+    "distance of the tape-tension peak from the nearest fixed node": 14.26552822307558
+   },
+   "calculix": {
+    "height": 14.246399564841399,
+    "maximum width": 14.05124591614728,
+    "volume": 1346.1816309916996,
+    "maximum tape tension": 101.68921590695268,
+    "distance of the tape-tension peak from the nearest fixed node": 14.26552822057461
+   },
+   "comparison": [
+    [
+     "height",
+     14.24639956938609,
+     14.246399564841399,
+     "m",
+     3.1900633643746535e-10,
+     0.05
+    ],
+    [
+     "maximum width",
+     14.051245918350919,
+     14.05124591614728,
+     "m",
+     1.5682866655674695e-10,
+     0.05
+    ],
+    [
+     "volume",
+     1346.1816311575415,
+     1346.1816309916996,
+     "m^3",
+     1.231942314145099e-10,
+     0.05
+    ],
+    [
+     "maximum displacement",
+     0.9848467843206129,
+     0.9848467704653495,
+     "m",
+     1.406844557105822e-08,
+     0.05
+    ],
+    [
+     "nodal displacement difference (RMS / max displacement)",
+     0.0,
+     5.457259844274399e-09,
+     "-",
+     5.457259844274399e-09,
+     0.05
+    ],
+    [
+     "mean N1 (area-weighted)",
+     135.99627357551168,
+     135.99626809149578,
+     "N/m",
+     4.032475123593942e-08,
+     0.05
+    ],
+    [
+     "N1, 99th percentile",
+     581.3987631474508,
+     581.3987201854602,
+     "N/m",
+     7.389418993143557e-08,
+     0.05
+    ],
+    [
+     "maximum tape tension",
+     101.68921769141414,
+     101.68921590695268,
+     "N",
+     1.7548187515708e-08,
+     0.05
+    ],
+    [
+     "mean tape tension",
+     31.40441216653331,
+     31.40441090596932,
+     "N",
+     4.013970969208576e-08,
+     0.05
+    ]
+   ],
+   "findings": []
+  },
+  {
+   "target_mm": 850.0,
+   "nodes": 1908,
+   "triangles": 3768,
+   "preview_converged": true,
+   "calculix_converged": true,
+   "calculix_passes": 1,
+   "calculix_elapsed": 21.69452921300035,
+   "calculix_movement": 1.8349142390795234e-08,
+   "preview": {
+    "height": 14.243646746388995,
+    "maximum width": 14.063384070439763,
+    "volume": 1348.7178745571377,
+    "maximum tape tension": 108.75074975408295,
+    "distance of the tape-tension peak from the nearest fixed node": 14.25575136793492
+   },
+   "calculix": {
+    "height": 14.243646747797387,
+    "maximum width": 14.06338407498481,
+    "volume": 1348.7178743896393,
+    "maximum tape tension": 108.75074756416802,
+    "distance of the tape-tension peak from the nearest fixed node": 14.25575136889102
+   },
+   "comparison": [
+    [
+     "height",
+     14.243646746388995,
+     14.243646747797387,
+     "m",
+     9.887858429955076e-11,
+     0.05
+    ],
+    [
+     "maximum width",
+     14.063384070439763,
+     14.06338407498481,
+     "m",
+     3.2318302498581313e-10,
+     0.05
+    ],
+    [
+     "volume",
+     1348.7178745571377,
+     1348.7178743896393,
+     "m^3",
+     1.2419087724262825e-10,
+     0.05
+    ],
+    [
+     "maximum displacement",
+     0.9543074942327956,
+     0.9543074933532866,
+     "m",
+     9.216201554351261e-10,
+     0.05
+    ],
+    [
+     "nodal displacement difference (RMS / max displacement)",
+     0.0,
+     3.5881626945572345e-09,
+     "-",
+     3.5881626945572345e-09,
+     0.05
+    ],
+    [
+     "mean N1 (area-weighted)",
+     134.85691499177145,
+     134.85691520987865,
+     "N/m",
+     1.6173230970202641e-09,
+     0.05
+    ],
+    [
+     "N1, 99th percentile",
+     531.5114564774816,
+     531.5114278865241,
+     "N/m",
+     5.379179917647159e-08,
+     0.05
+    ],
+    [
+     "maximum tape tension",
+     108.75074975408295,
+     108.75074756416802,
+     "N",
+     2.0137009888488887e-08,
+     0.05
+    ],
+    [
+     "mean tape tension",
+     32.728910637644,
+     32.72891047692186,
+     "N",
+     4.910708443682621e-09,
+     0.05
+    ]
+   ],
+   "findings": []
+  },
+  {
+   "target_mm": 600.0,
+   "nodes": 3036,
+   "triangles": 6012,
+   "preview_converged": true,
+   "calculix_converged": true,
+   "calculix_passes": 1,
+   "calculix_elapsed": 35.11205038499975,
+   "calculix_movement": 9.93071653906523e-09,
+   "preview": {
+    "height": 14.247483127719969,
+    "maximum width": 14.06066448440538,
+    "volume": 1347.6784916241204,
+    "maximum tape tension": 147.31032583445992,
+    "distance of the tape-tension peak from the nearest fixed node": 0.14501356163761098
+   },
+   "calculix": {
+    "height": 14.247483128828282,
+    "maximum width": 14.060664487860512,
+    "volume": 1347.6784914849338,
+    "maximum tape tension": 147.31032104431387,
+    "distance of the tape-tension peak from the nearest fixed node": 0.14501356162375892
+   },
+   "comparison": [
+    [
+     "height",
+     14.247483127719969,
+     14.247483128828282,
+     "m",
+     7.779012132089923e-11,
+     0.05
+    ],
+    [
+     "maximum width",
+     14.06066448440538,
+     14.060664487860512,
+     "m",
+     2.4573029930533923e-10,
+     0.05
+    ],
+    [
+     "volume",
+     1347.6784916241204,
+     1347.6784914849338,
+     "m^3",
+     1.0327876338010108e-10,
+     0.05
+    ],
+    [
+     "maximum displacement",
+     0.9555974547593403,
+     0.9555974592099061,
+     "m",
+     4.6573646493249945e-09,
+     0.05
+    ],
+    [
+     "nodal displacement difference (RMS / max displacement)",
+     0.0,
+     1.9799637075561934e-09,
+     "-",
+     1.9799637075561934e-09,
+     0.05
+    ],
+    [
+     "mean N1 (area-weighted)",
+     131.97251387926312,
+     131.97251441845657,
+     "N/m",
+     4.085649616936969e-09,
+     0.05
+    ],
+    [
+     "N1, 99th percentile",
+     467.0576308981527,
+     467.0576056643287,
+     "N/m",
+     5.402721700017674e-08,
+     0.05
+    ],
+    [
+     "maximum tape tension",
+     147.31032583445992,
+     147.31032104431387,
+     "N",
+     3.2517381407904225e-08,
+     0.05
+    ],
+    [
+     "mean tape tension",
+     38.17447385325063,
+     38.17447413314613,
+     "N",
+     7.332006625720987e-09,
+     0.05
+    ]
+   ],
+   "findings": []
+  }
+ ]
+}

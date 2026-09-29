@@ -32,7 +32,8 @@ docs = [
   "mkdocs>=1.6",
   "mkdocs-material>=9.5",
 ]
-kratos = []
+# CalculiX (the verification solver) is an external program, not a Python package:
+# see docs/dev/calculix-installation.md.
 scan = []
 
 [project.scripts]
@@ -52,12 +53,16 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "N"]
 
+[tool.ruff.lint.isort]
+# The CalculiX adapter lives in solvers/ but is part of this project.
+known-first-party = ["envelopelab", "calculix_adapter"]
+
 [tool.mypy]
 # No python_version pin: each CI job checks against its own interpreter. Pinning 3.11 made
 # mypy parse numpy >= 2.5 stubs (3.12-only `type` statements) as 3.11 code on 3.12 runners.
 # The 3.11 job and ruff's target-version still enforce 3.11 compatibility.
 strict = true
-packages = ["envelopelab"]
+packages = ["envelopelab", "calculix_adapter"]
 
 [[tool.mypy.overrides]]
 # SciPy ships no type information; its results are converted with np.asarray at the call site.
@@ -70,4 +75,4 @@ module = ["gmsh"]
 ignore_missing_imports = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/envelopelab"]
+packages = ["src/envelopelab", "solvers/calculix_adapter"]
