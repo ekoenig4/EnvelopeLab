@@ -3,6 +3,33 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- `envelopelab.solvers.model`: gas chambers (`PressureChamber`, `SolverModel.chambers`,
+  `tri_chambers`, `triangle_pressure`); closures may belong to a chamber. Preview solver
+  and CalculiX adapter share the definition; chamber volumes and per-gas lift in the
+  results (`chamber_volumes`). Models without chambers give bit-identical results.
+- `envelopelab.features`: special-shape feature model (`features:` section of the build
+  pack: ram-air pods, blisters, tubular and line-supported appendages, reinforced holes,
+  rim tapes), pressure communication from feed holes with an `assumed` loss factor
+  (default 0.1 in the fixtures), designed rim ease over match points, seam classification
+  (matched / designed ease / seam error), construction-sequence, ordinate and doubler
+  checks, appendage sub-model and tube builders (Gmsh), and appendage metrics identical
+  for preview and CalculiX results.
+- `envelopelab.report`: Reality Check report (three shape states, deviation heat map,
+  dimensions, load paths, factors of safety, findings, convergence, sensitivity sweep)
+  exported as HTML, PDF, JSON (`envelopelab.reality-check` v1) and CSV; `verified` only
+  for a converged CalculiX solve within the documented tolerances.
+- `envelopelab.io.reference_mesh`: OBJ/STL/PLY reference meshes, ICP registration (Open3D
+  optional extra `registration`, MIT; SciPy fallback), signed distance, volume notation
+  parsing.
+- `envelopelab.solvers.dynamic_relaxation.enclosed_volume`: capped volume of a surface.
+- Generated page `validation/special-shape-fixtures.md` (+ `.json`): hemispherical blister
+  (preview and CalculiX), rim-tape load transfer (CalculiX golden: host N1 at the rim
+  173.7 -> 326.8 N/m without the rim-to-tape connection), designed ease, Alien features.
+  No existing numerical result changes.
+- Alien fixture: `features:` and `reference:` sections and a reference mesh generated
+  from the pack's 3D concept page.
+- Documentation: `user/reality-check-report.md`, `theory/appendage-pressure-and-load-paths.md`,
+  ADR-0006. Appendage external aerodynamics and turbulent flow are outside the model scope.
 - `calculix_adapter` (`solvers/calculix_adapter`, optional): verification solve of a
   `SolverModel` with the external program CalculiX CrunchiX (`ccx`, GPL-2.0-or-later, not
   bundled). M3D3 membranes with per-element orientation and anisotropic material, as-sewn

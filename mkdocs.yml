@@ -4,6 +4,7 @@ nav:
   - User guide:
       - Importing patterns: user/importing-patterns.md
       - Simulation preview: user/simulation-preview.md
+      - Reality Check report: user/reality-check-report.md
   - Developer:
       - Setup: dev/setup.md
       - CalculiX installation: dev/calculix-installation.md
@@ -13,6 +14,7 @@ nav:
       - Virtual sewing: theory/virtual-sewing.md
       - Dynamic-relaxation solver: theory/dynamic-relaxation.md
       - CalculiX verification solver: theory/verification-solver.md
+      - Appendage pressure and load paths: theory/appendage-pressure-and-load-paths.md
   - Validation:
       - Analytic geometry: validation/analytic-geometry.md
       - Pattern-import fixtures: validation/pattern-import-fixtures.md
