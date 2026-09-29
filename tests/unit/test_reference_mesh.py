@@ -62,9 +62,9 @@ def test_binary_ply_and_ascii_stl(tmp_path: Path) -> None:
         lines += ["facet normal 0 0 0", "outer loop"]
         lines += [f"vertex {x} {y} {z}" for x, y, z in m.vertices[t]]
         lines += ["endloop", "endfacet"]
-    (tmp_path / "a.stl").write_text("\n".join(lines + ["endsolid s"]))
+    (tmp_path / "a.stl").write_text("\n".join(lines + ["endsolid s"]), encoding="ascii")
     assert read_mesh(tmp_path / "a.stl").volume == pytest.approx(m.volume, rel=1e-9)
-    (tmp_path / "x.dxf").write_text("0\nEOF\n")
+    (tmp_path / "x.dxf").write_text("0\nEOF\n", encoding="ascii")
     with pytest.raises(ReferenceMeshError):
         read_mesh(tmp_path / "x.dxf")
 
@@ -112,6 +112,8 @@ def test_volume_notation() -> None:
 
 def test_title_text_reads_html_headings(tmp_path: Path) -> None:
     page = tmp_path / "p.html"
-    page.write_text("<html><title>Concept</title><body><b>Thing — 1,234 m³</b></body></html>")
+    page.write_text(
+        "<html><title>Concept</title><body><b>Thing — 1,234 m³</b></body></html>", encoding="utf-8"
+    )
     text = title_text(page)
     assert "Concept" in text and parse_volume_notation(text) == pytest.approx(1234.0)
