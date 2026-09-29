@@ -27,6 +27,7 @@ nav:
       - ADR-0003: adr/ADR-0003-pattern-import-and-virtual-sewing.md
       - ADR-0004: adr/ADR-0004-preview-solver-dynamic-relaxation.md
       - ADR-0005: adr/ADR-0005-verification-solver-calculix.md
+      - ADR-0006: adr/ADR-0006-appendage-submodels-and-reality-check.md
 theme:
   name: material
 markdown_extensions:

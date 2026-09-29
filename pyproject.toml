@@ -32,6 +32,11 @@ docs = [
   "mkdocs>=1.6",
   "mkdocs-material>=9.5",
 ]
+# Optional: Open3D point-to-plane ICP for reference-mesh registration (a SciPy ICP is used
+# without it). See ADR-0006.
+registration = [
+  "open3d>=0.18",
+]
 # CalculiX (the verification solver) is an external program, not a Python package:
 # see docs/dev/calculix-installation.md.
 scan = []
@@ -67,6 +72,11 @@ packages = ["envelopelab", "calculix_adapter"]
 [[tool.mypy.overrides]]
 # SciPy ships no type information; its results are converted with np.asarray at the call site.
 module = ["scipy", "scipy.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# Open3D (optional, reference-mesh registration) ships no type information.
+module = ["open3d", "open3d.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
