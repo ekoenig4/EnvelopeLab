@@ -13,6 +13,7 @@
 | Gmsh (Python API and library) | panel triangulation (`envelopelab.assembly.mesh`) | GPL-2.0-or-later (with linking exceptions) |
 | PyYAML | build-pack YAML mapping files | MIT |
 | types-PyYAML (dev) | type stubs for mypy | Apache-2.0 |
+| Open3D (optional extra `registration`) | point-to-plane ICP registration of reference meshes (`envelopelab.io.reference_mesh`); a SciPy ICP is used when it is not installed | MIT |
 | pymdown-extensions (via mkdocs-material) | `arithmatex` math in docs | MIT |
 | MathJax (loaded from jsDelivr by the docs site) | equation rendering | Apache-2.0 |
 

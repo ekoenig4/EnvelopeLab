@@ -4,6 +4,7 @@ nav:
   - User guide:
       - Importing patterns: user/importing-patterns.md
       - Simulation preview: user/simulation-preview.md
+      - Reality Check report: user/reality-check-report.md
   - Developer:
       - Setup: dev/setup.md
       - CalculiX installation: dev/calculix-installation.md
@@ -13,11 +14,13 @@ nav:
       - Virtual sewing: theory/virtual-sewing.md
       - Dynamic-relaxation solver: theory/dynamic-relaxation.md
       - CalculiX verification solver: theory/verification-solver.md
+      - Appendage pressure and load paths: theory/appendage-pressure-and-load-paths.md
   - Validation:
       - Analytic geometry: validation/analytic-geometry.md
       - Pattern-import fixtures: validation/pattern-import-fixtures.md
       - Preview solver benchmarks: validation/preview-solver-benchmarks.md
       - Preview vs CalculiX: validation/preview-vs-calculix.md
+      - Special-shape fixtures: validation/special-shape-fixtures.md
   - Formats:
       - Design schema: formats/design-schema.md
       - Pattern import mapping: formats/pattern-import-mapping.md
@@ -27,6 +30,7 @@ nav:
       - ADR-0003: adr/ADR-0003-pattern-import-and-virtual-sewing.md
       - ADR-0004: adr/ADR-0004-preview-solver-dynamic-relaxation.md
       - ADR-0005: adr/ADR-0005-verification-solver-calculix.md
+      - ADR-0006: adr/ADR-0006-appendage-submodels-and-reality-check.md
 theme:
   name: material
 markdown_extensions:

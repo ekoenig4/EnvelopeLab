@@ -123,6 +123,9 @@ class SimulationResult:
         0 taut, 1 wrinkled, 2 slack per element, when the solver reports it.
     findings : list of Finding
         Warnings and errors; errors mean the result is not final.
+    chamber_volumes : dict of str to float
+        Volume of the main envelope gas and of each appendage chamber, m^3 (empty
+        without chambers).
     manifest : RunManifest
         Reproducibility record.
     """
@@ -150,6 +153,7 @@ class SimulationResult:
     manifest: RunManifest
     wrinkle_state: np.ndarray | None = None
     findings: list[Finding] = field(default_factory=list)
+    chamber_volumes: dict[str, float] = field(default_factory=dict)
 
     @property
     def n_nodes(self) -> int:
@@ -314,4 +318,5 @@ def from_preview(
         manifest=manifest or manifest_for(model, "envelopelab-preview", result.metadata),
         wrinkle_state=result.state,
         findings=[Finding(w.code, w.message, w.severity) for w in result.warnings],
+        chamber_volumes=dict(result.chamber_volumes),
     )

@@ -1,0 +1,24 @@
+{
+  "calculix_version": "2.21",
+  "cases": {
+    "caught": {
+      "converged": true,
+      "elements": 1445,
+      "host_rim_max_n1_n_per_m": 173.7255803804806,
+      "min_host_fos": 80.58686561494433,
+      "nodes": 751,
+      "protrusion_m": 0.5001960574000037,
+      "rim_tape_max_tension_n": 92.102725721388
+    },
+    "not_caught": {
+      "converged": true,
+      "elements": 1445,
+      "host_rim_max_n1_n_per_m": 326.7782784418795,
+      "min_host_fos": 42.842504914199885,
+      "nodes": 751,
+      "protrusion_m": 0.5044987223749295,
+      "rim_tape_max_tension_n": 75.75912138563234
+    }
+  },
+  "description": "CalculiX (verification solver) result of envelopelab.validation.special_shapes.load_transfer_model: pressure-fed pod on a spherical host patch with the rim tape caught into the host tapes or not."
+}

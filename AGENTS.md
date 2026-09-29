@@ -29,7 +29,8 @@ never hidden. The builder is responsible for airworthiness.
     src/envelopelab/   core library, installed as `envelopelab`
                        (now: atmosphere, geometry, mass_estimate, design, materials,
                        commands, validation, io, assembly, solvers (preview
-                       dynamic-relaxation solver); planned: export)
+                       dynamic-relaxation solver), features (special-shape
+                       appendages), report (Reality Check); planned: export)
     tests/             unit/, property/, benchmarks/, regression/, fixtures/ (planned: gui/)
     docs/              MkDocs site: user/, theory/, validation/, dev/, formats/, adr/
     scripts/           dev utilities: verify.py, generate_validation_docs.py,
