@@ -483,7 +483,13 @@ def _ratio(levels: list[LevelData]) -> float:
 
 
 def _fmt(value: float) -> str:
-    return "n/a" if not math.isfinite(value) else f"{value:.4g}"
+    if not math.isfinite(value):
+        return "n/a"
+    # Near-zero values (differences between two converged solutions) are round-off;
+    # their digits change between platforms, so only a bound is shown.
+    if 0.0 < abs(value) < 1e-6:
+        return "< 1e-06"
+    return f"{value:.4g}"
 
 
 def _fmt_mm(length: float) -> str:

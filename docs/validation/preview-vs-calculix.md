@@ -50,7 +50,7 @@ known differences below.
 | maximum width | 14.06 | 14.06 | m | 0.0 % | within 5 % |
 | volume | 1348 | 1348 | m^3 | 0.0 % | within 5 % |
 | maximum displacement | 0.9556 | 0.9556 | m | 0.0 % | within 5 % |
-| nodal displacement difference (RMS / max displacement) | 0 | 1.98e-09 | - | 0.0 % | within 5 % |
+| nodal displacement difference (RMS / max displacement) | 0 | < 1e-06 | - | 0.0 % | within 5 % |
 | mean N1 (area-weighted) | 132 | 132 | N/m | 0.0 % | within 5 % |
 | N1, 99th percentile | 467.1 | 467.1 | N/m | 0.0 % | within 5 % |
 | maximum tape tension | 147.3 | 147.3 | N | 0.0 % | within 5 % |
