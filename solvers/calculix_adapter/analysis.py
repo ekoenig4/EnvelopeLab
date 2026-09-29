@@ -338,7 +338,7 @@ class _Problem:
     def external(self, x: FloatArray) -> FloatArray:
         """Nodal external force at ``x`` (pressure, closures, dead loads), N."""
         xe = x[self.tri]
-        p = self.model.conditions.pressure(xe[:, :, 2])
+        p = self.model.triangle_pressure(xe[:, :, 2])
         area_normal = 0.5 * np.cross(xe[:, 1] - xe[:, 0], xe[:, 2] - xe[:, 0])
         weights = (p + p.sum(axis=1, keepdims=True)) / 12.0  # (2 p_a + p_b + p_c) / 12
         out = np.zeros((self.n, 3))
@@ -812,7 +812,8 @@ def _result(
         reactions=groups,
         nodal_reactions=ps.reactions,
         volume=volume,
-        lift=volume * model.conditions.pressure_gradient,
+        lift=prob.ev.lift(ps.x),
+        chamber_volumes=prob.ev.chamber_volumes(ps.x),
         residual_history=residuals,
         iteration_history=history,
         residual_measure=(

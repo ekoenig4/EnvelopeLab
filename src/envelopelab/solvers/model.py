@@ -228,9 +228,71 @@ class PressureClosure:
 
     name: str
     nodes: IntArray
+    chamber: str | None = None
 
     def __post_init__(self) -> None:
         self.nodes = _int_array(self.nodes).ravel()
+
+
+#: Code of the main envelope gas in :attr:`SolverModel.tri_chambers`.
+MAIN_CHAMBER = -1
+#: Code of the surrounding air in :attr:`SolverModel.tri_chambers`.
+AMBIENT = -2
+
+
+@dataclass(frozen=True)
+class PressureChamber:
+    r"""A separately pressurised gas volume (appendage pod, blister, tube).
+
+    The chamber's differential pressure to the ambient air is hydrostatic in its own gas,
+
+    .. math:: p_c(z) = p_{ref} + \frac{dp}{dz}\,(z - z_{ref}),
+              \qquad \frac{dp}{dz} = (\rho_{amb} - \rho_{gas})\, g
+
+    with no zero-pressure level: the chamber is closed except for its feed holes, whose
+    elevation sets :math:`z_{ref}` (see :mod:`envelopelab.features.pressure`).
+
+    Attributes
+    ----------
+    name : str
+        Chamber name (the feature it belongs to).
+    reference_pressure : float
+        Differential pressure at ``reference_height``, Pa.
+    reference_height : float
+        m.
+    gradient : float
+        :math:`(\rho_{amb} - \rho_{gas}) g`, Pa/m; also the gross lift of the chamber
+        gas per unit volume, N/m^3.
+    source : {"datasheet", "measured", "assumed"}
+        Provenance of the pressure (derived chambers inherit ``assumed`` from the loss
+        factor).
+    description : str
+        How the pressure was obtained.
+    """
+
+    name: str
+    reference_pressure: float
+    reference_height: float
+    gradient: float
+    source: SourceTag = "assumed"
+    description: str = ""
+
+    def pressure(self, z: npt.ArrayLike) -> FloatArray:
+        """Differential pressure at heights ``z`` (m), Pa."""
+        return self.reference_pressure + self.gradient * (
+            np.asarray(z, dtype=np.float64) - self.reference_height
+        )
+
+    def as_dict(self) -> dict[str, object]:
+        """JSON-ready dictionary with units."""
+        return {
+            "name": self.name,
+            "reference_pressure_pa": self.reference_pressure,
+            "reference_height_m": self.reference_height,
+            "gradient_pa_m": self.gradient,
+            "source": self.source,
+            "description": self.description,
+        }
 
 
 @dataclass(frozen=True)
@@ -436,6 +498,14 @@ class SolverModel:
         Model name.
     source_hash : str
         Content hash of the design the model came from ("" for synthetic models).
+    chambers : list of PressureChamber
+        Appendage gas volumes besides the main envelope.
+    tri_chambers : ndarray of int, shape (m, 2), optional
+        Gas on the inside (normal side reversed) and outside (normal side) of each
+        triangle: :data:`MAIN_CHAMBER`, :data:`AMBIENT` or an index into ``chambers``.
+        ``None`` means every triangle separates the main envelope gas from the ambient
+        air. A triangle with the same gas on both sides (an internal diaphragm) carries
+        no pressure.
     """
 
     positions: FloatArray
@@ -456,6 +526,8 @@ class SolverModel:
     closures: list[PressureClosure] = field(default_factory=list)
     name: str = "model"
     source_hash: str = ""
+    chambers: list[PressureChamber] = field(default_factory=list)
+    tri_chambers: IntArray | None = None
 
     def __post_init__(self) -> None:
         self.positions = np.asarray(self.positions, dtype=np.float64).reshape(-1, 3)
@@ -464,6 +536,8 @@ class SolverModel:
         m = len(self.triangles)
         self.grain = np.broadcast_to(np.asarray(self.grain, dtype=np.float64), (m, 2)).copy()
         self.tri_zone = np.broadcast_to(_int_array(self.tri_zone), (m,)).copy()
+        if self.tri_chambers is not None:
+            self.tri_chambers = _int_array(self.tri_chambers, 2)
         self.validate()
 
     @classmethod
@@ -558,6 +632,18 @@ class SolverModel:
         for name, idx in groups:
             if idx.size and (idx.min() < 0 or idx.max() >= n):
                 raise ModelError(f"{name}: node index out of range")
+        if self.tri_chambers is not None:
+            if self.tri_chambers.shape != (m, 2):
+                raise ModelError("tri_chambers needs one (inside, outside) pair per triangle")
+            codes = self.tri_chambers
+            if m and (codes.min() < AMBIENT or codes.max() >= len(self.chambers)):
+                raise ModelError("tri_chambers code out of range")
+        names = [c.name for c in self.chambers]
+        if len(set(names)) != len(names):
+            raise ModelError("chamber names must be unique")
+        for closure in self.closures:
+            if closure.chamber is not None and closure.chamber not in names:
+                raise ModelError(f"closure {closure.name}: unknown chamber {closure.chamber!r}")
         for load in self.distributed_loads:
             if load.triangles.size and (load.triangles.min() < 0 or load.triangles.max() >= m):
                 raise ModelError(f"{load.name}: triangle index out of range")
@@ -592,7 +678,64 @@ class SolverModel:
         ):
             digest.update(repr(group).encode())
         digest.update(self.source_hash.encode())
+        if self.chambers or self.tri_chambers is not None:
+            digest.update(repr(self.chambers).encode())
+            if self.tri_chambers is not None:
+                digest.update(np.ascontiguousarray(self.tri_chambers).tobytes())
         return digest.hexdigest()
+
+    def chamber_index(self, name: str | None) -> int:
+        """Code of a chamber name (``None`` or ``"envelope"`` is the main gas)."""
+        if name is None or name == "envelope":
+            return MAIN_CHAMBER
+        for k, chamber in enumerate(self.chambers):
+            if chamber.name == name:
+                return k
+        raise ModelError(f"unknown chamber {name!r}")
+
+    def chamber_pressure(self, code: int, z: npt.ArrayLike) -> FloatArray:
+        """Differential pressure of gas ``code`` at heights ``z`` (m), Pa."""
+        if code == MAIN_CHAMBER:
+            return self.conditions.pressure(z)
+        if code == AMBIENT:
+            return np.zeros_like(np.asarray(z, dtype=np.float64))
+        return self.chambers[code].pressure(z)
+
+    def chamber_gradient(self, code: int) -> float:
+        """Gross lift per unit volume of gas ``code``, N/m^3."""
+        if code == MAIN_CHAMBER:
+            return self.conditions.pressure_gradient
+        if code == AMBIENT:
+            return 0.0
+        return self.chambers[code].gradient
+
+    def triangle_pressure(self, z: FloatArray, subset: npt.ArrayLike | None = None) -> FloatArray:
+        """Net pressure (inside minus outside) at triangle corners.
+
+        Parameters
+        ----------
+        z : ndarray, shape (m, 3)
+            Corner heights of every triangle, or of the triangles in ``subset``, m.
+        subset : array_like of int, optional
+            Triangle indices the rows of ``z`` belong to (default: all triangles).
+
+        Returns
+        -------
+        ndarray, shape like ``z``
+            Pressure acting along each triangle's normal, Pa.
+        """
+        if self.tri_chambers is None:
+            return self.conditions.pressure(z)
+        pairs = self.tri_chambers if subset is None else self.tri_chambers[np.asarray(subset)]
+        out = np.zeros_like(z, dtype=np.float64)
+        for side, sign in ((0, 1.0), (1, -1.0)):
+            codes = pairs[:, side]
+            for code in np.unique(codes):
+                if code == AMBIENT:
+                    continue
+                mask = codes == code
+                out[mask] += sign * self.chamber_pressure(int(code), z[mask])
+        return out
 
 
 def edge_rest_lengths(edges: IntArray, triangles: IntArray, rest_uv: FloatArray) -> FloatArray:

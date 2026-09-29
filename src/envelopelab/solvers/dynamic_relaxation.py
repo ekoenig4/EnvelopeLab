@@ -79,7 +79,7 @@ from envelopelab.solvers.membrane import (
     rest_geometry,
     tension_field,
 )
-from envelopelab.solvers.model import SolverModel, SolverSettings
+from envelopelab.solvers.model import MAIN_CHAMBER, SolverModel, SolverSettings
 
 SolveStatus = Literal["converged", "max_iterations", "time_limit", "cancelled", "diverged"]
 Severity = Literal["info", "warning", "error"]
@@ -282,6 +282,9 @@ class SolveResult:
     metadata : dict
         Reproducibility data (git commit, dependency versions, content hash, material
         sources, load case, settings, mesh size, seed).
+    chamber_volumes : dict of str to float
+        Gas volume of the main envelope (``envelope``) and of each appendage chamber,
+        m^3; empty for a model without chambers.
     """
 
     positions: FloatArray
@@ -303,6 +306,7 @@ class SolveResult:
     convergence: Convergence
     warnings: list[SolverWarning] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
+    chamber_volumes: dict[str, float] = field(default_factory=dict)
 
     @property
     def converged(self) -> bool:
@@ -365,6 +369,35 @@ def _cap(x: FloatArray, edges: IntArray) -> tuple[FloatArray, FloatArray, FloatA
     normals = 0.5 * np.cross(a, b)
     centroids = (centre + x[edges[:, 0]] + x[edges[:, 1]]) / 3.0
     return centre, normals, centroids
+
+
+def enclosed_volume(positions: FloatArray, triangles: IntArray) -> float:
+    """Volume enclosed by a triangle surface with every boundary loop closed by a flat fan
+    cap, m^3 (the definition the solver uses without symmetry planes or chambers).
+
+    Parameters
+    ----------
+    positions : ndarray, shape (n, 3)
+        Node positions, m.
+    triangles : ndarray of int, shape (m, 3)
+        Outward-oriented triangles.
+
+    Returns
+    -------
+    float
+        m^3.
+    """
+    x = np.asarray(positions, dtype=np.float64)
+    tri = np.asarray(triangles, dtype=np.int64)
+    e = x[tri]
+    vol = float(np.einsum("mi,mi->m", e[:, 0], np.cross(e[:, 1], e[:, 2])).sum()) / 6.0
+    for edges in _edge_loops(_directed_boundary_edges(tri)):
+        centre = x[np.unique(edges)].mean(axis=0)
+        vol += (
+            float(np.einsum("i,mi->m", centre, np.cross(x[edges[:, 1]], x[edges[:, 0]])).sum())
+            / 6.0
+        )
+    return vol
 
 
 def _plane_basis(normal: FloatArray) -> FloatArray:
@@ -478,7 +511,26 @@ class _System:
             if not len(edges):
                 raise ValueError(f"closure {closure.name}: nodes are not on a boundary loop")
             self.closures.append((closure.name, edges))
+        self.closure_codes = [model.chamber_index(c.chamber) for c in model.closures]
         self.volume_origin = self._volume_origin()
+        # Gas regions (main envelope plus appendage chambers): each is bounded by the
+        # triangles with that gas inside (as oriented) and those with it outside (flipped).
+        self.gas_regions: list[tuple[str, int, IntArray, list[IntArray]]] = []
+        if model.tri_chambers is not None:
+            codes = model.tri_chambers
+            for code in (MAIN_CHAMBER, *range(len(model.chambers))):
+                inside = (codes[:, 0] == code) & (codes[:, 1] != code)
+                outside = (codes[:, 1] == code) & (codes[:, 0] != code)
+                oriented = np.concatenate([self.tri[inside], self.tri[outside][:, [0, 2, 1]]])
+                if not len(oriented):
+                    continue
+                edges = _directed_boundary_edges(oriented)
+                keep = np.ones(len(edges), dtype=bool)
+                for _, nodes, _, _ in self.planes:
+                    member = np.isin(edges, nodes)
+                    keep &= ~(member[:, 0] & member[:, 1])
+                name = "envelope" if code == MAIN_CHAMBER else model.chambers[code].name
+                self.gas_regions.append((name, code, oriented, _edge_loops(edges[keep])))
 
     @staticmethod
     def _remove_direction(proj: FloatArray, nodes: IntArray, d: FloatArray) -> None:
@@ -536,18 +588,17 @@ class _System:
         return tension, strain, unit, length
 
     def pressure_corners(self, xe: FloatArray) -> tuple[FloatArray, FloatArray]:
-        cond = self.model.conditions
-        p = cond.pressure(xe[:, :, 2])
+        p = self.model.triangle_pressure(xe[:, :, 2])
         normal = 0.5 * np.cross(xe[:, 1] - xe[:, 0], xe[:, 2] - xe[:, 0])
         weights = (p + p.sum(axis=1, keepdims=True)) / 12.0  # (2 p_a + p_b + p_c) / 12
         return weights[:, :, None] * normal[:, None, :], p
 
     def closure_forces(self, x: FloatArray) -> dict[str, FloatArray]:
-        cond = self.model.conditions
         out: dict[str, FloatArray] = {}
-        for name, edges in self.closures:
+        for (name, edges), code in zip(self.closures, self.closure_codes, strict=True):
             _, normals, centroids = _cap(x, edges)
-            total = (cond.pressure(centroids[:, 2])[:, None] * normals).sum(axis=0)
+            p = self.model.chamber_pressure(code, centroids[:, 2])
+            total = (p[:, None] * normals).sum(axis=0)
             lengths = np.linalg.norm(x[edges[:, 1]] - x[edges[:, 0]], axis=1)
             trib = np.bincount(edges.ravel(), np.repeat(0.5 * lengths, 2), minlength=self.n)
             vec = np.zeros((self.n, 3))
@@ -616,16 +667,39 @@ class _System:
         floor = 1e-9 * float(k.max()) if k.size and k.max() > 0 else 1.0
         return self.settings.mass_factor * 0.5 * np.maximum(k, floor)
 
-    def volume(self, x: FloatArray) -> float:
-        xo = x - self.volume_origin
-        e = xo[self.tri]
+    @staticmethod
+    def _enclosed(xo: FloatArray, tri: IntArray, loops: list[IntArray]) -> float:
+        e = xo[tri]
         vol = float(np.einsum("mi,mi->m", e[:, 0], np.cross(e[:, 1], e[:, 2])).sum()) / 6.0
-        for edges in self.volume_loops:
+        for edges in loops:
             centre = xo[np.unique(edges)].mean(axis=0)
             a = xo[edges[:, 1]]
             b = xo[edges[:, 0]]
             vol += float(np.einsum("i,mi->m", centre, np.cross(a, b)).sum()) / 6.0
         return vol
+
+    def chamber_volumes(self, x: FloatArray) -> dict[str, float]:
+        """Gas volume of the main envelope and of each chamber, m^3 (empty without
+        chambers)."""
+        xo = x - self.volume_origin
+        return {name: self._enclosed(xo, tri, loops) for name, _, tri, loops in self.gas_regions}
+
+    def volume(self, x: FloatArray) -> float:
+        if self.gas_regions:
+            return float(sum(self.chamber_volumes(x).values()))
+        return self._enclosed(x - self.volume_origin, self.tri, self.volume_loops)
+
+    def lift(self, x: FloatArray) -> float:
+        """Gross lift of all gas regions, N."""
+        if not self.gas_regions:
+            return self.volume(x) * self.model.conditions.pressure_gradient
+        volumes = self.chamber_volumes(x)
+        return float(
+            sum(
+                volumes[name] * self.model.chamber_gradient(code)
+                for name, code, _, _ in self.gas_regions
+            )
+        )
 
 
 class ModelEvaluator:
@@ -679,6 +753,14 @@ class ModelEvaluator:
     def volume(self, x: FloatArray) -> float:
         """Enclosed volume at ``x``, m^3 (openings capped, symmetry planes closing)."""
         return self._s.volume(x)
+
+    def chamber_volumes(self, x: FloatArray) -> dict[str, float]:
+        """Volume of the main envelope gas and of each chamber at ``x``, m^3."""
+        return self._s.chamber_volumes(x)
+
+    def lift(self, x: FloatArray) -> float:
+        """Gross lift of every gas region at ``x``, N."""
+        return self._s.lift(x)
 
     def closure_forces(self, x: FloatArray) -> dict[str, FloatArray]:
         """Nodal cap-pressure forces per closure at ``x``, N, shape (n, 3) each."""
@@ -948,7 +1030,7 @@ def _finish(
     )
     volume = system.volume(x)
     cond = model.conditions
-    lift = volume * cond.pressure_gradient
+    lift = system.lift(x)
     node_pressure = cond.pressure(x[:, 2])
     result = SolveResult(
         positions=x,
@@ -968,6 +1050,7 @@ def _finish(
         lift=lift,
         loads=loads,
         convergence=convergence,
+        chamber_volumes=system.chamber_volumes(x),
     )
     result.warnings = _warnings(system, result)
     result.metadata = {
@@ -991,6 +1074,7 @@ def _finish(
             "cable_elements": len(system.cable_edges),
         },
         "load_case": cond.as_dict(),
+        **({"chambers": [c.as_dict() for c in model.chambers]} if model.chambers else {}),
         "settings": settings.as_dict(),
         "materials": {z: model.materials[z].sources() for z in model.zone_names},
         "tapes": {c.name: c.material.sources() for c in model.cables},
