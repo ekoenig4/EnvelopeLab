@@ -2,6 +2,8 @@ site_name: EnvelopeLab
 nav:
   - Home: index.md
   - User guide:
+      - Your first design: user/first-design.md
+      - Editing designs: user/editing-designs.md
       - Importing patterns: user/importing-patterns.md
       - Simulation preview: user/simulation-preview.md
       - Reality Check report: user/reality-check-report.md
@@ -15,6 +17,7 @@ nav:
       - Dynamic-relaxation solver: theory/dynamic-relaxation.md
       - CalculiX verification solver: theory/verification-solver.md
       - Appendage pressure and load paths: theory/appendage-pressure-and-load-paths.md
+      - Design editing and staleness: theory/design-editing.md
   - Validation:
       - Analytic geometry: validation/analytic-geometry.md
       - Pattern-import fixtures: validation/pattern-import-fixtures.md

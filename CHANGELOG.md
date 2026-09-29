@@ -20,6 +20,11 @@ All notable changes to this project will be documented in this file.
 - `FabricLibraryRepository.fabric()`, `.fabrics()` and `.catalog()` (thread-safe copy).
 - Fixture `tests/fixtures/standard_gore/design.elproj`: the generic 8-gore design as a
   project. No existing numerical result changes.
+- Standard-gore editor (draggable profile points, exact numeric entry, panel rows,
+  height/volume/diameter/N locks, live area, volume, lift, mass and lift margin) and 2D
+  pattern editor (seam allowance, grain, labels, zones, notches, tape paths, feature
+  locations, flagged manual outline overrides with provenance and seam matching). Docs:
+  `user/first-design.md`, `user/editing-designs.md`, `theory/design-editing.md`.
 - `envelopelab.solvers.model`: gas chambers (`PressureChamber`, `SolverModel.chambers`,
   `tri_chambers`, `triangle_pressure`); closures may belong to a chamber. Preview solver
   and CalculiX adapter share the definition; chamber volumes and per-gas lift in the

@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab.design.model import DesignDocument
+from envelopelab.project.dependencies import artifact_inputs
 from envelopelab.project.model import PROJECT_SUFFIX
 from envelopelab.project.recovery import (
     autosave_file,
@@ -29,10 +30,12 @@ from envelopelab.project.recovery import (
 from envelopelab.project.session import ProjectSession
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.dialogs import PreferencesDialog
+from envelopelab_app.gore_editor import GoreEditor
 from envelopelab_app.panels.base import PanelDock
 from envelopelab_app.panels.design_tree import DesignTreePanel
 from envelopelab_app.panels.history import HistoryPanel
 from envelopelab_app.panels.materials import MaterialsPanel
+from envelopelab_app.panels.patterns import PatternPanel
 from envelopelab_app.panels.properties import PropertiesPanel
 from envelopelab_app.panels.validation import ValidationPanel
 from envelopelab_app.settings import (
@@ -75,14 +78,15 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("EnvelopeLab")
         self.resize(1500, 950)
 
-        placeholder = QLabel("Open or create a design; edit it in the Design Tree and Properties.")
-        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setCentralWidget(placeholder)
+        self.gore_editor = GoreEditor(self.controller)
+        self.setCentralWidget(self.gore_editor)
         self.design_tree = DesignTreePanel(self.controller)
         self.properties = PropertiesPanel(self.controller)
         self.validation = ValidationPanel(self.controller)
         self.materials = MaterialsPanel(self.controller)
+        self.patterns = PatternPanel(self.controller)
         self.history = HistoryPanel(self.controller)
+        pattern_scope = artifact_inputs("patterns")
         self.docks: dict[str, PanelDock] = {
             "tree": PanelDock("Design Tree", self.controller, self.design_tree),
             "properties": PanelDock("Properties", self.controller, self.properties),
@@ -90,12 +94,20 @@ class MainWindow(QMainWindow):
                 "Materials", self.controller, self.materials, scope={"materials", "row_zones"}
             ),
             "validation": PanelDock("Validation / Warnings", self.controller, self.validation),
+            "patterns": PanelDock(
+                "2D Pattern View",
+                self.controller,
+                self.patterns,
+                scope=pattern_scope,
+                artifacts=("patterns",),
+            ),
             "history": PanelDock("History", self.controller, self.history),
         }
         area = Qt.DockWidgetArea
         self.addDockWidget(area.LeftDockWidgetArea, self.docks["tree"])
         self.addDockWidget(area.LeftDockWidgetArea, self.docks["properties"])
         self.tabifyDockWidget(self.docks["properties"], self.docks["materials"])
+        self.addDockWidget(area.RightDockWidgetArea, self.docks["patterns"])
         self.addDockWidget(area.RightDockWidgetArea, self.docks["history"])
         self.addDockWidget(area.BottomDockWidgetArea, self.docks["validation"])
         self.docks["properties"].raise_()
@@ -154,6 +166,7 @@ class MainWindow(QMainWindow):
         self.redo_action = self._action("&Redo", self.redo, std.Redo)
         self.snapshot_action = self._action("Take &snapshot…", self.history._take)
         self.version_action = self._action("Commit &version…", self.history._commit)
+        self.regen_action = self._action("&Regenerate patterns", self.patterns.regenerate, "F5")
 
         menu = self.menuBar()
         file_menu = menu.addMenu("&File")
@@ -173,6 +186,8 @@ class MainWindow(QMainWindow):
         edit_menu.addSeparator()
         edit_menu.addAction(self.snapshot_action)
         edit_menu.addAction(self.version_action)
+        design_menu = menu.addMenu("&Design")
+        design_menu.addAction(self.regen_action)
         view_menu = menu.addMenu("&View")
         for dock in self.docks.values():
             view_menu.addAction(dock.toggleViewAction())
@@ -184,6 +199,7 @@ class MainWindow(QMainWindow):
             self.save_action,
             self.undo_action,
             self.redo_action,
+            self.regen_action,
         ):
             toolbar.addAction(action)
 
@@ -217,6 +233,7 @@ class MainWindow(QMainWindow):
         )
         self.snapshot_action.setEnabled(has)
         self.version_action.setEnabled(has)
+        self.regen_action.setEnabled(self.controller.is_gore)
 
     def _task(self, text: str) -> None:
         self.task_label.setText(text)
@@ -358,6 +375,7 @@ class MainWindow(QMainWindow):
         wizard = NewDesignWizard(self.controller.fabrics, self)
         if wizard.exec() and wizard.design is not None:
             self.new_project(wizard.design)
+            self.controller.regenerate_patterns()
 
     def open_dialog(self) -> None:
         if not self.maybe_discard():
