@@ -1,11 +1,23 @@
+# The hooks run the project's own ruff and mypy from the active virtualenv (activate
+# .venv before committing), so they use the same versions and settings as
+# scripts/verify.py and CI. Isolated hook environments cannot see numpy, pytest or
+# PySide6, which strict mypy needs.
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.6.9
+  - repo: local
     hooks:
       - id: ruff
+        name: ruff check
+        entry: python -m ruff check --fix
+        language: system
+        types: [python]
       - id: ruff-format
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.11.2
-    hooks:
+        name: ruff format
+        entry: python -m ruff format
+        language: system
+        types: [python]
       - id: mypy
-        additional_dependencies: [pydantic>=2.9,<3]
+        name: mypy (strict)
+        entry: python -m mypy src solvers app tests
+        language: system
+        types: [python]
+        pass_filenames: false
