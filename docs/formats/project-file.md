@@ -21,7 +21,8 @@ around it:
 | `runs` | Run records: solver (`envelopelab-preview` or `calculix`), status, convergence, final residual and what it measures, iterations, run time, mesh size, material sources, load case, design content hash, the **input fingerprint** that decides whether the run is still current, summary values and the run manifest. |
 
 Result arrays of each run (positions, initial positions and triangles in m, principal
-resultants in N/m, wrinkle state) are stored next to the project in
+resultants in N/m, wrinkle state, and the residual history: iteration or CalculiX increment
+and relative residual) are stored next to the project in
 `<name>.elproj.runs/<run_id>.npz` (NumPy archive, no pickled objects);
 `runs[].result_file` gives the relative path.
 

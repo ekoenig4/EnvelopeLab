@@ -65,7 +65,8 @@ around it:
 {table}
 
 Result arrays of each run (positions, initial positions and triangles in m, principal
-resultants in N/m, wrinkle state) are stored next to the project in
+resultants in N/m, wrinkle state, and the residual history: iteration or CalculiX increment
+and relative residual) are stored next to the project in
 `<name>{PROJECT_SUFFIX}.runs/<run_id>.npz` (NumPy archive, no pickled objects);
 `runs[].result_file` gives the relative path.
 

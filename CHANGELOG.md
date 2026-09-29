@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Run results now keep the solver's residual history and the flat mesh data. New
+  `envelopelab.assembly.transfer` maps a solved shape onto another mesh of the same build
+  pack through the flat patterns, and `project.simulation.start_from_run` turns a saved
+  run into a starting guess for a solve on another mesh. No numerical results change.
 - Parachute in the design (design schema v2, ADR-0009): optional `gores.parachute`, a flat
   canopy of radial gores round a centre disc. It has pattern pieces in the 2D pattern view,
   seam checks (radial sides, centre seam, seal overlap against the hole), manual outline

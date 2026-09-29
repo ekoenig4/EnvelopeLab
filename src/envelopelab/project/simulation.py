@@ -41,6 +41,7 @@ from ezdxf.filemanagement import new as new_dxf
 
 from envelopelab.assembly.pipeline import BuildPackResult, import_build_pack
 from envelopelab.assembly.spec import MeshOptions
+from envelopelab.assembly.transfer import SolvedShape, transfer_positions
 from envelopelab.atmosphere import gas_density
 from envelopelab.design.model import DesignDocument
 from envelopelab.geometry.gore import PanelRow
@@ -583,6 +584,41 @@ def final_residual(result: SimulationResult) -> tuple[float, str]:
     return math.nan, result.residual_measure
 
 
+def start_from_run(arrays: dict[str, np.ndarray], built: BuiltModel) -> np.ndarray | None:
+    """Starting positions for ``built`` from a saved run's result arrays, m.
+
+    The run's shape is used as is when it has the same mesh, and is transferred through
+    the flat patterns (:func:`envelopelab.assembly.transfer.transfer_positions`) when it
+    was solved on another mesh of the same build pack. A start is only a guess: the new
+    solve is accepted on its own convergence criteria.
+
+    Returns
+    -------
+    ndarray, shape (n, 3), or None
+        None when the run lacks the flat mesh data (runs saved by older versions) or does
+        not belong to this build pack.
+    """
+    positions = np.asarray(arrays["positions"], dtype=np.float64)
+    if positions.shape == built.model.positions.shape and np.array_equal(
+        np.asarray(arrays["triangles"]), built.model.triangles
+    ):
+        return positions
+    mesh = built.build.rest_model.mesh if built.build.rest_model is not None else None
+    if mesh is None or not {"rest_uv", "tri_instance", "instance_ids"} <= set(arrays):
+        return None
+    shape = SolvedShape(
+        np.asarray(arrays["triangles"], dtype=np.int64),
+        np.asarray(arrays["rest_uv"], dtype=np.float64),
+        np.asarray(arrays["tri_instance"], dtype=np.int64),
+        [str(v) for v in arrays["instance_ids"]],
+        positions,
+    )
+    try:
+        return transfer_positions(shape, mesh)
+    except ValueError:
+        return None
+
+
 def run_record(
     result: SimulationResult,
     built: BuiltModel,
@@ -603,7 +639,10 @@ def run_record(
     -------
     (RunRecord, dict of str to ndarray)
         Record, and positions / initial positions (m), triangles, principal resultants
-        (N/m) and wrinkle state for the 3D view.
+        (N/m) and wrinkle state for the 3D view, and the residual history (iteration or
+        CalculiX increment, relative residual; shape (k, 2)) to diagnose convergence,
+        and the flat mesh data (``rest_uv`` m, ``tri_instance``, ``instance_ids``) that lets
+        the shape seed a solve on another mesh (:func:`start_from_run`).
     """
     iterations = (
         int(result.residual_history[-1][0])
@@ -654,4 +693,12 @@ def run_record(
     }
     if result.wrinkle_state is not None:
         arrays["wrinkle_state"] = np.asarray(result.wrinkle_state, dtype=np.int8)
+    mesh = built.build.rest_model.mesh if built.build.rest_model is not None else None
+    if mesh is not None and mesh.triangles.shape == np.asarray(result.triangles).shape:
+        arrays["rest_uv"] = np.asarray(mesh.rest_uv, dtype=np.float64)
+        arrays["tri_instance"] = np.asarray(mesh.tri_instance, dtype=np.int64)
+        arrays["instance_ids"] = np.asarray(mesh.instance_ids, dtype=np.str_)
+    arrays["residual_history"] = np.asarray(
+        [(float(i), float(r)) for i, r in result.residual_history], dtype=np.float64
+    ).reshape(-1, 2)
     return record, arrays
