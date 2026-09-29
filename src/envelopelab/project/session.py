@@ -226,8 +226,21 @@ class ProjectSession:
         state: DesignState,
         description: str,
         provenance: tuple[str, str, str] | None = None,
+        stamp: bool = True,
     ) -> bool:
         """Replace the design state as one undoable command.
+
+        Parameters
+        ----------
+        state : DesignState
+            New state.
+        description : str
+            History text.
+        provenance : (str, str, str), optional
+            Provenance entry for flagged edits.
+        stamp : bool
+            Set ``meta.modified`` to now (an edit). False keeps the state's own metadata,
+            so that restoring a snapshot or version reproduces its content hash exactly.
 
         Returns
         -------
@@ -237,11 +250,13 @@ class ProjectSession:
         before = self.project.state
         design_b, patterns_b = _state_data(before)
         design_a, patterns_a = _state_data(state)
-        design_b["meta"]["modified"] = design_a["meta"]["modified"] = None
+        if stamp:
+            design_b["meta"]["modified"] = design_a["meta"]["modified"] = None
         if design_b == design_a and patterns_b == patterns_a:
             return False
         after = state.model_copy(deep=True)
-        after.design.meta.modified = utc_now()
+        if stamp:
+            after.design.meta.modified = utc_now()
         after.design.meta.content_hash = after.design.compute_content_hash()
         self.stack.do(StateCommand(self, before, after, description, provenance))
         return True
@@ -381,7 +396,9 @@ class ProjectSession:
         snap = next((s for s in self.project.snapshots if s.name == name), None)
         if snap is None:
             raise KeyError(f"no snapshot {name!r}")
-        return self.apply_state(snap.state.model_copy(deep=True), f"Restore snapshot {name}")
+        return self.apply_state(
+            snap.state.model_copy(deep=True), f"Restore snapshot {name}", stamp=False
+        )
 
     def delete_snapshot(self, name: str) -> None:
         """Remove snapshot ``name``."""
@@ -418,7 +435,9 @@ class ProjectSession:
         version = next((v for v in self.project.versions if v.version_id == version_id), None)
         if version is None:
             raise KeyError(f"no version {version_id!r}")
-        return self.apply_state(version.state.model_copy(deep=True), f"Check out {version_id}")
+        return self.apply_state(
+            version.state.model_copy(deep=True), f"Check out {version_id}", stamp=False
+        )
 
     # -- runs ---------------------------------------------------------------------------
 

@@ -11,8 +11,9 @@ live outputs and saves it as a project.
 
 ## Install and start
 
+See [Installation](installation.md) (on Linux: `bash scripts/install_env.sh`), then:
+
 ```bash
-python -m pip install -e ".[gui]"   # PySide6, PyVista, pyvistaqt
 envelopelab                          # or: python -m envelopelab_app [project.elproj]
 ```
 

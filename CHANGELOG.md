@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Desktop application: software OpenGL (`LIBGL_ALWAYS_SOFTWARE=1`) is selected
+  automatically under WSL, where the GPU driver drew the window black; new launcher options
+  `--software-gl` and `--hardware-gl`. An explicit `LIBGL_ALWAYS_SOFTWARE` is respected.
+- `scripts/install_env.sh`: one-command environment setup for Linux and containers (system
+  libraries for Gmsh, Qt and VTK via apt/dnf/pacman/zypper, CalculiX, Xvfb, virtualenv,
+  `pip install -e .[dev,docs,gui]`, and a headless start check of the application); CI
+  installs its Linux packages with it. New guide `user/installation.md` with per-distribution
+  package lists and troubleshooting for the "Qt platform plugin xcb" start-up error.
 - Desktop application shell (`envelopelab`, extra `gui`: PySide6, PyVista, pyvistaqt;
   ADR-0007): project open/save/save-as, recent projects, preferences, status bar,
   autosave and crash recovery; dockable Design Tree, Properties, Validation / Warnings,

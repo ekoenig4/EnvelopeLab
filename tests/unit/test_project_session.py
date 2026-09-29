@@ -271,3 +271,29 @@ def test_any_edit_sequence_undoes_to_the_original_and_saves_losslessly(
     assert reopened.content_hash() == edited and reopened.patterns == s.patterns
     s.stack.go_to(0)
     assert s.content_hash() == original
+
+
+def test_restoring_a_version_or_snapshot_reproduces_its_content_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Checkout and restore give back the recorded state exactly, whatever the clock says.
+
+    Edits stamp ``meta.modified``; a clock that advances one second per call makes every
+    edit and the checkout fall in different seconds (as on a slow CI runner).
+    """
+    import itertools
+    from datetime import timedelta
+
+    import envelopelab.project.session as session_module
+
+    start = utc_now()
+    ticks = itertools.count()
+    monkeypatch.setattr(session_module, "utc_now", lambda: start + timedelta(seconds=next(ticks)))
+    s = fixture_session()
+    snap = s.create_snapshot("baseline")
+    version = s.commit_version("first")
+    edits.move_control_point(s, 1, 2.7, 2.0)
+    assert s.checkout_version(version.version_id)
+    assert s.content_hash() == version.content_hash
+    assert s.restore_snapshot("baseline")
+    assert s.content_hash() == snap.content_hash
