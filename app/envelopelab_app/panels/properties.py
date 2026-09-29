@@ -29,6 +29,8 @@ UNITS = {
     "crown_ring": "m (diameter)",
     "parachute_hole_diameter": "m",
     "seal_overlap": "m",
+    "diameter": "m",
+    "centre_diameter": "m",
     "width": "m",
     "strength": "N",
     "allowance": "m",
@@ -86,7 +88,7 @@ class PropertiesPanel(QWidget):
 
     def _selection(self, target: str) -> None:
         section = target.split(":")[0]
-        if section in ("profile", "rows") or section.startswith("row"):
+        if section in ("profile", "rows", "parachute") or section.startswith("row"):
             section = "gores"
         if section in EDITABLE_SECTIONS:
             self.section = section
@@ -124,6 +126,9 @@ class PropertiesPanel(QWidget):
                 nested.append((value, sub))
                 continue
             name = str(key)
+            if name == "parachute" and value is None:
+                form.addRow("parachute", QLabel("none (Design ▸ Add parachute)"))
+                continue
             editor = QLineEdit(self._text(value))
             editor.setMinimumWidth(120)
             editor.setObjectName("prop_" + "_".join(str(p) for p in sub))

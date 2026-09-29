@@ -66,6 +66,37 @@ def test_manual_override_reaches_the_seam_audit(tmp_path: Path) -> None:
     assert any(f.code == "seam_audit" or "differ" in f.message for f in built.findings)
 
 
+def test_parachute_is_audited_but_left_out_of_the_solver_pack(tmp_path: Path) -> None:
+    from envelopelab.assembly.pipeline import import_build_pack
+    from envelopelab.assembly.spec import MeshOptions
+
+    s = ProjectSession.open(FIXTURE)
+    assert edits.add_parachute(s)
+    solver_pack = yaml.safe_load(
+        write_build_pack(s.design, s.patterns, tmp_path / "solve").read_text()
+    )
+    assert "parts" not in solver_pack["assembly"] and "PCG" not in solver_pack["import"]["pieces"]
+    config = write_build_pack(
+        s.design, s.patterns, tmp_path / "pack", COARSE_MM, include_parachute=True
+    )
+    result = import_build_pack(config, mesh_options=MeshOptions(target_edge_length_mm=COARSE_MM))
+    assert result.status == "PASS"
+    rows = {r.seam_id: r for r in result.audit.rows if r.seam_id.startswith("parachute")}
+    assert len(rows) == 8 + 1  # radial seams and the centre seam
+    assert all(r.abs_mismatch < 1e-6 and not r.meshed for r in rows.values())
+    assert rows["parachute:centre"].panels_b == ["parachute/centre"]
+    assert not result.audit.edge_findings  # the rim is a declared opening, not an open edge
+    # The parachute is not meshed: the rest mesh is the envelope alone.
+    report = result.mesh_report
+    assert report is not None and report.passed
+    without = import_build_pack(
+        write_build_pack(s.design, s.patterns, tmp_path / "solve2", COARSE_MM),
+        mesh_options=MeshOptions(target_edge_length_mm=COARSE_MM),
+    )
+    assert without.mesh_report is not None
+    assert report.total_rest_area == pytest.approx(without.mesh_report.total_rest_area)
+
+
 def test_special_shapes_are_not_simulated_without_panels(tmp_path: Path) -> None:
     mesh = FIXTURES / "alien" / "reference" / "alien-reference.ply"
     if not mesh.is_file():

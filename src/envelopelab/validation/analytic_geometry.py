@@ -1,11 +1,11 @@
-"""Analytic benchmarks for the atmosphere and gore geometry modules.
+"""Analytic benchmarks for the atmosphere, gore and parachute geometry modules.
 
 The same functions back ``tests/benchmarks/test_analytic_geometry.py`` and the generated
 page ``docs/validation/analytic-geometry.md`` (``scripts/generate_validation_docs.py``), so
 the published table is always the one the test suite checks.
 
-Only analytic shapes (spheres, cylinders, spherical zones) are used here; reference
-designs live in ``tests/fixtures/``.
+Only analytic shapes (spheres, cylinders, spherical zones, flat circular parachutes) are
+used here; reference designs live in ``tests/fixtures/``.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from envelopelab.geometry.gore import (
     profile_from_gore_widths,
     split_rows,
 )
+from envelopelab.geometry.parachute import parachute_pieces
 
 ErrorKind = Literal["relative", "absolute"]
 
@@ -182,6 +183,35 @@ def run_benchmarks() -> list[BenchmarkResult]:
                 f"Round trip z(s), spherical zone, N=24, {label}",
                 height_error,
                 0.0,
+                "m",
+                "absolute",
+                1e-3,
+            ),
+        ]
+    chute_radius, chute_centre = 2.86, 0.5
+    for n in (8, 20):
+        chute = parachute_pieces(2.0 * chute_radius, 2.0 * chute_centre, n, 0.0)
+        results += [
+            BenchmarkResult(
+                f"Flat parachute R=2.86 m, {n} gores + disc: finished area",
+                chute.finished_area,
+                math.pi * chute_radius**2,
+                "m^2",
+                "relative",
+                1e-3,
+            ),
+            BenchmarkResult(
+                f"Flat parachute R=2.86 m, {n} gores: rim length",
+                chute.rim_length,
+                2.0 * math.pi * chute_radius,
+                "m",
+                "relative",
+                1e-3,
+            ),
+            BenchmarkResult(
+                f"Flat parachute, {n} gore ends vs centre-disc circumference",
+                n * chute.gore_edges["top"],
+                2.0 * math.pi * chute_centre,
                 "m",
                 "absolute",
                 1e-3,

@@ -177,7 +177,7 @@ An open ring boundary (mouth or crown) and its hem.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `name` | `str` | **required** | Opening name. |
-| `kind` | `Literal['mouth', 'parachute_opening', 'vent', 'feed_hole', 'feature_opening']` | **required** | Opening kind. |
+| `kind` | `Literal['mouth', 'parachute_opening', 'vent', 'feed_hole', 'feature_opening', 'parachute_rim']` | **required** | Opening kind. |
 | `hem` | `SeamProperties \| None` | `None` | Hem (rim seam) metadata. |
 
 ### `OpenSeamSpec`
@@ -189,7 +189,7 @@ A vertical ring seam left unsewn over some rows (e.g. a turning vent).
 | `name` | `str` | **required** | Opening name. |
 | `gores` | `tuple[int, int]` | **required** | The two neighbouring gores, e.g. [15, 16]. |
 | `rows` | `list[str]` | **required** | Rows over which the seam stays open. |
-| `kind` | `Literal['mouth', 'parachute_opening', 'vent', 'feed_hole', 'feature_opening']` | `'vent'` | Opening kind. |
+| `kind` | `Literal['mouth', 'parachute_opening', 'vent', 'feed_hole', 'feature_opening', 'parachute_rim']` | `'vent'` | Opening kind. |
 | `hem` | `SeamProperties \| None` | `None` | Hem (rim seam) metadata. |
 
 ### `SeamProperties`
@@ -283,7 +283,7 @@ A feature opening or embedded mark in selected instances.
 |---|---|---|---|
 | `name` | `str` | **required** | Name of the opening or mark within the instance. |
 | `feature` | `FeatureSelector` | **required** | Selects the feature entity in the piece. |
-| `kind` | `Literal['mouth', 'parachute_opening', 'vent', 'feed_hole', 'feature_opening']` | `'feature_opening'` | Opening kind (ignored for marks). |
+| `kind` | `Literal['mouth', 'parachute_opening', 'vent', 'feed_hole', 'feature_opening', 'parachute_rim']` | `'feature_opening'` | Opening kind (ignored for marks). |
 | `hem` | `SeamProperties \| None` | `None` | Hem (rim seam) metadata for openings. |
 
 ### `FeatureSelector`
@@ -317,7 +317,7 @@ An explicitly declared opening made of instance edges.
 | Field | Type | Default | Description |
 |---|---|---|---|
 | `name` | `str` | **required** | Opening name. |
-| `kind` | `Literal['mouth', 'parachute_opening', 'vent', 'feed_hole', 'feature_opening']` | `'feature_opening'` | Opening kind. |
+| `kind` | `Literal['mouth', 'parachute_opening', 'vent', 'feed_hole', 'feature_opening', 'parachute_rim']` | `'feature_opening'` | Opening kind. |
 | `edges` | `list[EdgeRef]` | **required** | Edges forming the opening. |
 | `hem` | `SeamProperties \| None` | `None` | Hem (rim seam) metadata. |
 | `reason` | `str \| None` | `None` | Why the boundary is left open (shown in reports). |

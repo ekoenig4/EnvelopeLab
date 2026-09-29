@@ -71,6 +71,28 @@ Moving one replaces the generated outline by yours: a **manual override**. It is
 If the design geometry changes after the override was drawn, Validation reports the
 override as outdated. *Remove manual override* restores the generated outline.
 
+## The parachute
+
+The parachute that closes the crown hole is part of the design. New designs from the wizard
+get one; for older designs use **Design ▸ Add parachute** (and **Remove parachute** to take
+it out). It starts as a flat canopy: one gore per envelope gore, a diameter of the hole plus
+twice the seal overlap, and a centre disc of 0.2 × its diameter. These are starting values
+to check against your drawings.
+
+* Select **Parachute** in the design tree to edit its gore count, diameter and centre-disc
+  diameter (m) in **Properties**.
+* The 2D pattern view draws the parachute gore (with its quantity) and the centre disc
+  after the crown row.
+* **Live outputs** list the parachute mass. It is included in the estimated envelope mass
+  and the lift margin.
+* **Validation / Warnings** checks its seams: the radial sides of a gore must match, the
+  gore ends must match the centre disc, and the rim must overlap the hole by the seal
+  overlap.
+
+Parachute edits only make the patterns stale. Simulations stay current, because the solver
+closes the crown with an unmeshed cap and does not use the parachute pieces. See
+[Parachute geometry](../theory/parachute-geometry.md) for the model and its limits.
+
 ## What an edit makes stale
 
 | Edit | Stale afterwards |

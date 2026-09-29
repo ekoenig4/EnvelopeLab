@@ -231,6 +231,7 @@ class GoreEditor(QWidget):
             ("volume", "Volume"),
             ("gross_lift", "Gross lift"),
             ("envelope_mass", "Estimated envelope mass"),
+            ("parachute", "  of which parachute"),
             ("lift_margin", "Lift margin (after payload)"),
             ("sources", "Material sources"),
         ):
@@ -344,6 +345,9 @@ class GoreEditor(QWidget):
             "gross_lift": f"{out.gross_lift:.0f} N ({out.gross_lift / 9.80665:.1f} kg)",
             "envelope_mass": "-" if out.envelope_mass is None else f"{out.envelope_mass:.1f} kg",
             "lift_margin": "-" if out.lift_margin is None else f"{out.lift_margin:.1f} kg",
+            "parachute": "none (Design ▸ Add parachute)"
+            if out.parachute is None
+            else f"{out.parachute.total_mass:.1f} kg ({out.parachute.finished_area:.2f} m²)",
             "sources": ", ".join(out.sources) or "-",
         }
         for key, text in values.items():

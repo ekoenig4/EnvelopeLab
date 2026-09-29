@@ -20,8 +20,10 @@ temperatures:
 The envelope mass is `envelopelab.mass_estimate.estimate_mass` of the cut panel rows
 (finished rows plus seam allowances, times \(N\)), with fabric areal mass from the fabric
 library (stored in g/m², converted to kg/m², source tag kept), and generic `assumed` tape
-(0.02 kg/m) and thread (30 tex, 2.75 m per m of seam per stitch row, two rows) values. The
-lift margin is \( L/g - m_{env} - m_{payload} \).
+(0.02 kg/m) and thread (30 tex, 2.75 m per m of seam per stitch row, two rows) values.
+When the design has a parachute its mass (fabric, radial and rim tapes, thread; see
+[parachute geometry](parachute-geometry.md)) is added to \( m_{env} \). The lift margin is
+\( L/g - m_{env} - m_{payload} \).
 
 **Validated by** `tests/unit/test_gore_design.py`: a two-point (conical frustum) profile
 gives \( V = \pi h (r_0^2 + r_0 r_1 + r_1^2)/3 \) and \( A = \pi (r_0 + r_1) \ell \) to
@@ -59,14 +61,14 @@ applied inside the root search. Valid range: targets whose volume lies between t
 ## Staleness of derived artifacts
 
 The design state is split into input groups (geometry, seam allowance, seam construction,
-manual outlines, labels, grain, row zones, tape paths, feature locations, tapes, materials,
+manual outlines, labels, grain, row zones, tape paths, feature locations, parachute, tapes, materials,
 operating conditions, features, meta, rigging, scale variants). Each artifact reads some
 groups and some upstream artifacts:
 
 | Artifact | Reads | Upstream |
 |---|---|---|
 | profile | geometry | |
-| patterns | geometry, seam allowance, manual outlines, labels, grain, row zones, tape paths, feature locations | |
+| patterns | geometry, seam allowance, manual outlines, labels, grain, row zones, tape paths, feature locations, parachute | |
 | assembly | geometry, manual outlines, tape paths, feature locations, features, tapes | |
 | rest mesh | grain, row zones | assembly |
 | simulation | operating, materials, tapes, seam construction | rest mesh |
@@ -78,7 +80,8 @@ The fingerprint of an artifact is the SHA-256 of its input groups (canonical JSO
 upstream fingerprints. An artifact or run is *current* when it was built from the current
 fingerprint and *stale* otherwise. The seam allowance is read only by the patterns branch
 (the rest mesh is built from finished outlines), so changing it leaves the rest mesh and
-simulations current. `tests/unit/test_project_dependencies.py` checks the table.
+simulations current. The parachute is read only by the patterns branch for the same
+reason: the solver closes the crown with an unmeshed cap. `tests/unit/test_project_dependencies.py` checks the table.
 
 ## Manual outline overrides and seam matching
 

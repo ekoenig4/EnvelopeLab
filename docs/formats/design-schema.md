@@ -147,6 +147,17 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
           "title": "Panel Rows",
           "type": "array"
         },
+        "parachute": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ParachuteSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "parachute_hole_diameter": {
           "exclusiveMinimum": 0,
           "title": "Parachute Hole Diameter",
@@ -245,6 +256,34 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
         "finished_height"
       ],
       "title": "PanelRow",
+      "type": "object"
+    },
+    "ParachuteSpec": {
+      "additionalProperties": false,
+      "description": "Flat parachute closing the crown hole (theory: docs/theory/parachute-geometry.md).\n\nAttributes\n----------\ngore_count : int\n    Number of parachute gores (>= 3), usually the envelope gore count.\ndiameter : float\n    Finished flat diameter, m; normally the hole diameter plus twice the seal overlap.\ncentre_diameter : float\n    Finished diameter of the centre disc the gores are sewn to, m.",
+      "properties": {
+        "centre_diameter": {
+          "exclusiveMinimum": 0,
+          "title": "Centre Diameter",
+          "type": "number"
+        },
+        "diameter": {
+          "exclusiveMinimum": 0,
+          "title": "Diameter",
+          "type": "number"
+        },
+        "gore_count": {
+          "minimum": 3,
+          "title": "Gore Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "gore_count",
+        "diameter",
+        "centre_diameter"
+      ],
+      "title": "ParachuteSpec",
       "type": "object"
     },
     "RiggingSpec": {
@@ -495,7 +534,7 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
       "type": "array"
     },
     "schema_version": {
-      "default": 1,
+      "default": 2,
       "title": "Schema Version",
       "type": "integer"
     },

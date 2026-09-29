@@ -1,7 +1,8 @@
 """2D pattern editor: flat panel rows with allowances, labels, grain, zones, tapes, features.
 
 Rows are drawn from the *last generated* patterns, stacked as they are sewn into a gore
-(mouth at the bottom, crown at the top) or side by side (the *Stack rows* toggle). When the
+(mouth at the bottom, crown at the top) or side by side (the *Stack rows* toggle); the
+parachute gore and centre disc follow the crown row. When the
 design changed since then the view says so (a STALE banner, greyed rows) until the patterns
 are regenerated: it never shows outdated patterns as current. Dragging outline handles in
 *Edit outline* mode makes a flagged manual override (recorded in the provenance log).
@@ -40,9 +41,13 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab.geometry.gore import PanelRow
+from envelopelab.geometry.parachute import ParachutePieces
 from envelopelab.project.gore_design import (
+    ParachutePiece,
     default_allowance,
     editable_outline,
+    parachute_pattern,
+    parachute_zone,
     row_allowance,
     row_zone,
 )
@@ -100,6 +105,43 @@ def layout_offsets(rows: list[PanelRow], stacked: bool, gap: float = GAP) -> dic
     return offsets
 
 
+def parachute_offsets(
+    rows: list[PanelRow],
+    offsets: dict[str, Offset],
+    parachute: ParachutePieces,
+    stacked: bool,
+    gap: float = GAP,
+) -> dict[str, Offset]:
+    """Layout origin of the parachute gore and centre disc after the crown row, m.
+
+    Stacked: the gore above the crown row and the disc above the gore, on the centreline.
+    Side by side: both to the right of the last row.
+
+    Returns
+    -------
+    dict of str to (float, float)
+        ``gore`` and ``centre`` offsets, m.
+    """
+    out: dict[str, Offset] = {}
+    if stacked:
+        top = max(
+            (offsets[r.label][1] + float(r.cut_outline[:, 1].max()) for r in rows), default=0.0
+        )
+        for key, cut in (("gore", parachute.gore_cut), ("centre", parachute.centre_cut)):
+            y = top + gap - float(cut[:, 1].min())
+            out[key] = (-float(cut[:, 0].mean()), y)
+            top = y + float(cut[:, 1].max())
+    else:
+        right = max(
+            (offsets[r.label][0] + float(r.cut_outline[:, 0].max()) for r in rows), default=0.0
+        )
+        for key, cut in (("gore", parachute.gore_cut), ("centre", parachute.centre_cut)):
+            x = right + gap - float(cut[:, 0].min())
+            out[key] = (x, -float(cut[:, 1].min()))
+            right = x + float(cut[:, 0].max())
+    return out
+
+
 class OutlineHandle(QGraphicsEllipseItem):
     """Draggable vertex of an outline being edited (scene units m)."""
 
@@ -146,6 +188,7 @@ class PatternView(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
         self.offsets: dict[str, Offset] = {}
+        self.parachute_offsets: dict[str, Offset] = {}
         self.handles: list[OutlineHandle] = []
         self.edit_letter: str | None = None
         self.content_rect = QRectF()
@@ -406,6 +449,22 @@ class PatternPanel(QWidget):
             self._draw_row(row, ann, offset, stale, row.label == selected, design.gores.count)
             bounds = _polygon(row.cut_outline, offset).boundingRect()
             self.view.content_rect = self.view.content_rect.united(bounds)
+        cache = self.controller.patterns_cache
+        chute = cache.parachute if cache is not None else None
+        self.view.parachute_offsets = {}
+        if chute is not None:
+            self.view.parachute_offsets = parachute_offsets(
+                rows, self.view.offsets, chute, self.controller.prefs.stack_pattern_rows
+            )
+            pieces: list[tuple[ParachutePiece, np.ndarray, np.ndarray, int]] = [
+                ("gore", chute.gore_finished, chute.gore_cut, chute.n_gores),
+                ("centre", chute.centre_finished, chute.centre_cut, 1),
+            ]
+            for piece, finished, cut, quantity in pieces:
+                offset = self.view.parachute_offsets[piece]
+                self._draw_parachute_piece(piece, finished, cut, offset, quantity, stale)
+                bounds = _polygon(cut, offset).boundingRect()
+                self.view.content_rect = self.view.content_rect.united(bounds)
         # Labels ignore the view transform, so their pixel extents would count as metres in
         # the default scene rect and keep the panels from being centred; use the panels,
         # with room to pan around them.
@@ -519,6 +578,51 @@ class PatternPanel(QWidget):
                 handle = OutlineHandle(self.view, i, _point(px_, py_, offset))
                 scene.addItem(handle)
                 self.view.handles.append(handle)
+
+    def _draw_parachute_piece(
+        self,
+        piece: ParachutePiece,
+        finished: np.ndarray,
+        cut: np.ndarray,
+        offset: Offset,
+        quantity: int,
+        stale: bool,
+    ) -> None:
+        """Draw a parachute piece (read-only: edit it in Properties)."""
+        scene = self.view.scene()
+        session = self.controller.session
+        assert session is not None
+        grey = QColor("#9e9e9e")
+        cut_item = QGraphicsPolygonItem(_polygon(cut, offset))
+        cut_item.setPen(QPen(grey if stale else QColor("#333333"), 0, Qt.PenStyle.DashLine))
+        scene.addItem(cut_item)
+        zone = parachute_zone(session.design, session.patterns, piece)
+        manual = parachute_pattern(session.patterns, piece).manual_outline
+        item = QGraphicsPolygonItem(_polygon(finished, offset))
+        item.setBrush(QBrush(QColor(200, 200, 200, 60) if stale else self._zone_color(zone)))
+        pen = QPen(
+            QColor("#d62728") if manual is not None else (grey if stale else QColor("#1f3b57")), 1.5
+        )
+        pen.setCosmetic(True)
+        item.setPen(pen)
+        name = "PARACHUTE GORE" if piece == "gore" else "PARACHUTE CENTRE"
+        text = parachute_pattern(session.patterns, piece).label_text or f"{name} x{quantity}"
+        item.setToolTip(f"{text}; zone {zone}")
+        scene.addItem(item)
+        centre = finished.mean(axis=0)
+        label = QGraphicsSimpleTextItem(text)
+        font = label.font()
+        font.setPointSizeF(7.5)
+        label.setFont(font)
+        label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        label.setPos(_point(float(centre[0]) - 0.25, float(centre[1]), offset))
+        scene.addItem(label)
+        if manual is not None:
+            flag = QGraphicsSimpleTextItem("MANUAL OVERRIDE")
+            flag.setBrush(QBrush(QColor("#d62728")))
+            flag.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+            flag.setPos(_point(float(centre[0]) - 0.3, float(finished[:, 1].max()) * 0.9, offset))
+            scene.addItem(flag)
 
     @staticmethod
     def _edges(row: PanelRow) -> dict[str, tuple[np.ndarray, np.ndarray]]:

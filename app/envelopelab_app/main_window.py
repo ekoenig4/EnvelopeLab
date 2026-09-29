@@ -217,6 +217,12 @@ class MainWindow(QMainWindow):
         )
         self.cancel_action = self._action("C&ancel run", self.simulation.cancel)
         self.reference_action = self._action("Load &reference mesh…", self.reference_dialog)
+        self.add_parachute_action = self._action(
+            "Add &parachute", lambda: self.controller.edit("add_parachute")
+        )
+        self.remove_parachute_action = self._action(
+            "Remove parachute", lambda: self.controller.edit("remove_parachute")
+        )
         self.detect_action = self._action("Detect CalculiX again", self.simulation.detect_calculix)
 
         menu = self.menuBar()
@@ -240,6 +246,9 @@ class MainWindow(QMainWindow):
         design_menu = menu.addMenu("&Design")
         design_menu.addAction(self.regen_action)
         design_menu.addAction(self.reference_action)
+        design_menu.addSeparator()
+        design_menu.addAction(self.add_parachute_action)
+        design_menu.addAction(self.remove_parachute_action)
         sim_menu = menu.addMenu("&Simulation")
         sim_menu.addAction(self.preview_action)
         sim_menu.addAction(self.calculix_action)
@@ -297,6 +306,12 @@ class MainWindow(QMainWindow):
         running = self.simulation.running
         gore = self.controller.is_gore
         self.regen_action.setEnabled(gore)
+        design = self.controller.design
+        chute = (
+            design is not None and design.gores is not None and design.gores.parachute is not None
+        )
+        self.add_parachute_action.setEnabled(gore and not chute)
+        self.remove_parachute_action.setEnabled(gore and chute)
         self.preview_action.setEnabled(gore and not running)
         self.calculix_action.setEnabled(gore and not running and self.simulation.calculix_available)
         self.calculix_action.setToolTip(

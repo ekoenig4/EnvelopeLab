@@ -14,8 +14,9 @@ Live outputs
   :math:`\rho = p/(R T)` at the design's ambient pressure and the ambient and internal
   temperatures (:func:`envelopelab.atmosphere.gas_density`).
 * Estimated envelope mass from the cut panel areas, tapes and thread
-  (:func:`envelopelab.mass_estimate.estimate_mass`) and the lift margin
-  :math:`L/g - m_{env} - m_{payload}`.
+  (:func:`envelopelab.mass_estimate.estimate_mass`), plus the parachute when the design
+  has one (:func:`envelopelab.mass_estimate.estimate_parachute_mass`, pieces from
+  :func:`design_parachute`), and the lift margin :math:`L/g - m_{env} - m_{payload}`.
 
 Constraint locks
 ----------------
@@ -75,11 +76,15 @@ from envelopelab.geometry.gore import (
     SeamAllowance,
     split_rows,
 )
+from envelopelab.geometry.parachute import ParachutePieces, gore_edge_lengths, parachute_pieces
+from envelopelab.geometry.polygon import offset_polygon, orient_ccw, polyline_length
 from envelopelab.mass_estimate import (
     MassEstimate,
+    ParachuteEstimate,
     TapeMasses,
     ThreadSpec,
     estimate_mass,
+    estimate_parachute_mass,
     lift_margin,
 )
 from envelopelab.materials.repository import (
@@ -87,7 +92,8 @@ from envelopelab.materials.repository import (
     FabricLibraryRepository,
     MaterialProperty,
 )
-from envelopelab.project.model import ConstraintLocks, PatternSet
+from envelopelab.project.dependencies import canonical_hash
+from envelopelab.project.model import ConstraintLocks, PatternSet, RowPattern
 
 FloatArray = np.ndarray
 Severity = Literal["info", "warning", "error"]
@@ -109,6 +115,10 @@ ASSUMED_THREAD = ThreadSpec(
 ASSUMED_AREAL_MASS = MaterialProperty(0.065, "assumed")
 #: Kilograms per square metre per gram per square metre (fabric library unit).
 KG_PER_G = 1e-3
+#: Centre-disc diameter of a new parachute as a fraction of its diameter (generic default
+#: to review, not a design rule).
+DEFAULT_PARACHUTE_CENTRE_FRACTION = 0.2
+ParachutePiece = Literal["gore", "centre"]
 
 
 class LockError(ValueError):
@@ -296,11 +306,14 @@ class GoreOutputs:
     envelope_mass : float, optional
         kg.
     lift_margin : float, optional
-        Spare liftable mass after envelope and payload, kg.
+        Spare liftable mass after envelope (parachute included) and payload, kg.
     sources : tuple of str
         Source tags of the material values in the mass estimate.
     findings : list of DesignFinding
         Why an output is missing, and design warnings.
+    parachute : ParachuteEstimate, optional
+        Parachute areas (m^2) and masses (kg) when the design has a parachute; its mass is
+        included in ``envelope_mass``.
     """
 
     meridian_length: float
@@ -316,6 +329,7 @@ class GoreOutputs:
     lift_margin: float | None
     sources: tuple[str, ...]
     findings: list[DesignFinding] = field(default_factory=list)
+    parachute: ParachuteEstimate | None = None
 
 
 def zone_areal_masses(
@@ -397,7 +411,34 @@ def gore_outputs(
             TapeMasses(tape, tape, tape, tape),
             ASSUMED_THREAD,
         )
-        margin = lift_margin(profile.volume, rho_a, rho_i, mass.total_mass, op.payload_mass).margin
+    parachute: ParachuteEstimate | None = None
+    if mass is not None and design.gores.parachute is not None:
+        try:
+            pieces = design_parachute(design, patterns)
+        except ValueError as exc:
+            findings.append(
+                DesignFinding(
+                    "parachute", "error", f"parachute: {exc}; mass not estimated", "parachute"
+                )
+            )
+            mass = None
+        else:
+            assert pieces is not None
+            p_zones = [parachute_zone(design, patterns, piece) for piece in ("gore", "centre")]
+            areal = zone_areal_masses(design, fabrics)
+            for z in set(p_zones) - set(areal):
+                areal[z] = ASSUMED_AREAL_MASS
+            tape = ASSUMED_TAPE_LINEAR_MASS
+            parachute = estimate_parachute_mass(
+                pieces, p_zones[0], p_zones[1], areal, tape, tape, ASSUMED_THREAD
+            )
+    envelope_mass: float | None = None
+    if mass is not None:
+        envelope_mass = mass.total_mass + (parachute.total_mass if parachute else 0.0)
+        margin = lift_margin(profile.volume, rho_a, rho_i, envelope_mass, op.payload_mass).margin
+    sources: tuple[str, ...] = ()
+    if mass is not None:
+        sources = tuple(sorted(set(mass.sources) | set(parachute.sources if parachute else ())))
     return GoreOutputs(
         meridian_length=profile.meridian_length,
         height=profile.height,
@@ -408,10 +449,11 @@ def gore_outputs(
         internal_density=rho_i,
         gross_lift=lift,
         mass=mass,
-        envelope_mass=None if mass is None else mass.total_mass,
+        envelope_mass=envelope_mass,
         lift_margin=margin,
-        sources=() if mass is None else mass.sources,
+        sources=sources,
         findings=findings,
+        parachute=parachute,
     )
 
 
@@ -483,6 +525,205 @@ def design_findings(design: DesignDocument, patterns: PatternSet) -> list[Design
                 letter,
             )
         )
+    out += parachute_findings(design, patterns)
+    return out
+
+
+# --------------------------------------------------------------------------------------
+# Parachute
+# --------------------------------------------------------------------------------------
+
+
+def default_parachute(design: DesignDocument) -> dict[str, float | int]:
+    """Parachute spec for a gore design: hole plus twice the seal overlap (m), N gores.
+
+    The centre disc is :data:`DEFAULT_PARACHUTE_CENTRE_FRACTION` of the diameter, a generic
+    starting value to review.
+    """
+    assert design.gores is not None
+    g = design.gores
+    diameter = g.parachute_hole_diameter + 2.0 * g.seal_overlap
+    if diameter <= g.parachute_hole_diameter:  # no overlap set: the cap must still cover it
+        diameter = g.parachute_hole_diameter * 1.05
+    return {
+        "gore_count": g.count,
+        "diameter": diameter,
+        "centre_diameter": DEFAULT_PARACHUTE_CENTRE_FRACTION * diameter,
+    }
+
+
+def parachute_pattern(patterns: PatternSet, piece: ParachutePiece) -> RowPattern:
+    """Annotations of a parachute piece (``gore`` or ``centre``)."""
+    return patterns.parachute.gore if piece == "gore" else patterns.parachute.centre
+
+
+def parachute_allowance(
+    design: DesignDocument, patterns: PatternSet, piece: ParachutePiece
+) -> float:
+    """Seam allowance of a parachute piece, m (piece override or the design default)."""
+    override = parachute_pattern(patterns, piece).seam_allowance
+    return default_allowance(design) if override is None else override
+
+
+def parachute_zone(design: DesignDocument, patterns: PatternSet, piece: ParachutePiece) -> str:
+    """Material zone of a parachute piece (piece setting or the design's first zone)."""
+    zone = parachute_pattern(patterns, piece).zone
+    if zone is not None:
+        return zone
+    return next(iter(design.zones), "default")
+
+
+def parachute_geometry_hash(design: DesignDocument) -> str:
+    """Hash of the parachute spec (what a parachute outline override is drawn over)."""
+    assert design.gores is not None
+    spec = design.gores.parachute
+    return canonical_hash(None if spec is None else spec.model_dump(mode="json"))
+
+
+def design_parachute(design: DesignDocument, patterns: PatternSet) -> ParachutePieces | None:
+    """Finished and cut parachute pieces of a design, m (None without a parachute).
+
+    Generated flat pieces (:func:`envelopelab.geometry.parachute.parachute_pieces`) unless a
+    piece has a manual outline override; cut outlines are the finished outline offset by
+    the piece's seam allowance.
+
+    Raises
+    ------
+    ValueError
+        For an invalid override (e.g. a gore outline without four corners).
+    """
+    if design.gores is None or design.gores.parachute is None:
+        return None
+    spec = design.gores.parachute
+    a_gore = parachute_allowance(design, patterns, "gore")
+    a_centre = parachute_allowance(design, patterns, "centre")
+    generated = parachute_pieces(spec.diameter, spec.centre_diameter, spec.gore_count, 0.0)
+    outlines = {}
+    for piece, default in (
+        ("gore", generated.gore_finished),
+        ("centre", generated.centre_finished),
+    ):
+        manual = parachute_pattern(patterns, piece).manual_outline  # type: ignore[arg-type]
+        outlines[piece] = (
+            default if manual is None else orient_ccw(np.asarray(manual.points, dtype=np.float64))
+        )
+    gore_edge_lengths(outlines["gore"])  # four corners (raises otherwise)
+
+    def cut(points: FloatArray, allowance: float) -> FloatArray:
+        return offset_polygon(points, allowance) if allowance > 0 else points.copy()
+
+    return ParachutePieces(
+        n_gores=spec.gore_count,
+        gore_finished=outlines["gore"],
+        gore_cut=cut(outlines["gore"], a_gore),
+        centre_finished=outlines["centre"],
+        centre_cut=cut(outlines["centre"], a_centre),
+    )
+
+
+def parachute_findings(
+    design: DesignDocument, patterns: PatternSet, tolerance: float = 3e-3
+) -> list[DesignFinding]:
+    """Validation findings of the parachute (seam lengths within ``tolerance`` m).
+
+    * The radial sides of a gore are sewn to the neighbouring gore: they must match.
+    * The :math:`N` inner ends are sewn round the centre disc: their sum must match its
+      circumference.
+    * The parachute should overlap the hole by the design's seal overlap all round.
+    * An override drawn before the parachute spec changed is flagged.
+    """
+    if design.gores is None or design.gores.parachute is None:
+        return []
+    g = design.gores
+    spec = g.parachute
+    assert spec is not None
+    out: list[DesignFinding] = []
+    try:
+        pieces = design_parachute(design, patterns)
+    except ValueError as exc:
+        return [DesignFinding("parachute", "error", f"parachute: {exc}", "parachute")]
+    assert pieces is not None
+    edges = pieces.gore_edges
+    if abs(edges["left"] - edges["right"]) > tolerance:
+        out.append(
+            DesignFinding(
+                "parachute_seam",
+                "error",
+                f"parachute radial seam sides differ by "
+                f"{abs(edges['left'] - edges['right']) * 1000:.1f} mm "
+                f"(tolerance {tolerance * 1000:.0f} mm)",
+                "parachute",
+            )
+        )
+    inner = spec.gore_count * edges["top"]
+    disc = polyline_length(pieces.centre_finished, closed=True)
+    if abs(inner - disc) > tolerance:
+        out.append(
+            DesignFinding(
+                "parachute_seam",
+                "error",
+                f"parachute centre seam: {spec.gore_count} gore ends measure {inner:.4f} m but "
+                f"the centre disc circumference is {disc:.4f} m (differ by "
+                f"{abs(inner - disc) * 1000:.1f} mm, tolerance {tolerance * 1000:.0f} mm)",
+                "parachute",
+            )
+        )
+    rim_diameter = pieces.rim_length / math.pi
+    overlap = 0.5 * (rim_diameter - g.parachute_hole_diameter)
+    if abs(overlap - g.seal_overlap) > tolerance:
+        out.append(
+            DesignFinding(
+                "parachute_overlap",
+                "warning",
+                f"parachute overlaps the hole by {overlap * 1000:.0f} mm all round (rim "
+                f"diameter {rim_diameter:.3f} m), not the design's seal overlap "
+                f"{g.seal_overlap * 1000:.0f} mm",
+                "parachute",
+            )
+        )
+    if spec.gore_count != g.count:
+        out.append(
+            DesignFinding(
+                "parachute_gores",
+                "info",
+                f"the parachute has {spec.gore_count} gores and the envelope {g.count}",
+                "parachute",
+            )
+        )
+    current = parachute_geometry_hash(design)
+    for piece in ("gore", "centre"):
+        ann = parachute_pattern(patterns, piece)
+        if ann.zone is not None and ann.zone not in design.zones:
+            out.append(
+                DesignFinding(
+                    "zone",
+                    "error",
+                    f"parachute {piece}: zone {ann.zone!r} is not defined",
+                    "parachute",
+                )
+            )
+        manual = ann.manual_outline
+        if manual is None:
+            continue
+        out.append(
+            DesignFinding(
+                "manual_override",
+                "warning",
+                f"parachute {piece}: finished outline is a MANUAL OVERRIDE ({manual.reason}); "
+                "it is not the generated geometry",
+                "parachute",
+            )
+        )
+        if manual.base_hash != current:
+            out.append(
+                DesignFinding(
+                    "manual_override_outdated",
+                    "error",
+                    f"parachute {piece}: the parachute changed after the manual override was "
+                    "drawn; review or remove the override",
+                    "parachute",
+                )
+            )
     return out
 
 
@@ -859,6 +1100,7 @@ def standard_gore_design(
     ambient_temperature: float = 288.15,
     ambient_pressure: float = 101325.0,
     payload_mass: float = 0.0,
+    parachute: bool = True,
 ) -> DesignDocument:
     """New standard-gore design from target volume, height and width.
 
@@ -884,6 +1126,9 @@ def standard_gore_design(
         Pa.
     payload_mass : float
         kg.
+    parachute : bool
+        Include a generated flat parachute (:func:`default_parachute`) closing the top
+        opening.
 
     Returns
     -------
@@ -897,7 +1142,7 @@ def standard_gore_design(
     r, z = wizard_control_points(target_volume, target_height, target_width, mouth, top)
     length = profile_from_arrays(r, z).meridian_length
     heights = equal_row_heights(length, row_count)
-    return new_design(
+    design = new_design(
         name=name,
         points=list(zip(r.tolist(), z.tolist(), strict=True)),
         gore_count=gore_count,
@@ -911,6 +1156,11 @@ def standard_gore_design(
         ambient_pressure=ambient_pressure,
         payload_mass=payload_mass,
     )
+    if not parachute:
+        return design
+    data = design.model_dump(by_alias=True, mode="json")
+    data["gores"]["parachute"] = default_parachute(design)
+    return DesignDocument.model_validate(data).with_updated_hash()
 
 
 def rows_zones_mapping(design: DesignDocument, patterns: PatternSet) -> Mapping[str, str]:

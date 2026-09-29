@@ -16,6 +16,7 @@ from PySide6.QtCore import QObject, Signal
 
 from envelopelab.design.model import DesignDocument
 from envelopelab.geometry.gore import PanelRow
+from envelopelab.geometry.parachute import ParachutePieces
 from envelopelab.materials.repository import FabricLibraryRepository
 from envelopelab.project import edits
 from envelopelab.project.dependencies import ARTIFACTS, ArtifactStatus
@@ -24,6 +25,7 @@ from envelopelab.project.gore_design import (
     GoreOutputs,
     check_locks,
     design_findings,
+    design_parachute,
     gore_outputs,
     panel_rows,
     seam_mismatches,
@@ -50,6 +52,7 @@ class PatternCache:
 
     rows: list[PanelRow]
     fingerprint: str
+    parachute: ParachutePieces | None = None
 
 
 @dataclass
@@ -228,8 +231,14 @@ class WorkspaceController(QObject):
             if emit:
                 self.editRejected.emit(f"patterns not generated: {exc}")
             return False
+        try:
+            parachute = design_parachute(self.session.design, self.session.patterns)
+        except ValueError as exc:  # an invalid override: the rows are still drawn
+            parachute = None
+            if emit:
+                self.editRejected.emit(f"parachute not generated: {exc}")
         fingerprint = self.session.fingerprints()["patterns"]
-        self.patterns_cache = PatternCache(rows, fingerprint)
+        self.patterns_cache = PatternCache(rows, fingerprint, parachute)
         self.session.tracker.mark_built("patterns", fingerprint)
         if emit:
             self.artifactsChanged.emit()

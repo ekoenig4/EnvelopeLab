@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Parachute in the design (design schema v2, ADR-0009): optional `gores.parachute`, a flat
+  canopy of radial gores round a centre disc. It has pattern pieces in the 2D pattern view,
+  seam checks (radial sides, centre seam, seal overlap against the hole), manual outline
+  overrides, and Design ▸ Add/Remove parachute. Its mass is counted in the estimated
+  envelope mass and the lift margin; the volume and lift do not change. New wizard designs
+  get a parachute by default. For a design that has one, the envelope mass rises by the
+  parachute mass: for the 8-gore test fixture with a default 1.92 m parachute,
+  +0.47 kg (12.43 kg to 12.90 kg). Build packs can carry it as audited, unmeshed parts (new
+  `parachute_rim` opening kind). v1 design files are migrated on load, after their stored
+  content hash is checked; existing projects load unchanged and their runs stay current.
 - 2D Pattern View: panel rows are stacked vertically as they are sewn into a gore (mouth
   at the bottom, crown at the top) by default; the new *Stack rows (as sewn)* toolbar
   toggle and preference switch back to the side-by-side layout. Drawing only; no numerical

@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Sequence
 from pathlib import Path
 
-from envelopelab.design.model import DesignDocument
+from envelopelab.design.model import CURRENT_SCHEMA_VERSION, DesignDocument
 from envelopelab.project.model import utc_now
 
 #: Generic tape classes (width m, strength N) used by new designs; review before building.
@@ -45,7 +45,7 @@ def _common(
     payload_mass: float,
 ) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": CURRENT_SCHEMA_VERSION,
         "meta": _meta(name),
         "zones": {"body": fabric_id},
         "tapes": DEFAULT_TAPES,

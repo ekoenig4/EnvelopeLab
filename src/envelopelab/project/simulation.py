@@ -6,7 +6,10 @@ the way a builder's DXF patterns would be:
 1. :func:`write_build_pack` draws every panel row (finished SEW outline, CUT outline,
    label ``PANEL <row> x<N>``, grain arrow, tape paths) into a DXF file in mm and writes
    the build-pack YAML (one ring of N gores; mouth fixed, crown closed by an unmeshed
-   parachute; load tapes from the design's tape classes).
+   parachute; load tapes from the design's tape classes). With ``include_parachute`` the
+   parachute gores and centre disc are added as audited, unmeshed parts (radial seams,
+   the centre seam and the free rim); solves leave them out, since the solver closes the
+   crown with an unmeshed cap.
 2. :func:`build_solver_model` runs :func:`envelopelab.assembly.pipeline.import_build_pack`
    (import, seam graph, seam audit, Gmsh, virtual sewing, initial shape) and
    :func:`envelopelab.solvers.model.model_from_rest_model` with the design's operating
@@ -41,7 +44,7 @@ from envelopelab.assembly.spec import MeshOptions
 from envelopelab.atmosphere import gas_density
 from envelopelab.design.model import DesignDocument
 from envelopelab.geometry.gore import PanelRow
-from envelopelab.geometry.polygon import offset_polygon
+from envelopelab.geometry.polygon import FloatArray, offset_polygon
 from envelopelab.materials.membrane import MaterialValue, MembraneMaterial, TapeMaterial
 from envelopelab.materials.repository import (
     FabricCatalog,
@@ -49,7 +52,16 @@ from envelopelab.materials.repository import (
     MaterialProperty,
     SourceTag,
 )
-from envelopelab.project.gore_design import panel_rows, row_allowance, row_zone
+from envelopelab.project.gore_design import (
+    ParachutePiece,
+    design_parachute,
+    panel_rows,
+    parachute_allowance,
+    parachute_pattern,
+    parachute_zone,
+    row_allowance,
+    row_zone,
+)
 from envelopelab.project.model import PatternSet, RunFinding, RunRecord, utc_now
 from envelopelab.solvers.dynamic_relaxation import (
     CancellationToken,
@@ -65,6 +77,9 @@ from envelopelab.solvers.model import (
 from envelopelab.solvers.simulation import SimulationResult, from_preview
 
 MM = 1000.0
+#: Piece ids of the parachute gore and centre disc in a build pack.
+PARACHUTE_GORE_PIECE = "PCG"
+PARACHUTE_CENTRE_PIECE = "PCC"
 #: Default target edge length of the preview mesh, mm.
 DEFAULT_MESH_MM = 800.0
 
@@ -176,6 +191,7 @@ def write_build_pack(
     out_dir: str | Path,
     mesh_mm: float = DEFAULT_MESH_MM,
     rows: list[PanelRow] | None = None,
+    include_parachute: bool = False,
 ) -> Path:
     """Write the DXF patterns and build-pack YAML of a standard-gore design.
 
@@ -192,6 +208,8 @@ def write_build_pack(
         Target mesh edge length, mm.
     rows : list of PanelRow, optional
         Precomputed :func:`~envelopelab.project.gore_design.panel_rows`.
+    include_parachute : bool
+        Add the design's parachute (if any) as audited, unmeshed parts.
 
     Returns
     -------
@@ -241,10 +259,49 @@ def write_build_pack(
             # threshold; a gore panel's real corners turn by far more than 60 deg.
             pieces[row.label]["corner_angle_deg"] = 60.0
         x += width / 2
+    parachute = design_parachute(design, patterns) if include_parachute else None
+    if parachute is not None:
+        parachute_parts: list[tuple[str, ParachutePiece, FloatArray, FloatArray, int]] = [
+            (
+                PARACHUTE_GORE_PIECE,
+                "gore",
+                parachute.gore_finished,
+                parachute.gore_cut,
+                parachute.n_gores,
+            ),
+            (PARACHUTE_CENTRE_PIECE, "centre", parachute.centre_finished, parachute.centre_cut, 1),
+        ]
+        for piece_id, key, finished, cut, quantity in parachute_parts:
+            width = float(np.ptp(cut[:, 0])) * MM
+            x += width / 2 + 200.0
+            x0 = x - float(cut[:, 0].mean()) * MM
+            msp.add_lwpolyline(
+                [(float(px * MM + x0), float(py * MM)) for px, py in cut],
+                close=True,
+                dxfattribs={"layer": "CUT"},
+            )
+            msp.add_lwpolyline(
+                [(float(px * MM + x0), float(py * MM)) for px, py in finished],
+                close=True,
+                dxfattribs={"layer": "SEW"},
+            )
+            centre = finished.mean(axis=0) * MM
+            msp.add_text(
+                f"PANEL {piece_id} x{quantity}",
+                height=40.0,
+                dxfattribs={"layer": "NOTES", "insert": (x0 + centre[0] - 150.0, centre[1])},
+            )
+            ann = parachute_pattern(patterns, key)
+            pieces[piece_id] = {
+                "material_zone": parachute_zone(design, patterns, key),
+                "grain": list(_grain(ann.grain_angle_deg)),
+                "seam_allowance_mm": round(parachute_allowance(design, patterns, key) * MM, 6),
+            }
+            x += width / 2
     doc.saveas(out / "design.dxf")
     tapes = design.tapes
     allowance_mm = round(row_allowance(design, patterns, rows[0].label) * MM, 6)
-    config = {
+    config: dict[str, Any] = {
         "import": {
             "mapping_version": f"envelopelab-design/{design.compute_content_hash()[:12]}",
             "units": "auto",
@@ -293,6 +350,9 @@ def write_build_pack(
             "mesh": {"target_edge_length_mm": mesh_mm},
         },
     }
+    if parachute is not None:
+        allowance = parachute_allowance(design, patterns, "gore") * MM
+        config["assembly"].update(_parachute_assembly(parachute.n_gores, design, allowance))
     target = out / "build-pack.yaml"
     target.write_text(
         "# Generated by EnvelopeLab from a design document; do not edit by hand.\n"
@@ -300,6 +360,55 @@ def write_build_pack(
         encoding="utf-8",
     )
     return target
+
+
+def _parachute_assembly(n: int, design: DesignDocument, allowance_mm: float) -> dict[str, Any]:
+    """Unmeshed parachute parts, their seams and the free rim (build-pack YAML data)."""
+    reason = "the parachute is audited only: the solver closes the crown with an unmeshed cap"
+    gores = [f"parachute/g{i}" for i in range(1, n + 1)]
+    allowance = round(allowance_mm, 6)
+    parts = [
+        {"name": g, "piece": PARACHUTE_GORE_PIECE, "mesh": False, "reason": reason} for g in gores
+    ]
+    parts.append(
+        {
+            "name": "parachute/centre",
+            "piece": PARACHUTE_CENTRE_PIECE,
+            "mesh": False,
+            "reason": reason,
+        }
+    )
+    tapes = design.tapes
+    seams: list[dict[str, Any]] = [
+        {
+            "name": f"parachute:radial@{i + 1}",
+            "type": "vertical_gore",
+            "a": [{"instance": gores[i], "edge": "right"}],
+            "b": [{"instance": gores[(i + 1) % n], "edge": "left"}],
+            "allowance_mm": allowance,
+            "load_tape": tapes.vertical.tape_class,
+        }
+        for i in range(n)
+    ]
+    seams.append(
+        {
+            "name": "parachute:centre",
+            "type": "horizontal_panel",
+            "a": [{"instance": g, "edge": "top"} for g in gores],
+            "b": [{"instance": "parachute/centre", "edge": "loop"}],
+            "allowance_mm": allowance,
+        }
+    )
+    openings = [
+        {
+            "name": "parachute_rim",
+            "kind": "parachute_rim",
+            "edges": [{"instance": g, "edge": "bottom"} for g in gores],
+            "hem": {"load_tape": tapes.hole.tape_class},
+            "reason": "the parachute rim overlaps the crown hole to seal it; it is not sewn",
+        }
+    ]
+    return {"parts": parts, "seams": seams, "openings": openings}
 
 
 class BuildError(RuntimeError):

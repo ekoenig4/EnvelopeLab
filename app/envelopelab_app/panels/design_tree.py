@@ -89,6 +89,21 @@ class DesignTreePanel(QWidget):
                         else ""
                     )
                     self._add(rows, f"Row {row.letter}{flag}", f"row:{row.letter}")
+                chute = design.gores.parachute
+                if chute is None:
+                    self._add(item, "Parachute: none", "parachute")
+                else:
+                    ann = session.patterns.parachute
+                    flag = (
+                        " (manual override)"
+                        if ann.gore.manual_outline or ann.centre.manual_outline
+                        else ""
+                    )
+                    self._add(
+                        item,
+                        f"Parachute ({chute.gore_count} gores, {chute.diameter:.3f} m){flag}",
+                        "parachute",
+                    )
             if target == "zones":
                 for zone, fabric in design.zones.items():
                     self._add(item, f"{zone}: {fabric}", "zones")

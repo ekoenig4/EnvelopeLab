@@ -22,6 +22,12 @@ KEYS: tuple[tuple[str, str], ...] = (
         "override** (m) with the time, reason and the geometry hash it was drawn over.",
     ),
     (
+        "`state.patterns.parachute.gore`, `.centre`",
+        "Pattern annotations of the parachute gore and centre disc (the same fields as a "
+        "row; a gore override has the rim at the bottom, m). The parachute itself "
+        "(`gores.parachute` in the design) is optional; files without either load unchanged.",
+    ),
+    (
         "`locks`",
         "Constraint locks of the gore editor (height m, volume m³, maximum diameter m, gore "
         "count).",

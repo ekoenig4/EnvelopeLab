@@ -10,7 +10,7 @@ depends on a set of *input groups* (slices of the design state, e.g. ``geometry`
 
     geometry ──► profile
     geometry, seam_allowance, manual_outlines, labels, grain, row_zones,
-      tape_paths, feature_locations ──► patterns ──► nesting ──► export
+      tape_paths, feature_locations, parachute ──► patterns ──► nesting ──► export
     geometry, manual_outlines, tape_paths, feature_locations, tapes ──► assembly
     assembly, grain, row_zones ──► rest_mesh ──► simulation
     operating, materials, tapes, seam_construction ──► simulation
@@ -22,6 +22,8 @@ fingerprints of its upstream artifacts. An artifact built with fingerprint ``f``
 *current* while the design's fingerprint for it is still ``f`` and *stale* otherwise, so
 an edit that is undone makes the artifact current again, and a seam-allowance change
 (which only the ``patterns`` branch reads) never touches the rest mesh or simulations.
+The parachute is patterns-only for the same reason: the solver closes the crown with an
+unmeshed cap and never reads the parachute pieces.
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ INPUT_GROUPS: tuple[str, ...] = (
     "row_zones",
     "tape_paths",
     "feature_locations",
+    "parachute",
     "tapes",
     "materials",
     "operating",
@@ -92,6 +95,7 @@ ARTIFACTS: tuple[ArtifactSpec, ...] = (
             "row_zones",
             "tape_paths",
             "feature_locations",
+            "parachute",
         ),
     ),
     ArtifactSpec(
@@ -177,6 +181,10 @@ def input_groups(design: Mapping[str, Any], patterns: Mapping[str, Any]) -> dict
         "row_zones": per_row("zone"),
         "tape_paths": per_row("tape_paths"),
         "feature_locations": per_row("feature_locations"),
+        "parachute": {
+            "spec": gores.get("parachute"),
+            "annotations": patterns.get("parachute"),
+        },
         "tapes": design.get("tapes"),
         "materials": design.get("zones"),
         "operating": design.get("operating"),

@@ -19,6 +19,12 @@ shown.
 | Round trip z(s), spherical zone, N=24, chord, flat | - | - | m | 0.016 mm | 1 mm | pass |
 | Round trip r(s), spherical zone, N=24, chord, bulge radius 4 m | - | - | m | 0.004 mm | 1 mm | pass |
 | Round trip z(s), spherical zone, N=24, chord, bulge radius 4 m | - | - | m | 0.016 mm | 1 mm | pass |
+| Flat parachute R=2.86 m, 8 gores + disc: finished area | 25.6966 | 25.697 | m^2 | 1.3e-05 | 0.001 | pass |
+| Flat parachute R=2.86 m, 8 gores: rim length | 17.9699 | 17.9699 | m | 3.2e-06 | 0.001 | pass |
+| Flat parachute, 8 gore ends vs centre-disc circumference | - | - | m | 0.010 mm | 1 mm | pass |
+| Flat parachute R=2.86 m, 20 gores + disc: finished area | 25.6966 | 25.697 | m^2 | 1.3e-05 | 0.001 | pass |
+| Flat parachute R=2.86 m, 20 gores: rim length | 17.9699 | 17.9699 | m | 3.2e-06 | 0.001 | pass |
+| Flat parachute, 20 gore ends vs centre-disc circumference | - | - | m | 0.010 mm | 1 mm | pass |
 | dp gradient, 15 degC / 100 degC, sea level | 2.73648 | 2.736 | Pa/m | 0.00018 | 0.01 | pass |
 | Gross lift, 2 610 m^3, 15 degC / 100 degC, sea level | 7142.21 | 7142 | N | 3e-05 | 0.01 | pass |
 | ISA pressure at 1 000 m | 89874.6 | 89874.6 | Pa | < 1e-06 | 0.0001 | pass |

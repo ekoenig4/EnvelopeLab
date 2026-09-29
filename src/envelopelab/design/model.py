@@ -7,7 +7,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 2
 
 
 class SourceValue(BaseModel):
@@ -42,6 +42,32 @@ class PanelRow(BaseModel):
     finished_height: float = Field(gt=0)
 
 
+class ParachuteSpec(BaseModel):
+    """Flat parachute closing the crown hole (theory: docs/theory/parachute-geometry.md).
+
+    Attributes
+    ----------
+    gore_count : int
+        Number of parachute gores (>= 3), usually the envelope gore count.
+    diameter : float
+        Finished flat diameter, m; normally the hole diameter plus twice the seal overlap.
+    centre_diameter : float
+        Finished diameter of the centre disc the gores are sewn to, m.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    gore_count: int = Field(ge=3)
+    diameter: float = Field(gt=0)
+    centre_diameter: float = Field(gt=0)
+
+    @model_validator(mode="after")
+    def validate_centre(self) -> ParachuteSpec:
+        if self.centre_diameter >= self.diameter:
+            raise ValueError("parachute centre disc must be smaller than the parachute")
+        return self
+
+
 class GoreSpec(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -52,11 +78,14 @@ class GoreSpec(BaseModel):
     crown_ring: float = Field(gt=0)
     parachute_hole_diameter: float = Field(gt=0)
     seal_overlap: float = Field(ge=0)
+    parachute: ParachuteSpec | None = None
 
     @model_validator(mode="after")
     def validate_overlap(self) -> GoreSpec:
         if self.seal_overlap >= self.parachute_hole_diameter / 2:
             raise ValueError("seal overlap must be less than hole radius")
+        if self.parachute is not None and self.parachute.diameter <= self.parachute_hole_diameter:
+            raise ValueError("the parachute must be larger than the parachute hole it closes")
         return self
 
 
@@ -169,13 +198,7 @@ class DesignDocument(BaseModel):
         return dumped
 
     def compute_content_hash(self) -> str:
-        canonical_json = json.dumps(
-            self.model_dump_for_hash(),
-            sort_keys=True,
-            separators=(",", ":"),
-            ensure_ascii=False,
-        )
-        return sha256(canonical_json.encode("utf-8")).hexdigest()
+        return _canonical_hash(self.model_dump_for_hash())
 
     def with_updated_hash(self) -> DesignDocument:
         updated = self.model_copy(deep=True)
@@ -198,7 +221,31 @@ def _upgrade_v0_to_v1(raw: dict[str, Any]) -> dict[str, Any]:
         },
     )
     upgraded.pop("name", None)
-    upgraded.setdefault("schema_version", CURRENT_SCHEMA_VERSION)
+    upgraded.setdefault("schema_version", 1)
+    return upgraded
+
+
+def _canonical_hash(dumped: dict[str, Any]) -> str:
+    canonical_json = json.dumps(dumped, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return sha256(canonical_json.encode("utf-8")).hexdigest()
+
+
+def _upgrade_v1_to_v2(raw: dict[str, Any]) -> dict[str, Any]:
+    """v2 adds the optional ``gores.parachute``; the content hash is recomputed.
+
+    The stored v1 hash is checked first against the v1 canonical form (no ``parachute``
+    key), so a v1 file that was changed by hand is still refused.
+    """
+    stored = (raw.get("meta") or {}).get("content_hash")
+    if stored is not None:
+        v1 = DesignDocument.model_validate({**raw, "schema_version": 1}).model_dump_for_hash()
+        if isinstance(v1.get("gores"), dict):
+            v1["gores"].pop("parachute", None)
+        if _canonical_hash(v1) != stored:
+            raise ValueError("content hash mismatch")
+    upgraded = dict(raw)
+    upgraded["meta"] = {**raw["meta"], "content_hash": None}
+    upgraded["schema_version"] = 2
     return upgraded
 
 
@@ -208,6 +255,8 @@ def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
     while version < CURRENT_SCHEMA_VERSION:
         if version == 0:
             upgraded = _upgrade_v0_to_v1(upgraded)
+        elif version == 1:
+            upgraded = _upgrade_v1_to_v2(upgraded)
         else:
             raise ValueError(f"unsupported schema version: {version}")
         version += 1

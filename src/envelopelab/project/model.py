@@ -158,12 +158,31 @@ class RowPattern(BaseModel):
     manual_outline: ManualOutline | None = None
 
 
+class ParachutePattern(BaseModel):
+    """Pattern annotations of the parachute pieces (see ``GoreSpec.parachute``).
+
+    Attributes
+    ----------
+    gore : RowPattern
+        The parachute gore (every gore uses the same piece): label, grain, zone, seam
+        allowance and an optional manual outline override (rim at the bottom, m).
+    centre : RowPattern
+        The centre disc, with the same fields (manual outline in m).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    gore: RowPattern = Field(default_factory=RowPattern)
+    centre: RowPattern = Field(default_factory=RowPattern)
+
+
 class PatternSet(BaseModel):
-    """Pattern annotations keyed by panel-row letter."""
+    """Pattern annotations keyed by panel-row letter, plus the parachute pieces."""
 
     model_config = ConfigDict(extra="forbid")
 
     rows: dict[str, RowPattern] = Field(default_factory=dict)
+    parachute: ParachutePattern = Field(default_factory=ParachutePattern)
 
     def row(self, letter: str) -> RowPattern:
         """Annotations of row ``letter`` (defaults when none were made)."""

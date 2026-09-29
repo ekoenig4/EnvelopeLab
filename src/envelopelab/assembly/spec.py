@@ -32,7 +32,9 @@ MM = 1e-3  # m per mm
 SeamType = Literal[
     "horizontal_panel", "vertical_gore", "reinforcement", "appendage", "rim", "closing"
 ]
-OpeningKind = Literal["mouth", "parachute_opening", "vent", "feed_hole", "feature_opening"]
+OpeningKind = Literal[
+    "mouth", "parachute_opening", "vent", "feed_hole", "feature_opening", "parachute_rim"
+]
 Orientation = Literal["reversed", "same"]
 RingSide = Literal["bottom", "top", "left", "right"]
 

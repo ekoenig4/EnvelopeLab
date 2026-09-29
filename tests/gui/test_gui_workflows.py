@@ -260,6 +260,54 @@ def test_pattern_rows_stack_vertically_as_sewn(
     assert load_preferences(settings).stack_pattern_rows is False
 
 
+def test_parachute_is_added_edited_drawn_and_removed(gore_window: MainWindow) -> None:
+    w = gore_window
+    session = w.controller.session
+    assert session is not None
+    assert w.add_parachute_action.isEnabled() and not w.remove_parachute_action.isEnabled()
+    before = w.controller.outputs
+    assert before is not None and before.envelope_mass is not None
+    w.add_parachute_action.trigger()
+    chute = session.design.gores.parachute  # type: ignore[union-attr]
+    assert chute is not None and chute.gore_count == 8
+    assert not w.add_parachute_action.isEnabled() and w.remove_parachute_action.isEnabled()
+    after = w.controller.outputs
+    assert after is not None and after.parachute is not None and after.envelope_mass is not None
+    assert after.envelope_mass == pytest.approx(before.envelope_mass + after.parachute.total_mass)
+    assert "kg" in w.gore_editor.outputs["parachute"].text()
+    tree = w.design_tree.tree
+    items = [tree.topLevelItem(0)]
+    texts = []
+    while items:
+        item = items.pop()
+        if item is not None:
+            texts.append(item.text(0))
+            items += [item.child(i) for i in range(item.childCount())]
+    assert any(t.startswith("Parachute (8 gores") for t in texts)
+    # The parachute is drawn after the crown row, above it when stacked.
+    w.patterns.regenerate()
+    offsets = w.patterns.view.parachute_offsets
+    rows = list(w.patterns.rows_by_letter().values())
+    top_row = rows[-1]
+    crown_top = w.patterns.view.offsets[top_row.label][1] + top_row.cut_outline[:, 1].max()
+    cache = w.controller.patterns_cache
+    assert cache is not None and cache.parachute is not None
+    gore_bottom = offsets["gore"][1] + cache.parachute.gore_cut[:, 1].min()
+    assert gore_bottom == pytest.approx(crown_top + 0.4)
+    assert offsets["centre"][1] > offsets["gore"][1]
+    # Properties edits the parachute fields; a parachute edit leaves simulations current.
+    w.controller.select("parachute")
+    w.properties.set_field(("gores", "parachute", "diameter"), str(chute.diameter + 0.1))
+    assert session.design.gores.parachute.diameter == pytest.approx(chute.diameter + 0.1)  # type: ignore[union-attr]
+    assert w.controller.artifact_status("patterns") == "stale"
+    assert w.controller.artifact_status("simulation") != "stale"
+    messages = " ".join(w.validation.messages())
+    assert "overlaps the hole by" in messages  # no longer the design seal overlap
+    w.remove_parachute_action.trigger()
+    assert session.design.gores.parachute is None  # type: ignore[union-attr]
+    assert "none" in w.gore_editor.outputs["parachute"].text()
+
+
 def test_pattern_annotations_are_undoable_edits(gore_window: MainWindow) -> None:
     w = gore_window
     session = w.controller.session

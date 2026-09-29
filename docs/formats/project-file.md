@@ -13,6 +13,7 @@ around it:
 |---|---|
 | `state.design` | The design document (SI units: m, K, Pa, kg). |
 | `state.patterns.rows.<letter>` | Pattern annotations of one panel row: printed label, grain angle (degrees from the panel x axis), fabric zone, seam-allowance override (m), notches, tape paths and feature locations (panel coordinates, m), and an optional **manual outline override** (m) with the time, reason and the geometry hash it was drawn over. |
+| `state.patterns.parachute.gore`, `.centre` | Pattern annotations of the parachute gore and centre disc (the same fields as a row; a gore override has the rim at the bottom, m). The parachute itself (`gores.parachute` in the design) is optional; files without either load unchanged. |
 | `locks` | Constraint locks of the gore editor (height m, volume m³, maximum diameter m, gore count). |
 | `snapshots` | Named copies of `state` with their design content hash. |
 | `versions` | Committed design versions (`version_id`, `parent_id`, message, state). |
@@ -141,7 +142,7 @@ clean exit, and offered for recovery at the next start otherwise.
           "type": "array"
         },
         "schema_version": {
-          "default": 1,
+          "default": 2,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -424,6 +425,17 @@ clean exit, and offered for recovery at the next start otherwise.
           "title": "Panel Rows",
           "type": "array"
         },
+        "parachute": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ParachuteSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "parachute_hole_diameter": {
           "exclusiveMinimum": 0,
           "title": "Parachute Hole Diameter",
@@ -597,10 +609,55 @@ clean exit, and offered for recovery at the next start otherwise.
       "title": "PanelRow",
       "type": "object"
     },
+    "ParachutePattern": {
+      "additionalProperties": false,
+      "description": "Pattern annotations of the parachute pieces (see ``GoreSpec.parachute``).\n\nAttributes\n----------\ngore : RowPattern\n    The parachute gore (every gore uses the same piece): label, grain, zone, seam\n    allowance and an optional manual outline override (rim at the bottom, m).\ncentre : RowPattern\n    The centre disc, with the same fields (manual outline in m).",
+      "properties": {
+        "centre": {
+          "$ref": "#/$defs/RowPattern"
+        },
+        "gore": {
+          "$ref": "#/$defs/RowPattern"
+        }
+      },
+      "title": "ParachutePattern",
+      "type": "object"
+    },
+    "ParachuteSpec": {
+      "additionalProperties": false,
+      "description": "Flat parachute closing the crown hole (theory: docs/theory/parachute-geometry.md).\n\nAttributes\n----------\ngore_count : int\n    Number of parachute gores (>= 3), usually the envelope gore count.\ndiameter : float\n    Finished flat diameter, m; normally the hole diameter plus twice the seal overlap.\ncentre_diameter : float\n    Finished diameter of the centre disc the gores are sewn to, m.",
+      "properties": {
+        "centre_diameter": {
+          "exclusiveMinimum": 0,
+          "title": "Centre Diameter",
+          "type": "number"
+        },
+        "diameter": {
+          "exclusiveMinimum": 0,
+          "title": "Diameter",
+          "type": "number"
+        },
+        "gore_count": {
+          "minimum": 3,
+          "title": "Gore Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "gore_count",
+        "diameter",
+        "centre_diameter"
+      ],
+      "title": "ParachuteSpec",
+      "type": "object"
+    },
     "PatternSet": {
       "additionalProperties": false,
-      "description": "Pattern annotations keyed by panel-row letter.",
+      "description": "Pattern annotations keyed by panel-row letter, plus the parachute pieces.",
       "properties": {
+        "parachute": {
+          "$ref": "#/$defs/ParachutePattern"
+        },
         "rows": {
           "additionalProperties": {
             "$ref": "#/$defs/RowPattern"

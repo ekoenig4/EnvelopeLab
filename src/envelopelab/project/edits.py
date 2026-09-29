@@ -14,16 +14,21 @@ from typing import Any
 import numpy as np
 
 from envelopelab.geometry.gore import LENGTH_TOLERANCE
+from envelopelab.geometry.parachute import gore_edge_lengths
+from envelopelab.geometry.polygon import polyline_length
 from envelopelab.project.dependencies import canonical_hash
 from envelopelab.project.gore_design import (
     LockError,
+    ParachutePiece,
     apply_locks,
     control_arrays,
+    default_parachute,
     design_profile,
     editable_outline,
     fit_row_heights,
     outline_edges,
     panel_rows,
+    parachute_geometry_hash,
     profile_from_arrays,
 )
 from envelopelab.project.model import ConstraintLocks, ManualOutline, utc_now
@@ -334,3 +339,99 @@ def outline_within_tolerance(
     """Two outlines with the same vertices within the geometry tolerance (1 mm)."""
     pa, pb = np.asarray(a), np.asarray(b)
     return pa.shape == pb.shape and bool(np.all(np.hypot(*(pa - pb).T) <= LENGTH_TOLERANCE))
+
+
+# --------------------------------------------------------------------------------------
+# Parachute
+# --------------------------------------------------------------------------------------
+
+
+def add_parachute(session: ProjectSession) -> bool:
+    """Give the design a generated flat parachute (:func:`~envelopelab.project.gore_design.
+    default_parachute`); False when it already has one."""
+    assert session.design.gores is not None
+    if session.design.gores.parachute is not None:
+        return False
+    return session.set_design_value(
+        ("gores", "parachute"), default_parachute(session.design), "Add parachute"
+    )
+
+
+def remove_parachute(session: ProjectSession) -> bool:
+    """Remove the parachute (its pattern annotations are kept for an undo or a re-add)."""
+    return session.set_design_value(("gores", "parachute"), None, "Remove parachute")
+
+
+def set_parachute_value(session: ProjectSession, name: str, value: float | int) -> bool:
+    """Set one parachute field: ``gore_count``, ``diameter`` (m) or ``centre_diameter`` (m).
+
+    Raises
+    ------
+    ValueError
+        For an unknown field or a design without a parachute.
+    """
+    if name not in ("gore_count", "diameter", "centre_diameter"):
+        raise ValueError(f"unknown parachute field {name!r}")
+    assert session.design.gores is not None
+    if session.design.gores.parachute is None:
+        raise ValueError("the design has no parachute")
+    return session.set_design_value(("gores", "parachute", name), value, f"Parachute: set {name}")
+
+
+def set_parachute_pattern(
+    session: ProjectSession,
+    piece: ParachutePiece,
+    values: dict[str, Any],
+    description: str | None = None,
+    provenance: tuple[str, str, str] | None = None,
+) -> bool:
+    """Update the annotations of a parachute piece (``gore`` or ``centre``), undoable."""
+
+    def mutate(_design: dict[str, Any], patterns: dict[str, Any]) -> None:
+        patterns.setdefault("parachute", {}).setdefault(piece, {}).update(values)
+
+    keys = ", ".join(values)
+    return session.edit(description or f"Parachute {piece}: set {keys}", mutate, provenance)
+
+
+def set_parachute_outline(
+    session: ProjectSession,
+    piece: ParachutePiece,
+    points: Sequence[tuple[float, float]],
+    reason: str,
+) -> bool:
+    """Replace a parachute piece's finished outline (m): a flagged manual override.
+
+    A gore outline has the rim at the bottom and four corners; the centre disc is any
+    closed outline. The override is logged in the provenance with its edge lengths.
+    """
+    assert session.design.gores is not None
+    if session.design.gores.parachute is None:
+        raise ValueError("the design has no parachute")
+    pts = np.asarray(points, dtype=np.float64)
+    if piece == "gore":
+        e = gore_edge_lengths(pts)
+        lengths = (
+            f"rim {e['bottom']:.4f} m, inner end {e['top']:.4f} m, radial sides "
+            f"{e['left']:.4f} m and {e['right']:.4f} m"
+        )
+    else:
+        lengths = f"circumference {polyline_length(pts, closed=True):.4f} m"
+    override = ManualOutline(
+        points=[(float(x), float(y)) for x, y in points],
+        created=utc_now(),
+        reason=reason,
+        base_hash=parachute_geometry_hash(session.design),
+    )
+    return set_parachute_pattern(
+        session,
+        piece,
+        {"manual_outline": override.model_dump(mode="json")},
+        f"Parachute {piece}: manual outline override",
+        provenance=(
+            "manual outline override",
+            f"parachute {piece}",
+            f"finished outline overridden ({reason}); {lengths}; "
+            f"outline hash {canonical_hash(override.points)[:12]}",
+        ),
+    )

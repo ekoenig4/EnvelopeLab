@@ -9,6 +9,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from envelopelab.design import (
+    CURRENT_SCHEMA_VERSION,
     DesignDocument,
     dump_design_document,
     load_design_document,
@@ -32,7 +33,7 @@ def gore_documents(draw: st.DrawFn) -> DesignDocument:
         )
     )
     payload = {
-        "schema_version": 1,
+        "schema_version": CURRENT_SCHEMA_VERSION,
         "meta": {
             "name": "property-test",
             "version_id": "v1",
@@ -254,5 +255,50 @@ def test_migration_upgrades_v0_fixture() -> None:
     migrated = migrate_document(fixture)
     loaded = load_design_document(json.dumps(migrated))
 
-    assert loaded.schema_version == 1
+    assert loaded.schema_version == CURRENT_SCHEMA_VERSION
     assert loaded.meta.content_hash is not None
+
+
+V1_PROJECT = Path(__file__).parent / "fixtures" / "standard_gore" / "design.elproj"
+
+
+def _v1_design() -> dict[str, object]:
+    raw = json.loads(V1_PROJECT.read_text(encoding="utf-8"))["state"]["design"]
+    assert raw["schema_version"] == 1 and "parachute" not in raw["gores"]
+    return raw  # type: ignore[no-any-return]
+
+
+def test_v1_document_migrates_to_v2_without_parachute() -> None:
+    loaded = load_design_document(json.dumps(_v1_design()))
+    assert loaded.schema_version == 2
+    assert loaded.gores is not None and loaded.gores.parachute is None
+    assert loaded.meta.content_hash == loaded.compute_content_hash()
+
+
+def test_v1_migration_still_refuses_a_changed_file() -> None:
+    raw = _v1_design()
+    raw["gores"]["mouth_diameter"] += 0.001  # type: ignore[index]
+    with pytest.raises(ValueError, match="content hash mismatch"):
+        load_design_document(json.dumps(raw))
+
+
+def test_parachute_round_trip_and_validation() -> None:
+    document = load_design_document(json.dumps(_v1_design()))
+    assert document.gores is not None
+    hole = document.gores.parachute_hole_diameter
+    data = document.model_dump(by_alias=True, mode="json")
+    data["gores"]["parachute"] = {
+        "gore_count": document.gores.count,
+        "diameter": hole + 2 * document.gores.seal_overlap + 0.01,
+        "centre_diameter": 0.2 * hole,
+    }
+    with_parachute = DesignDocument.model_validate(data)
+    again = load_design_document(dump_design_document(with_parachute))
+    assert again.gores is not None and again.gores.parachute == with_parachute.gores.parachute  # type: ignore[union-attr]
+    assert again.compute_content_hash() != document.compute_content_hash()
+    too_small = {**data["gores"]["parachute"], "diameter": 0.9 * hole}
+    with pytest.raises(ValidationError, match="larger than the parachute hole"):
+        DesignDocument.model_validate({**data, "gores": {**data["gores"], "parachute": too_small}})
+    no_centre = {**data["gores"]["parachute"], "centre_diameter": 2 * hole}
+    with pytest.raises(ValidationError, match="centre disc must be smaller"):
+        DesignDocument.model_validate({**data, "gores": {**data["gores"], "parachute": no_centre}})

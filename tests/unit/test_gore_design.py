@@ -162,6 +162,13 @@ def test_wizard_meets_volume_height_and_width() -> None:
     assert design.gores is not None and design.gores.count == 12
     assert len(panel_rows(design, PatternSet())) == 5
     assert not [f for f in design_findings(design, PatternSet()) if f.severity == "error"]
+    chute = design.gores.parachute
+    assert chute is not None and chute.gore_count == 12
+    g = design.gores
+    assert chute.diameter == pytest.approx(g.parachute_hole_diameter + 2 * g.seal_overlap)
+    assert out.parachute is not None and out.envelope_mass is not None
+    bare = standard_gore_design("w", 2200.0, 17.0, 16.0, 12, 5, parachute=False)
+    assert bare.gores is not None and bare.gores.parachute is None
 
 
 def test_wizard_reports_the_achievable_range() -> None:
