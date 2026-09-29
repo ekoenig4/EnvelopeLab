@@ -38,6 +38,7 @@ from envelopelab.project.session import (
     EVENT_STATE,
     ProjectSession,
 )
+from envelopelab.project.simulation import BuiltModel
 from envelopelab_app.settings import Preferences
 
 T = TypeVar("T")
@@ -48,6 +49,14 @@ class PatternCache:
     """Patterns as last generated, with the fingerprint they were generated from."""
 
     rows: list[PanelRow]
+    fingerprint: str
+
+
+@dataclass
+class ModelCache:
+    """Solver model as last built (rest mesh), with its fingerprint."""
+
+    built: BuiltModel
     fingerprint: str
 
 
@@ -74,6 +83,7 @@ class WorkspaceController(QObject):
         self.fabrics = fabrics
         self.session: ProjectSession | None = None
         self.patterns_cache: PatternCache | None = None
+        self.model_cache: ModelCache | None = None
         self.selection = ""
         self._outputs: GoreOutputs | None = None
         self._outputs_error: str | None = None
@@ -86,6 +96,7 @@ class WorkspaceController(QObject):
             self.session.remove_listener(self._on_event)
         self.session = session
         self.patterns_cache = None
+        self.model_cache = None
         self._refresh_outputs()
         if session is not None:
             session.add_listener(self._on_event)
@@ -223,6 +234,15 @@ class WorkspaceController(QObject):
         if emit:
             self.artifactsChanged.emit()
         return True
+
+    def store_model(self, built: BuiltModel, fingerprints: dict[str, str]) -> None:
+        """Keep a solver model built from the state with ``fingerprints``."""
+        if self.session is None:
+            return
+        self.model_cache = ModelCache(built, fingerprints["rest_mesh"])
+        self.session.tracker.mark_built("assembly", fingerprints["assembly"])
+        self.session.tracker.mark_built("rest_mesh", fingerprints["rest_mesh"])
+        self.artifactsChanged.emit()
 
     def run_status(self, record: RunRecord) -> ArtifactStatus:
         """``current`` or ``stale`` for a run."""

@@ -60,4 +60,4 @@ are unsaved changes an autosave file is written every few minutes (**File ▸
 Preferences**); after a crash the next start offers to recover it. **File ▸ Open Recent**
 lists the last ten projects.
 
-Next: [editing designs](editing-designs.md).
+Next: [editing designs](editing-designs.md) and [running simulations](running-simulations.md).

@@ -6,7 +6,13 @@ a Python dependency; install the ``ccx`` program to use this package (see
 ``docs/dev/calculix-installation.md``). Nothing in ``envelopelab`` imports this package.
 """
 
-from calculix_adapter.analysis import CalculixSettings, run_calculix
+from calculix_adapter.analysis import (
+    CalculixCancelledError,
+    CalculixProgress,
+    CalculixRunError,
+    CalculixSettings,
+    run_calculix,
+)
 from calculix_adapter.detect import (
     SETUP_MESSAGE,
     CalculixInstallation,
@@ -17,8 +23,11 @@ from calculix_adapter.detect import (
 
 __all__ = [
     "SETUP_MESSAGE",
+    "CalculixCancelledError",
     "CalculixInstallation",
     "CalculixNotFoundError",
+    "CalculixProgress",
+    "CalculixRunError",
     "CalculixSettings",
     "find_calculix",
     "require_calculix",

@@ -1,4 +1,4 @@
-"""EnvelopeLab main window: project files, dockable panels, undo/redo, autosave."""
+"""EnvelopeLab main window: project files, dockable panels, undo/redo, runs, autosave."""
 
 from __future__ import annotations
 
@@ -37,7 +37,9 @@ from envelopelab_app.panels.history import HistoryPanel
 from envelopelab_app.panels.materials import MaterialsPanel
 from envelopelab_app.panels.patterns import PatternPanel
 from envelopelab_app.panels.properties import PropertiesPanel
+from envelopelab_app.panels.runs import RunsPanel
 from envelopelab_app.panels.validation import ValidationPanel
+from envelopelab_app.panels.view3d import View3DPanel
 from envelopelab_app.settings import (
     Preferences,
     add_recent_project,
@@ -45,6 +47,7 @@ from envelopelab_app.settings import (
     recent_projects,
     save_preferences,
 )
+from envelopelab_app.simulation import CALCULIX, PREVIEW, SimulationManager
 from envelopelab_app.wizard import NewDesignWizard
 
 FILE_FILTER = f"EnvelopeLab projects (*{PROJECT_SUFFIX})"
@@ -58,7 +61,7 @@ class MainWindow(QMainWindow):
     settings : QSettings
         Where preferences and recent projects are stored.
     enable_3d : bool, optional
-        Reserved for the 3D view.
+        Override the preference (tests pass False to run without OpenGL).
     interactive : bool
         Ask before discarding changes and offer crash recovery (False in tests).
     """
@@ -75,15 +78,19 @@ class MainWindow(QMainWindow):
         self.interactive = interactive
         self.instance_id = uuid.uuid4().hex
         self.controller = WorkspaceController(self.prefs)
+        self.simulation = SimulationManager(self.controller)
         self.setWindowTitle("EnvelopeLab")
         self.resize(1500, 950)
 
         self.gore_editor = GoreEditor(self.controller)
         self.setCentralWidget(self.gore_editor)
+        use_3d = self.prefs.enable_3d if enable_3d is None else enable_3d
         self.design_tree = DesignTreePanel(self.controller)
         self.properties = PropertiesPanel(self.controller)
         self.validation = ValidationPanel(self.controller)
+        self.runs = RunsPanel(self.controller, self.simulation)
         self.materials = MaterialsPanel(self.controller)
+        self.view3d = View3DPanel(self.controller, enable_renderer=use_3d)
         self.patterns = PatternPanel(self.controller)
         self.history = HistoryPanel(self.controller)
         pattern_scope = artifact_inputs("patterns")
@@ -94,6 +101,22 @@ class MainWindow(QMainWindow):
                 "Materials", self.controller, self.materials, scope={"materials", "row_zones"}
             ),
             "validation": PanelDock("Validation / Warnings", self.controller, self.validation),
+            "runs": PanelDock(
+                "Simulation Runs",
+                self.controller,
+                self.runs,
+                scope=artifact_inputs("simulation"),
+                artifacts=("simulation",),
+                runs=True,
+            ),
+            "view3d": PanelDock(
+                "3D View",
+                self.controller,
+                self.view3d,
+                scope=artifact_inputs("simulation"),
+                artifacts=("rest_mesh",),
+                runs=True,
+            ),
             "patterns": PanelDock(
                 "2D Pattern View",
                 self.controller,
@@ -107,10 +130,15 @@ class MainWindow(QMainWindow):
         self.addDockWidget(area.LeftDockWidgetArea, self.docks["tree"])
         self.addDockWidget(area.LeftDockWidgetArea, self.docks["properties"])
         self.tabifyDockWidget(self.docks["properties"], self.docks["materials"])
+        self.addDockWidget(area.RightDockWidgetArea, self.docks["view3d"])
         self.addDockWidget(area.RightDockWidgetArea, self.docks["patterns"])
+        self.tabifyDockWidget(self.docks["view3d"], self.docks["patterns"])
         self.addDockWidget(area.RightDockWidgetArea, self.docks["history"])
         self.addDockWidget(area.BottomDockWidgetArea, self.docks["validation"])
+        self.addDockWidget(area.BottomDockWidgetArea, self.docks["runs"])
+        self.tabifyDockWidget(self.docks["validation"], self.docks["runs"])
         self.docks["properties"].raise_()
+        self.docks["view3d"].raise_()
         self.docks["validation"].raise_()
 
         self._build_status_bar()
@@ -119,10 +147,17 @@ class MainWindow(QMainWindow):
         self.controller.fileChanged.connect(self._update_title)
         self.controller.stateChanged.connect(self._update_actions)
         self.controller.sessionChanged.connect(self._update_actions)
+        self.simulation.started.connect(lambda s: self._task(f"running {s}…"))
+        self.simulation.progress.connect(self._progress)
+        self.simulation.finished.connect(self._run_finished)
+        self.simulation.failed.connect(self._run_failed)
+        self.simulation.calculixChanged.connect(self._update_ccx_label)
+        self.simulation.idle.connect(self._update_actions)
 
         self.autosave_timer = QTimer(self)
         self.autosave_timer.timeout.connect(self.autosave)
         self._apply_autosave_interval()
+        self._update_ccx_label()
         self._update_actions()
         self._update_title()
         if interactive:
@@ -138,9 +173,12 @@ class MainWindow(QMainWindow):
         self.progress_bar.setMaximumWidth(220)
         self.progress_bar.setVisible(False)
         self.dirty_label = QLabel()
+        self.ccx_label = QLabel()
+        self.ccx_label.setObjectName("ccxStatus")
         bar.addWidget(self.task_label, 1)
         bar.addPermanentWidget(self.progress_bar)
         bar.addPermanentWidget(self.dirty_label)
+        bar.addPermanentWidget(self.ccx_label)
 
     def _action(
         self,
@@ -167,6 +205,15 @@ class MainWindow(QMainWindow):
         self.snapshot_action = self._action("Take &snapshot…", self.history._take)
         self.version_action = self._action("Commit &version…", self.history._commit)
         self.regen_action = self._action("&Regenerate patterns", self.patterns.regenerate, "F5")
+        self.preview_action = self._action(
+            "Run &Preview", lambda: self.simulation.start(PREVIEW), "F9"
+        )
+        self.calculix_action = self._action(
+            "Run &CalculiX", lambda: self.simulation.start(CALCULIX), "Shift+F9"
+        )
+        self.cancel_action = self._action("C&ancel run", self.simulation.cancel)
+        self.reference_action = self._action("Load &reference mesh…", self.reference_dialog)
+        self.detect_action = self._action("Detect CalculiX again", self.simulation.detect_calculix)
 
         menu = self.menuBar()
         file_menu = menu.addMenu("&File")
@@ -188,6 +235,13 @@ class MainWindow(QMainWindow):
         edit_menu.addAction(self.version_action)
         design_menu = menu.addMenu("&Design")
         design_menu.addAction(self.regen_action)
+        design_menu.addAction(self.reference_action)
+        sim_menu = menu.addMenu("&Simulation")
+        sim_menu.addAction(self.preview_action)
+        sim_menu.addAction(self.calculix_action)
+        sim_menu.addAction(self.cancel_action)
+        sim_menu.addSeparator()
+        sim_menu.addAction(self.detect_action)
         view_menu = menu.addMenu("&View")
         for dock in self.docks.values():
             view_menu.addAction(dock.toggleViewAction())
@@ -200,6 +254,9 @@ class MainWindow(QMainWindow):
             self.undo_action,
             self.redo_action,
             self.regen_action,
+            self.preview_action,
+            self.calculix_action,
+            self.cancel_action,
         ):
             toolbar.addAction(action)
 
@@ -233,10 +290,48 @@ class MainWindow(QMainWindow):
         )
         self.snapshot_action.setEnabled(has)
         self.version_action.setEnabled(has)
-        self.regen_action.setEnabled(self.controller.is_gore)
+        running = self.simulation.running
+        gore = self.controller.is_gore
+        self.regen_action.setEnabled(gore)
+        self.preview_action.setEnabled(gore and not running)
+        self.calculix_action.setEnabled(gore and not running and self.simulation.calculix_available)
+        self.calculix_action.setToolTip(
+            "CalculiX verification solve"
+            if self.simulation.calculix_available
+            else self.simulation.calculix_message
+        )
+        self.cancel_action.setEnabled(running)
+        self.runs.update_actions()
+
+    def _update_ccx_label(self) -> None:
+        if self.simulation.calculix_available:
+            self.ccx_label.setText(f"CalculiX {self.simulation.calculix_version}")
+            self.ccx_label.setStyleSheet("")
+        else:
+            self.ccx_label.setText("CalculiX not installed — Run CalculiX disabled")
+            self.ccx_label.setStyleSheet("color: #b00020; font-weight: bold;")
+        self.ccx_label.setToolTip(self.simulation.calculix_message)
+        self._update_actions()
 
     def _task(self, text: str) -> None:
         self.task_label.setText(text)
+
+    def _progress(self, message: str, fraction: float) -> None:
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setValue(int(1000 * max(0.0, min(1.0, fraction))))
+        self.task_label.setText(message)
+
+    def _run_finished(self, record: object) -> None:
+        self.progress_bar.setVisible(False)
+        converged = getattr(record, "converged", False)
+        label = getattr(record, "solver_label", "run")
+        self.task_label.setText(f"{label}: {'converged' if converged else 'NOT CONVERGED'}")
+        self._update_actions()
+
+    def _run_failed(self, message: str) -> None:
+        self.progress_bar.setVisible(False)
+        self.task_label.setText(message.splitlines()[0])
+        self._update_actions()
 
     def _rejected(self, message: str) -> None:
         self.statusBar().showMessage(f"Edit refused: {message}", 8000)
@@ -246,6 +341,8 @@ class MainWindow(QMainWindow):
 
     def set_session(self, session: ProjectSession | None) -> None:
         """Show ``session``."""
+        if self.simulation.running:
+            self.simulation.cancel()
         self.controller.set_session(session)
         self._update_title()
 
@@ -390,6 +487,13 @@ class MainWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(self, "Save project as", "", FILE_FILTER)
         return bool(path) and self.save_to(path)
 
+    def reference_dialog(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Reference mesh", "", "Meshes (*.obj *.stl *.ply)"
+        )
+        if path:
+            self.view3d.load_reference(path)
+
     def preferences_dialog(self) -> None:
         dialog = PreferencesDialog(self.prefs, self)
         if dialog.exec():
@@ -401,6 +505,7 @@ class MainWindow(QMainWindow):
             setattr(self.prefs, name, value)
         save_preferences(self.settings, self.prefs)
         self._apply_autosave_interval()
+        self.simulation.detect_calculix()
 
     def _fill_recent(self) -> None:
         self.recent_menu.clear()
@@ -433,7 +538,11 @@ class MainWindow(QMainWindow):
         if not self.maybe_discard():
             event.ignore()
             return
+        if self.simulation.running:
+            self.simulation.cancel()
+            self.simulation.wait(30_000)
         discard(self.autosave_path())
+        self.view3d.close_renderer()
         event.accept()
 
 

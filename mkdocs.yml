@@ -4,6 +4,7 @@ nav:
   - User guide:
       - Your first design: user/first-design.md
       - Editing designs: user/editing-designs.md
+      - Running simulations: user/running-simulations.md
       - Importing patterns: user/importing-patterns.md
       - Simulation preview: user/simulation-preview.md
       - Reality Check report: user/reality-check-report.md

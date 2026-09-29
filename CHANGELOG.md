@@ -25,6 +25,16 @@ All notable changes to this project will be documented in this file.
   pattern editor (seam allowance, grain, labels, zones, notches, tape paths, feature
   locations, flagged manual outline overrides with provenance and seam matching). Docs:
   `user/first-design.md`, `user/editing-designs.md`, `theory/design-editing.md`.
+- Simulation Runs panel with separate Run Preview / Run CalculiX actions (Run CalculiX
+  disabled with installation instructions when ccx is missing; ccx runs as an external
+  process with a progress monitor), solver, convergence, residual and run time for every
+  run, stale runs never shown as current; 3D view (design surface, rest mesh, preview,
+  CalculiX and reference layers with distinct labels and colours, section plane, picking,
+  spline widget). `envelopelab.project.simulation`: design -> build pack -> solver model
+  pipeline and run records. Docs: `user/running-simulations.md`.
+- `calculix_adapter.run_calculix`: optional `progress` callback (`CalculixProgress`) and
+  `cancel` token (stops ccx, `CalculixCancelledError`). Results are bit-identical with and
+  without them.
 - `envelopelab.solvers.model`: gas chambers (`PressureChamber`, `SolverModel.chambers`,
   `tri_chambers`, `triangle_pressure`); closures may belong to a chamber. Preview solver
   and CalculiX adapter share the definition; chamber volumes and per-gas lift in the
