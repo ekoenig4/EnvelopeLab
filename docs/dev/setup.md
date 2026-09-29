@@ -1,13 +1,20 @@
 # Developer setup
 
+On Linux (or in a container) `bash scripts/install_env.sh` installs the system libraries,
+CalculiX and Xvfb, creates `.venv` with the `dev,docs,gui` extras and checks the result;
+see [Installation](../user/installation.md). By hand:
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev,docs]"
+python -m pip install -e ".[dev,docs,gui]"
 pre-commit install
 python scripts/verify.py
 ```
+
+The pre-commit hooks run the project's own ruff and mypy (`language: system`), so
+activate `.venv` before committing.
 
 On Linux the Gmsh wheel needs a few system libraries (ADR-0003):
 
@@ -24,7 +31,8 @@ envelopelab                   # the application (app/envelopelab_app)
 
 The GUI (ADR-0007) is a view of `envelopelab.project`; it contains no engineering math.
 GUI tests (`tests/gui`, pytest-qt) run headless on Qt's `offscreen` platform (set by
-`tests/gui/conftest.py`). On Linux, Qt needs `libegl1 libxkbcommon0 libfontconfig1`.
+`tests/gui/conftest.py`). The Linux system libraries Qt needs are listed in
+[Installation](../user/installation.md).
 The PyVista renderer test runs only with a display:
 
 ```bash

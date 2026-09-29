@@ -36,7 +36,7 @@ never hidden. The builder is responsible for airworthiness.
     docs/              MkDocs site: user/, theory/, validation/, dev/, formats/, adr/
     scripts/           dev utilities: verify.py, generate_validation_docs.py,
                        generate_design_schema_docs.py, generate_pattern_mapping_docs.py,
-                       generate_project_schema_docs.py
+                       generate_project_schema_docs.py, install_env.sh
     solvers/           adapters for external solvers: calculix_adapter (CalculiX
                        verification solver, installed as `calculix_adapter`);
                        planned: Gmsh, Meshroom
@@ -49,6 +49,8 @@ Create a planned directory only when the first code for it lands.
     python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
     pip install -e ".[dev,docs,gui]"
     pre-commit install
+    # Linux/containers, all of the above plus system libraries, CalculiX and Xvfb:
+    bash scripts/install_env.sh
 
 ## 5. Working loop (every task)
 1. **Plan:** restate the task, list assumptions, propose the files to touch, and name the

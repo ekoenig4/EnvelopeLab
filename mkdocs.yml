@@ -2,6 +2,7 @@ site_name: EnvelopeLab
 nav:
   - Home: index.md
   - User guide:
+      - Installation: user/installation.md
       - Your first design: user/first-design.md
       - Editing designs: user/editing-designs.md
       - Running simulations: user/running-simulations.md
