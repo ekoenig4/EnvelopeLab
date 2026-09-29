@@ -46,6 +46,11 @@ For the selected row you can set the label, grain direction, zone, seam allowanc
 rows or this row), add notches, tape paths across the panel and feature locations (drag a
 feature to move it).
 
+The rows are **stacked as they are sewn** into a gore: the mouth row at the bottom, the
+crown row at the top, with the same clear gap between neighbouring cut lines. Uncheck
+**Stack rows (as sewn)** in the panel's toolbar (or in the preferences) to lay them out side
+by side instead; the choice is kept for the next session.
+
 Patterns are drawn **as last generated**. When the design has changed since, a red
 **STALE** banner says so and the panels are greyed until you press **Regenerate patterns**
 (F5), or enable automatic regeneration in the preferences.

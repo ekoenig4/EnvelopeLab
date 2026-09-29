@@ -1,9 +1,10 @@
 """2D pattern editor: flat panel rows with allowances, labels, grain, zones, tapes, features.
 
-Rows are drawn from the *last generated* patterns. When the design changed since then the
-view says so (a STALE banner, greyed rows) until the patterns are regenerated: it never
-shows outdated patterns as current. Dragging outline handles in *Edit outline* mode makes a
-flagged manual override (recorded in the provenance log).
+Rows are drawn from the *last generated* patterns, stacked as they are sewn into a gore
+(mouth at the bottom, crown at the top) or side by side (the *Stack rows* toggle). When the
+design changed since then the view says so (a STALE banner, greyed rows) until the patterns
+are regenerated: it never shows outdated patterns as current. Dragging outline handles in
+*Edit outline* mode makes a flagged manual override (recorded in the provenance log).
 """
 
 from __future__ import annotations
@@ -49,11 +50,54 @@ from envelopelab.project.model import RowPattern
 from envelopelab_app.controller import WorkspaceController
 
 GAP = 0.4  # m between rows in the layout
+Offset = tuple[float, float]  # (x, y) of a row's panel origin in the layout, m
 ZONE_FALLBACK = "#d9e7f5"
 
 
-def _polygon(points: np.ndarray, dx: float) -> QPolygonF:
-    return QPolygonF([QPointF(float(x) + dx, -float(y)) for x, y in points])
+def _polygon(points: np.ndarray, offset: Offset) -> QPolygonF:
+    dx, dy = offset
+    return QPolygonF([QPointF(float(x) + dx, -(float(y) + dy)) for x, y in points])
+
+
+def _point(x: float, y: float, offset: Offset) -> QPointF:
+    """Scene point of panel point (x, y) m (scene y points down)."""
+    return QPointF(x + offset[0], -(y + offset[1]))
+
+
+def layout_offsets(rows: list[PanelRow], stacked: bool, gap: float = GAP) -> dict[str, Offset]:
+    """Layout origin of every row, m.
+
+    Parameters
+    ----------
+    rows : list of PanelRow
+        Rows mouth first; outlines in panel coordinates, m.
+    stacked : bool
+        Stack the rows vertically as they are sewn (mouth at the bottom); otherwise place
+        them side by side from left to right.
+    gap : float
+        Clear space between neighbouring cut outlines, m.
+
+    Returns
+    -------
+    dict of str to (float, float)
+        Row label to the (x, y) offset of its panel origin, m.
+    """
+    offsets: dict[str, Offset] = {}
+    x = y = 0.0
+    previous_top: float | None = None
+    for row in rows:
+        cut = row.cut_outline
+        if stacked:
+            if previous_top is not None:
+                y = previous_top + gap - float(cut[:, 1].min())
+            offsets[row.label] = (0.0, y)
+            previous_top = y + float(cut[:, 1].max())
+        else:
+            width = float(np.ptp(cut[:, 0]))
+            x += width / 2
+            offsets[row.label] = (x, 0.0)
+            x += width / 2 + gap
+    return offsets
 
 
 class OutlineHandle(QGraphicsEllipseItem):
@@ -101,7 +145,7 @@ class PatternView(QGraphicsView):
         self.setScene(QGraphicsScene(self))
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
-        self.offsets: dict[str, float] = {}
+        self.offsets: dict[str, Offset] = {}
         self.handles: list[OutlineHandle] = []
         self.edit_letter: str | None = None
         self.content_rect = QRectF()
@@ -114,12 +158,12 @@ class PatternView(QGraphicsView):
     def mousePressEvent(self, event: object) -> None:  # noqa: N802
         point: QPoint = event.position().toPoint()  # type: ignore[attr-defined]
         pos = self.mapToScene(point)
-        for letter, dx in self.offsets.items():
+        for letter, offset in self.offsets.items():
             rows = self.panel.rows_by_letter()
             row = rows.get(letter)
             if row is None:
                 continue
-            outline = _polygon(row.cut_outline, dx)
+            outline = _polygon(row.cut_outline, offset)
             if outline.containsPoint(pos, Qt.FillRule.OddEvenFill):
                 self.panel.controller.select(f"row:{letter}")
                 break
@@ -129,8 +173,8 @@ class PatternView(QGraphicsView):
         """Turn the handle positions into a manual outline override."""
         if self.edit_letter is None or not self.handles:
             return
-        dx = self.offsets.get(self.edit_letter, 0.0)
-        points = [(float(h.pos().x() - dx), float(-h.pos().y())) for h in self.handles]
+        dx, dy = self.offsets.get(self.edit_letter, (0.0, 0.0))
+        points = [(float(h.pos().x() - dx), float(-h.pos().y() - dy)) for h in self.handles]
         self.panel.controller.edit("set_manual_outline", self.edit_letter, points)
 
     def commit_feature(self, marker: FeatureMarker) -> None:
@@ -141,11 +185,11 @@ class PatternView(QGraphicsView):
         row = session.patterns.row(marker.letter)
         if marker.index >= len(row.feature_locations):
             return
-        dx = self.offsets.get(marker.letter, 0.0)
+        dx, dy = self.offsets.get(marker.letter, (0.0, 0.0))
         centre = marker.mapToScene(marker.rect().center())
         features = [f.model_dump() for f in row.feature_locations]
         features[marker.index]["x"] = float(centre.x() - dx)
-        features[marker.index]["y"] = float(-centre.y())
+        features[marker.index]["y"] = float(-centre.y() - dy)
         self.panel.controller.set_row_pattern(
             marker.letter, {"feature_locations": features}, f"Row {marker.letter}: move feature"
         )
@@ -170,6 +214,14 @@ class PatternPanel(QWidget):
         self.edit_outline = QCheckBox("Edit outline (manual override)")
         self.edit_outline.toggled.connect(self._toggle_edit)
         toolbar.addWidget(self.edit_outline)
+        self.stack_rows = QCheckBox("Stack rows (as sewn)")
+        self.stack_rows.setToolTip(
+            "Stack the rows vertically as they are sewn into a gore (mouth at the bottom, "
+            "crown at the top); unchecked: side by side"
+        )
+        self.stack_rows.setChecked(controller.prefs.stack_pattern_rows)
+        self.stack_rows.toggled.connect(self._toggle_stack)
+        toolbar.addWidget(self.stack_rows)
 
         form_box = QGroupBox("Selected row")
         form = QFormLayout(form_box)
@@ -253,6 +305,9 @@ class PatternPanel(QWidget):
         splitter.addWidget(scroll)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 1)
+        # Stretch factors only share extra space; start the drawing at 3/4 of the height so
+        # a stacked gore is not squeezed by the form's size hint.
+        splitter.setSizes([3, 1])
         layout = QVBoxLayout(self)
         layout.addWidget(toolbar)
         layout.addWidget(self.banner)
@@ -343,33 +398,37 @@ class PatternPanel(QWidget):
         design = session.design
         assert design.gores is not None
         selected = self.selected_letter()
-        x = 0.0
-        for row in self.rows_by_letter().values():
+        rows = list(self.rows_by_letter().values())
+        self.view.offsets = layout_offsets(rows, self.controller.prefs.stack_pattern_rows)
+        for row in rows:
             ann = session.patterns.row(row.label)
-            width = float(np.ptp(row.cut_outline[:, 0]))
-            x += width / 2
-            self.view.offsets[row.label] = x
-            self._draw_row(row, ann, x, stale, row.label == selected, design.gores.count)
-            x += width / 2 + GAP
-            bounds = _polygon(row.cut_outline, self.view.offsets[row.label]).boundingRect()
+            offset = self.view.offsets[row.label]
+            self._draw_row(row, ann, offset, stale, row.label == selected, design.gores.count)
+            bounds = _polygon(row.cut_outline, offset).boundingRect()
             self.view.content_rect = self.view.content_rect.united(bounds)
+        # Labels ignore the view transform, so their pixel extents would count as metres in
+        # the default scene rect and keep the panels from being centred; use the panels,
+        # with room to pan around them.
+        rect = self.view.content_rect
+        margin = max(rect.width(), rect.height())
+        scene.setSceneRect(rect.adjusted(-margin, -margin, margin, margin))
         if first:
             QTimer.singleShot(0, self.fit)
 
     def _draw_row(
-        self, row: PanelRow, ann: RowPattern, dx: float, stale: bool, selected: bool, n: int
+        self, row: PanelRow, ann: RowPattern, offset: Offset, stale: bool, selected: bool, n: int
     ) -> None:
         scene = self.view.scene()
         session = self.controller.session
         assert session is not None
         grey = QColor("#9e9e9e")
-        cut = QGraphicsPolygonItem(_polygon(row.cut_outline, dx))
+        cut = QGraphicsPolygonItem(_polygon(row.cut_outline, offset))
         pen = QPen(grey if stale else QColor("#333333"), 0, Qt.PenStyle.DashLine)
         cut.setPen(pen)
         scene.addItem(cut)
         manual = ann.manual_outline
         finished_pts = np.asarray(manual.points) if manual is not None else row.finished_outline
-        finished = QGraphicsPolygonItem(_polygon(finished_pts, dx))
+        finished = QGraphicsPolygonItem(_polygon(finished_pts, offset))
         zone = row_zone(session.design, session.patterns, row.label)
         finished.setBrush(QBrush(QColor(200, 200, 200, 60) if stale else self._zone_color(zone)))
         color = QColor("#d62728") if manual is not None else (grey if stale else QColor("#1f3b57"))
@@ -386,7 +445,7 @@ class PatternPanel(QWidget):
         font.setPointSizeF(7.5)
         label.setFont(font)
         label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-        label.setPos(dx - 0.25 * row.bottom_width, -row.finished_height * 0.6)
+        label.setPos(_point(-0.25 * row.bottom_width, row.finished_height * 0.6, offset))
         label.setToolTip(f"{text}; zone {zone}; seam allowance {allowance * 1000:g} mm")
         scene.addItem(label)
         finished.setToolTip(label.toolTip())
@@ -394,12 +453,13 @@ class PatternPanel(QWidget):
             flag = QGraphicsSimpleTextItem("MANUAL OVERRIDE")
             flag.setBrush(QBrush(QColor("#d62728")))
             flag.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-            flag.setPos(dx - 0.3, -row.finished_height * 0.9)
+            flag.setPos(_point(-0.3, row.finished_height * 0.9, offset))
             scene.addItem(flag)
         # Grain arrow at mid-height.
         a = math.radians(ann.grain_angle_deg)
         length = 0.25 * max(row.bottom_width, row.top_width, 0.2)
-        cx, cy = dx, -row.finished_height * 0.3
+        centre = _point(0.0, row.finished_height * 0.3, offset)
+        cx, cy = centre.x(), centre.y()
         tip = QPointF(cx + length * math.cos(a), cy - length * math.sin(a))
         tail = QPointF(cx - length * math.cos(a), cy + length * math.sin(a))
         arrow = QPainterPath(tail)
@@ -419,7 +479,7 @@ class PatternPanel(QWidget):
         for notch in ann.notches:
             p0, p1 = edges[notch.edge]
             px = p0 + (p1 - p0) * notch.position
-            tick = QPainterPath(QPointF(px[0] + dx, -px[1]))
+            tick = QPainterPath(_point(px[0], px[1], offset))
             direction = (
                 np.array([1.0, 0.0])
                 if notch.edge == "left"
@@ -430,7 +490,7 @@ class PatternPanel(QWidget):
                 )
             )
             end = px + 0.08 * direction
-            tick.lineTo(QPointF(end[0] + dx, -end[1]))
+            tick.lineTo(_point(end[0], end[1], offset))
             item = QGraphicsPathItem(tick)
             np_ = QPen(QColor("#ff7f0e"), 2)
             np_.setCosmetic(True)
@@ -438,9 +498,9 @@ class PatternPanel(QWidget):
             item.setToolTip(f"notch {notch.edge} {notch.position:.2f}")
             scene.addItem(item)
         for tape in ann.tape_paths:
-            path = QPainterPath(QPointF(tape.points[0][0] + dx, -tape.points[0][1]))
+            path = QPainterPath(_point(tape.points[0][0], tape.points[0][1], offset))
             for px_, py_ in tape.points[1:]:
-                path.lineTo(QPointF(px_ + dx, -py_))
+                path.lineTo(_point(px_, py_, offset))
             item = QGraphicsPathItem(path)
             tp = QPen(QColor("#ff7f0e"), 4)
             tp.setCosmetic(True)
@@ -449,14 +509,14 @@ class PatternPanel(QWidget):
             scene.addItem(item)
         for i, feature in enumerate(ann.feature_locations):
             marker = FeatureMarker(self.view, row.label, i, feature.radius)
-            marker.setPos(QPointF(feature.x + dx, -feature.y))
+            marker.setPos(_point(feature.x, feature.y, offset))
             marker.setToolTip(f"feature {feature.feature} (r {feature.radius:g} m)")
             scene.addItem(marker)
         if selected and self.edit_outline.isChecked():
             points = manual.points if manual is not None else editable_outline(row)
             self.view.edit_letter = row.label
             for i, (px_, py_) in enumerate(points):
-                handle = OutlineHandle(self.view, i, QPointF(px_ + dx, -py_))
+                handle = OutlineHandle(self.view, i, _point(px_, py_, offset))
                 scene.addItem(handle)
                 self.view.handles.append(handle)
 
@@ -582,6 +642,11 @@ class PatternPanel(QWidget):
         letter = self.selected_letter()
         if letter is not None:
             self.controller.edit("clear_manual_outline", letter)
+
+    def _toggle_stack(self, on: bool) -> None:
+        self.controller.prefs.stack_pattern_rows = on
+        self.refresh()
+        self.fit()
 
     def _toggle_edit(self, on: bool) -> None:
         if on and self.controller.artifact_status("patterns") != "current":

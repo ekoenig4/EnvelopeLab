@@ -92,6 +92,10 @@ class MainWindow(QMainWindow):
         self.materials = MaterialsPanel(self.controller)
         self.view3d = View3DPanel(self.controller, enable_renderer=use_3d)
         self.patterns = PatternPanel(self.controller)
+        # The panel toggle edits the shared preferences; store them so the layout is kept.
+        self.patterns.stack_rows.toggled.connect(
+            lambda _on: save_preferences(self.settings, self.prefs)
+        )
         self.history = HistoryPanel(self.controller)
         pattern_scope = artifact_inputs("patterns")
         self.docks: dict[str, PanelDock] = {
@@ -504,6 +508,8 @@ class MainWindow(QMainWindow):
         for name, value in prefs.__dict__.items():
             setattr(self.prefs, name, value)
         save_preferences(self.settings, self.prefs)
+        if self.patterns.stack_rows.isChecked() != self.prefs.stack_pattern_rows:
+            self.patterns.stack_rows.setChecked(self.prefs.stack_pattern_rows)
         self._apply_autosave_interval()
         self.simulation.detect_calculix()
 

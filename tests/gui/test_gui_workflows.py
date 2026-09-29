@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QDialogButtonBox
 from pytestqt.qtbot import QtBot
 
 from envelopelab.project.dependencies import invalidated_by
+from envelopelab.project.gore_design import editable_outline
 from envelopelab.project.model import RunRecord, utc_now
 from envelopelab.project.recovery import find_recoverable
 from envelopelab.project.session import ProjectSession
@@ -225,6 +226,38 @@ def test_manual_outline_override_is_flagged(gore_window: MainWindow) -> None:
     assert "Row B (manual override)" in texts
     w.patterns.clear_override.click()
     assert session.patterns.row("B").manual_outline is None
+
+
+def test_pattern_rows_stack_vertically_as_sewn(
+    gore_window: MainWindow, settings: QSettings
+) -> None:
+    w = gore_window
+    session = w.controller.session
+    assert session is not None
+    w.patterns.regenerate()
+    rows = list(w.patterns.rows_by_letter().values())
+    assert w.patterns.stack_rows.isChecked()  # default: stacked, mouth at the bottom
+    offsets = w.patterns.view.offsets
+    for lower, upper in zip(rows, rows[1:], strict=False):
+        assert offsets[lower.label][0] == offsets[upper.label][0] == 0.0
+        top = offsets[lower.label][1] + lower.cut_outline[:, 1].max()
+        bottom = offsets[upper.label][1] + upper.cut_outline[:, 1].min()
+        assert bottom - top == pytest.approx(0.4)  # GAP, m: cut outlines never overlap
+    # Outline edits map back through the vertical offset: unmoved handles commit the
+    # row's own outline, not one shifted by the layout.
+    w.controller.select(f"row:{rows[-1].label}")
+    w.patterns.edit_outline.setChecked(True)
+    w.patterns.view.commit_outline()
+    manual = session.patterns.row(rows[-1].label).manual_outline
+    assert manual is not None
+    expected = w.patterns.rows_by_letter()[rows[-1].label]
+    assert np.allclose(manual.points, editable_outline(expected), atol=1e-9)
+    w.patterns.edit_outline.setChecked(False)
+    w.patterns.stack_rows.setChecked(False)  # side by side, stored in the settings
+    offsets = w.patterns.view.offsets
+    xs = [offsets[r.label][0] for r in rows]
+    assert all(offsets[r.label][1] == 0.0 for r in rows) and xs == sorted(xs)
+    assert load_preferences(settings).stack_pattern_rows is False
 
 
 def test_pattern_annotations_are_undoable_edits(gore_window: MainWindow) -> None:

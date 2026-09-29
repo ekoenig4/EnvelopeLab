@@ -30,6 +30,9 @@ class Preferences:
         until *Regenerate* is pressed).
     keep_rows_fitted : bool
         Rescale the panel rows to the meridian after profile edits.
+    stack_pattern_rows : bool
+        Draw the flat pattern rows stacked vertically as they are sewn into a gore (mouth
+        at the bottom); otherwise side by side.
     enable_3d : bool
         Use the PyVista 3D view (needs OpenGL; takes effect at the next start).
     recovery_dir : str
@@ -42,6 +45,7 @@ class Preferences:
     ccx_path: str = ""
     auto_regenerate_patterns: bool = False
     keep_rows_fitted: bool = True
+    stack_pattern_rows: bool = True
     enable_3d: bool = True
     recovery_dir: str = ""
 

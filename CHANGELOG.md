@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- 2D Pattern View: panel rows are stacked vertically as they are sewn into a gore (mouth
+  at the bottom, crown at the top) by default; the new *Stack rows (as sewn)* toolbar
+  toggle and preference switch back to the side-by-side layout. Drawing only; no numerical
+  results change.
 - Desktop application: software OpenGL (`LIBGL_ALWAYS_SOFTWARE=1`) is selected
   automatically under WSL, where the GPU driver drew the window black; new launcher options
   `--software-gl` and `--hardware-gl`. An explicit `LIBGL_ALWAYS_SOFTWARE` is respected.
