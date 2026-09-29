@@ -14,6 +14,13 @@
 | PyYAML | build-pack YAML mapping files | MIT |
 | types-PyYAML (dev) | type stubs for mypy | Apache-2.0 |
 | Open3D (optional extra `registration`) | point-to-plane ICP registration of reference meshes (`envelopelab.io.reference_mesh`); a SciPy ICP is used when it is not installed | MIT |
+| PySide6 and shiboken6 (optional extra `gui`) | desktop application (`app/envelopelab_app`), see ADR-0007 | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only |
+| PyVista (optional extra `gui`) | 3D view | MIT |
+| pyvistaqt (optional extra `gui`) | PyVista inside Qt | MIT |
+| QtPy (via pyvistaqt) | Qt binding shim | MIT |
+| VTK (via PyVista) | 3D rendering | BSD-3-Clause |
+| scooby (via PyVista) | environment report | MIT |
+| pytest-qt (dev) | headless GUI tests | MIT |
 | pymdown-extensions (via mkdocs-material) | `arithmatex` math in docs | MIT |
 | MathJax (loaded from jsDelivr by the docs site) | equation rendering | Apache-2.0 |
 

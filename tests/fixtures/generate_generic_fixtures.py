@@ -14,17 +14,22 @@ with $INSUNITS = 4:
   finished rim of a hole for a tube appendage), a TAPE line and a GRAIN arrow; plus a
   tube (developed cone frustum) whose base arc is 40 mm longer than the hole rim
   (designed ease) and a cap disc that closes the tube.
+* ``standard_gore/design.elproj``: the same 8-gore design as an EnvelopeLab project (design
+  document with the control points below, rows fitted to its meridian, 25 mm allowance,
+  100 degC internal at ISA sea level), used by the GUI workflow tests.
 * ``spherical_envelope/gores.dxf``: 12 gores x 5 rows of a sphere of radius 7 m between
   latitudes -72 deg (mouth) and +78 deg (crown ring), CUT and SEW outlines. Used for the
   preview-solver smoke solve and mesh-refinement study.
 
-Pass fixture names (``standard_gore``, ``special_shape``, ``spherical_envelope``) to
+Pass fixture names (``standard_gore``, ``standard_gore_project``, ``special_shape``,
+``spherical_envelope``) to
 regenerate only those; the default regenerates all.
 """
 
 from __future__ import annotations
 
 import math
+from datetime import UTC, datetime
 from pathlib import Path
 
 import numpy as np
@@ -82,7 +87,7 @@ def _rows(n_gores: int, r: list[float], z: list[float], labels: list[str]) -> li
 
 
 def standard_gore() -> None:
-    rows = _rows(8, [1.0, 2.6, 3.0, 2.2, 0.8], [0.0, 2.0, 4.5, 7.0, 8.2], list("ABCD"))
+    rows = _rows(8, STANDARD_GORE_R, STANDARD_GORE_Z, list("ABCD"))
     doc = _new_doc()
     msp = doc.modelspace()
     x = 0.0
@@ -95,6 +100,33 @@ def standard_gore() -> None:
         x += width / 2
     _text(msp, "GENERIC STANDARD GORE FIXTURE 1:1 mm", (0.0, -600.0), 120.0)
     doc.saveas(HERE / "standard_gore" / "panels.dxf")
+
+
+STANDARD_GORE_R = [1.0, 2.6, 3.0, 2.2, 0.8]
+STANDARD_GORE_Z = [0.0, 2.0, 4.5, 7.0, 8.2]
+
+
+def standard_gore_project() -> None:
+    from envelopelab.project.gore_design import equal_row_heights, profile_from_arrays
+    from envelopelab.project.model import DesignState, Project, save_project
+    from envelopelab.project.templates import new_design
+
+    r, z = np.array(STANDARD_GORE_R), np.array(STANDARD_GORE_Z)
+    length = profile_from_arrays(r, z).meridian_length
+    design = new_design(
+        name="generic standard gore fixture",
+        points=list(zip(STANDARD_GORE_R, STANDARD_GORE_Z, strict=True)),
+        gore_count=8,
+        row_heights=equal_row_heights(length, 4),
+        mouth_diameter=2.0 * STANDARD_GORE_R[0],
+        top_diameter=2.0 * STANDARD_GORE_R[-1],
+        seam_allowance=ALLOWANCE,
+    )
+    # Fixed metadata so that regenerating the fixture gives an identical file.
+    design.meta.version_id = "v1-fixture"
+    design.meta.created = design.meta.modified = datetime(2026, 9, 1, tzinfo=UTC)
+    project = Project(state=DesignState(design=design.with_updated_hash()))
+    save_project(project, HERE / "standard_gore" / "design.elproj")
 
 
 def _circle(radius: float, n: int = 128) -> FloatArray:
@@ -185,6 +217,7 @@ def spherical_envelope() -> None:
 
 FIXTURES = {
     "standard_gore": standard_gore,
+    "standard_gore_project": standard_gore_project,
     "special_shape": special_shape,
     "spherical_envelope": spherical_envelope,
 }

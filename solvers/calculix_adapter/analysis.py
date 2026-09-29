@@ -70,14 +70,16 @@ References
 from __future__ import annotations
 
 import logging
+import math
 import os
 import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -195,6 +197,51 @@ class CalculixSettings:
     def as_dict(self) -> dict[str, Any]:
         """Settings as a plain dictionary (for the run manifest)."""
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class CalculixProgress:
+    """Progress of a verification solve, reported before and after every ``ccx`` job.
+
+    Attributes
+    ----------
+    pass_no : int
+        Current pass (1-based).
+    max_passes : int
+        Pass limit.
+    job : str
+        ``held``, ``release`` or ``done``.
+    residual : float
+        Latest relative out-of-balance, dimensionless (``inf`` before the first).
+    elapsed : float
+        Wall time since the start, s.
+    """
+
+    pass_no: int
+    max_passes: int
+    job: str
+    residual: float
+    elapsed: float
+
+    @property
+    def fraction(self) -> float:
+        """Rough progress in [0, 1] from the residual decade reached (1 when done)."""
+        if self.job == "done":
+            return 1.0
+        if not math.isfinite(self.residual) or self.residual >= 1.0:
+            return 0.0
+        target = CalculixSettings().residual_target
+        return min(0.99, math.log10(self.residual) / math.log10(target))
+
+
+CalculixProgressCallback = Callable[[CalculixProgress], None]
+
+
+class CancelToken(Protocol):
+    """Anything with a ``cancelled`` property (e.g. the preview solver's token)."""
+
+    @property
+    def cancelled(self) -> bool: ...
 
 
 class CalculixRunError(RuntimeError):
@@ -422,7 +469,17 @@ class _Problem:
         )
 
 
-def _run_job(inst: CalculixInstallation, deck: DeckInput, workdir: Path, threads: int) -> bool:
+class CalculixCancelledError(RuntimeError):
+    """The verification solve was cancelled (``ccx`` was stopped; there is no result)."""
+
+
+def _run_job(
+    inst: CalculixInstallation,
+    deck: DeckInput,
+    workdir: Path,
+    threads: int,
+    cancel: CancelToken | None = None,
+) -> bool:
     write_deck(deck, workdir / f"{JOB}.inp")
     for suffix in (".dat", ".sta", ".cvg", ".frd"):
         (workdir / f"{JOB}{suffix}").unlink(missing_ok=True)
@@ -432,15 +489,30 @@ def _run_job(inst: CalculixInstallation, deck: DeckInput, workdir: Path, threads
         CCX_NPROC_STIFFNESS=str(threads),
         CCX_NPROC_EQUATION_SOLVER=str(threads),
     )
-    proc = subprocess.run(
-        [str(inst.executable), "-i", JOB],
-        cwd=workdir,
-        capture_output=True,
-        text=True,
-        env=env,
-        check=False,
-    )
-    log = proc.stdout + proc.stderr
+    with (
+        (workdir / f"{JOB}.stdout").open("w+", encoding="utf-8") as out,
+        subprocess.Popen(
+            [str(inst.executable), "-i", JOB],
+            cwd=workdir,
+            stdout=out,
+            stderr=subprocess.STDOUT,
+            text=True,
+            env=env,
+        ) as proc,
+    ):
+        # Poll so that a cancel request stops ccx instead of waiting for the job to end.
+        while proc.poll() is None:
+            if cancel is not None and cancel.cancelled:
+                proc.kill()
+                proc.wait()
+                raise CalculixCancelledError("CalculiX verification solve cancelled")
+            try:
+                proc.wait(timeout=0.2)
+            except subprocess.TimeoutExpired:
+                pass
+        out.seek(0)
+        log = out.read()
+    (workdir / f"{JOB}.stdout").unlink(missing_ok=True)
     (workdir / f"{JOB}.log").write_text(log, encoding="utf-8")
     if "*ERROR reading" in log or "*ERROR in calinput" in log:
         raise CalculixRunError(f"CalculiX rejected the input deck:\n{log[-2000:]}")
@@ -455,6 +527,8 @@ def run_calculix(
     workdir: str | Path | None = None,
     mesh_options: dict[str, Any] | None = None,
     start_positions: FloatArray | None = None,
+    progress: CalculixProgressCallback | None = None,
+    cancel: CancelToken | None = None,
 ) -> SimulationResult:
     """Verification solve of ``model`` with CalculiX (see module docstring).
 
@@ -476,6 +550,12 @@ def run_calculix(
         form-finding stage; it does not enter the equilibrium equations, and the result is
         accepted only on CalculiX's own convergence criteria. Displacements are still
         measured from the model's initial shape.
+    progress : callable, optional
+        Called with a :class:`CalculixProgress` before every ``ccx`` job and at the end
+        (on the calling thread).
+    cancel : object with a ``cancelled`` property, optional
+        Checked while ``ccx`` runs; when set, ``ccx`` is stopped and
+        :class:`CalculixCancelledError` is raised.
 
     Returns
     -------
@@ -490,6 +570,8 @@ def run_calculix(
         When ``ccx`` is not installed (the message explains how to install it).
     CalculixRunError
         When CalculiX rejects the input deck or crashes.
+    CalculixCancelledError
+        When ``cancel`` was set.
     """
     settings = settings or CalculixSettings()
     inst = require_calculix(settings.executable)
@@ -502,7 +584,9 @@ def run_calculix(
         work = Path(workdir)
         work.mkdir(parents=True, exist_ok=True)
     try:
-        return _solve(model, settings, inst, work, start, mesh_options, start_positions)
+        return _solve(
+            model, settings, inst, work, start, mesh_options, start_positions, progress, cancel
+        )
     finally:
         if temp is not None:
             shutil.rmtree(temp, ignore_errors=True)
@@ -533,6 +617,8 @@ def _solve(
     start: float,
     mesh_options: dict[str, Any] | None,
     start_positions: FloatArray | None = None,
+    progress: CalculixProgressCallback | None = None,
+    cancel: CancelToken | None = None,
 ) -> SimulationResult:
     s = settings
     prob = _Problem(model, s)
@@ -558,6 +644,16 @@ def _solve(
     jobs_ok, passes_ok, settled = True, False, False
     prev_start: float | None = None
     total_iterations = tf_pass = pass_no = 0
+    last_residual = math.inf
+
+    def report(job: str) -> None:
+        if progress is not None:
+            progress(
+                CalculixProgress(
+                    pass_no, s.max_passes, job, last_residual, time.perf_counter() - start
+                )
+            )
+
     while pass_no < s.max_passes:
         pass_no += 1
         if s.tension_field and np.any(ps.state != TAUT):
@@ -571,12 +667,14 @@ def _solve(
         sig0 = prob.exact_stress(x, mats)
         f_ext = prob.external(x)
         held = prob.deck(x, axes, mats, sig0, [LoadStep("held", f_ext)], True, 0.0, 1.0)
-        if not _run_job(inst, held, work, s.threads):
+        report("held")
+        if not _run_job(inst, held, work, s.threads, cancel):
             raise CalculixRunError("CalculiX failed on a held (fully fixed) job")
         f_int = read_reactions(work / f"{JOB}.dat", prob.n) + prob.tape_forces(x)
         balance = f_int - f_ext
         start_residual, _ = prob.split_planes(np.where(prob.fixed_mask, 0.0, balance))
         b_rel = float(np.linalg.norm(start_residual)) / (float(np.linalg.norm(f_ext)) or 1.0)
+        last_residual = b_rel
         history.append(
             IterationRecord("pass: start out-of-balance (exact law)", pass_no, 0, 0, b_rel)
         )
@@ -602,7 +700,8 @@ def _solve(
                 for r in range(1, ramp + 1)
             ]
             deck = prob.deck(x, axes, mats, sig0, steps, False, stab, inc)
-            ok = _run_job(inst, deck, work, s.threads)
+            report("release")
+            ok = _run_job(inst, deck, work, s.threads, cancel)
             if ok:
                 break
             if ramp * 2 <= s.max_ramp_steps:
@@ -642,6 +741,7 @@ def _solve(
             )
             break
         _update(prob, ps, work, axes, f_ext, mats)
+        last_residual = ps.residual
         history.append(IterationRecord("pass: largest node movement (m)", pass_no, 0, 0, ps.moved))
         history.append(IterationRecord("pass: relative out-of-balance", pass_no, 0, 0, ps.residual))
         log.info(
@@ -665,6 +765,7 @@ def _solve(
             and ps.residual <= s.residual_target
         )
     elapsed = time.perf_counter() - start
+    report("done")
     return _result(
         model,
         s,

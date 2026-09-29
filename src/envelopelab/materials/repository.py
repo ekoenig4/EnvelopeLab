@@ -34,6 +34,22 @@ class Fabric:
     cost: MaterialProperty
 
 
+@dataclass(frozen=True)
+class FabricCatalog:
+    """Immutable copy of fabric records (safe to use on any thread, unlike the SQLite
+    connection of :class:`FabricLibraryRepository`)."""
+
+    records: tuple[Fabric, ...]
+
+    def fabric(self, fabric_id: str) -> Fabric | None:
+        """Fabric ``fabric_id``, or None."""
+        return next((f for f in self.records if f.fabric_id == fabric_id), None)
+
+    def fabrics(self) -> list[Fabric]:
+        """Every fabric, ordered by id."""
+        return sorted(self.records, key=lambda f: f.fabric_id)
+
+
 class FabricLibraryRepository:
     def __init__(self, db_path: str = ":memory:") -> None:
         self._connection = sqlite3.connect(db_path)
@@ -196,8 +212,59 @@ class FabricLibraryRepository:
         rows = self._connection.execute("SELECT fabric_id FROM fabrics").fetchall()
         return {str(row["fabric_id"]) for row in rows}
 
+    def fabric(self, fabric_id: str) -> Fabric | None:
+        """Fabric ``fabric_id`` with every value and its source tag, or None.
+
+        Library units (a display boundary): areal mass g/m^2, tensile and tear strength as
+        entered, moduli Pa, porosity as entered, maximum service temperature degC, roll
+        width m, cost per m^2 as entered.
+        """
+        row = self._connection.execute(
+            "SELECT * FROM fabrics WHERE fabric_id = ?", (fabric_id,)
+        ).fetchone()
+        return None if row is None else _fabric_from_row(row)
+
+    def fabrics(self) -> list[Fabric]:
+        """Every fabric, ordered by id."""
+        rows = self._connection.execute("SELECT * FROM fabrics ORDER BY fabric_id").fetchall()
+        return [_fabric_from_row(row) for row in rows]
+
+    def catalog(self) -> FabricCatalog:
+        """Immutable copy of the library (for worker threads)."""
+        return FabricCatalog(tuple(self.fabrics()))
+
     def fabric_exists(self, fabric_id: str) -> bool:
         row = self._connection.execute(
             "SELECT 1 FROM fabrics WHERE fabric_id = ? LIMIT 1", (fabric_id,)
         ).fetchone()
         return row is not None
+
+
+_PROPERTIES = (
+    "areal_mass",
+    "warp_tensile",
+    "weft_tensile",
+    "tear",
+    "seam_efficiency",
+    "e_warp",
+    "e_weft",
+    "g",
+    "nu",
+    "porosity",
+    "max_service_temperature",
+    "roll_width",
+)
+
+
+def _fabric_from_row(row: sqlite3.Row) -> Fabric:
+    props = {
+        name: MaterialProperty(float(row[name]), str(row[f"{name}_source"])) for name in _PROPERTIES
+    }
+    return Fabric(
+        fabric_id=str(row["fabric_id"]),
+        name=str(row["name"]),
+        color=str(row["color"]),
+        color_source=str(row["color_source"]),
+        cost=MaterialProperty(float(row["cost"]), str(row["cost_source"])),
+        **props,
+    )

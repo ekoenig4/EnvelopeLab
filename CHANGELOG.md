@@ -3,6 +3,38 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Desktop application shell (`envelopelab`, extra `gui`: PySide6, PyVista, pyvistaqt;
+  ADR-0007): project open/save/save-as, recent projects, preferences, status bar,
+  autosave and crash recovery; dockable Design Tree, Properties, Validation / Warnings,
+  Materials and History panels with unsaved (●) and [STALE] indicators; undo/redo with
+  full history, named snapshots and design versions; new-design wizard (standard gore from
+  target volume/height/width, special shape from a mesh; design from measurements is a
+  stub).
+- `envelopelab.project`: project sessions (every edit an undoable command on
+  `CommandStack`, snapshots, versions, provenance), fingerprint-based dependency graph of
+  derived artifacts (a seam-allowance change marks patterns, nesting and export stale but
+  not the rest mesh or simulations), gore live outputs and constraint locks. New file
+  formats `envelopelab.project` v1 (`*.elproj`) and `envelopelab.autosave` v1 (ADR-0008,
+  generated page `formats/project-file.md`).
+- `CommandStack`: listeners, history, `go_to`, undo/redo texts and clean (saved) state.
+- `FabricLibraryRepository.fabric()`, `.fabrics()` and `.catalog()` (thread-safe copy).
+- Fixture `tests/fixtures/standard_gore/design.elproj`: the generic 8-gore design as a
+  project. No existing numerical result changes.
+- Standard-gore editor (draggable profile points, exact numeric entry, panel rows,
+  height/volume/diameter/N locks, live area, volume, lift, mass and lift margin) and 2D
+  pattern editor (seam allowance, grain, labels, zones, notches, tape paths, feature
+  locations, flagged manual outline overrides with provenance and seam matching). Docs:
+  `user/first-design.md`, `user/editing-designs.md`, `theory/design-editing.md`.
+- Simulation Runs panel with separate Run Preview / Run CalculiX actions (Run CalculiX
+  disabled with installation instructions when ccx is missing; ccx runs as an external
+  process with a progress monitor), solver, convergence, residual and run time for every
+  run, stale runs never shown as current; 3D view (design surface, rest mesh, preview,
+  CalculiX and reference layers with distinct labels and colours, section plane, picking,
+  spline widget). `envelopelab.project.simulation`: design -> build pack -> solver model
+  pipeline and run records. Docs: `user/running-simulations.md`.
+- `calculix_adapter.run_calculix`: optional `progress` callback (`CalculixProgress`) and
+  `cancel` token (stops ccx, `CalculixCancelledError`). Results are bit-identical with and
+  without them.
 - `envelopelab.solvers.model`: gas chambers (`PressureChamber`, `SolverModel.chambers`,
   `tri_chambers`, `triangle_pressure`); closures may belong to a chamber. Preview solver
   and CalculiX adapter share the definition; chamber volumes and per-gas lift in the
