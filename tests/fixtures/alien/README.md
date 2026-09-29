@@ -11,3 +11,16 @@ source-code special cases (`tests/regression/test_pattern_import_fixtures.py`,
 these tests says nothing about its airworthiness. Its eye-pod layout (a separate skin sewn
 onto envelope panels over feed holes) is one example of an appendage, not a general
 assumption.
+
+The `features:` section of `build-pack.yaml` describes the two eye pods and the two
+antennae for `envelopelab.features` (placement, rim, match points, feed holes, pressure,
+construction steps, intended values from the pack's documents); `reference:` names the
+reference mesh `reference/alien-reference.obj` and the concept page whose title carries
+the volume notation. The mesh is generated from `pack/alien-balloon-3d.html` by
+`make_reference_mesh.py` (the page's own lathe profile and eye bulges). They are used by
+`tests/regression/test_feature_regressions.py` and `docs/validation/special-shape-fixtures.md`.
+
+Figures measured from the pack's DXF (not the task text): skin offset 224 mm (mean),
+rim ease 1.241 m = 5.35 % over 16 match points (77.6 mm per segment). The DXF antenna
+cone sector has two equal side seams (2.27 m), so it does not produce the 35 deg lean the
+instructions describe; the Reality Check reports this.

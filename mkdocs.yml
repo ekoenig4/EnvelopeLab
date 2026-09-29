@@ -18,6 +18,7 @@ nav:
       - Pattern-import fixtures: validation/pattern-import-fixtures.md
       - Preview solver benchmarks: validation/preview-solver-benchmarks.md
       - Preview vs CalculiX: validation/preview-vs-calculix.md
+      - Special-shape fixtures: validation/special-shape-fixtures.md
   - Formats:
       - Design schema: formats/design-schema.md
       - Pattern import mapping: formats/pattern-import-mapping.md

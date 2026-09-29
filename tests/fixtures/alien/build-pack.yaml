@@ -202,3 +202,112 @@ assembly:
       reason: "see antenna_neck_g4"
   mesh:
     target_edge_length_mm: 400
+
+# Special-shape features (envelopelab.features). TEST DATA ONLY: values from the pack's
+# -eye-build.pdf, -eyes.pdf, -antenna-instructions.pdf and -antennae.pdf.
+features:
+  - name: eye_pod_left
+    kind: ram_air_pod
+    # Pack: "seam to seam across three gores; row F bottom to row J top exactly".
+    host: {ring: envelope, gores: [18, 20], rows: [F, J], margin_mm: 2500}
+    footprint: {piece: eye_footprint}
+    skin:
+      piece: eye_skin
+      # The 14 bolt-width pieces the skin is cut from (strip seams fabric to fabric).
+      strips: {file: pack/alien-balloon-appendage-patterns.dxf, layer: PIECING}
+    skin_zone: ripstop_black
+    rim: {seam: eye_rim_left, match_points: 16, tape: "Class 3 1/2 in", caught_into_host_tapes: true}
+    feed_holes:
+      - {opening: "envelope/H@20:eye_feed_hole"}
+      - {opening: "envelope/H@19:eye_feed_hole"}
+      - {opening: "envelope/i@18:eye_feed_hole"}
+    pressure: {mode: fed, loss_factor: 0.1}
+    # Pack: dome 1300 mm proud, skin offset 224 mm, rim ease 1.24 m (5.4 %).
+    intended: {dome_height_mm: 1300, skin_offset_mm: 224, rim_ease_mm: 1240}
+    # 800 mm: the preview solve converges; at 500 mm it does not (see
+    # docs/validation/special-shape-fixtures.md).
+    mesh_size_mm: 800
+    construction:
+      - {step: strip_seams, note: "sections within a strip first, then strip to strip"}
+      - {step: ordinate_check, tolerance_mm: 10, note: "assembled skin against the loft"}
+      - {step: gore_assembly}
+      - {step: feed_holes}
+      - {step: rim_tape, note: "caught into every vertical load tape it crosses"}
+      - {step: ease_onto_envelope, note: "16 match points, pinned by halving"}
+      - {step: load_test}
+  - name: eye_pod_right
+    kind: ram_air_pod
+    host: {ring: envelope, gores: [2, 4], rows: [F, J], mirror: true, margin_mm: 2500}
+    footprint: {piece: eye_footprint}
+    skin:
+      piece: eye_skin
+      strips: {file: pack/alien-balloon-appendage-patterns.dxf, layer: PIECING}
+    skin_zone: ripstop_black
+    rim: {seam: eye_rim_right, match_points: 16, tape: "Class 3 1/2 in", caught_into_host_tapes: true}
+    feed_holes:
+      - {opening: "envelope/H@2:eye_feed_hole"}
+      - {opening: "envelope/H@3:eye_feed_hole"}
+      - {opening: "envelope/i@4:eye_feed_hole"}
+    pressure: {mode: fed, loss_factor: 0.1}
+    intended: {dome_height_mm: 1300, skin_offset_mm: 224, rim_ease_mm: 1240}
+    # 800 mm: the preview solve converges; at 500 mm it does not (see
+    # docs/validation/special-shape-fixtures.md).
+    mesh_size_mm: 800
+    construction:
+      - {step: strip_seams}
+      - {step: ordinate_check, tolerance_mm: 10}
+      - {step: gore_assembly}
+      - {step: feed_holes}
+      - {step: rim_tape}
+      - {step: ease_onto_envelope}
+      - {step: load_test}
+  - name: antenna_g18
+    kind: tubular
+    host: {ring: envelope, gores: [18, 18], rows: [N, N], margin_mm: 900}
+    skin: {instance: antenna_cone_g18}
+    rim: {tape: "Class 3 1/2 in"}
+    feed_holes: [{opening: "envelope/N@18:antenna_feed_hole"}]
+    pressure: {mode: fed, loss_factor: 0.1}
+    tube:
+      base_mark: antenna_base
+      # Ball (not assembled, stands in as a neck cap): 7.07 m^2 red ripstop at an
+      # assumed 0.065 kg/m^2 = 0.46 kg; hot-air lift of the 1.77 m^3 ball at 100 degC
+      # internal, ISA sea level = 1.77 x 2.74 = 4.8 N (both assumed).
+      tip_mass_kg: 0.46
+      tip_lift_n: 4.8
+    doubler: {instance: "envelope/N@18", caught_at: gore_assembly}
+    # Pack: 3.75 m overall (2.25 m cone + 1.5 m ball), 35 deg outboard lean.
+    intended: {lean_deg: 35, length_mm: 2250, overall_length_mm: 3750}
+    mesh_size_mm: 150
+    construction:
+      - {step: doubler_caught_into_seams}
+      - {step: gore_assembly}
+      - {step: feed_holes}
+      - {step: attach_appendage}
+  - name: antenna_g4
+    kind: tubular
+    host: {ring: envelope, gores: [4, 4], rows: [N, N], margin_mm: 900}
+    skin: {instance: antenna_cone_g4}
+    rim: {tape: "Class 3 1/2 in"}
+    feed_holes: [{opening: "envelope/N@4:antenna_feed_hole"}]
+    pressure: {mode: fed, loss_factor: 0.1}
+    tube: {base_mark: antenna_base, tip_mass_kg: 0.46, tip_lift_n: 4.8}
+    doubler: {instance: "envelope/N@4", caught_at: gore_assembly}
+    intended: {lean_deg: 35, length_mm: 2250, overall_length_mm: 3750}
+    mesh_size_mm: 150
+    construction:
+      - {step: doubler_caught_into_seams}
+      - {step: gore_assembly}
+      - {step: feed_holes}
+      - {step: attach_appendage}
+
+# Reference shape for the Reality Check report (a mesh generated from the pack's 3D
+# concept page by tests/fixtures/alien/make_reference_mesh.py; its title carries the
+# volume notation).
+reference:
+  mesh: reference/alien-reference.obj
+  title_source: pack/alien-balloon-3d.html
+  # Frame of the reference mesh: the concept page puts the face (gore 1, between the
+  # eyes) at azimuth 90 deg; the build pack's gore 1 centre is at 9 deg (18 deg gores,
+  # panel +x = increasing gore), so reference azimuth = build-pack azimuth + 81 deg.
+  rotate_z_deg: 81

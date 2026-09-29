@@ -1,0 +1,272 @@
+{
+  "blister": [
+    {
+      "analytic_apex_n_n_per_m": 100.03869205139895,
+      "apex_n_n_per_m": 99.29968614754972,
+      "case": "baseline",
+      "converged": true,
+      "elements": 342,
+      "nodes": 193,
+      "pressure_pa": 200.0,
+      "protrusion_m": 0.9948451780489377,
+      "solver": "preview",
+      "stiffness_n_per_m": 100000.0
+    },
+    {
+      "analytic_apex_n_n_per_m": 100.03869204855343,
+      "apex_n_n_per_m": 99.29968840000001,
+      "case": "baseline",
+      "converged": true,
+      "elements": 342,
+      "nodes": 193,
+      "pressure_pa": 200.0,
+      "protrusion_m": 0.9948451781181981,
+      "solver": "calculix",
+      "stiffness_n_per_m": 100000.0
+    },
+    {
+      "analytic_apex_n_n_per_m": 200.2321566491471,
+      "apex_n_n_per_m": 198.7310818383886,
+      "case": "pressure x2",
+      "converged": true,
+      "elements": 342,
+      "nodes": 193,
+      "pressure_pa": 400.0,
+      "protrusion_m": 0.99562871057646,
+      "solver": "preview",
+      "stiffness_n_per_m": 100000.0
+    },
+    {
+      "analytic_apex_n_n_per_m": 200.23215666107114,
+      "apex_n_n_per_m": 198.73118627450987,
+      "case": "pressure x2",
+      "converged": true,
+      "elements": 342,
+      "nodes": 193,
+      "pressure_pa": 400.0,
+      "protrusion_m": 0.995628710502588,
+      "solver": "calculix",
+      "stiffness_n_per_m": 100000.0
+    },
+    {
+      "analytic_apex_n_n_per_m": 100.00027488055092,
+      "apex_n_n_per_m": 99.26528785437516,
+      "case": "stiffness x2",
+      "converged": true,
+      "elements": 342,
+      "nodes": 193,
+      "pressure_pa": 200.0,
+      "protrusion_m": 0.9944565706591194,
+      "solver": "preview",
+      "stiffness_n_per_m": 200000.0
+    },
+    {
+      "analytic_apex_n_n_per_m": 100.0002748864352,
+      "apex_n_n_per_m": 99.2653026,
+      "case": "stiffness x2",
+      "converged": true,
+      "elements": 342,
+      "nodes": 193,
+      "pressure_pa": 200.0,
+      "protrusion_m": 0.9944565708051314,
+      "solver": "calculix",
+      "stiffness_n_per_m": 200000.0
+    }
+  ],
+  "calculix_version": "2.21",
+  "ease": [
+    {
+      "class": "designed ease",
+      "designed_ease_m": 0.04,
+      "fixture": "special_shape",
+      "length_a_m": 1.8848519944211033,
+      "length_b_m": 1.9249366907642644,
+      "residual_m": 8.469634316114055e-05,
+      "seam": "tube_base"
+    },
+    {
+      "class": "summary",
+      "fixture": "special_shape",
+      "seam": "(all)",
+      "seam_errors": 0
+    },
+    {
+      "class": "designed ease",
+      "designed_ease_m": 1.24,
+      "fixture": "alien",
+      "length_a_m": 23.18499002731682,
+      "length_b_m": 24.42613819922712,
+      "residual_m": 0.0011481719102965915,
+      "seam": "eye_rim_left"
+    },
+    {
+      "class": "designed ease",
+      "designed_ease_m": 1.24,
+      "fixture": "alien",
+      "length_a_m": 23.18499002731682,
+      "length_b_m": 24.42613819922712,
+      "residual_m": 0.0011481719102965915,
+      "seam": "eye_rim_right"
+    },
+    {
+      "class": "summary",
+      "fixture": "alien",
+      "seam": "(all)",
+      "seam_errors": 0
+    }
+  ],
+  "fixture": {
+    "antenna_g18": {
+      "construction": [
+        [
+          "doubler_caught_into_seams before attach_appendage",
+          "ok"
+        ],
+        [
+          "gore_assembly before attach_appendage",
+          "ok"
+        ],
+        [
+          "feed_holes before attach_appendage",
+          "ok"
+        ],
+        [
+          "doubler caught into seams",
+          "ok"
+        ]
+      ],
+      "geometry": {
+        "base_edge_m": 2.7508719773386385,
+        "footprint_rim_m": 2.7495944254750104,
+        "reference_projected_height_m": 0.011045473766311709,
+        "side_a_m": 2.27,
+        "side_b_m": 2.27,
+        "side_difference_m": 0.0
+      },
+      "geometry_findings": [
+        [
+          "warning",
+          "intended lean 35 deg but the pattern's two side seams are equal (2270 mm): a straight base cut does not lean the tube"
+        ]
+      ],
+      "preview": {
+        "chamber_volume_m3": 0.661620872613478,
+        "converged": true,
+        "elements": 1250,
+        "lean_deg": 0.18739531902744855,
+        "nodes": 692,
+        "projected_height_m": 2.2351249868969987,
+        "skin_wrinkled_fraction": 0.3570221945624344,
+        "status": "converged"
+      },
+      "verified": false
+    },
+    "eye_pod_left": {
+      "construction": [
+        [
+          "strip_seams before ordinate_check",
+          "ok"
+        ],
+        [
+          "ordinate_check before ease_onto_envelope",
+          "ok"
+        ],
+        [
+          "feed_holes before ease_onto_envelope",
+          "ok"
+        ],
+        [
+          "rim_tape before ease_onto_envelope",
+          "ok"
+        ],
+        [
+          "gore_assembly before ease_onto_envelope",
+          "ok"
+        ],
+        [
+          "ordinate check",
+          "ok"
+        ]
+      ],
+      "geometry": {
+        "ease_per_segment_m": 0.07757176074439354,
+        "footprint_area_m2": 34.19526369430241,
+        "footprint_height_m": 6.812899999999998,
+        "footprint_rim_m": 23.18499002731682,
+        "footprint_width_m": 7.96440658503959,
+        "match_points": 16,
+        "reference_projected_height_m": 1.3875329854909308,
+        "rim_ease_fraction": 0.053532400507740635,
+        "rim_ease_m": 1.2411481719102966,
+        "skin_area_m2": 39.50455540370467,
+        "skin_area_ratio": 1.1552639499103172,
+        "skin_offset_max_m": 0.2393976456806075,
+        "skin_offset_mean_m": 0.22365325202223083,
+        "skin_offset_min_m": 0.2076488096193773,
+        "skin_rim_m": 24.42613819922712
+      },
+      "geometry_findings": [],
+      "preview": {
+        "chamber_volume_m3": 10.817596206852887,
+        "converged": true,
+        "elements": 1510,
+        "nodes": 782,
+        "projected_height_m": 0.3864719612733536,
+        "skin_wrinkled_fraction": 0.7729114783196801,
+        "status": "converged"
+      },
+      "verified": false
+    }
+  },
+  "fixture_name": "alien",
+  "load_transfer": [
+    {
+      "converged": true,
+      "elements": 1445,
+      "host_rim_max_n1_n_per_m": 173.725552341059,
+      "min_host_fos": 80.58687862171892,
+      "nodes": 751,
+      "protrusion_m": 0.5001960558242473,
+      "rim_tape_caught": true,
+      "rim_tape_max_tension_n": 92.10272395916431,
+      "solver": "preview"
+    },
+    {
+      "converged": true,
+      "elements": 1445,
+      "host_rim_max_n1_n_per_m": 173.7255803804806,
+      "min_host_fos": 80.58686561494433,
+      "nodes": 751,
+      "protrusion_m": 0.5001960574000037,
+      "rim_tape_caught": true,
+      "rim_tape_max_tension_n": 92.102725721388,
+      "solver": "calculix"
+    },
+    {
+      "converged": true,
+      "elements": 1445,
+      "host_rim_max_n1_n_per_m": 326.7781670304801,
+      "min_host_fos": 42.842519520877765,
+      "nodes": 751,
+      "protrusion_m": 0.5044987159941705,
+      "rim_tape_caught": false,
+      "rim_tape_max_tension_n": 75.75909634255362,
+      "solver": "preview"
+    },
+    {
+      "converged": true,
+      "elements": 1445,
+      "host_rim_max_n1_n_per_m": 326.7782784418795,
+      "min_host_fos": 42.842504914199885,
+      "nodes": 751,
+      "protrusion_m": 0.5044987223749295,
+      "rim_tape_caught": false,
+      "rim_tape_max_tension_n": 75.75912138563234,
+      "solver": "calculix"
+    }
+  ],
+  "notes": [
+    "The pod sub-model converges with the preview solver at its fixture mesh (800 mm); at 500 mm it does not converge within 200 000 iterations (the host fabric under the pod carries almost no pressure and wrinkles), so the pod height above is mesh-dependent and is not a prediction of the built pod.",
+    "CalculiX did not converge on the 800 mm pod sub-model in a trial run (tension-field states kept changing between passes); the fixture's reports are therefore not verified."
+  ]
+}
