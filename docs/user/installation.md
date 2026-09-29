@@ -91,7 +91,13 @@ use **Simulation ▸ Detect CalculiX again** or restart.
 envelopelab                 # or: python -m envelopelab_app
 envelopelab my.elproj       # open a project
 envelopelab --no-3d         # without the PyVista 3D renderer (no OpenGL needed)
+envelopelab --software-gl   # software OpenGL (Mesa llvmpipe): slower, works everywhere
+envelopelab --hardware-gl   # GPU OpenGL even where software is the default (WSL)
 ```
+
+Under **WSL** (Windows Subsystem for Linux, WSLg) the application selects software OpenGL
+by itself and says so on start-up, because the WSL GPU driver draws the window black. An
+explicit `LIBGL_ALWAYS_SOFTWARE` setting in your environment is always respected.
 
 On a machine without a display (a container, a server over SSH), run it on a virtual
 display:
@@ -113,6 +119,11 @@ above are installed, force X11 with `QT_QPA_PLATFORM=xcb envelopelab`.
 
 **Still failing?** Run `QT_DEBUG_PLUGINS=1 envelopelab 2>&1 | tail -40`: the last lines
 name the library that could not be loaded; install the package that provides it.
+
+**The window opens but stays black (WSL, virtual machines, remote desktop).** The GPU OpenGL
+driver cannot draw the window. Start with `envelopelab --software-gl` (the same as
+`LIBGL_ALWAYS_SOFTWARE=1 envelopelab`); under WSL this is already the default. Keeping WSL
+up to date (`wsl --update` in Windows PowerShell, then `wsl --shutdown`) also helps.
 
 **The window opens but the 3D view is blank or crashes** (remote desktop, no OpenGL):
 start with `envelopelab --no-3d`, or turn the 3D view off in **File ▸ Preferences**. The

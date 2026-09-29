@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Desktop application: software OpenGL (`LIBGL_ALWAYS_SOFTWARE=1`) is selected
+  automatically under WSL, where the GPU driver drew the window black; new launcher options
+  `--software-gl` and `--hardware-gl`. An explicit `LIBGL_ALWAYS_SOFTWARE` is respected.
 - `scripts/install_env.sh`: one-command environment setup for Linux and containers (system
   libraries for Gmsh, Qt and VTK via apt/dnf/pacman/zypper, CalculiX, Xvfb, virtualenv,
   `pip install -e .[dev,docs,gui]`, and a headless start check of the application); CI
