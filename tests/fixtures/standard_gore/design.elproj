@@ -1,0 +1,127 @@
+{
+  "format": "envelopelab.project",
+  "format_version": 1,
+  "locks": {
+    "gore_count": null,
+    "height": null,
+    "max_diameter": null,
+    "volume": null
+  },
+  "provenance": [],
+  "runs": [],
+  "snapshots": [],
+  "state": {
+    "design": {
+      "envelope_type": "gore",
+      "features": [],
+      "gores": {
+        "count": 8,
+        "crown_ring": 1.6,
+        "meridian_profile_control_points": [
+          {
+            "x": 1.0,
+            "y": 0.0
+          },
+          {
+            "x": 2.6,
+            "y": 2.0
+          },
+          {
+            "x": 3.0,
+            "y": 4.5
+          },
+          {
+            "x": 2.2,
+            "y": 7.0
+          },
+          {
+            "x": 0.8,
+            "y": 8.2
+          }
+        ],
+        "mouth_diameter": 2.0,
+        "panel_rows": [
+          {
+            "finished_height": 2.4182,
+            "letter": "A"
+          },
+          {
+            "finished_height": 2.4182,
+            "letter": "B"
+          },
+          {
+            "finished_height": 2.4182,
+            "letter": "C"
+          },
+          {
+            "finished_height": 2.4184493424651095,
+            "letter": "D"
+          }
+        ],
+        "parachute_hole_diameter": 1.6,
+        "seal_overlap": 0.16000000000000003
+      },
+      "meta": {
+        "content_hash": "3fdc6dc5d9f75761a2d68a58136db34ddcf62e2605d9730cea4ff05ed5a5fe39",
+        "created": "2026-09-01T00:00:00Z",
+        "modified": "2026-09-01T00:00:00Z",
+        "name": "generic standard gore fixture",
+        "parent_id": null,
+        "version_id": "v1-fixture"
+      },
+      "operating": {
+        "altitude": 0.0,
+        "ambient_pressure": 101325.0,
+        "ambient_temperature": 288.15,
+        "internal_temperature": 373.15,
+        "payload_mass": 0.0
+      },
+      "rigging": {
+        "crown_line": "crown line",
+        "flying_wires": [],
+        "parachute_confluence_centering": "centred",
+        "red_line": "deflation line"
+      },
+      "scale_variants": [],
+      "schema_version": 1,
+      "seam_types": [
+        {
+          "allowance": 0.025,
+          "efficiency": 0.8,
+          "name": "flat felled",
+          "rows_of_stitching": 2
+        }
+      ],
+      "special": null,
+      "tapes": {
+        "hole": {
+          "class": "crown ring tape",
+          "strength": 7000.0,
+          "width": 0.025
+        },
+        "horizontal": {
+          "class": "horizontal tape",
+          "strength": 7000.0,
+          "width": 0.025
+        },
+        "rim": {
+          "class": "mouth webbing",
+          "strength": 20000.0,
+          "width": 0.05
+        },
+        "vertical": {
+          "class": "vertical load tape",
+          "strength": 7000.0,
+          "width": 0.025
+        }
+      },
+      "zones": {
+        "body": "ripstop_nylon"
+      }
+    },
+    "patterns": {
+      "rows": {}
+    }
+  },
+  "versions": []
+}

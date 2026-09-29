@@ -25,8 +25,15 @@ dev = [
   "mypy>=1.11",
   "pre-commit>=3.8",
   "pytest>=8.3",
+  "pytest-qt>=4.4",
   "ruff>=0.6",
   "types-PyYAML>=6.0",
+]
+# Desktop application (app/envelopelab_app). See ADR-0007.
+gui = [
+  "PySide6>=6.6",
+  "pyvista>=0.43",
+  "pyvistaqt>=0.11",
 ]
 docs = [
   "mkdocs>=1.6",
@@ -44,11 +51,16 @@ scan = []
 [project.scripts]
 envelopelab-import = "envelopelab.assembly.pipeline:main"
 
+[project.gui-scripts]
+envelopelab = "envelopelab_app.application:main"
+
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers"
 markers = [
   "slow: long-running test, excluded from the fast suite with -m 'not slow'",
 ]
+# GUI tests run headless (offscreen Qt platform); see tests/gui/conftest.py.
+qt_api = "pyside6"
 testpaths = ["tests"]
 
 [tool.ruff]
@@ -60,14 +72,14 @@ select = ["E", "F", "I", "UP", "B", "N"]
 
 [tool.ruff.lint.isort]
 # The CalculiX adapter lives in solvers/ but is part of this project.
-known-first-party = ["envelopelab", "calculix_adapter"]
+known-first-party = ["envelopelab", "calculix_adapter", "envelopelab_app"]
 
 [tool.mypy]
 # No python_version pin: each CI job checks against its own interpreter. Pinning 3.11 made
 # mypy parse numpy >= 2.5 stubs (3.12-only `type` statements) as 3.11 code on 3.12 runners.
 # The 3.11 job and ruff's target-version still enforce 3.11 compatibility.
 strict = true
-packages = ["envelopelab", "calculix_adapter"]
+packages = ["envelopelab", "calculix_adapter", "envelopelab_app"]
 
 [[tool.mypy.overrides]]
 # SciPy ships no type information; its results are converted with np.asarray at the call site.
@@ -80,9 +92,15 @@ module = ["open3d", "open3d.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+# pyvistaqt and VTK ship no (complete) type information; the 3D view isolates them.
+module = ["pyvistaqt", "pyvistaqt.*", "vtkmodules", "vtkmodules.*", "pyvista", "pyvista.*"]
+ignore_missing_imports = true
+follow_imports = "skip"
+
+[[tool.mypy.overrides]]
 # The Gmsh Python API (a ctypes wrapper) ships no type information.
 module = ["gmsh"]
 ignore_missing_imports = true
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/envelopelab", "solvers/calculix_adapter"]
+packages = ["src/envelopelab", "solvers/calculix_adapter", "app/envelopelab_app"]

@@ -30,22 +30,24 @@ never hidden. The builder is responsible for airworthiness.
                        (now: atmosphere, geometry, mass_estimate, design, materials,
                        commands, validation, io, assembly, solvers (preview
                        dynamic-relaxation solver), features (special-shape
-                       appendages), report (Reality Check); planned: export)
-    tests/             unit/, property/, benchmarks/, regression/, fixtures/ (planned: gui/)
+                       appendages), report (Reality Check), project (sessions,
+                       dependency graph, project files); planned: export)
+    tests/             unit/, property/, benchmarks/, regression/, fixtures/, gui/
     docs/              MkDocs site: user/, theory/, validation/, dev/, formats/, adr/
     scripts/           dev utilities: verify.py, generate_validation_docs.py,
-                       generate_design_schema_docs.py, generate_pattern_mapping_docs.py
+                       generate_design_schema_docs.py, generate_pattern_mapping_docs.py,
+                       generate_project_schema_docs.py
     solvers/           adapters for external solvers: calculix_adapter (CalculiX
                        verification solver, installed as `calculix_adapter`);
                        planned: Gmsh, Meshroom
-    app/               planned: PySide6 GUI
+    app/               PySide6 GUI, installed as `envelopelab_app` (extra `gui`)
 
 Paths written as `envelopelab/...` elsewhere in this file mean `src/envelopelab/...`.
 Create a planned directory only when the first code for it lands.
 
 ## 4. Environment setup
     python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-    pip install -e ".[dev,docs]"
+    pip install -e ".[dev,docs,gui]"
     pre-commit install
 
 ## 5. Working loop (every task)
@@ -62,7 +64,7 @@ Create a planned directory only when the first code for it lands.
 
 ### 6.1 Commands
     ruff check . && ruff format --check .      # lint + format
-    mypy src solvers tests                     # types (strict; config in pyproject.toml)
+    mypy src solvers app tests                 # types (strict; config in pyproject.toml)
     pytest -m "not slow" -q                    # fast suite, run after every change
     pytest -q                                  # full suite, run before every commit
     python scripts/generate_validation_docs.py # regenerate docs/validation/ benchmark pages
