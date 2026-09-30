@@ -12,6 +12,7 @@ nav:
   - Developer:
       - Setup: dev/setup.md
       - CalculiX installation: dev/calculix-installation.md
+      - TODO and open work: dev/todo.md
   - Theory:
       - Atmosphere: theory/atmosphere.md
       - Gore geometry: theory/gore-geometry.md

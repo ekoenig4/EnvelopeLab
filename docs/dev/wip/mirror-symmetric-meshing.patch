@@ -1,0 +1,211 @@
+diff --git a/src/envelopelab/assembly/mesh.py b/src/envelopelab/assembly/mesh.py
+index e9b6b45..8a6182b 100644
+--- a/src/envelopelab/assembly/mesh.py
++++ b/src/envelopelab/assembly/mesh.py
+@@ -14,7 +14,12 @@ Method
+    points are kept exactly (every boundary segment is a transfinite line with two nodes);
+    embedded marks and tape paths become embedded mesh lines. A background size field
+    refines the mesh near seams, holes, marks and corners and grows to the target edge
+-   length inside the panel.
++   length inside the panel. A panel whose prescribed boundary is mirror-symmetric about a
++   vertical line (a standard gore panel) is meshed as its left half and reflected, so its
++   triangulation has the symmetry of the panel: a non-symmetric mesh of a symmetric panel
++   biases the equilibrium sideways at every seam, and the preview solver then wanders
++   between near-equal lobe shapes of lofted gores instead of converging. Edges that cross
++   the mirror line get a boundary node on it (on both sides of their seam).
+ 3. **Sewing.** Local nodes of all instances are merged with a union-find over the seam
+    node pairs, producing one topological mesh. Openings are left unsewn. Every triangle
+    keeps its flat rest coordinates (the as-cut geometry), panel id, material zone, grain
+@@ -61,6 +66,8 @@ from envelopelab.geometry.polygon import (
+ IntArray = npt.NDArray[np.int64]
+ #: Relative tolerance (x target size) used to match Gmsh nodes to prescribed points.
+ MATCH_TOLERANCE = 1e-6
++#: Largest deviation from mirror symmetry for a panel or edge to be meshed symmetrically, m.
++SYMMETRY_TOLERANCE = 1e-6
+ 
+ 
+ class MeshingError(RuntimeError):
+@@ -155,6 +162,39 @@ class RestMesh:
+ # --------------------------------------------------------------------------------------
+ 
+ 
++def _mirror_axis(outline: FloatArray, tol: float = SYMMETRY_TOLERANCE) -> float | None:
++    """x of the vertical mirror line of a closed outline, m (None if not symmetric)."""
++    c = 0.5 * float(outline[:, 0].min() + outline[:, 0].max())
++    reflected = outline * np.array([-1.0, 1.0]) + np.array([2.0 * c, 0.0])
++    if float(distance_to_polyline(reflected, outline, closed=True).max()) > tol:
++        return None
++    return c
++
++
++def _crosses_axis_symmetrically(assembly: Assembly, node_id: str) -> bool:
++    """True for an edge of a mirror-symmetric instance that crosses the mirror line and is
++    itself symmetric about it (its arc-length midpoint then lies on the line)."""
++    node = assembly.graph.nodes[node_id]
++    if not node.instance_id:
++        return False
++    inst = assembly.instances[node.instance_id]
++    c = _mirror_axis(inst.outline)
++    pts = node.points
++    if c is None or not (
++        pts[:, 0].min() < c - SYMMETRY_TOLERANCE < c + SYMMETRY_TOLERANCE < pts[:, 0].max()
++    ):
++        return False
++    reflected = pts * np.array([-1.0, 1.0]) + np.array([2.0 * c, 0.0])
++    return float(distance_to_polyline(reflected, pts, closed=False).max()) <= SYMMETRY_TOLERANCE
++
++
++def _with_midpoint(t: FloatArray) -> FloatArray:
++    """Fractions with 0.5 included (a node on the mirror line of a symmetric edge)."""
++    if np.any(np.abs(t - 0.5) < 1e-12):
++        return t
++    return np.sort(np.append(t, 0.5))
++
++
+ def _seam_size(seam: GraphSeam, opts: MeshOptions) -> float:
+     if seam.seam_type in {"appendage", "reinforcement", "closing"} or seam.attachment:
+         return opts.appendage
+@@ -194,6 +234,13 @@ def _seam_fractions(
+         parts.append(u0 + (u1 - u0) * f[1:])
+     ta = np.concatenate(parts)
+     ta[-1] = 1.0
++    if (
++        len(seam.side_a) == 1
++        and len(seam.side_b) == 1
++        and _crosses_axis_symmetrically(assembly, seam.side_a[0].node_id)
++        and _crosses_axis_symmetrically(assembly, seam.side_b[0].node_id)
++    ):
++        ta = _with_midpoint(ta)
+     tb = ta if seam.props.orientation == "same" else 1.0 - ta[::-1]
+     return ta, tb, breaks_a
+ 
+@@ -254,7 +301,10 @@ def discretize(assembly: Assembly, opts: MeshOptions) -> dict[str, FloatArray]:
+         loop = inst.loops.get(node.name)
+         size = opts.hole if loop is not None and loop.role != "tape" else opts.seam
+         end = opts.corner if loop is None else None
+-        fractions[node_id] = graded_fractions(node.length, size, end, opts.growth)
++        t = graded_fractions(node.length, size, end, opts.growth)
++        if loop is None and _crosses_axis_symmetrically(assembly, node_id):
++            t = _with_midpoint(t)
++        fractions[node_id] = t
+     return fractions
+ 
+ 
+@@ -286,7 +336,73 @@ class _PanelGeometry:
+ _ALGORITHMS = {"frontal_delaunay": 6, "delaunay": 5, "meshadapt": 1}
+ 
+ 
+-def _gmsh_triangulate(geom: _PanelGeometry, opts: MeshOptions) -> tuple[FloatArray, IntArray]:
++def _triangulate(geom: _PanelGeometry, opts: MeshOptions) -> tuple[FloatArray, IntArray]:
++    """Triangulate a panel; mirror-symmetric panels as their reflected left half."""
++    half = _mirror_half(geom, MATCH_TOLERANCE * max(opts.target, 1e-3), opts)
++    if half is None:
++        return _gmsh_triangulate(geom, opts)
++    half_geom, c, n_axis = half
++    xy, tris = _gmsh_triangulate(half_geom, opts, interior_lines=n_axis)
++    on_axis = np.abs(xy[:, 0] - c) <= MATCH_TOLERANCE * max(opts.target, 1e-3)
++    xy[on_axis, 0] = c
++    off = np.flatnonzero(~on_axis)
++    mirror_index = np.arange(len(xy))
++    mirror_index[off] = len(xy) + np.arange(len(off))
++    mirrored = xy[off] * np.array([-1.0, 1.0]) + np.array([2.0 * c, 0.0])
++    full_xy = np.vstack((xy, mirrored))
++    full_tris = np.vstack((tris, mirror_index[tris][:, [0, 2, 1]]))
++    return full_xy, full_tris
++
++
++def _mirror_half(
++    geom: _PanelGeometry, tol: float, opts: MeshOptions
++) -> tuple[_PanelGeometry, float, int] | None:
++    """Left half of a panel whose prescribed boundary points are mirror-symmetric about a
++    vertical line and include both crossing points of that line (None otherwise).
++
++    The half is closed by the mirror line, discretised like a seam edge (the boundary
++    spacing at both ends, growing to the target size inside); the returned count is the
++    number of mirror-line segments."""
++    if geom.holes or geom.embeds:
++        return None
++    pts = geom.outer
++    c = 0.5 * float(pts[:, 0].min() + pts[:, 0].max())
++    reflected = pts * np.array([-1.0, 1.0]) + np.array([2.0 * c, 0.0])
++    dist, _ = cKDTree(pts).query(reflected)
++    axis = np.flatnonzero(np.abs(pts[:, 0] - c) <= tol)
++    if float(dist.max()) > tol or len(axis) != 2:
++        return None
++    top, bottom = (int(i) for i in sorted(axis, key=lambda i: -pts[i, 1]))
++    n = len(pts)
++    # Counter-clockwise from the top crossing: along the top leftwards, down the left side
++    # and along the bottom to the bottom crossing; the mirror line closes the loop.
++    order = [(top + k) % n for k in range(n)]
++    order = order[: order.index(bottom) + 1]
++    if not np.all(pts[order[1:-1], 0] < c):
++        return None
++    corners = [order.index(i) for i in geom.corners if i in order]
++    y0, y1 = float(pts[bottom, 1]), float(pts[top, 1])
++    end = float(min(geom.outer_size[bottom], geom.outer_size[top]))
++    t = graded_fractions(y1 - y0, opts.target, end, opts.growth)[1:-1]
++    axis_pts = np.column_stack((np.full(len(t), c), y0 + t * (y1 - y0)))
++    steps = np.diff(np.concatenate(([0.0], t, [1.0]))) * (y1 - y0)
++    axis_size = np.minimum(steps[:-1], steps[1:])
++    half = _PanelGeometry(
++        outer=np.vstack((pts[order], axis_pts)),
++        outer_size=np.concatenate((geom.outer_size[order], axis_size)),
++        holes=[],
++        embeds=[],
++        corners=corners,
++    )
++    return half, c, len(t) + 1
++
++
++def _gmsh_triangulate(
++    geom: _PanelGeometry, opts: MeshOptions, interior_lines: int = 0
++) -> tuple[FloatArray, IntArray]:
++    """Gmsh triangulation of a panel. The last ``interior_lines`` outline segments (the
++    mirror line of a half panel, which lies inside the full panel) get no refinement
++    field."""
+     import gmsh
+ 
+     gmsh.model.add("panel")
+@@ -305,6 +421,9 @@ def _gmsh_triangulate(geom: _PanelGeometry, opts: MeshOptions) -> tuple[FloatArr
+         count = n if closed else n - 1
+         lines = [geo.addLine(ptags[i], ptags[(i + 1) % n]) for i in range(count)]
+         for i, line in enumerate(lines):
++            if interior_lines and closed and i >= count - interior_lines:
++                # The mirror line lies inside the full panel: no refinement field around it.
++                continue
+             # Size classes are rounded to 1 % so that similar spacings share one field.
+             size = float(min(sizes[i], sizes[(i + 1) % n]))
+             line_classes[float(f"{size:.2g}")].append(line)
+@@ -540,7 +659,7 @@ def sew(assembly: Assembly, opts: MeshOptions | None = None) -> RestMesh:
+             geom, curve_pts = _panel_geometry(assembly, inst, fractions, opts)
+             key = geom.key()
+             if key not in cache:
+-                cache[key] = _gmsh_triangulate(geom, opts)
++                cache[key] = _triangulate(geom, opts)
+             xy, tris = cache[key]
+             part = _InstanceMesh(inst, xy, tris)
+             for node_id, pts in curve_pts.items():
+diff --git a/src/envelopelab/geometry/polygon.py b/src/envelopelab/geometry/polygon.py
+index 7b1faf2..d0dbe2b 100644
+--- a/src/envelopelab/geometry/polygon.py
++++ b/src/envelopelab/geometry/polygon.py
+@@ -703,7 +703,10 @@ def graded_fractions(
+     The local spacing is :math:`h(s) = \\min(h, h_e + (g - 1)\\,d(s))` where :math:`d` is
+     the distance to the nearer end, :math:`h` the nominal size, :math:`h_e` the end size and
+     :math:`g` the growth ratio; the resulting node count is rounded and the spacing
+-    rescaled so the last node lands exactly on the end.
++    rescaled so the last node lands exactly on the end. The fractions are then averaged
++    with their mirror image, :math:`t_i \\leftarrow \\tfrac12 (t_i + 1 - t_{k-i})`, so they
++    are symmetric (:math:`t \\leftrightarrow 1 - t`): a mirror-symmetric panel gets
++    mirror-symmetric boundary nodes.
+ 
+     Parameters
+     ----------
+@@ -735,5 +738,5 @@ def graded_fractions(
+         s.append(s[-1] + last_step)
+     if len(s) > 2 and s[-1] - length > 0.5 * last_step:
+         s.pop()
+-    raw = np.array(s, dtype=np.float64)
+-    return np.asarray(raw / raw[-1], dtype=np.float64)
++    raw = np.array(s, dtype=np.float64) / s[-1]
++    return np.asarray(0.5 * (raw + 1.0 - raw[::-1]), dtype=np.float64)
