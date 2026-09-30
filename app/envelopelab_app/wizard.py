@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -26,6 +27,12 @@ from envelopelab.project.templates import (
     MEASUREMENTS_NOT_IMPLEMENTED,
     special_design_from_mesh,
 )
+from envelopelab_app.settings import (
+    WizardDefaults,
+    load_wizard_defaults,
+    reset_wizard_defaults,
+    save_wizard_defaults,
+)
 
 
 def _spin(value: float, low: float, high: float, suffix: str, decimals: int = 2) -> QDoubleSpinBox:
@@ -44,8 +51,14 @@ NO_MOUTH_ROW = "(no separate mouth row)"
 class NewDesignWizard(QDialog):
     """Dialog that produces a new :class:`DesignDocument` (``self.design``)."""
 
-    def __init__(self, fabrics: FabricLibraryRepository, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        fabrics: FabricLibraryRepository,
+        parent: QWidget | None = None,
+        settings: QSettings | None = None,
+    ) -> None:
         super().__init__(parent)
+        self.settings = settings
         self.setWindowTitle("New design")
         self.design: DesignDocument | None = None
         self.tabs = QTabWidget()
@@ -95,6 +108,22 @@ class NewDesignWizard(QDialog):
             ("Ambient temperature", self.ambient),
         ):
             form.addRow(label, widget)
+        self.save_defaults = QPushButton("Save as my defaults")
+        self.save_defaults.setToolTip("Open the wizard with these values next time")
+        self.save_defaults.clicked.connect(self.store_defaults)
+        self.reset_defaults = QPushButton("Reset to built-in defaults")
+        self.reset_defaults.clicked.connect(self.restore_builtin_defaults)
+        defaults_row = QHBoxLayout()
+        defaults_row.addWidget(self.save_defaults)
+        defaults_row.addWidget(self.reset_defaults)
+        form.addRow(defaults_row)
+        self.defaults_note = QLabel()
+        form.addRow(self.defaults_note)
+        for button in (self.save_defaults, self.reset_defaults):
+            button.setEnabled(settings is not None)
+        self.apply_defaults(
+            load_wizard_defaults(settings) if settings is not None else WizardDefaults()
+        )
         self.tabs.addTab(gore, "Standard gore")
 
         special = QWidget()
@@ -134,6 +163,62 @@ class NewDesignWizard(QDialog):
         layout.addWidget(self.tabs)
         layout.addWidget(self.error)
         layout.addWidget(self.buttons)
+
+    # -- defaults -----------------------------------------------------------------------
+
+    def apply_defaults(self, d: WizardDefaults) -> None:
+        """Show ``d`` in the standard-gore fields (unknown fabrics keep the current one)."""
+        self.name.setText(d.name)
+        self.volume.setValue(d.volume)
+        self.target_height.setValue(d.height)
+        self.target_width.setValue(d.width)
+        self.gores.setValue(d.gores)
+        self.rows.setValue(d.rows)
+        self.mouth.setValue(d.mouth_fraction)
+        self.top.setValue(d.top_fraction)
+        if self.fabric.findText(d.fabric) >= 0:
+            self.fabric.setCurrentText(d.fabric)
+        mouth = d.mouth_fabric or NO_MOUTH_ROW
+        if self.mouth_fabric.findText(mouth) >= 0:
+            self.mouth_fabric.setCurrentText(mouth)
+        self.mouth_height.setValue(d.mouth_height)
+        self.allowance.setValue(d.allowance_mm)
+        self.internal.setValue(d.internal_c)
+        self.ambient.setValue(d.ambient_c)
+
+    def current_defaults(self) -> WizardDefaults:
+        """The standard-gore fields as wizard defaults."""
+        mouth = self.mouth_fabric.currentText()
+        return WizardDefaults(
+            name=self.name.text().strip() or "New envelope",
+            volume=self.volume.value(),
+            height=self.target_height.value(),
+            width=self.target_width.value(),
+            gores=self.gores.value(),
+            rows=self.rows.value(),
+            mouth_fraction=self.mouth.value(),
+            top_fraction=self.top.value(),
+            fabric=self.fabric.currentText(),
+            mouth_fabric="" if mouth == NO_MOUTH_ROW else mouth,
+            mouth_height=self.mouth_height.value(),
+            allowance_mm=self.allowance.value(),
+            internal_c=self.internal.value(),
+            ambient_c=self.ambient.value(),
+        )
+
+    def store_defaults(self) -> None:
+        """Save the current fields as the user's defaults."""
+        if self.settings is None:
+            return
+        save_wizard_defaults(self.settings, self.current_defaults())
+        self.defaults_note.setText("Saved: the wizard opens with these values next time.")
+
+    def restore_builtin_defaults(self) -> None:
+        """Forget the user's defaults and show the built-in values."""
+        if self.settings is not None:
+            reset_wizard_defaults(self.settings)
+        self.apply_defaults(WizardDefaults())
+        self.defaults_note.setText("Built-in defaults restored.")
 
     def _browse(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

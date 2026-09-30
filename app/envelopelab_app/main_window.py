@@ -10,6 +10,7 @@ from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -214,6 +215,7 @@ class MainWindow(QMainWindow):
         std = QKeySequence.StandardKey
         self.new_action = self._action("&New design…", self.new_design_dialog, std.New)
         self.open_action = self._action("&Open…", self.open_dialog, std.Open)
+        self.template_action = self._action("New from &template…", self.template_dialog)
         self.save_action = self._action("&Save", self.save, std.Save)
         self.save_as_action = self._action("Save &As…", self.save_as_dialog, std.SaveAs)
         self.prefs_action = self._action("&Preferences…", self.preferences_dialog, std.Preferences)
@@ -236,6 +238,7 @@ class MainWindow(QMainWindow):
         menu = self.menuBar()
         file_menu = menu.addMenu("&File")
         file_menu.addAction(self.new_action)
+        file_menu.addAction(self.template_action)
         file_menu.addAction(self.open_action)
         self.recent_menu = file_menu.addMenu("Open &Recent")
         self.recent_menu.aboutToShow.connect(self._fill_recent)
@@ -487,10 +490,33 @@ class MainWindow(QMainWindow):
     def new_design_dialog(self) -> None:
         if not self.maybe_discard():
             return
-        wizard = NewDesignWizard(self.controller.fabrics, self)
+        wizard = NewDesignWizard(self.controller.fabrics, self, self.settings)
         if wizard.exec() and wizard.design is not None:
             self.new_project(wizard.design)
             self.controller.regenerate_patterns()
+
+    def new_from_template(self, path: str | Path, name: str) -> ProjectSession | None:
+        """Start an unsaved project whose design is a copy of the project at ``path``."""
+        try:
+            session = ProjectSession.from_template(path, name)
+        except (OSError, ValueError) as exc:
+            self._error(f"Could not use {path} as a template", str(exc))
+            return None
+        self.set_session(session)
+        self.controller.regenerate_patterns()
+        return session
+
+    def template_dialog(self) -> None:
+        if not self.maybe_discard():
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Template project", "", FILE_FILTER)
+        if not path:
+            return
+        name, ok = QInputDialog.getText(
+            self, "New from template", "Name of the new design:", text="New envelope"
+        )
+        if ok:
+            self.new_from_template(path, name)
 
     def open_dialog(self) -> None:
         if not self.maybe_discard():

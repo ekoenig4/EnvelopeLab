@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- New-design wizard: **Save as my defaults** / **Reset to built-in defaults** (stored in the
+  application settings). **File ▸ New from template…** starts a new design as a copy of a
+  saved project's design state (`ProjectSession.from_template`,
+  `envelopelab.project.templates.state_from_template`).
 - 2D pattern view: pieces are stacked vertically as sewn up a gore (scoop, rows from the
   mouth up, parachute on top) in their own full-height column right of the 3D view.
 - 3D view: the design surface is solid, coloured by each row's fabric with alternate gores

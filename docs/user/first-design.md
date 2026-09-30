@@ -39,6 +39,18 @@ and the 3D panel lists its layers without drawing them.
    volume is the target (within 0.1 %). When the volume cannot be reached with that height
    and width, the wizard says which volumes can.
 
+### Your own starting balloon
+
+* **Save as my defaults** (in the wizard) stores the values on the Standard gore tab; the
+  wizard opens with them from then on. **Reset to built-in defaults** goes back to the
+  values the program ships with.
+* **File ▸ New from template…** starts a new, unsaved design as a copy of any saved
+  project: shape, panel rows and fabrics, tapes, operating conditions, parachute and rings,
+  red line, flying wires, turning vents, scoop, pattern annotations and constraint locks.
+  You give the copy a name; it gets its own version id. The template's snapshots,
+  versions, simulation runs and history are not copied, and the template file is never
+  changed.
+
 The other tabs create a **special shape from an imported mesh** (OBJ, STL or PLY in m; the
 design references the mesh, panels are added later) and **design from measurements**
 (planned, not available yet).

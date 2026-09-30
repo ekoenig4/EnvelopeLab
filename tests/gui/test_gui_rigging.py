@@ -179,3 +179,35 @@ def test_3d_design_layer_shows_gores_rows_and_seams(gore_window: MainWindow) -> 
     assert len(layer.polylines["horizontal_seams"]) == 5  # mouth, 3 row seams, top
     # Neighbouring gores are shaded differently.
     assert len({tuple(c) for c in layer.face_colors}) >= 2
+
+
+def test_wizard_defaults_can_be_saved_and_reset(window: MainWindow) -> None:
+    from envelopelab_app.settings import WizardDefaults, load_wizard_defaults
+    from envelopelab_app.wizard import NewDesignWizard
+
+    wizard = NewDesignWizard(window.controller.fabrics, window, window.settings)
+    assert wizard.gores.value() == WizardDefaults().gores
+    wizard.gores.setValue(16)
+    wizard.volume.setValue(3000.0)
+    wizard.mouth_height.setValue(1.5)
+    wizard.store_defaults()
+    assert load_wizard_defaults(window.settings).gores == 16
+    again = NewDesignWizard(window.controller.fabrics, window, window.settings)
+    assert again.gores.value() == 16 and again.volume.value() == 3000.0
+    assert again.mouth_height.value() == 1.5
+    again.restore_builtin_defaults()
+    assert again.gores.value() == WizardDefaults().gores
+    assert load_wizard_defaults(window.settings) == WizardDefaults()
+
+
+def test_new_from_template_opens_an_unsaved_copy(window: MainWindow, tmp_path: object) -> None:
+    from pathlib import Path
+
+    from .gui_support import GORE_PROJECT
+
+    session = window.new_from_template(GORE_PROJECT, "copy of the fixture")
+    assert session is not None and session.path is None
+    assert session.design.meta.name == "copy of the fixture"
+    assert window.controller.session is session
+    assert window.template_action.text() == "New from &template…"
+    assert window.new_from_template(Path(str(tmp_path)) / "missing.elproj", "x") is None

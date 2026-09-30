@@ -1,4 +1,5 @@
-"""New-design templates: standard gore, special shape from a mesh, design from measurements.
+"""New-design templates: standard gore, special shape from a mesh, a saved project as a
+template, design from measurements.
 
 Every value a template fills in without the user's input is a generic default the user is
 expected to review (tape classes, seam type, rigging names, the default parachute, red
@@ -19,7 +20,7 @@ from envelopelab.design.model import (
     DEFAULT_SAFETY_FACTOR,
     DesignDocument,
 )
-from envelopelab.project.model import utc_now
+from envelopelab.project.model import DesignState, Project, utc_now
 
 #: Generic tape classes (width m, strength N) used by new designs; review before building.
 DEFAULT_TAPES = {
@@ -232,6 +233,38 @@ def special_design_from_mesh(
         "panel_list": [],
     }
     return DesignDocument.model_validate(payload).with_updated_hash()
+
+
+def state_from_template(template: Project, name: str) -> DesignState:
+    """The design state of a saved project, as the start of a new design.
+
+    Everything that is designed is kept: the design document (shape, rows and their
+    zones, materials, tapes, seams, features, operating conditions, parachute, rigging,
+    turning vents, scoop) and the pattern annotations. The copy is a new design: its name
+    is ``name``, it gets a new version id, no parent, the current time and a new content
+    hash. Snapshots, versions, run records and the provenance log of the template are not
+    part of the state and are not copied.
+
+    Parameters
+    ----------
+    template : Project
+        The template project.
+    name : str
+        Name of the new design.
+
+    Returns
+    -------
+    DesignState
+        Independent copy (editing it does not change ``template``).
+    """
+    if not name.strip():
+        raise ValueError("a design from a template needs a name")
+    state = template.state.model_copy(deep=True)
+    meta = _meta(name.strip())
+    data = state.design.model_dump(by_alias=True, mode="json")
+    data["meta"] = meta
+    design = DesignDocument.model_validate(data).with_updated_hash()
+    return DesignState(design=design, patterns=state.patterns)
 
 
 MEASUREMENTS_NOT_IMPLEMENTED = (
