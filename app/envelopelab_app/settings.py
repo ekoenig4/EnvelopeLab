@@ -34,6 +34,10 @@ class Preferences:
         Use the PyVista 3D view (needs OpenGL; takes effect at the next start).
     recovery_dir : str
         Directory for autosave files; empty: the platform's application data folder.
+    material_library : str
+        Fabric library file shared by all designs; empty: ``$ENVELOPELAB_MATERIAL_LIBRARY``
+        or ``materials.sqlite`` in the application data folder (takes effect at the next
+        start).
     """
 
     autosave_minutes: float = 2.0
@@ -44,6 +48,7 @@ class Preferences:
     keep_rows_fitted: bool = True
     enable_3d: bool = True
     recovery_dir: str = ""
+    material_library: str = ""
 
     def resolved_recovery_dir(self) -> Path:
         """Autosave directory."""
@@ -52,8 +57,22 @@ class Preferences:
         env = os.environ.get("ENVELOPELAB_RECOVERY_DIR")
         if env:
             return Path(env)
-        base = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
-        return Path(base or Path.home() / ".envelopelab") / "recovery"
+        return app_data_dir() / "recovery"
+
+    def resolved_material_library(self) -> Path:
+        """Fabric library file shared by all designs."""
+        if self.material_library:
+            return Path(self.material_library)
+        env = os.environ.get("ENVELOPELAB_MATERIAL_LIBRARY")
+        if env:
+            return Path(env)
+        return app_data_dir() / "materials.sqlite"
+
+
+def app_data_dir() -> Path:
+    """The platform's application data folder (``~/.envelopelab`` if Qt knows none)."""
+    base = QStandardPaths.writableLocation(QStandardPaths.StandardLocation.AppDataLocation)
+    return Path(base or Path.home() / ".envelopelab")
 
 
 def _to_bool(value: object) -> bool:

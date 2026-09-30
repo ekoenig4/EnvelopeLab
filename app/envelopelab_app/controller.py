@@ -8,7 +8,8 @@ number comes from :mod:`envelopelab`.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import sqlite3
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
@@ -16,7 +17,14 @@ from PySide6.QtCore import QObject, Signal
 
 from envelopelab.design.model import DesignDocument
 from envelopelab.geometry.gore import PanelRow
-from envelopelab.materials.repository import FabricLibraryRepository
+from envelopelab.materials.repository import (
+    Fabric,
+    FabricLibraryError,
+    FabricLibraryRepository,
+    FabricValidationError,
+    fabric_data,
+    open_user_library,
+)
 from envelopelab.project import edits
 from envelopelab.project.dependencies import ARTIFACTS, ArtifactStatus
 from envelopelab.project.gore_design import (
@@ -72,14 +80,16 @@ class WorkspaceController(QObject):
     provenanceChanged = Signal()  # noqa: N815
     selectionChanged = Signal(str)  # noqa: N815
     editRejected = Signal(str)  # noqa: N815
+    libraryChanged = Signal()  # noqa: N815
     message = Signal(str)
 
     def __init__(self, prefs: Preferences, fabrics: FabricLibraryRepository | None = None) -> None:
         super().__init__()
         self.prefs = prefs
+        #: Why the shared library file could not be opened (None: it is in use).
+        self.library_error: str | None = None
         if fabrics is None:
-            fabrics = FabricLibraryRepository()
-            fabrics.seed_example_data()
+            fabrics = self._open_library()
         self.fabrics = fabrics
         self.session: ProjectSession | None = None
         self.patterns_cache: PatternCache | None = None
@@ -87,6 +97,61 @@ class WorkspaceController(QObject):
         self.selection = ""
         self._outputs: GoreOutputs | None = None
         self._outputs_error: str | None = None
+
+    def _open_library(self) -> FabricLibraryRepository:
+        path = self.prefs.resolved_material_library()
+        try:
+            return open_user_library(path)
+        except (sqlite3.Error, FabricLibraryError, OSError) as exc:
+            # Keep the application usable, but say plainly that nothing will be kept.
+            self.library_error = (
+                f"The fabric library {path} could not be opened ({exc}). A temporary library "
+                "with the example fabrics is used; fabrics created now are not saved."
+            )
+            fallback = FabricLibraryRepository()
+            fallback.seed_example_data()
+            return fallback
+
+    # -- fabric library -----------------------------------------------------------------
+
+    def fabric_lookup(self, fabric_id: str) -> Mapping[str, Any] | None:
+        """Library values of ``fabric_id`` for the session's fingerprints (None: missing)."""
+        fabric = self.fabrics.fabric(fabric_id)
+        return None if fabric is None else fabric_data(fabric)
+
+    def add_fabric(self, fabric: Fabric) -> bool:
+        """Create a fabric in the shared library; a refusal is reported (``editRejected``)."""
+        return self._library_edit(self.fabrics.add_fabric, fabric)
+
+    def update_fabric(self, fabric: Fabric) -> bool:
+        """Change a user fabric in the shared library."""
+        return self._library_edit(self.fabrics.update_fabric, fabric)
+
+    def delete_fabric(self, fabric_id: str) -> bool:
+        """Remove a user fabric from the shared library."""
+        return self._library_edit(self.fabrics.delete_fabric, fabric_id)
+
+    def zones_using(self, fabric_id: str) -> list[str]:
+        """Zones of the open design that use ``fabric_id``."""
+        design = self.design
+        if design is None:
+            return []
+        return [zone for zone, fid in design.zones.items() if fid == fabric_id]
+
+    def _library_edit(self, action: Callable[[Any], None], argument: Any) -> bool:
+        try:
+            action(argument)
+        except (FabricValidationError, FabricLibraryError, sqlite3.Error) as exc:
+            self.editRejected.emit(str(exc))
+            return False
+        if self.session is not None:
+            # Results built from the old values become stale (fabric_properties group).
+            self.session.refresh_fabrics()
+        self._refresh_outputs()
+        self.libraryChanged.emit()
+        self.stateChanged.emit()
+        self.artifactsChanged.emit()
+        return True
 
     # -- session ------------------------------------------------------------------------
 
@@ -97,6 +162,8 @@ class WorkspaceController(QObject):
         self.session = session
         self.patterns_cache = None
         self.model_cache = None
+        if session is not None:
+            session.set_fabric_lookup(self.fabric_lookup)
         self._refresh_outputs()
         if session is not None:
             session.add_listener(self._on_event)

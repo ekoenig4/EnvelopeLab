@@ -1,8 +1,8 @@
 """Headless GUI test setup (pytest-qt).
 
 Qt runs on the ``offscreen`` platform, so the tests need no display; the PyVista renderer
-is off (the 3D panel still builds its layer list, which is what the tests check). Settings
-and autosave files go to the test's temporary directory.
+is off (the 3D panel still builds its layer list, which is what the tests check). Settings,
+autosave files and the fabric library go to the test's temporary directory.
 """
 
 from __future__ import annotations
@@ -30,10 +30,11 @@ from .gui_support import GORE_PROJECT, make_window  # noqa: E402
 
 @pytest.fixture
 def settings(tmp_path: Path) -> QSettings:
-    """Isolated settings: autosave off, recovery folder in ``tmp_path``."""
+    """Isolated settings: autosave off, recovery folder and fabric library in ``tmp_path``."""
     s = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
     s.setValue("preferences/autosave_minutes", 0.0)
     s.setValue("preferences/recovery_dir", str(tmp_path / "recovery"))
+    s.setValue("preferences/material_library", str(tmp_path / "materials.sqlite"))
     s.setValue("preferences/preview_mesh_mm", 1600.0)
     s.setValue("preferences/calculix_mesh_mm", 1600.0)
     s.sync()

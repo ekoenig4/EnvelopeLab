@@ -35,8 +35,10 @@ in the undo history. Nothing is edited by hand in JSON.
 
 Select a section in the **Design Tree** (operating conditions, tapes, seam types, rigging,
 …) and edit its fields in **Properties**. Values are SI: lengths m, temperatures K (°C shown
-beside), pressure Pa, masses kg. The **Materials** panel lists the fabric library with source
-tags and maps each material zone to a fabric.
+beside), pressure Pa, masses kg. The **Materials** panel lists your fabric library with source
+tags and maps each material zone to a fabric. The library is shared by all your designs:
+create fabrics there once (**New fabric…**, **Duplicate…**) and use them anywhere; see
+[Creating fabrics for all your designs](fabric-library.md).
 
 ## The 2D pattern view
 
@@ -76,6 +78,7 @@ override as outdated. *Remove manual override* restores the generated outline.
 | Grain, row zone | patterns, rest mesh, simulations, nesting, export |
 | Manual outline, tape paths, feature locations | patterns, assembly, rest mesh, simulations, flattening, nesting, export |
 | Operating conditions, zone fabrics, tapes | simulations (fabrics also nesting and export) |
+| Values of a library fabric the design uses (edited in the Materials panel) | simulations, nesting, export (the project file is unchanged) |
 
 Staleness compares fingerprints of the inputs, so undoing an edit makes a result current
 again. The **Derived artifacts** node of the design tree shows the state of each.

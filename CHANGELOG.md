@@ -3,6 +3,20 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Shared fabric library: fabrics created once can be used in every design. The library is
+  a per-user SQLite file (`materials.sqlite` in the application data folder, or
+  `$ENVELOPELAB_MATERIAL_LIBRARY` / Preferences → Fabric library file), replacing the
+  in-memory library that was reset at every start. The Materials panel gains **New fabric…**,
+  **Duplicate…**, **Edit…** and **Delete**, backed by a fabric form with a source tag on every
+  value. `FabricLibraryRepository.add_fabric` / `update_fabric` / `delete_fabric` validate
+  every write (`validate_fabric`). Example fabrics are read-only. Library files carry a
+  layout version (1; version 0 files are upgraded). See `user/fabric-library.md`,
+  `formats/fabric-library.md` and ADR-0009.
+- Staleness: the values of the library fabrics a design uses are a new external input group,
+  `fabric_properties`, read by simulation and nesting. Editing a fabric marks the results
+  built from it stale in every design that uses it, without marking the project modified.
+  Runs saved before this change show as stale once in the application (they did not record
+  fabric values); fingerprints computed without a library are unchanged.
 - Desktop application: software OpenGL (`LIBGL_ALWAYS_SOFTWARE=1`) is selected
   automatically under WSL, where the GPU driver drew the window black; new launcher options
   `--software-gl` and `--hardware-gl`. An explicit `LIBGL_ALWAYS_SOFTWARE` is respected.
