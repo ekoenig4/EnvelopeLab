@@ -155,7 +155,7 @@ def cap_points(hole_radius: float, rim_height: float, rise: float) -> tuple[Floa
     rim_height : float
         :math:`z_t`, m.
     rise : float
-        :math:`h \ge 0` (0: flat disc), m.
+        :math:`h \ge 0` (below 1 um: flat disc), m.
 
     Returns
     -------
@@ -164,7 +164,8 @@ def cap_points(hole_radius: float, rim_height: float, rise: float) -> tuple[Floa
     """
     if hole_radius <= 0.0 or rise < 0.0:
         raise ValueError("hole radius must be positive and rise non-negative")
-    if rise == 0.0:
+    # Below 1 um of rise the cap is flat (a sphere radius that large overflows).
+    if rise < 1e-6:
         r = np.linspace(hole_radius, 0.0, CAP_SAMPLES)
         return r, np.full_like(r, rim_height)
     rho = (hole_radius**2 + rise**2) / (2.0 * rise)

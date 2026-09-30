@@ -261,3 +261,12 @@ def test_preview_converges_with_open_turning_vents(tmp_path: Path) -> None:
     assert result.converged
     assert 140.0 < result.volume < 175.0  # the design's profile holds 160.7 m^3
     assert design_profile(vented).volume == pytest.approx(160.7, rel=0.01)
+
+
+def test_cap_of_negligible_rise_is_flat_and_finite() -> None:
+    from envelopelab.rigging.parachute import cap_points
+
+    r, z = cap_points(2.0, 10.0, 1e-300)
+    assert np.all(np.isfinite(r)) and np.all(np.isfinite(z))
+    assert r[0] == pytest.approx(2.0) and r[-1] == 0.0
+    assert np.allclose(z, 10.0)
