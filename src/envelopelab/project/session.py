@@ -23,6 +23,7 @@ from envelopelab.design.model import DesignDocument
 from envelopelab.project.dependencies import (
     ArtifactStatus,
     ArtifactTracker,
+    canonical_hash,
     changed_groups,
     fingerprints,
     group_hashes,
@@ -54,6 +55,9 @@ EVENT_PROVENANCE = "provenance"
 
 Listener = Callable[[str], None]
 Mutator = Callable[[dict[str, Any], dict[str, Any]], None]
+#: Resolves a fabric id to JSON-ready fabric values (None: not in the library); see
+#: :func:`envelopelab.materials.repository.fabric_data`.
+FabricLookup = Callable[[str], Mapping[str, Any] | None]
 
 
 class StateCommand(Command):
@@ -135,13 +139,22 @@ class ProjectSession:
         Project to edit.
     path : str or Path, optional
         Where it was loaded from / will be saved to.
+    fabric_lookup : callable, optional
+        Resolves the design's fabric ids in the fabric library, so that the library values
+        take part in artifact fingerprints (see :meth:`set_fabric_lookup`).
     """
 
-    def __init__(self, project: Project, path: str | Path | None = None) -> None:
+    def __init__(
+        self,
+        project: Project,
+        path: str | Path | None = None,
+        fabric_lookup: FabricLookup | None = None,
+    ) -> None:
         self.project = project
         self.path: Path | None = Path(path) if path is not None else None
         self.stack = CommandStack()
         self._listeners: list[Listener] = []
+        self._fabric_lookup = fabric_lookup
         self._hashes: dict[str, str] = {}
         self._fingerprints: dict[str, str] = {}
         self._refresh_hashes()
@@ -158,14 +171,16 @@ class ProjectSession:
     # -- construction -------------------------------------------------------------------
 
     @classmethod
-    def new(cls, design: DesignDocument) -> ProjectSession:
+    def new(
+        cls, design: DesignDocument, fabric_lookup: FabricLookup | None = None
+    ) -> ProjectSession:
         """Session for a new, unsaved project around ``design``."""
-        return cls(Project(state=DesignState(design=design)))
+        return cls(Project(state=DesignState(design=design)), fabric_lookup=fabric_lookup)
 
     @classmethod
-    def open(cls, path: str | Path) -> ProjectSession:
+    def open(cls, path: str | Path, fabric_lookup: FabricLookup | None = None) -> ProjectSession:
         """Open a project file."""
-        return cls(load_project(path), path)
+        return cls(load_project(path), path, fabric_lookup)
 
     # -- listeners ----------------------------------------------------------------------
 
@@ -201,7 +216,33 @@ class ProjectSession:
     def _refresh_hashes(self) -> None:
         design, patterns = _state_data(self.project.state)
         self._hashes = group_hashes(input_groups(design, patterns))
-        self._fingerprints = fingerprints(self._hashes)
+        # Library values are not part of the file, so they only enter the fingerprints,
+        # never the saved/unsaved comparison of ``_hashes``.
+        self._fingerprints = fingerprints({**self._hashes, **self._external_hashes()})
+
+    def _external_hashes(self) -> dict[str, str]:
+        if self._fabric_lookup is None:
+            return {}
+        ids = sorted(set(self.design.zones.values()))
+        values = {fabric_id: self._fabric_lookup(fabric_id) for fabric_id in ids}
+        return {"fabric_properties": canonical_hash(values)}
+
+    def set_fabric_lookup(self, lookup: FabricLookup | None) -> None:
+        """Resolve fabric ids with ``lookup`` from now on (None: ignore library values).
+
+        With a lookup, the values of the fabrics the design uses take part in the
+        ``fabric_properties`` input group, so editing a library fabric makes the
+        simulations and nesting built from it stale.
+        """
+        self._fabric_lookup = lookup
+        self.refresh_fabrics()
+
+    def refresh_fabrics(self) -> None:
+        """Re-read the library values (call after the library changed)."""
+        before = self._fingerprints
+        self._refresh_hashes()
+        if self._fingerprints != before:
+            self._emit(EVENT_ARTIFACTS)
 
     def _set_state(self, state: DesignState) -> None:
         self.project.state = state
