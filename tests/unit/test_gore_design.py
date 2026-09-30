@@ -74,8 +74,12 @@ def test_mass_estimate_uses_library_areal_mass_with_sources() -> None:
     assert zone.finished_area == pytest.approx(out.area, rel=0.02)  # flat gores vs revolution
     assert "assumed - verify" in out.sources and "assumed" in out.sources
     assert out.lift_margin == pytest.approx(
-        out.gross_lift / G0.value - out.envelope_mass - design.operating.payload_mass
+        out.gross_lift / G0.value
+        - out.envelope_mass
+        - (out.rigging_mass or 0.0)
+        - design.operating.payload_mass
     )
+    assert out.rigging_mass is not None and out.rigging_mass > 0.0
 
 
 def test_invalid_rows_report_instead_of_hiding() -> None:

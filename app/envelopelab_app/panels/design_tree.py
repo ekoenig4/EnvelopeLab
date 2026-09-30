@@ -20,7 +20,9 @@ SECTIONS = (
     ("seam_types", "Seam types", "seam_allowance"),
     ("operating", "Operating conditions", "operating"),
     ("features", "Features", "features"),
-    ("rigging", "Rigging", "rigging"),
+    ("parachute", "Parachute", "parachute"),
+    ("rigging", "Rigging (red line, flying wires)", "rigging"),
+    ("turning_vents", "Turning vents", "turning_vents"),
     ("special", "Special shape", "geometry"),
 )
 
@@ -74,7 +76,10 @@ class DesignTreePanel(QWidget):
                 continue
             if target == "special" and design.special is None:
                 continue
-            item = self._add(root, title, target, "● unsaved" if group in unsaved else "")
+            state = "● unsaved" if group in unsaved else ""
+            if target == "parachute" and design.parachute is None:
+                state = (state + " not defined").strip()
+            item = self._add(root, title, target, state)
             if target == "gores" and design.gores is not None:
                 self._add(
                     item,
@@ -89,6 +94,9 @@ class DesignTreePanel(QWidget):
                         else ""
                     )
                     self._add(rows, f"Row {row.letter}{flag}", f"row:{row.letter}")
+            if target == "turning_vents":
+                for vent in design.turning_vents:
+                    self._add(item, f"{vent.name} (seam {vent.seam})", "turning_vents")
             if target == "zones":
                 for zone, fabric in design.zones.items():
                     self._add(item, f"{zone}: {fabric}", "zones")

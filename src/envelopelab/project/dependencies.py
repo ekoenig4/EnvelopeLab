@@ -10,12 +10,13 @@ depends on a set of *input groups* (slices of the design state, e.g. ``geometry`
 
     geometry ──► profile
     geometry, seam_allowance, manual_outlines, labels, grain, row_zones,
-      tape_paths, feature_locations ──► patterns ──► nesting ──► export
-    geometry, manual_outlines, tape_paths, feature_locations, tapes ──► assembly
+      tape_paths, feature_locations, parachute ──► patterns ──► nesting ──► export
+    geometry, manual_outlines, tape_paths, feature_locations, tapes,
+      vent_openings ──► assembly
     assembly, grain, row_zones ──► rest_mesh ──► simulation
     operating, materials, tapes, seam_construction ──► simulation
     geometry, manual_outlines ──► flattening
-    materials ──► nesting;  meta, rigging, scale_variants ──► export
+    materials ──► nesting;  meta, rigging, turning_vents, scale_variants ──► export
 
 The *fingerprint* of an artifact is the SHA-256 of its own input slices and the
 fingerprints of its upstream artifacts. An artifact built with fingerprint ``f`` is
@@ -52,6 +53,9 @@ INPUT_GROUPS: tuple[str, ...] = (
     "meta",
     "rigging",
     "scale_variants",
+    "parachute",
+    "turning_vents",
+    "vent_openings",
 )
 
 
@@ -92,12 +96,21 @@ ARTIFACTS: tuple[ArtifactSpec, ...] = (
             "row_zones",
             "tape_paths",
             "feature_locations",
+            "parachute",
         ),
     ),
     ArtifactSpec(
         "assembly",
         "Assembly (seam graph)",
-        ("geometry", "manual_outlines", "tape_paths", "feature_locations", "features", "tapes"),
+        (
+            "geometry",
+            "manual_outlines",
+            "tape_paths",
+            "feature_locations",
+            "features",
+            "tapes",
+            "vent_openings",
+        ),
     ),
     ArtifactSpec("rest_mesh", "Rest mesh", ("grain", "row_zones"), ("assembly",)),
     ArtifactSpec(
@@ -108,7 +121,9 @@ ARTIFACTS: tuple[ArtifactSpec, ...] = (
     ),
     ArtifactSpec("flattening", "Flattening", ("geometry", "manual_outlines")),
     ArtifactSpec("nesting", "Nesting", ("materials",), ("patterns",)),
-    ArtifactSpec("export", "Export", ("meta", "rigging", "scale_variants"), ("nesting",)),
+    ArtifactSpec(
+        "export", "Export", ("meta", "rigging", "turning_vents", "scale_variants"), ("nesting",)
+    ),
 )
 
 _BY_NAME: dict[str, ArtifactSpec] = {a.name: a for a in ARTIFACTS}
@@ -184,6 +199,14 @@ def input_groups(design: Mapping[str, Any], patterns: Mapping[str, Any]) -> dict
         "meta": {k: v for k, v in (design.get("meta") or {}).items() if k == "name"},
         "rigging": design.get("rigging"),
         "scale_variants": design.get("scale_variants"),
+        "parachute": design.get("parachute"),
+        "turning_vents": design.get("turning_vents") or [],
+        # Only vents simulated open change the sewn assembly.
+        "vent_openings": [
+            {k: v[k] for k in ("name", "seam", "rows")}
+            for v in design.get("turning_vents") or []
+            if v.get("simulate_open")
+        ],
     }
 
 

@@ -14,8 +14,10 @@ Live outputs
   :math:`\rho = p/(R T)` at the design's ambient pressure and the ambient and internal
   temperatures (:func:`envelopelab.atmosphere.gas_density`).
 * Estimated envelope mass from the cut panel areas, tapes and thread
-  (:func:`envelopelab.mass_estimate.estimate_mass`) and the lift margin
-  :math:`L/g - m_{env} - m_{payload}`.
+  (:func:`envelopelab.mass_estimate.estimate_mass`), the parachute and rigging mass
+  (:func:`envelopelab.rigging.rigging_outputs`: parachute fabric, shroud and centralising
+  lines, red line, flying wires and turning-vent lines) and the lift margin
+  :math:`L/g - m_{env} - m_{rig} - m_{payload}`.
 
 Constraint locks
 ----------------
@@ -60,7 +62,7 @@ from __future__ import annotations
 import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 from scipy.optimize import brentq
@@ -88,6 +90,9 @@ from envelopelab.materials.repository import (
     MaterialProperty,
 )
 from envelopelab.project.model import ConstraintLocks, PatternSet
+
+if TYPE_CHECKING:
+    from envelopelab.rigging import RiggingOutputs
 
 FloatArray = np.ndarray
 Severity = Literal["info", "warning", "error"]
@@ -296,11 +301,16 @@ class GoreOutputs:
     envelope_mass : float, optional
         kg.
     lift_margin : float, optional
-        Spare liftable mass after envelope and payload, kg.
+        Spare liftable mass after envelope, parachute and rigging, and payload, kg.
     sources : tuple of str
         Source tags of the material values in the mass estimate.
     findings : list of DesignFinding
         Why an output is missing, and design warnings.
+    rigging : RiggingOutputs, optional
+        Parachute, red line, flying wires and turning vents (None when the profile has
+        no valid rigging evaluation).
+    rigging_mass : float, optional
+        Parachute and rigging mass, kg.
     """
 
     meridian_length: float
@@ -316,6 +326,8 @@ class GoreOutputs:
     lift_margin: float | None
     sources: tuple[str, ...]
     findings: list[DesignFinding] = field(default_factory=list)
+    rigging: RiggingOutputs | None = None
+    rigging_mass: float | None = None
 
 
 def zone_areal_masses(
@@ -397,7 +409,13 @@ def gore_outputs(
             TapeMasses(tape, tape, tape, tape),
             ASSUMED_THREAD,
         )
-        margin = lift_margin(profile.volume, rho_a, rho_i, mass.total_mass, op.payload_mass).margin
+    from envelopelab.rigging import rigging_outputs
+
+    rigging = rigging_outputs(design, patterns, fabrics, profile)
+    if mass is not None:
+        margin = lift_margin(
+            profile.volume, rho_a, rho_i, mass.total_mass + rigging.total_mass, op.payload_mass
+        ).margin
     return GoreOutputs(
         meridian_length=profile.meridian_length,
         height=profile.height,
@@ -410,15 +428,33 @@ def gore_outputs(
         mass=mass,
         envelope_mass=None if mass is None else mass.total_mass,
         lift_margin=margin,
-        sources=() if mass is None else mass.sources,
+        sources=() if mass is None else tuple(sorted({*mass.sources, *rigging.sources})),
         findings=findings,
+        rigging=rigging,
+        rigging_mass=rigging.total_mass,
     )
 
 
+def rigging_findings(
+    design: DesignDocument,
+    patterns: PatternSet,
+    fabrics: FabricLibraryRepository | FabricCatalog | None = None,
+) -> list[DesignFinding]:
+    """Parachute, red-line, flying-wire and turning-vent findings (FoS failures are errors)."""
+    from envelopelab.rigging import rigging_outputs
+
+    try:
+        found = rigging_outputs(design, patterns, fabrics).findings
+    except ValueError as exc:
+        return [DesignFinding("rigging", "error", f"rigging not evaluated: {exc}", "rigging")]
+    return [DesignFinding(f.code, f.severity, f.message, f.target) for f in found]
+
+
 def design_findings(design: DesignDocument, patterns: PatternSet) -> list[DesignFinding]:
-    """Validation findings of a gore design (profile, rows, openings, zones)."""
+    """Validation findings of a gore design (profile, rows, openings, zones, rigging)."""
     out: list[DesignFinding] = []
     if design.gores is None:
+        out += rigging_findings(design, patterns)
         if design.special is not None and not design.special.panel_list:
             out.append(
                 DesignFinding(
@@ -483,6 +519,7 @@ def design_findings(design: DesignDocument, patterns: PatternSet) -> list[Design
                 letter,
             )
         )
+    out += rigging_findings(design, patterns)
     return out
 
 

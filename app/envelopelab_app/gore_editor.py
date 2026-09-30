@@ -231,7 +231,8 @@ class GoreEditor(QWidget):
             ("volume", "Volume"),
             ("gross_lift", "Gross lift"),
             ("envelope_mass", "Estimated envelope mass"),
-            ("lift_margin", "Lift margin (after payload)"),
+            ("rigging_mass", "Parachute and rigging mass"),
+            ("lift_margin", "Lift margin (after rigging and payload)"),
             ("sources", "Material sources"),
         ):
             label = QLabel("-")
@@ -343,6 +344,7 @@ class GoreEditor(QWidget):
             "volume": f"{out.volume:.2f} m³",
             "gross_lift": f"{out.gross_lift:.0f} N ({out.gross_lift / 9.80665:.1f} kg)",
             "envelope_mass": "-" if out.envelope_mass is None else f"{out.envelope_mass:.1f} kg",
+            "rigging_mass": "-" if out.rigging_mass is None else f"{out.rigging_mass:.1f} kg",
             "lift_margin": "-" if out.lift_margin is None else f"{out.lift_margin:.1f} kg",
             "sources": ", ".join(out.sources) or "-",
         }

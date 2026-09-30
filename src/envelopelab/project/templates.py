@@ -1,8 +1,10 @@
 """New-design templates: standard gore, special shape from a mesh, design from measurements.
 
 Every value a template fills in without the user's input is a generic default the user is
-expected to review (tape classes, seam type, rigging names); none of them is a material
-property. Material properties come from the fabric library and carry its source tags.
+expected to review (tape classes, seam type, rigging names, the default parachute, red
+line and flying wires of :mod:`envelopelab.rigging.defaults`). Fabric properties come
+from the fabric library and carry its source tags; the default line and cable strengths
+are tagged ``assumed``.
 """
 
 from __future__ import annotations
@@ -11,7 +13,12 @@ import uuid
 from collections.abc import Sequence
 from pathlib import Path
 
-from envelopelab.design.model import DesignDocument
+from envelopelab.design.model import (
+    CURRENT_SCHEMA_VERSION,
+    DEFAULT_LOAD_FACTOR,
+    DEFAULT_SAFETY_FACTOR,
+    DesignDocument,
+)
 from envelopelab.project.model import utc_now
 
 #: Generic tape classes (width m, strength N) used by new designs; review before building.
@@ -45,7 +52,7 @@ def _common(
     payload_mass: float,
 ) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": CURRENT_SCHEMA_VERSION,
         "meta": _meta(name),
         "zones": {"body": fabric_id},
         "tapes": DEFAULT_TAPES,
@@ -68,10 +75,13 @@ def _common(
         "scale_variants": [],
         "rigging": {
             "crown_line": "crown line",
-            "red_line": "deflation line",
-            "flying_wires": [],
-            "parachute_confluence_centering": "centred",
+            "load_factor": dict(DEFAULT_LOAD_FACTOR),
+            "required_safety_factor": dict(DEFAULT_SAFETY_FACTOR),
+            "red_line": None,
+            "flying_wires": None,
         },
+        "parachute": None,
+        "turning_vents": [],
     }
 
 
@@ -89,6 +99,7 @@ def new_design(
     ambient_pressure: float = 101325.0,
     payload_mass: float = 0.0,
     row_letters: Sequence[str] | None = None,
+    rigging: bool = True,
 ) -> DesignDocument:
     """A standard-gore design document.
 
@@ -116,6 +127,9 @@ def new_design(
         kg.
     row_letters : sequence of str, optional
         Row letters; default A, B, C, ...
+    rigging : bool
+        Add the default parachute, red line and flying wires
+        (:func:`envelopelab.rigging.with_default_rigging`).
 
     Returns
     -------
@@ -146,7 +160,12 @@ def new_design(
         "parachute_hole_diameter": top_diameter,
         "seal_overlap": 0.1 * top_diameter,
     }
-    return DesignDocument.model_validate(payload).with_updated_hash()
+    document = DesignDocument.model_validate(payload)
+    if rigging:
+        from envelopelab.rigging import with_default_rigging
+
+        document = with_default_rigging(document)
+    return document.with_updated_hash()
 
 
 def special_design_from_mesh(

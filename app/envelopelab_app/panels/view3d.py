@@ -1,4 +1,4 @@
-"""3D view: design surface, rest mesh, preview and CalculiX results, reference mesh.
+"""3D view: design surface, rigging, rest mesh, preview and CalculiX results, reference mesh.
 
 Every layer has its own colour and a label naming where it comes from; a stale or
 unconverged layer says so in its label (and is drawn grey or hatched), so a result is never
@@ -41,6 +41,16 @@ LAYER_COLORS = {
     "envelopelab-preview": "#1f77b4",
     "calculix": "#ff7f0e",
     "reference": "#2ca02c",
+    "rigging": "#9467bd",
+}
+#: Line colours of the rigging layer, per element kind.
+RIGGING_COLORS = {
+    "parachute": "#9467bd",
+    "shroud_lines": "#8c564b",
+    "centralizing_lines": "#e377c2",
+    "red_line": "#d62728",
+    "flying_wires": "#17becf",
+    "turning_vents": "#e7ba52",
 }
 
 
@@ -70,6 +80,8 @@ class Layer:
         Zone name per triangle (for picking), optional.
     tapes : dict of str to ndarray
         Tape paths as node pairs, optional.
+    polylines : dict of str to list of ndarray
+        Line-only content (rigging), m, keyed by element kind, optional.
     """
 
     key: str
@@ -82,6 +94,7 @@ class Layer:
     visible: bool = True
     zones: list[str] = field(default_factory=list)
     tapes: dict[str, np.ndarray] = field(default_factory=dict)
+    polylines: dict[str, list[np.ndarray]] = field(default_factory=dict)
 
     @property
     def color(self) -> str:
@@ -202,6 +215,17 @@ class View3DPanel(QWidget):
                 )
             except ValueError:
                 pass
+            lines = self.controller.rigging_polylines()
+            if lines:
+                parts = ", ".join(k.replace("_", " ") for k in lines)
+                self.layers["rigging"] = Layer(
+                    "rigging",
+                    "rigging",
+                    f"Parachute and rigging (design, current): {parts}",
+                    np.zeros((0, 3)),
+                    np.zeros((0, 3), dtype=np.int64),
+                    polylines=lines,
+                )
         cache = self.controller.model_cache
         if session is not None and cache is not None:
             model = cache.built.model
@@ -307,6 +331,15 @@ class View3DPanel(QWidget):
         plotter.clear_spline_widgets()
         legend = []
         for layer in self.layers.values():
+            if layer.visible and layer.polylines:
+                for kind, polylines in layer.polylines.items():
+                    for line in polylines:
+                        plotter.add_mesh(
+                            pv.lines_from_points(np.asarray(line, dtype=float)),
+                            color=RIGGING_COLORS.get(kind, layer.color),
+                            line_width=4 if kind == "red_line" else 2,
+                        )
+                legend.append([layer.label, layer.color])
             if not layer.visible or len(layer.faces) == 0:
                 continue
             faces = np.hstack([np.full((len(layer.faces), 1), 3), layer.faces]).ravel()

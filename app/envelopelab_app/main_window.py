@@ -37,6 +37,7 @@ from envelopelab_app.panels.history import HistoryPanel
 from envelopelab_app.panels.materials import MaterialsPanel
 from envelopelab_app.panels.patterns import PatternPanel
 from envelopelab_app.panels.properties import PropertiesPanel
+from envelopelab_app.panels.rigging import RiggingPanel
 from envelopelab_app.panels.runs import RunsPanel
 from envelopelab_app.panels.validation import ValidationPanel
 from envelopelab_app.panels.view3d import View3DPanel
@@ -93,6 +94,7 @@ class MainWindow(QMainWindow):
         self.view3d = View3DPanel(self.controller, enable_renderer=use_3d)
         self.patterns = PatternPanel(self.controller)
         self.history = HistoryPanel(self.controller)
+        self.rigging = RiggingPanel(self.controller)
         pattern_scope = artifact_inputs("patterns")
         self.docks: dict[str, PanelDock] = {
             "tree": PanelDock("Design Tree", self.controller, self.design_tree),
@@ -125,11 +127,18 @@ class MainWindow(QMainWindow):
                 artifacts=("patterns",),
             ),
             "history": PanelDock("History", self.controller, self.history),
+            "rigging": PanelDock(
+                "Rigging",
+                self.controller,
+                self.rigging,
+                scope={"parachute", "rigging", "turning_vents", "operating"},
+            ),
         }
         area = Qt.DockWidgetArea
         self.addDockWidget(area.LeftDockWidgetArea, self.docks["tree"])
         self.addDockWidget(area.LeftDockWidgetArea, self.docks["properties"])
         self.tabifyDockWidget(self.docks["properties"], self.docks["materials"])
+        self.tabifyDockWidget(self.docks["properties"], self.docks["rigging"])
         self.addDockWidget(area.RightDockWidgetArea, self.docks["view3d"])
         self.addDockWidget(area.RightDockWidgetArea, self.docks["patterns"])
         self.tabifyDockWidget(self.docks["view3d"], self.docks["patterns"])

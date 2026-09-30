@@ -318,6 +318,7 @@ class PatternPanel(QWidget):
         scene.clear()
         self.view.handles = []
         self.view.offsets = {}
+        self.parachute_item: QGraphicsPolygonItem | None = None
         first = self.view.content_rect.isEmpty()
         self.view.content_rect = QRectF()
         session = self.controller.session
@@ -353,6 +354,7 @@ class PatternPanel(QWidget):
             x += width / 2 + GAP
             bounds = _polygon(row.cut_outline, self.view.offsets[row.label]).boundingRect()
             self.view.content_rect = self.view.content_rect.united(bounds)
+        self._draw_parachute(x, stale)
         if first:
             QTimer.singleShot(0, self.fit)
 
@@ -459,6 +461,46 @@ class PatternPanel(QWidget):
                 handle = OutlineHandle(self.view, i, QPointF(px_ + dx, -py_))
                 scene.addItem(handle)
                 self.view.handles.append(handle)
+
+    def _draw_parachute(self, x: float, stale: bool) -> None:
+        """The parachute panel (read-only; placed from the Rigging panel), right of the rows."""
+        rigging = self.controller.rigging
+        session = self.controller.session
+        if rigging is None or rigging.parachute is None or rigging.parachute.panel is None:
+            return
+        assert session is not None and session.design.parachute is not None
+        panel = rigging.parachute.panel
+        n = rigging.parachute.panel_count
+        dx = x + float(np.ptp(panel.cut_outline[:, 0])) / 2
+        scene = self.view.scene()
+        grey = QColor("#9e9e9e")
+        cut = QGraphicsPolygonItem(_polygon(panel.cut_outline, dx))
+        cut.setPen(QPen(grey if stale else QColor("#333333"), 0, Qt.PenStyle.DashLine))
+        scene.addItem(cut)
+        zone = session.design.parachute.zone or next(iter(session.design.zones), "")
+        finished = QGraphicsPolygonItem(_polygon(panel.finished_outline, dx))
+        finished.setBrush(QBrush(QColor(200, 200, 200, 60) if stale else self._zone_color(zone)))
+        pen = QPen(grey if stale else QColor("#9467bd"), 1.5)
+        pen.setCosmetic(True)
+        finished.setPen(pen)
+        text = f"PARACHUTE x{n}"
+        finished.setToolTip(
+            f"{text}; zone {zone}; edge at the bottom, apex at the top; shroud and "
+            "centralising lines at each side seam's bottom end"
+        )
+        scene.addItem(finished)
+        label = QGraphicsSimpleTextItem(text)
+        font = label.font()
+        font.setPointSizeF(7.5)
+        label.setFont(font)
+        label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        label.setPos(dx - 0.25 * panel.bottom_width, -panel.finished_height * 0.4)
+        label.setToolTip(finished.toolTip())
+        scene.addItem(label)
+        self.parachute_item = finished
+        self.view.content_rect = self.view.content_rect.united(
+            _polygon(panel.cut_outline, dx).boundingRect()
+        )
 
     @staticmethod
     def _edges(row: PanelRow) -> dict[str, tuple[np.ndarray, np.ndarray]]:

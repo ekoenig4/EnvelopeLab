@@ -3,6 +3,26 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Parachute, red line, flying wires and turning vents are part of the design (design
+  schema v2, ADR-0009; v1 documents migrate on load, their hash checked first).
+  `envelopelab.rigging` computes the seated parachute and its flat panels, shroud and
+  centralising line lengths, the shroud lines' limit tension, the red-line pull to open the
+  parachute, the red-line route and length, flying-wire and crow's-foot geometry and limit
+  tensions, and turning-vent thrust, torque, air and heat loss; every factor-of-safety
+  failure, unreachable opening and inconsistent placement is a Validation error. Benchmarks
+  against hand calculations: `validation/rigging-benchmarks.md`. Guides: `user/rigging.md`,
+  `theory/rigging.md`.
+- New designs get a default parachute (one shroud line per load tape), red line and flying
+  wires to a four-point burner frame; generic line and cable strengths are `assumed`.
+- **Changed result:** the live lift margin now subtracts the parachute and rigging mass
+  (parachute fabric, tapes and thread, lines, wires, crow's-foot legs, vent control lines).
+  Designs without rigging (all migrated v1 designs) are unchanged; for a new 2000 m^3,
+  12-gore design from the wizard (generic 65 g/m^2 fabric) the margin drops by 4.3 kg.
+- Turning vents marked `simulate_open` are left open (`open_seams`) in the preview and
+  CalculiX models; other vents are simulated closed, as before.
+- Desktop application: Rigging panel (add/remove, lengths, loads, factors of safety, mass),
+  Parachute / Rigging / Turning vents in the Design Tree and Properties (with units), a
+  parachute and rigging layer in the 3D view, and the rigging mass in the live outputs.
 - Desktop application: software OpenGL (`LIBGL_ALWAYS_SOFTWARE=1`) is selected
   automatically under WSL, where the GPU driver drew the window black; new launcher options
   `--software-gl` and `--hardware-gl`. An explicit `LIBGL_ALWAYS_SOFTWARE` is respected.

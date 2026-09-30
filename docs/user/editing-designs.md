@@ -33,8 +33,10 @@ in the undo history. Nothing is edited by hand in JSON.
 
 ## Properties and materials
 
-Select a section in the **Design Tree** (operating conditions, tapes, seam types, rigging,
-…) and edit its fields in **Properties**. Values are SI: lengths m, temperatures K (°C shown
+Select a section in the **Design Tree** (operating conditions, tapes, seam types,
+parachute, rigging, turning vents, …) and edit its fields in **Properties**; the
+parachute, red line, flying wires and turning vents are added and checked in the
+**Rigging** panel ([guide](rigging.md)). Values are SI: lengths m, temperatures K (°C shown
 beside), pressure Pa, masses kg. The **Materials** panel lists the fabric library with source
 tags and maps each material zone to a fabric.
 

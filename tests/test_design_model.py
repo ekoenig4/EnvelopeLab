@@ -9,6 +9,7 @@ from hypothesis import strategies as st
 from pydantic import ValidationError
 
 from envelopelab.design import (
+    CURRENT_SCHEMA_VERSION,
     DesignDocument,
     dump_design_document,
     load_design_document,
@@ -254,5 +255,58 @@ def test_migration_upgrades_v0_fixture() -> None:
     migrated = migrate_document(fixture)
     loaded = load_design_document(json.dumps(migrated))
 
-    assert loaded.schema_version == 1
+    assert loaded.schema_version == CURRENT_SCHEMA_VERSION
     assert loaded.meta.content_hash is not None
+    assert loaded.rigging.crown_line == "crown"
+    assert loaded.parachute is None
+    assert loaded.rigging.red_line is None and loaded.rigging.flying_wires is None
+
+
+def _v1_payload() -> dict[str, object]:
+    fixture_path = Path(__file__).parent / "fixtures" / "design_v0.json"
+    return migrate_to_v1(json.loads(fixture_path.read_text(encoding="utf-8")))
+
+
+def migrate_to_v1(raw: dict[str, object]) -> dict[str, object]:
+    from envelopelab.design.model import _upgrade_v0_to_v1
+
+    return _upgrade_v0_to_v1(raw)
+
+
+def test_v1_document_is_hash_checked_then_migrated() -> None:
+    raw = _v1_payload()
+    assert raw["schema_version"] == 1
+    loaded = load_design_document(json.dumps(raw))
+    assert loaded.schema_version == CURRENT_SCHEMA_VERSION
+    assert loaded.rigging.load_factor.value == 1.4
+    assert loaded.rigging.required_safety_factor.source == "assumed"
+    assert loaded.turning_vents == []
+    assert loaded.meta.content_hash == loaded.compute_content_hash()
+
+
+def test_v1_document_with_wrong_hash_is_rejected() -> None:
+    raw = _v1_payload()
+    raw["meta"]["content_hash"] = "0" * 64  # type: ignore[index]
+    with pytest.raises(ValueError, match="content hash mismatch"):
+        load_design_document(json.dumps(raw))
+
+
+def test_v1_project_fixture_loads_as_v2() -> None:
+    from envelopelab.project.model import load_project
+
+    path = Path(__file__).parent / "fixtures" / "standard_gore" / "design.elproj"
+    project = load_project(path)
+    assert project.state.design.schema_version == CURRENT_SCHEMA_VERSION
+    assert project.state.design.rigging.crown_line == "crown line"
+
+
+def test_turning_vent_names_must_be_unique() -> None:
+    from envelopelab.project.gore_design import standard_gore_design
+    from envelopelab.rigging import turning_vent_pair
+
+    design = standard_gore_design("t", 2000.0, 17.0, 16.0, 12, 6)
+    vents = turning_vent_pair(design)
+    data = design.model_dump(by_alias=True, mode="json")
+    data["turning_vents"] = [v.model_dump(by_alias=True, mode="json") for v in vents] * 2
+    with pytest.raises(ValidationError, match="unique"):
+        DesignDocument.model_validate(data)

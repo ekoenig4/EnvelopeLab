@@ -60,19 +60,20 @@ applied inside the root search. Valid range: targets whose volume lies between t
 
 The design state is split into input groups (geometry, seam allowance, seam construction,
 manual outlines, labels, grain, row zones, tape paths, feature locations, tapes, materials,
-operating conditions, features, meta, rigging, scale variants). Each artifact reads some
+operating conditions, features, meta, rigging, scale variants, parachute, turning vents,
+vent openings). Each artifact reads some
 groups and some upstream artifacts:
 
 | Artifact | Reads | Upstream |
 |---|---|---|
 | profile | geometry | |
-| patterns | geometry, seam allowance, manual outlines, labels, grain, row zones, tape paths, feature locations | |
-| assembly | geometry, manual outlines, tape paths, feature locations, features, tapes | |
+| patterns | geometry, seam allowance, manual outlines, labels, grain, row zones, tape paths, feature locations, parachute | |
+| assembly | geometry, manual outlines, tape paths, feature locations, features, tapes, vent openings | |
 | rest mesh | grain, row zones | assembly |
 | simulation | operating, materials, tapes, seam construction | rest mesh |
 | flattening | geometry, manual outlines | |
 | nesting | materials | patterns |
-| export | meta, rigging, scale variants | nesting |
+| export | meta, rigging, turning vents, scale variants | nesting |
 
 The fingerprint of an artifact is the SHA-256 of its input groups (canonical JSON) and its
 upstream fingerprints. An artifact or run is *current* when it was built from the current
