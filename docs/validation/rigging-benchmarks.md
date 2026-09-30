@@ -8,7 +8,10 @@ latitude, seal overlap 0.5 m, shroud attachment 3 m, confluence 3 m below the ri
 billow 0.1 and 12 shroud lines. Flying-wire rows use a 2.5 m mouth radius, a
 0.8 m frame radius 3 m below the mouth and a 400 kg payload. The turning-vent rows
 use a 0.2 m wide slot from 2 m to 5 m above the mouth of a 3 m radius cylinder,
-C_d = 0.61. Relative errors are fractions; absolute errors are in the unit shown.
+C_d = 0.61. Ring rows use the same sphere (1000 N on the rim) and a 0.1 m centre
+ring on a cap of billow 0.2 at 50 Pa; scoop rows a 1.5 m deep, 10 deg scoop on a
+2.5 m mouth radius over 6 of 12 gores (the 2 % area tolerance allows for flat gores
+vs the cone). Relative errors are fractions; absolute errors are in the unit shown.
 
 | Benchmark | Computed | Reference | Unit | Error | Tolerance | Status |
 |---|---|---|---|---|---|---|
@@ -27,6 +30,10 @@ C_d = 0.61. Relative errors are fractions; absolute errors are in the unit shown
 | Turning vent thrust (cylinder, linear dp) | 7.01086 | 7.01086 | N | < 1e-06 | 0.001 | pass |
 | Turning vent torque R F | 21.0326 | 21.0326 | N m | < 1e-06 | 0.001 | pass |
 | Turning vent mass flow | 1.54561 | 1.54561 | kg/s | < 1e-06 | 0.001 | pass |
+| Crown ring hoop F tan(lat) / 2 pi (sphere, lat 75 deg) | 593.974 | 593.974 | N | < 1e-06 | 0.001 | pass |
+| Centre ring hoop p rho a / 2 | 7.50575 | 7.50575 | N | < 1e-06 | 0.001 | pass |
+| Scoop area (6 of 12 gores, frustum) | 12.5955 | 12.5955 | m^2 | < 1e-06 | 0.02 | pass |
+| Scoop top edge = mouth gore width | - | - | m | < 1e-06 m | 1 mm | pass |
 
 The opening-path rows check that the red-line kinematics keep both line lengths at
 the full-open travel (taut, inextensible lines).

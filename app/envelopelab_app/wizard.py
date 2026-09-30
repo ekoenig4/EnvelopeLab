@@ -37,6 +37,10 @@ def _spin(value: float, low: float, high: float, suffix: str, decimals: int = 2)
     return box
 
 
+#: Mouth-fabric choice for a design without a separate mouth row.
+NO_MOUTH_ROW = "(no separate mouth row)"
+
+
 class NewDesignWizard(QDialog):
     """Dialog that produces a new :class:`DesignDocument` (``self.design``)."""
 
@@ -60,8 +64,17 @@ class NewDesignWizard(QDialog):
         self.rows.setValue(5)
         self.mouth = _spin(0.30, 0.05, 0.95, " × width")
         self.top = _spin(0.25, 0.05, 0.95, " × width")
+        ids = [f.fabric_id for f in fabrics.fabrics()]
         self.fabric = QComboBox()
-        self.fabric.addItems([f.fabric_id for f in fabrics.fabrics()])
+        self.fabric.addItems(ids)
+        if "ripstop_nylon" in ids:
+            self.fabric.setCurrentText("ripstop_nylon")
+        self.mouth_fabric = QComboBox()
+        self.mouth_fabric.addItems([NO_MOUTH_ROW, *ids])
+        if "nomex" in ids:
+            self.mouth_fabric.setCurrentText("nomex")
+        self.mouth_height = _spin(0.0, 0.0, 100.0, " m")
+        self.mouth_height.setSpecialValueText("same as the body rows")
         self.allowance = _spin(25.0, 0.0, 200.0, " mm", 1)
         self.internal = _spin(100.0, -50.0, 200.0, " °C", 1)
         self.ambient = _spin(15.0, -60.0, 60.0, " °C", 1)
@@ -71,10 +84,12 @@ class NewDesignWizard(QDialog):
             ("Target height (mouth to top opening)", self.target_height),
             ("Target maximum diameter", self.target_width),
             ("Gores N", self.gores),
-            ("Panel rows", self.rows),
+            ("Mouth row fabric (next to the burner)", self.mouth_fabric),
+            ("Mouth row height", self.mouth_height),
+            ("Body panel rows (above the mouth row)", self.rows),
             ("Mouth diameter", self.mouth),
             ("Top opening diameter", self.top),
-            ("Fabric", self.fabric),
+            ("Body and parachute fabric", self.fabric),
             ("Seam allowance", self.allowance),
             ("Internal temperature", self.internal),
             ("Ambient temperature", self.ambient),
@@ -137,6 +152,7 @@ class NewDesignWizard(QDialog):
         try:
             if self.tabs.currentIndex() == 0:
                 w = self.target_width.value()
+                mouth = self.mouth_fabric.currentText()
                 self.design = standard_gore_design(
                     name=self.name.text().strip() or "New envelope",
                     target_volume=self.volume.value(),
@@ -150,6 +166,8 @@ class NewDesignWizard(QDialog):
                     seam_allowance=self.allowance.value() / 1000.0,
                     internal_temperature=self.internal.value() + 273.15,
                     ambient_temperature=self.ambient.value() + 273.15,
+                    mouth_fabric_id=None if mouth == NO_MOUTH_ROW else mouth,
+                    mouth_row_height=self.mouth_height.value() or None,
                 )
             elif self.tabs.currentIndex() == 1:
                 self.design = special_design_from_mesh(

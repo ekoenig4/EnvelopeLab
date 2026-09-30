@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from envelopelab.atmosphere import G0, gas_density, pressure_gradient
-from envelopelab.design.model import DesignDocument, LineSpec
+from envelopelab.design.model import DesignDocument, LineSpec, RingSpec
 from envelopelab.geometry.gore import LENGTH_TOLERANCE, MeridianProfile, PanelRow
 from envelopelab.mass_estimate import MassEstimate, TapeMasses, estimate_mass
 from envelopelab.materials.repository import (
@@ -41,12 +41,15 @@ from envelopelab.rigging.flying_wires import WireGeometry, wire_geometry, wire_t
 from envelopelab.rigging.parachute import (
     OpeningResult,
     ParachuteGeometry,
+    cap_radius,
     crown_force,
     opening,
     parachute_panel,
     seated_geometry,
     shroud_tension,
 )
+from envelopelab.rigging.rings import centre_ring_hoop, crown_ring_hoop
+from envelopelab.rigging.scoop import scoop_panel, scoop_profile
 from envelopelab.rigging.turning_vents import VentJet, side_force, vent_jet
 
 
@@ -72,6 +75,9 @@ class ParachuteResult:
         Red-line travels.
     mass : MassEstimate, optional
         Parachute fabric, radial and edge tapes and thread.
+    rings : dict of str to LineResult
+        ``crown ring`` and ``centre ring`` when defined: circumference (m), limit hoop
+        force (N, tension positive; None when not assessed), strength and mass.
     """
 
     geometry: ParachuteGeometry
@@ -83,6 +89,35 @@ class ParachuteResult:
     centralizing: LineResult
     opening: OpeningResult
     mass: MassEstimate | None
+    rings: dict[str, LineResult] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ScoopResult:
+    """Scoop below the mouth.
+
+    Attributes
+    ----------
+    first_gore, gore_count : int
+    zone : str
+    bottom_radius, slant_length : float
+        m.
+    panel : PanelRow
+        Flat pattern of one scoop panel.
+    mass : MassEstimate
+        All scoop panels, their tapes and thread.
+    azimuths : tuple of float
+        Start and end azimuth of the scoop, rad.
+    """
+
+    first_gore: int
+    gore_count: int
+    zone: str
+    bottom_radius: float
+    slant_length: float
+    panel: PanelRow
+    mass: MassEstimate
+    azimuths: tuple[float, float]
 
 
 @dataclass(frozen=True)
@@ -168,7 +203,7 @@ class RiggingOutputs:
 
     Attributes
     ----------
-    parachute, red_line, flying_wires : optional
+    parachute, red_line, flying_wires, scoop : optional
     turning_vents : list of TurningVentResult
     net_torque, net_side_force, total_heat_loss : float
         All vents fully open: N m, N, W.
@@ -183,6 +218,7 @@ class RiggingOutputs:
     red_line: RedLineResult | None = None
     flying_wires: FlyingWireResult | None = None
     turning_vents: list[TurningVentResult] = field(default_factory=list)
+    scoop: ScoopResult | None = None
     net_torque: float = 0.0
     net_side_force: float = 0.0
     total_heat_loss: float = 0.0
@@ -211,6 +247,18 @@ def _line_result(
         strength=_prop(spec.strength),
         linear_mass=_prop(spec.linear_mass),
         required_safety_factor=required,
+    )
+
+
+def _ring_result(name: str, spec: RingSpec, length: float, hoop: float | None) -> LineResult:
+    return LineResult(
+        name=name,
+        count=1,
+        length=length,
+        tension=hoop,
+        strength=_prop(spec.strength),
+        linear_mass=_prop(spec.linear_mass),
+        required_safety_factor=spec.required_safety_factor.value,
     )
 
 
@@ -258,6 +306,7 @@ def rigging_outputs(
         ASSUMED_THREAD,
         default_allowance,
         design_profile,
+        row_zone,
         zone_areal_masses,
     )
 
@@ -342,7 +391,12 @@ def rigging_outputs(
             )
         try:
             geom = seated_geometry(
-                profile, g.seal_overlap, pc.billow, pc.shroud_attachment, pc.centralizing_depth
+                profile,
+                g.seal_overlap,
+                pc.billow,
+                pc.shroud_attachment,
+                pc.centralizing_depth,
+                0.0 if pc.centre_ring is None else 0.5 * (pc.centre_ring_diameter or 0.0),
             )
         except ValueError as exc:
             findings.append(RiggingFinding("parachute_geometry", "error", str(exc), "parachute"))
@@ -419,16 +473,78 @@ def rigging_outputs(
                 sources.update(mass.sources)
             except ValueError as exc:
                 findings.append(RiggingFinding("parachute_panel", "error", str(exc), "parachute"))
+            p_apex = max(grad * (geom.rim_height + geom.cap_rise - z_m), 0.0)
+            rings: dict[str, LineResult] = {}
+            if pc.crown_ring is not None:
+                hoop = crown_ring_hoop(force, profile)
+                if hoop is None:
+                    findings.append(
+                        RiggingFinding(
+                            "crown_ring",
+                            "error",
+                            "the meridian is horizontal at the crown opening: the crown ring "
+                            "cannot carry the vertical load",
+                            "parachute",
+                        )
+                    )
+                elif hoop < 0.0:
+                    findings.append(
+                        RiggingFinding(
+                            "crown_ring_compression",
+                            "warning",
+                            f"the crown ring is in compression ({-lf * hoop:.0f} N at limit "
+                            "load); ring buckling is not checked",
+                            "parachute",
+                        )
+                    )
+                rings["crown ring"] = _ring_result(
+                    "crown ring",
+                    pc.crown_ring,
+                    2.0 * math.pi * geom.hole_radius,
+                    None if hoop is None else lf * hoop,
+                )
+            if pc.centre_ring is not None:
+                hoop = centre_ring_hoop(
+                    p_apex, cap_radius(geom.hole_radius, geom.cap_rise), geom.apex_radius
+                )
+                if hoop is None:
+                    findings.append(
+                        RiggingFinding(
+                            "centre_ring_flat",
+                            "warning",
+                            "centre-ring load not assessed: a flat parachute (billow 0) does "
+                            "not carry pressure as a membrane",
+                            "parachute",
+                        )
+                    )
+                rings["centre ring"] = _ring_result(
+                    "centre ring",
+                    pc.centre_ring,
+                    2.0 * math.pi * geom.apex_radius,
+                    None if hoop is None else lf * hoop,
+                )
+            for key, (ring, spec) in {
+                k: (v, pc.crown_ring if k == "crown ring" else pc.centre_ring)
+                for k, v in rings.items()
+            }.items():
+                masses[f"parachute:{key}"] = ring.mass
+                sources.update({ring.strength.source, ring.linear_mass.source})
+                if spec is not None:
+                    sources.add(spec.required_safety_factor.source)
+                f = fos_finding(ring, "parachute")
+                if f is not None:
+                    findings.append(f)
             parachute = ParachuteResult(
                 geometry=geom,
                 panel=panel,
                 panel_count=pc.panel_count,
-                crown_pressure=max(grad * (geom.rim_height + geom.cap_rise - z_m), 0.0),
+                crown_pressure=p_apex,
                 force=force,
                 shroud=shroud,
                 centralizing=central,
                 opening=open_,
                 mass=mass,
+                rings=rings,
             )
 
     # -- flying wires --------------------------------------------------------------
@@ -651,6 +767,67 @@ def rigging_outputs(
                 )
             )
         vents.append(TurningVentResult(vent.name, vent.seam, phi, s0, s1, ccw, jet, control))
+    # -- scoop -----------------------------------------------------------------------
+    scoop: ScoopResult | None = None
+    sc = design.scoop
+    if sc is not None:
+        mouth_zone = row_zone(design, patterns or PatternSet(), g.panel_rows[0].letter)
+        zone = sc.zone if sc.zone is not None else mouth_zone
+        if sc.first_gore > n or sc.gore_count > n:
+            findings.append(
+                RiggingFinding(
+                    "scoop_gores",
+                    "error",
+                    f"scoop gores {sc.first_gore}+{sc.gore_count} do not fit {n} gores",
+                    "scoop",
+                )
+            )
+        elif zone not in design.zones:
+            findings.append(
+                RiggingFinding(
+                    "scoop_zone", "error", f"scoop zone {zone!r} is not defined", "scoop"
+                )
+            )
+        else:
+            try:
+                sprof = scoop_profile(r_m, z_m, sc.height, sc.flare_deg)
+                spanel = scoop_panel(sprof, n, default_allowance(design))
+            except ValueError as exc:
+                findings.append(RiggingFinding("scoop", "error", str(exc), "scoop"))
+            else:
+                areal = zone_areal_masses(design, fabrics)
+                tape = ASSUMED_TAPE_LINEAR_MASS
+                smass = estimate_mass(
+                    [spanel],
+                    sc.gore_count,
+                    [zone],
+                    {zone: areal.get(zone, MaterialProperty(0.065, "assumed"))},
+                    TapeMasses(tape, tape, tape, tape),
+                    ASSUMED_THREAD,
+                )
+                masses["scoop:fabric, tapes and thread"] = smass.total_mass
+                sources.update(smass.sources)
+                a0 = 2.0 * math.pi * (sc.first_gore - 1) / n
+                scoop = ScoopResult(
+                    first_gore=sc.first_gore,
+                    gore_count=sc.gore_count,
+                    zone=zone,
+                    bottom_radius=float(sprof.r[0]),
+                    slant_length=sprof.meridian_length,
+                    panel=spanel,
+                    mass=smass,
+                    azimuths=(a0, a0 + 2.0 * math.pi * sc.gore_count / n),
+                )
+                if fw is not None and sc.height >= fw.frame_drop:
+                    findings.append(
+                        RiggingFinding(
+                            "scoop_frame",
+                            "warning",
+                            f"the scoop ({sc.height:.2f} m deep) reaches the burner frame "
+                            f"({fw.frame_drop:.2f} m below the mouth)",
+                            "scoop",
+                        )
+                    )
     torque = sum(v.jet.torque for v in vents)
     side = side_force(
         [v.jet.thrust for v in vents],
@@ -682,6 +859,7 @@ def rigging_outputs(
         red_line=red,
         flying_wires=wires,
         turning_vents=vents,
+        scoop=scoop,
         net_torque=torque,
         net_side_force=side,
         total_heat_loss=sum(v.jet.heat_loss for v in vents),
@@ -733,6 +911,17 @@ def rigging_polylines(
             e = point(g.edge_radius, phi, g.edge_height)
             shrouds.append(np.vstack((e, point(g.attachment_radius, phi, g.attachment_height))))
             centrals.append(np.vstack((e, [0.0, 0.0, g.confluence_height])))
+        for key in pr.rings:
+            radius, height = (
+                (g.hole_radius, g.rim_height)
+                if key == "crown ring"
+                else (g.apex_radius, float(g.profile.z[-1]))
+            )
+            seams.append(
+                np.column_stack(
+                    (radius * np.cos(ring), radius * np.sin(ring), np.full_like(ring, height))
+                )
+            )
         out["parachute"] = seams
         out["shroud_lines"] = shrouds
         out["centralizing_lines"] = centrals
@@ -759,4 +948,14 @@ def rigging_polylines(
         vents.append(np.column_stack((rr * math.cos(v.azimuth), rr * math.sin(v.azimuth), zz)))
     if vents:
         out["turning_vents"] = vents
+    sc = outputs.scoop
+    if sc is not None and design.scoop is not None:
+        sprof = scoop_profile(r_m, z_m, design.scoop.height, design.scoop.flare_deg)
+        arc = np.linspace(sc.azimuths[0], sc.azimuths[1], 8 * sc.gore_count + 1)
+        rb, zb = float(sprof.r[0]), float(sprof.z[0])
+        lines_s = [np.column_stack((rb * np.cos(arc), rb * np.sin(arc), np.full_like(arc, zb)))]
+        for k in range(sc.gore_count + 1):
+            a = sc.azimuths[0] + 2.0 * math.pi * k / n
+            lines_s.append(np.vstack((point(r_m, a, z_m), point(rb, a, zb))))
+        out["scoop"] = lines_s
     return out

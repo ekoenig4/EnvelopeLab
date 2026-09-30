@@ -177,10 +177,15 @@ def row_allowance(design: DesignDocument, patterns: PatternSet, letter: str) -> 
 
 
 def row_zone(design: DesignDocument, patterns: PatternSet, letter: str) -> str:
-    """Material zone of a row (row setting or the design's first zone)."""
+    """Material zone of a row: its pattern annotation, else the design row's zone, else the
+    design's first zone."""
     zone = patterns.row(letter).zone
     if zone is not None:
         return zone
+    if design.gores is not None:
+        for row in design.gores.panel_rows:
+            if row.letter == letter and row.zone is not None:
+                return row.zone
     return next(iter(design.zones), "default")
 
 
@@ -502,6 +507,16 @@ def design_findings(design: DesignDocument, patterns: PatternSet) -> list[Design
                 "gores",
             )
         )
+    for spec in g.panel_rows:
+        if spec.zone is not None and spec.zone not in design.zones:
+            out.append(
+                DesignFinding(
+                    "zone",
+                    "error",
+                    f"row {spec.letter}: zone {spec.zone!r} is not defined",
+                    spec.letter,
+                )
+            )
     for letter, row in patterns.rows.items():
         if row.zone is not None and row.zone not in design.zones:
             out.append(
@@ -896,6 +911,8 @@ def standard_gore_design(
     ambient_temperature: float = 288.15,
     ambient_pressure: float = 101325.0,
     payload_mass: float = 0.0,
+    mouth_fabric_id: str | None = None,
+    mouth_row_height: float | None = None,
 ) -> DesignDocument:
     """New standard-gore design from target volume, height and width.
 
@@ -908,7 +925,8 @@ def standard_gore_design(
     target_height, target_width : float
         m.
     gore_count, row_count : int
-        Gores N (>= 3) and horizontal panel rows (>= 1).
+        Gores N (>= 3) and horizontal body panel rows (>= 1); with a mouth fabric the
+        design has ``row_count + 1`` rows.
     mouth_diameter, top_diameter : float, optional
         m; default 0.3 and 0.25 of the width.
     fabric_id : str
@@ -921,6 +939,12 @@ def standard_gore_design(
         Pa.
     payload_mass : float
         kg.
+    mouth_fabric_id : str, optional
+        Fabric of a separate mouth row (zone ``mouth``), e.g. ``nomex`` next to the burner;
+        the body rows and the parachute use ``fabric_id``.
+    mouth_row_height : float, optional
+        Finished height of the mouth row along the tape, m; default the same as each
+        body row.
 
     Returns
     -------
@@ -933,7 +957,21 @@ def standard_gore_design(
     top = top_diameter if top_diameter is not None else 0.25 * target_width
     r, z = wizard_control_points(target_volume, target_height, target_width, mouth, top)
     length = profile_from_arrays(r, z).meridian_length
-    heights = equal_row_heights(length, row_count)
+    row_zones: list[str | None] | None = None
+    if mouth_fabric_id is None:
+        heights = equal_row_heights(length, row_count)
+    elif mouth_row_height is None:
+        heights = equal_row_heights(length, row_count + 1)
+        row_zones = ["mouth"] + [None] * row_count
+    else:
+        if not 0.0 < mouth_row_height < length:
+            raise ValueError(
+                f"mouth row height {mouth_row_height:g} m must be between 0 and the "
+                f"meridian length {length:.3f} m"
+            )
+        heights = [mouth_row_height, *equal_row_heights(length - mouth_row_height, row_count)]
+        heights[-1] = length - sum(heights[:-1])
+        row_zones = ["mouth"] + [None] * row_count
     return new_design(
         name=name,
         points=list(zip(r.tolist(), z.tolist(), strict=True)),
@@ -947,6 +985,8 @@ def standard_gore_design(
         ambient_temperature=ambient_temperature,
         ambient_pressure=ambient_pressure,
         payload_mass=payload_mass,
+        row_zones=row_zones,
+        extra_zones=None if mouth_fabric_id is None else {"mouth": mouth_fabric_id},
     )
 
 

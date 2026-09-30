@@ -16,6 +16,8 @@ from envelopelab.design.model import (
     LineSpec,
     ParachuteSpec,
     RedLineSpec,
+    RingSpec,
+    ScoopSpec,
     TurningVentSpec,
 )
 
@@ -56,6 +58,30 @@ def control_line_cord() -> LineSpec:
     return _line("turning vent line", 3000.0, 0.010)
 
 
+def _ring(name: str, strength: float, linear_mass: float, safety: float, rule: str) -> RingSpec:
+    note = "generic value; replace with the datasheet of the ring used"
+    return RingSpec.model_validate(
+        {
+            "class": name,
+            "strength": {"value": strength, "source": "assumed", "note": note},
+            "linear_mass": {"value": linear_mass, "source": "assumed", "note": note},
+            "required_safety_factor": {"value": safety, "source": "assumed", "note": rule},
+        }
+    )
+
+
+def crown_ring() -> RingSpec:
+    """Generic crown ring: 8 mm aluminium rod (6061-T6, yield 276 MPa): 13.9 kN,
+    0.136 kg/m, factor of safety 1.5 (14 CFR 31.25(a)); all assumed."""
+    return _ring("aluminium rod ring 8 mm", 13900.0, 0.136, 1.5, "14 CFR 31.25(a), metal part")
+
+
+def centre_ring() -> RingSpec:
+    """Generic parachute centre ring: 6 mm stainless rod (200 MPa): 5.6 kN, 0.226 kg/m,
+    factor of safety 1.5 (14 CFR 31.25(a)); all assumed."""
+    return _ring("stainless rod ring 6 mm", 5600.0, 0.226, 1.5, "14 CFR 31.25(a), metal part")
+
+
 def _gores(design: DesignDocument) -> Any:
     if design.gores is None:
         raise ValueError("rigging defaults need a standard-gore design")
@@ -66,7 +92,8 @@ def default_parachute(design: DesignDocument) -> ParachuteSpec:
     """A parachute with one shroud line per load tape (or per second tape above 24 gores).
 
     Shroud lines attach half a hole diameter below the parachute edge; the confluence is
-    one hole diameter below the crown opening; billow 0.1.
+    one hole diameter below the crown opening; billow 0.1; a crown ring at the rim and a
+    centre ring of 5 % of the hole diameter (at least 50 mm) at the apex.
     """
     g = _gores(design)
     count = g.count if g.count <= 24 or g.count % 2 else g.count // 2
@@ -79,6 +106,9 @@ def default_parachute(design: DesignDocument) -> ParachuteSpec:
         centralizing_depth=round(1.0 * hole, 4),
         shroud_line=shroud_line(),
         centralizing_line=centralizing_line(),
+        crown_ring=crown_ring(),
+        centre_ring=centre_ring(),
+        centre_ring_diameter=round(max(0.05, 0.05 * hole), 4),
     )
 
 
@@ -152,6 +182,19 @@ def turning_vent_pair(design: DesignDocument) -> list[TurningVentSpec]:
         )
         for i, seam in enumerate(seams)
     ]
+
+
+def default_scoop(design: DesignDocument) -> ScoopSpec:
+    """A half scoop from gore 1 over half the gores, 0.4 mouth diameters deep, 10 deg flare,
+    in the mouth row's fabric."""
+    g = _gores(design)
+    return ScoopSpec(
+        first_gore=1,
+        gore_count=max(1, g.count // 2),
+        height=round(0.4 * g.mouth_diameter, 4),
+        flare_deg=10.0,
+        zone=None,
+    )
 
 
 def with_default_rigging(design: DesignDocument) -> DesignDocument:

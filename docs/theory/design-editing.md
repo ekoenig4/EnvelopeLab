@@ -61,13 +61,14 @@ applied inside the root search. Valid range: targets whose volume lies between t
 The design state is split into input groups (geometry, seam allowance, seam construction,
 manual outlines, labels, grain, row zones, tape paths, feature locations, tapes, materials,
 operating conditions, features, meta, rigging, scale variants, parachute, turning vents,
-vent openings). Each artifact reads some
+vent openings, scoop). Row zones include both the design rows' zones and the pattern
+annotations; a row's zone is not part of the geometry group. Each artifact reads some
 groups and some upstream artifacts:
 
 | Artifact | Reads | Upstream |
 |---|---|---|
 | profile | geometry | |
-| patterns | geometry, seam allowance, manual outlines, labels, grain, row zones, tape paths, feature locations, parachute | |
+| patterns | geometry, seam allowance, manual outlines, labels, grain, row zones, tape paths, feature locations, parachute, scoop | |
 | assembly | geometry, manual outlines, tape paths, feature locations, features, tapes, vent openings | |
 | rest mesh | grain, row zones | assembly |
 | simulation | operating, materials, tapes, seam construction | rest mesh |

@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Panel layout from the mouth up: a mouth row in its own fabric (Nomex by default in the
+  wizard, configurable height), N body rows (nylon), and the parachute as the top panel.
+  Panel rows carry an optional design-level material zone (`gores.panel_rows[].zone`,
+  ADR-0010); the pattern view's row zone still overrides it.
+- Parachute crown ring (rim of the crown opening) and centre ring (apex, where the
+  panels now end): circumference, limit hoop force, factor of safety and mass.
+- Optional scoop below the mouth over consecutive gores (depth, flare, fabric zone):
+  flat panels that match the mouth row, mass, burner-frame clearance warning.
 - Parachute, red line, flying wires and turning vents are part of the design (design
   schema v2, ADR-0009; v1 documents migrate on load, their hash checked first).
   `envelopelab.rigging` computes the seated parachute and its flat panels, shroud and
@@ -17,7 +25,8 @@ All notable changes to this project will be documented in this file.
 - **Changed result:** the live lift margin now subtracts the parachute and rigging mass
   (parachute fabric, tapes and thread, lines, wires, crow's-foot legs, vent control lines).
   Designs without rigging (all migrated v1 designs) are unchanged; for a new 2000 m^3,
-  12-gore design from the wizard (generic 65 g/m^2 fabric) the margin drops by 4.3 kg.
+  12-gore design from the wizard (generic 65 g/m^2 fabric) the margin drops by 6.2 kg
+  (of which 1.8 kg are the default crown and centre rings).
 - Turning vents marked `simulate_open` are left open (`open_seams`) in the preview and
   CalculiX models; other vents are simulated closed, as before.
 - Desktop application: Rigging panel (add/remove, lengths, loads, factors of safety, mass),

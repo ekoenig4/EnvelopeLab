@@ -43,6 +43,7 @@ nav:
       - ADR-0007: adr/ADR-0007-desktop-application-stack.md
       - ADR-0008: adr/ADR-0008-project-file-and-staleness.md
       - ADR-0009: adr/ADR-0009-rigging-schema-v2.md
+      - ADR-0010: adr/ADR-0010-row-zones-rings-and-scoop.md
 theme:
   name: material
 markdown_extensions:

@@ -49,6 +49,9 @@ UNITS = {
     "frame_azimuth_deg": "deg",
     "crows_foot_drop": "m",
     "opening_width": "m",
+    "centre_ring_diameter": "m",
+    "height": "m",
+    "flare_deg": "deg",
 }
 #: Unit of a tagged ``value`` field, by the name of the field that holds it.
 VALUE_UNITS = {
@@ -68,6 +71,7 @@ EDITABLE_SECTIONS = (
     "parachute",
     "rigging",
     "turning_vents",
+    "scoop",
     "special",
     "zones",
 )
@@ -127,7 +131,7 @@ class PropertiesPanel(QWidget):
         if data is None or data == []:
             text = (
                 "(not defined — add it in the Rigging panel)"
-                if self.section in ("parachute", "turning_vents")
+                if self.section in ("parachute", "turning_vents", "scoop")
                 else "(not used by this design)"
             )
             self.form_layout.addWidget(QLabel(text))

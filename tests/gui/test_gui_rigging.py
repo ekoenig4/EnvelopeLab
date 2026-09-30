@@ -95,3 +95,54 @@ def test_parachute_panel_in_the_pattern_view(gore_window: MainWindow) -> None:
     gore_window.patterns.regenerate()
     item = gore_window.patterns.parachute_item
     assert item is not None and "PARACHUTE x8" in item.toolTip()
+
+
+def test_wizard_makes_a_nomex_mouth_row_and_n_nylon_rows(window: MainWindow, qtbot: object) -> None:
+    from envelopelab_app.wizard import NO_MOUTH_ROW, NewDesignWizard
+
+    wizard = NewDesignWizard(window.controller.fabrics, window)
+    assert wizard.mouth_fabric.currentText() == "nomex"
+    assert wizard.fabric.currentText() == "ripstop_nylon"
+    wizard.volume.setValue(170.0)
+    wizard.target_height.setValue(8.2)
+    wizard.target_width.setValue(6.4)
+    wizard.gores.setValue(8)
+    wizard.rows.setValue(3)
+    wizard.mouth_height.setValue(1.0)
+    wizard.create_design()
+    design = wizard.design
+    assert design is not None and design.gores is not None, wizard.error.text()
+    assert [r.zone for r in design.gores.panel_rows] == ["mouth", None, None, None]
+    assert design.gores.panel_rows[0].finished_height == 1.0
+    assert design.zones["mouth"] == "nomex" and design.parachute is not None
+    window.new_project(design)
+    root = window.design_tree.tree.topLevelItem(0)
+    assert root is not None
+    labels = [
+        root.child(i).child(j).child(k).text(0)  # type: ignore[union-attr]
+        for i in range(root.childCount())
+        for j in range(root.child(i).childCount())  # type: ignore[union-attr]
+        for k in range(root.child(i).child(j).childCount())  # type: ignore[union-attr]
+    ]
+    assert "Row A: mouth (nomex)" in labels and "Top: parachute" in labels
+    texts = window.rigging.find_items("crown ring")
+    assert texts and texts[0].text(1).endswith("m diameter")
+    wizard.mouth_fabric.setCurrentText(NO_MOUTH_ROW)
+    wizard.create_design()
+    assert wizard.design is not None and len(wizard.design.gores.panel_rows) == 3  # type: ignore[union-attr]
+
+
+def test_scoop_can_be_added_and_is_drawn(gore_window: MainWindow) -> None:
+    session = gore_window.controller.session
+    assert session is not None
+    gore_window.rigging.buttons["add_scoop"].click()
+    assert session.design.scoop is not None
+    assert "Scoop" in gore_window.rigging.texts()
+    gore_window.patterns.regenerate()
+    item = gore_window.patterns.scoop_item
+    assert item is not None and "SCOOP x4" in item.toolTip()
+    gore_window.controller.select("scoop")
+    gore_window.properties.set_field(("scoop", "height"), "0.8")
+    assert session.design.scoop.height == 0.8
+    gore_window.rigging.buttons["remove_scoop"].click()
+    assert session.design.scoop is None

@@ -51,6 +51,7 @@ RIGGING_COLORS = {
     "red_line": "#d62728",
     "flying_wires": "#17becf",
     "turning_vents": "#e7ba52",
+    "scoop": "#843c39",
 }
 
 

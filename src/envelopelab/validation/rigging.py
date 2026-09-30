@@ -13,9 +13,17 @@ import math
 import numpy as np
 
 from envelopelab.atmosphere import G0, celsius_to_kelvin, gas_density, pressure_gradient
-from envelopelab.geometry.gore import MeridianProfile
+from envelopelab.geometry.gore import GoreWidthModel, MeridianProfile
 from envelopelab.rigging.flying_wires import wire_geometry, wire_tensions
-from envelopelab.rigging.parachute import crown_force, opening, seated_geometry, shroud_tension
+from envelopelab.rigging.parachute import (
+    cap_radius,
+    crown_force,
+    opening,
+    seated_geometry,
+    shroud_tension,
+)
+from envelopelab.rigging.rings import centre_ring_hoop, crown_ring_hoop
+from envelopelab.rigging.scoop import scoop_panel, scoop_profile
 from envelopelab.rigging.turning_vents import vent_jet
 from envelopelab.validation.analytic_geometry import (
     BenchmarkResult,
@@ -175,9 +183,67 @@ def _vent_benchmarks() -> list[BenchmarkResult]:
     ]
 
 
+def _ring_and_scoop_benchmarks() -> list[BenchmarkResult]:
+    radius, lower, upper = 8.0, -math.pi / 3.0, math.radians(75.0)
+    prof = _sphere_zone(radius, lower, upper)
+    force = 1000.0
+    crown = crown_ring_hoop(force, prof)
+    r_h = radius * math.cos(upper)
+    rise = 0.2 * 2.0 * r_h
+    rho = (r_h**2 + rise**2) / (2.0 * rise)
+    pressure, ring = 50.0, 0.1
+    centre = centre_ring_hoop(pressure, cap_radius(r_h, rise), ring)
+    r_m, height, flare, n, k = 2.5, 1.5, 10.0, 12, 6
+    sprof = scoop_profile(r_m, 0.0, height, flare)
+    panel = scoop_panel(sprof, n, 0.0)
+    r_b = r_m + height * math.tan(math.radians(flare))
+    slant = height / math.cos(math.radians(flare))
+    width = GoreWidthModel(n_gores=n, form="small_bulge")
+    assert crown is not None and centre is not None
+    return [
+        BenchmarkResult(
+            "Crown ring hoop F tan(lat) / 2 pi (sphere, lat 75 deg)",
+            crown,
+            force * math.tan(upper) / (2.0 * math.pi),
+            "N",
+            "relative",
+            1e-3,
+        ),
+        BenchmarkResult(
+            "Centre ring hoop p rho a / 2",
+            centre,
+            pressure * rho * ring / 2.0,
+            "N",
+            "relative",
+            1e-3,
+        ),
+        BenchmarkResult(
+            "Scoop area (6 of 12 gores, frustum)",
+            k * panel.finished_area,
+            math.pi * (r_m + r_b) * slant * k / n,
+            "m^2",
+            "relative",
+            2e-2,
+        ),
+        BenchmarkResult(
+            "Scoop top edge = mouth gore width",
+            panel.top_width,
+            float(width.full_width(r_m)),
+            "m",
+            "absolute",
+            1e-3,
+        ),
+    ]
+
+
 def run_benchmarks() -> list[BenchmarkResult]:
     """Run every rigging benchmark (display order)."""
-    return _parachute_benchmarks() + _wire_benchmarks() + _vent_benchmarks()
+    return (
+        _parachute_benchmarks()
+        + _wire_benchmarks()
+        + _vent_benchmarks()
+        + _ring_and_scoop_benchmarks()
+    )
 
 
 def render_markdown(results: list[BenchmarkResult]) -> str:
@@ -195,7 +261,10 @@ def render_markdown(results: list[BenchmarkResult]) -> str:
         "billow 0.1 and 12 shroud lines. Flying-wire rows use a 2.5 m mouth radius, a",
         "0.8 m frame radius 3 m below the mouth and a 400 kg payload. The turning-vent rows",
         "use a 0.2 m wide slot from 2 m to 5 m above the mouth of a 3 m radius cylinder,",
-        "C_d = 0.61. Relative errors are fractions; absolute errors are in the unit shown.",
+        "C_d = 0.61. Ring rows use the same sphere (1000 N on the rim) and a 0.1 m centre",
+        "ring on a cap of billow 0.2 at 50 Pa; scoop rows a 1.5 m deep, 10 deg scoop on a",
+        "2.5 m mouth radius over 6 of 12 gores (the 2 % area tolerance allows for flat gores",
+        "vs the cone). Relative errors are fractions; absolute errors are in the unit shown.",
         "",
         "| Benchmark | Computed | Reference | Unit | Error | Tolerance | Status |",
         "|---|---|---|---|---|---|---|",

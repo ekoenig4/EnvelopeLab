@@ -30,7 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from envelopelab.project.gore_design import control_arrays, profile_from_arrays
+from envelopelab.project.gore_design import control_arrays, profile_from_arrays, row_zone
 from envelopelab_app.controller import WorkspaceController
 
 HANDLE_RADIUS = 6.0  # px
@@ -318,7 +318,7 @@ class GoreEditor(QWidget):
             for i, row in enumerate(rows):
                 self.rows_table.setItem(i, 0, _item(row.letter, editable=False))
                 self.rows_table.setItem(i, 1, _item(f"{row.finished_height:.4f}"))
-                zone = session.patterns.row(row.letter).zone or next(iter(design.zones), "")
+                zone = row_zone(design, session.patterns, row.letter)
                 self.rows_table.setItem(i, 2, _item(zone))
             self.gore_count.setValue(design.gores.count)
             locks = session.project.locks

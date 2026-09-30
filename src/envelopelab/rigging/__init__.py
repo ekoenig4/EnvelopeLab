@@ -10,6 +10,7 @@ from envelopelab.rigging.defaults import (
     default_flying_wires,
     default_parachute,
     default_red_line,
+    default_scoop,
     turning_vent_pair,
     with_default_rigging,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "default_flying_wires",
     "default_parachute",
     "default_red_line",
+    "default_scoop",
     "rigging_outputs",
     "rigging_polylines",
     "turning_vent_pair",

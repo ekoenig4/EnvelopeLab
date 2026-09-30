@@ -100,6 +100,8 @@ def new_design(
     payload_mass: float = 0.0,
     row_letters: Sequence[str] | None = None,
     rigging: bool = True,
+    row_zones: Sequence[str | None] | None = None,
+    extra_zones: dict[str, str] | None = None,
 ) -> DesignDocument:
     """A standard-gore design document.
 
@@ -130,6 +132,10 @@ def new_design(
     rigging : bool
         Add the default parachute, red line and flying wires
         (:func:`envelopelab.rigging.with_default_rigging`).
+    row_zones : sequence of str or None, optional
+        Material zone of each row (None: the ``body`` zone).
+    extra_zones : dict of str to str, optional
+        More zones (name to fabric id) next to ``body``, e.g. ``{"mouth": "nomex"}``.
 
     Returns
     -------
@@ -148,12 +154,18 @@ def new_design(
         ambient_pressure,
         payload_mass,
     )
+    if row_zones is not None and len(row_zones) != len(row_heights):
+        raise ValueError("row_zones and row_heights differ in length")
+    zones_of_rows = list(row_zones) if row_zones is not None else [None] * len(row_heights)
+    if extra_zones:
+        payload["zones"] = {**payload["zones"], **extra_zones}  # type: ignore[dict-item]
     payload["envelope_type"] = "gore"
     payload["gores"] = {
         "count": gore_count,
         "meridian_profile_control_points": [{"x": float(r), "y": float(z)} for r, z in points],
         "panel_rows": [
-            {"letter": letters[i], "finished_height": float(h)} for i, h in enumerate(row_heights)
+            {"letter": letters[i], "finished_height": float(h), "zone": zones_of_rows[i]}
+            for i, h in enumerate(row_heights)
         ],
         "mouth_diameter": mouth_diameter,
         "crown_ring": top_diameter,

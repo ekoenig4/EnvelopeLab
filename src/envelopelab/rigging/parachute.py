@@ -102,6 +102,8 @@ class ParachuteGeometry:
         :math:`s_A`, :math:`r_A`, :math:`z_A`, m.
     cap_rise : float
         :math:`h`, m.
+    apex_radius : float
+        Centre-ring radius where the panels end (0: none), m.
     confluence_height : float
         :math:`z_C`, m.
     shroud_length, centralizing_length : float
@@ -119,6 +121,7 @@ class ParachuteGeometry:
     attachment_radius: float
     attachment_height: float
     cap_rise: float
+    apex_radius: float
     confluence_height: float
     shroud_length: float
     centralizing_length: float
@@ -145,8 +148,19 @@ class ParachuteGeometry:
         return math.pi * self.hole_radius**2
 
 
-def cap_points(hole_radius: float, rim_height: float, rise: float) -> tuple[FloatArray, FloatArray]:
-    r"""Meridian of a spherical cap from the rim to the apex, m.
+#: Rise below which the cap is flat, m (a sphere radius that large overflows).
+FLAT_RISE = 1e-6
+
+
+def cap_radius(hole_radius: float, rise: float) -> float:
+    """Sphere radius of a cap, :math:`\rho = (r_h^2 + h^2)/(2h)`, m (inf when flat)."""
+    return math.inf if rise < FLAT_RISE else (hole_radius**2 + rise**2) / (2.0 * rise)
+
+
+def cap_points(
+    hole_radius: float, rim_height: float, rise: float, apex_radius: float = 0.0
+) -> tuple[FloatArray, FloatArray]:
+    r"""Meridian of a spherical cap from the rim to the apex (or a centre ring), m.
 
     Parameters
     ----------
@@ -155,23 +169,29 @@ def cap_points(hole_radius: float, rim_height: float, rise: float) -> tuple[Floa
     rim_height : float
         :math:`z_t`, m.
     rise : float
-        :math:`h \ge 0` (below 1 um: flat disc), m.
+        :math:`h \ge 0` of the full cap (below 1 um: flat disc), m.
+    apex_radius : float
+        Radius of the centre ring where the cap ends, :math:`0 \le a < r_h`, m.
 
     Returns
     -------
     (ndarray, ndarray)
-        Radii from :math:`r_h` to 0 and heights from :math:`z_t` to :math:`z_t + h`, m.
+        Radii from :math:`r_h` to :math:`a` and heights from :math:`z_t` up, m.
     """
     if hole_radius <= 0.0 or rise < 0.0:
         raise ValueError("hole radius must be positive and rise non-negative")
-    # Below 1 um of rise the cap is flat (a sphere radius that large overflows).
-    if rise < 1e-6:
-        r = np.linspace(hole_radius, 0.0, CAP_SAMPLES)
+    if not 0.0 <= apex_radius < hole_radius:
+        raise ValueError(
+            f"centre ring radius {apex_radius:.3f} m must be below the hole radius "
+            f"{hole_radius:.3f} m"
+        )
+    rho = cap_radius(hole_radius, rise)
+    if math.isinf(rho):
+        r = np.linspace(hole_radius, apex_radius, CAP_SAMPLES)
         return r, np.full_like(r, rim_height)
-    rho = (hole_radius**2 + rise**2) / (2.0 * rise)
     zc = rim_height + rise - rho
     theta_rim = math.atan2(hole_radius, rim_height - zc)
-    theta = np.linspace(theta_rim, 0.0, CAP_SAMPLES)
+    theta = np.linspace(theta_rim, math.asin(apex_radius / rho), CAP_SAMPLES)
     return rho * np.sin(theta), zc + rho * np.cos(theta)
 
 
@@ -185,6 +205,7 @@ def seated_geometry(
     billow: float,
     shroud_attachment: float,
     centralizing_depth: float,
+    apex_radius: float = 0.0,
 ) -> ParachuteGeometry:
     """Seated parachute geometry on an envelope profile (module docstring).
 
@@ -200,6 +221,8 @@ def seated_geometry(
         Distance along the load tape from the edge down to the shroud attachment, m.
     centralizing_depth : float
         Confluence depth below the rim, m.
+    apex_radius : float
+        Radius of the parachute centre ring (0: none), m.
 
     Returns
     -------
@@ -230,7 +253,7 @@ def seated_geometry(
     s_top = envelope.s[envelope.s > s_e]
     seg_r = np.concatenate(([r_e], envelope.radius_at(s_top)))
     seg_z = np.concatenate(([z_e], envelope.height_at(s_top)))
-    cr, cz = cap_points(r_h, z_t, rise)
+    cr, cz = cap_points(r_h, z_t, rise, apex_radius)
     keep = np.hypot(seg_r - r_h, seg_z - z_t) > 1e-9
     profile = MeridianProfile.from_points(
         np.concatenate((seg_r[keep], cr)), np.concatenate((seg_z[keep], cz))
@@ -246,6 +269,7 @@ def seated_geometry(
         attachment_radius=r_a,
         attachment_height=z_a,
         cap_rise=rise,
+        apex_radius=apex_radius,
         confluence_height=z_c,
         shroud_length=math.hypot(r_e - r_a, z_e - z_a),
         centralizing_length=math.hypot(r_e, z_e - z_c),

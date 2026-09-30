@@ -24,9 +24,17 @@ and the 3D panel lists its layers without drawing them.
 
 1. **File ▸ New design…** opens the wizard. On the **Standard gore** tab enter:
     * target **volume**, **height** (mouth to top opening) and **maximum diameter**;
-    * the number of **gores N** and **panel rows**;
+    * the number of **gores N**;
+    * the **mouth row fabric** (default Nomex, next to the burner; or no separate mouth
+      row) and its **height** along the tape (0: the same as each body row);
+    * the number of **body panel rows** above the mouth row (nylon by default);
     * mouth and top-opening diameters as fractions of the width;
-    * the fabric, seam allowance and the internal and ambient temperatures.
+    * the body and parachute fabric, seam allowance and the internal and ambient
+      temperatures.
+
+   The envelope is then, from the mouth up: the mouth row (zone `mouth`), the body rows
+   (zone `body`) and, as the top panel, the parachute over the crown opening with its
+   crown ring and centre ring ([parachute and rigging](rigging.md)).
 2. Press **OK**. The wizard finds a profile with exactly that height and width whose
    volume is the target (within 0.1 %). When the volume cannot be reached with that height
    and width, the wizard says which volumes can.

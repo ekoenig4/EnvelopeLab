@@ -1,6 +1,7 @@
 # Parachute, red line, flying wires and turning vents
 
-Module: `envelopelab.rigging` (`parachute`, `flying_wires`, `turning_vents`, `analysis`).
+Module: `envelopelab.rigging` (`parachute`, `rings`, `flying_wires`, `turning_vents`,
+`scoop`, `analysis`).
 Benchmarks: [rigging benchmarks](../validation/rigging-benchmarks.md). All quantities are
 SI; heights are those of the meridian profile, whose mouth is the zero-pressure level.
 
@@ -63,6 +64,37 @@ axis. Reported travels:
 A parachute that cannot reach full open, or whose confluence would be pulled below the
 mouth, is an error.
 
+## Crown ring and centre ring
+
+Both rings are thin circular rings under an axisymmetric radial line load \(q\) (outward
+positive), whose hoop force is \(H = q\,a\) for ring radius \(a\) (tension positive).
+
+*Crown ring* (rim of the crown opening, radius \(r_h\)). The envelope fabric pulls on it
+along the meridian tangent, at an angle \(\beta\) above the horizontal (taken from a
+second-order one-sided difference of the profile at the rim). Carrying a vertical force
+\(F\) needs \(n_m = F/(2\pi r_h\sin\beta)\), so \(q = n_m\cos\beta\) and
+
+\[ H_{crown} = \frac{F}{2\pi\tan\beta}. \]
+
+The design uses \(F = \Delta p(z_t + h)\,\pi r_h^2\), the full pressure force over the
+hole — the load path of the simulation's cap closure and an **upper bound** for a
+parachute design, whose shroud lines take most of it to the load tapes lower down. A
+meridian that turns inward below the rim puts the ring in compression (buckling is not
+checked: warning); a horizontal meridian at the rim cannot hold it (error).
+
+*Centre ring* (parachute apex, radius \(a\), where the radial tapes meet and the crown
+line is attached). The cap is a pressurised spherical membrane of radius \(\rho\) with
+isotropic resultant \(n = p\rho/2\), so
+
+\[ H_{centre} = \frac{p\,\rho\,a}{2}. \]
+
+A flat parachute cannot carry pressure as a membrane, so its centre-ring load is not
+assessed (warning). The parachute panels end at the centre ring (the cap meridian runs
+from the rim to radius \(a\)). The crown-line load is not computed. Both rings are
+checked against their own required factor of safety (default 1.5 for a metal part,
+14 CFR 31.25(a); `assumed`), at the limit load. References: W. C. Young, R. Budynas,
+*Roark's Formulas for Stress and Strain*, ch. 9 and 13.
+
 ## Red line
 
 The red line runs from the confluence down to a guide ring on the chosen load tape at the
@@ -111,11 +143,22 @@ class); otherwise the seam is simulated closed.
 Assumptions: quasi-steady jet from a thin-walled slot of uniform width; no wind; uniform
 densities; the vent does not change the envelope shape used for the jet.
 
+## Scoop
+
+An optional scoop continues the envelope below the mouth ring (radius \(r_m\)) over
+\(k\) consecutive gores (all \(N\): a full skirt), as a conical frustum of depth \(H\)
+flaring outward at \(\phi\) from the vertical: bottom radius \(r_m + H\tan\phi\), slant
+length \(H/\cos\phi\). Each scoop panel is the gore of that frustum cut with the
+envelope's width model, so its top edge equals the mouth row's bottom edge (the seam
+matches). Its fabric defaults to the mouth row's zone (Nomex). A scoop reaching the burner
+frame is a warning. Wind loads on the scoop and its effect on the mouth are not modelled.
+
 ## Mass
 
 Parachute fabric, radial and edge tapes and thread (the envelope's mass estimate,
-`envelopelab.mass_estimate`, applied to the parachute panels), shroud and
-centralising lines, red line, flying wires, crow's-foot legs and vent control lines are
+`envelopelab.mass_estimate`, applied to the parachute panels), crown and centre rings,
+shroud and centralising lines, red line, flying wires, crow's-foot legs, vent control
+lines and the scoop panels (with their tapes and thread) are
 summed into the *parachute and rigging mass*, which the lift margin subtracts.
 
 ## Limitations

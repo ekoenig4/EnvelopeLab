@@ -9,6 +9,7 @@ in the Validation panel; a value that is not assessed says so.
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from PySide6.QtCore import Qt
@@ -29,6 +30,7 @@ from envelopelab.rigging import (
     default_flying_wires,
     default_parachute,
     default_red_line,
+    default_scoop,
     turning_vent_pair,
 )
 from envelopelab_app.controller import WorkspaceController
@@ -66,6 +68,8 @@ class RiggingPanel(QWidget):
                 ("remove_flying_wires", "Remove flying wires", self.remove_flying_wires),
                 ("add_vents", "Add turning-vent pair", self.add_turning_vents),
                 ("remove_vents", "Remove turning vents", self.remove_turning_vents),
+                ("add_scoop", "Add scoop", self.add_scoop),
+                ("remove_scoop", "Remove scoop", self.remove_scoop),
             )
         ):
             button = QPushButton(text)
@@ -148,6 +152,16 @@ class RiggingPanel(QWidget):
         """Remove every turning vent."""
         self._set(("turning_vents",), [], "Remove turning vents")
 
+    def add_scoop(self) -> None:
+        """Add the default half scoop in the mouth row's fabric."""
+        design = self.controller.design
+        if design is not None and design.gores is not None:
+            self._set(("scoop",), self._dump(default_scoop(design)), "Add scoop")
+
+    def remove_scoop(self) -> None:
+        """Remove the scoop."""
+        self._set(("scoop",), None, "Remove scoop")
+
     # -- display ------------------------------------------------------------------------
 
     def _row(
@@ -173,6 +187,16 @@ class RiggingPanel(QWidget):
         self._row(node, "factor of safety", _fos_text(line), not line.passes)
         self._row(node, "mass", f"{line.mass:.3f} kg")
 
+    def _ring(self, parent: QTreeWidgetItem, ring: LineResult) -> None:
+        node = self._row(
+            parent, ring.name, f"{ring.length / math.pi:.3f} m diameter", not ring.passes
+        )
+        hoop = "not assessed" if ring.tension is None else f"{ring.tension:.0f} N"
+        self._row(node, "limit hoop force", hoop)
+        self._row(node, "strength", f"{ring.strength.value:.0f} N ({ring.strength.source})")
+        self._row(node, "factor of safety", _fos_text(ring), not ring.passes)
+        self._row(node, "mass", f"{ring.mass:.3f} kg")
+
     def refresh(self) -> None:
         """Show the current rigging outputs."""
         self.tree.clear()
@@ -195,6 +219,8 @@ class RiggingPanel(QWidget):
         self.buttons["add_flying_wires"].setEnabled(design.rigging.flying_wires is None)
         self.buttons["remove_flying_wires"].setEnabled(design.rigging.flying_wires is not None)
         self.buttons["remove_vents"].setEnabled(bool(design.turning_vents))
+        self.buttons["add_scoop"].setEnabled(design.scoop is None)
+        self.buttons["remove_scoop"].setEnabled(design.scoop is not None)
         out = self.controller.rigging
         if out is None:
             self.summary.setText(self.controller.outputs_error or "Rigging not evaluated.")
@@ -230,6 +256,8 @@ class RiggingPanel(QWidget):
             self._row(node, "shroud-line load (static)", f"{pr.force:.0f} N")
             self._line(node, pr.shroud)
             self._line(node, pr.centralizing)
+            for ring in pr.rings.values():
+                self._ring(node, ring)
             op = pr.opening
             fail = op.full_open_travel is None
             self._row(node, "red-line pull: seal open", _travel(op.seal_open_travel), fail)
@@ -271,6 +299,22 @@ class RiggingPanel(QWidget):
             self._row(node, "air loss", f"{v.jet.mass_flow:.2f} kg/s")
             self._row(node, "heat loss", f"{v.jet.heat_loss / 1000:.0f} kW")
             self._line(node, v.control_line)
+        sc = out.scoop
+        if sc is not None:
+            node = self._row(
+                self.tree, "Scoop", f"gores {sc.first_gore}-{sc.first_gore + sc.gore_count - 1}"
+            )
+            self._row(node, "fabric zone", sc.zone)
+            self._row(node, "slant length", f"{sc.slant_length:.3f} m")
+            self._row(node, "bottom radius", f"{sc.bottom_radius:.3f} m")
+            self._row(
+                node,
+                "panel (finished)",
+                f"{sc.panel.top_width:.3f} m at the mouth, {sc.panel.bottom_width:.3f} m at "
+                "the bottom",
+            )
+            self._row(node, "mass", f"{sc.mass.total_mass:.2f} kg")
+            self._row(node, "wind load", "not assessed")
         if out.turning_vents:
             self._row(self.tree, "Net turning torque", f"{out.net_torque:.0f} N m")
             self._row(self.tree, "Net side force", f"{out.net_side_force:.1f} N")

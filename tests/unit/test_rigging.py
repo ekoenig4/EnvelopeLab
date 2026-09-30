@@ -270,3 +270,136 @@ def test_cap_of_negligible_rise_is_flat_and_finite() -> None:
     assert np.all(np.isfinite(r)) and np.all(np.isfinite(z))
     assert r[0] == pytest.approx(2.0) and r[-1] == 0.0
     assert np.allclose(z, 10.0)
+
+
+# -- row zones, rings and scoop ---------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def nomex_design() -> DesignDocument:
+    return standard_gore_design(
+        "rows",
+        2000.0,
+        17.0,
+        16.0,
+        12,
+        5,
+        payload_mass=400.0,
+        mouth_fabric_id="nomex",
+        mouth_row_height=2.0,
+    )
+
+
+def test_nomex_mouth_row_then_nylon_rows(nomex_design: DesignDocument) -> None:
+    from envelopelab.project.gore_design import row_zone
+
+    assert nomex_design.gores is not None
+    rows = nomex_design.gores.panel_rows
+    assert len(rows) == 6 and rows[0].finished_height == pytest.approx(2.0)
+    assert nomex_design.zones == {"body": "ripstop_nylon", "mouth": "nomex"}
+    zones = [row_zone(nomex_design, PatternSet(), r.letter) for r in rows]
+    assert zones == ["mouth"] + ["body"] * 5
+    total = sum(r.finished_height for r in rows)
+    assert total == pytest.approx(design_profile(nomex_design).meridian_length, abs=1e-6)
+    # The parachute (top panel) is nylon: the first zone.
+    out = rigging_outputs(nomex_design)
+    assert out.parachute is not None and out.parachute.mass is not None
+    assert list(out.parachute.mass.zones) == ["body"]
+
+
+def test_row_zone_annotation_overrides_design_row(nomex_design: DesignDocument) -> None:
+    from envelopelab.project.gore_design import row_zone
+    from envelopelab.project.model import RowPattern
+
+    patterns = PatternSet(rows={"A": RowPattern(zone="body")})
+    assert row_zone(nomex_design, patterns, "A") == "body"
+
+
+def test_undefined_design_row_zone_is_an_error(nomex_design: DesignDocument) -> None:
+    bad = _with(nomex_design, ("gores", "panel_rows", 0, "zone"), "kevlar")  # type: ignore[arg-type]
+    codes = {f.code: f.severity for f in design_findings(bad, PatternSet())}
+    assert codes["zone"] == "error"
+
+
+def test_row_zone_change_is_not_a_geometry_change(nomex_design: DesignDocument) -> None:
+    from envelopelab.project.dependencies import changed_groups, group_hashes, input_groups
+
+    def hashes(d: DesignDocument) -> dict[str, str]:
+        return group_hashes(input_groups(d.model_dump(by_alias=True, mode="json"), {}))
+
+    changed = _with(nomex_design, ("gores", "panel_rows", 0, "zone"), None)  # type: ignore[arg-type]
+    assert changed_groups(hashes(nomex_design), hashes(changed)) == {"row_zones"}
+
+
+def test_mouth_row_height_must_fit() -> None:
+    with pytest.raises(ValueError, match="mouth row height"):
+        standard_gore_design(
+            "x", 2000.0, 17.0, 16.0, 12, 5, mouth_fabric_id="nomex", mouth_row_height=100.0
+        )
+
+
+def test_default_parachute_has_crown_and_centre_rings(design: DesignDocument) -> None:
+    out = rigging_outputs(design)
+    assert out.parachute is not None
+    rings = out.parachute.rings
+    assert set(rings) == {"crown ring", "centre ring"}
+    g = out.parachute.geometry
+    assert rings["crown ring"].length == pytest.approx(2 * math.pi * g.hole_radius)
+    assert g.apex_radius == pytest.approx(0.1)  # 5 % of the 4 m hole
+    assert out.parachute.panel is not None
+    assert out.parachute.panel.top_width == pytest.approx(2 * math.pi * 0.1 / 12, rel=1e-3)
+    assert all(r.passes and r.tension is not None and r.tension > 0 for r in rings.values())
+    assert out.masses["parachute:crown ring"] > 0.0
+
+
+def test_weak_crown_ring_fails(design: DesignDocument) -> None:
+    weak = _with(design, ("parachute", "crown_ring", "strength", "value"), 10.0)
+    msgs = [f.message for f in rigging_outputs(weak).findings if f.code == "fos"]
+    assert any(m.startswith("crown ring") for m in msgs)
+
+
+def test_flat_parachute_centre_ring_not_assessed(design: DesignDocument) -> None:
+    flat = _with(design, ("parachute", "billow"), 0.0)
+    out = rigging_outputs(flat)
+    assert _codes(flat)["centre_ring_flat"] == "warning"
+    assert out.parachute is not None and out.parachute.rings["centre ring"].tension is None
+
+
+def test_centre_ring_larger_than_hole_is_an_error(design: DesignDocument) -> None:
+    big = _with(design, ("parachute", "centre_ring_diameter"), 10.0)
+    assert _codes(big)["parachute_geometry"] == "error"
+
+
+def test_centre_ring_needs_a_diameter(design: DesignDocument) -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="centre_ring_diameter"):
+        _with(design, ("parachute", "centre_ring_diameter"), None)
+
+
+def test_scoop_matches_the_mouth_row_and_adds_mass(nomex_design: DesignDocument) -> None:
+    from envelopelab.project.gore_design import panel_rows
+    from envelopelab.rigging import default_scoop
+
+    scooped = nomex_design.model_copy(update={"scoop": default_scoop(nomex_design)})
+    out = rigging_outputs(scooped)
+    assert out.scoop is not None and out.scoop.zone == "mouth"  # Nomex by default
+    mouth_row = panel_rows(scooped, PatternSet())[0]
+    assert abs(out.scoop.panel.top_width - mouth_row.bottom_width) < 3e-3
+    assert out.masses["scoop:fabric, tapes and thread"] > 0.0
+    assert "scoop" in rigging_polylines(scooped, out)
+    assert out.findings == []
+
+
+def test_scoop_reaching_the_frame_is_warned(design: DesignDocument) -> None:
+    from envelopelab.rigging import default_scoop
+
+    deep = default_scoop(design).model_copy(update={"height": 50.0})
+    assert _codes(design.model_copy(update={"scoop": deep}))["scoop_frame"] == "warning"
+
+
+def test_scoop_gores_must_fit(design: DesignDocument) -> None:
+    from envelopelab.rigging import default_scoop
+
+    wide = default_scoop(design).model_copy(update={"gore_count": 13})
+    assert _codes(design.model_copy(update={"scoop": wide}))["scoop_gores"] == "error"

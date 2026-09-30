@@ -8,7 +8,8 @@ Pa) except the few angles marked as degrees. Every material value added in versi
 carries a source tag (:class:`TaggedValue`).
 
 Version history: 0 (no ``meta``), 1 (rigging names only), 2 (parachute, red-line,
-flying-wire and turning-vent placement; see ``docs/adr/ADR-0009-rigging-schema-v2.md``).
+flying-wire and turning-vent placement, row zones, crown and centre rings, scoop; see
+``docs/adr/ADR-0009-rigging-schema-v2.md`` and ``ADR-0010``).
 """
 
 from __future__ import annotations
@@ -51,10 +52,24 @@ class MeridianControlPoint(BaseModel):
 
 
 class PanelRow(BaseModel):
+    """One horizontal panel row of every gore.
+
+    Attributes
+    ----------
+    letter : str
+        Row letter (mouth first).
+    finished_height : float
+        Finished height along the tape, m.
+    zone : str, optional
+        Material zone (key of ``zones``), e.g. ``mouth`` for a Nomex row; a pattern
+        annotation of the row overrides it; default the first zone.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     letter: str = Field(min_length=1, max_length=4)
     finished_height: float = Field(gt=0)
+    zone: str | None = None
 
 
 class GoreSpec(BaseModel):
@@ -193,6 +208,29 @@ class LineSpec(BaseModel):
         return self
 
 
+class RingSpec(BaseModel):
+    """A load ring (crown ring at the opening rim, centre ring of the parachute).
+
+    Attributes
+    ----------
+    ring_class : str
+        Ring description (alias ``class``), e.g. "aluminium rod ring 8 mm".
+    linear_mass : TaggedValue
+        Mass per length of the ring, kg/m.
+    strength : TaggedValue
+        Allowable axial (hoop) force of the ring section, N.
+    required_safety_factor : TaggedValue
+        Minimum strength-to-limit-load ratio, dimensionless.
+    """
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    ring_class: str = Field(alias="class")
+    linear_mass: TaggedValue
+    strength: TaggedValue
+    required_safety_factor: TaggedValue
+
+
 class ParachuteSpec(BaseModel):
     """The parachute (deflation port) that closes the crown opening from inside.
 
@@ -218,6 +256,13 @@ class ParachuteSpec(BaseModel):
         opening, m.
     shroud_line, centralizing_line : LineSpec
         Line classes.
+    crown_ring : RingSpec, optional
+        Ring sewn into the rim of the crown opening (its diameter is the opening's).
+    centre_ring : RingSpec, optional
+        Ring at the parachute apex where the radial tapes meet and the crown line is
+        attached; the parachute panels end at it.
+    centre_ring_diameter : float, optional
+        m; required with ``centre_ring``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -229,6 +274,41 @@ class ParachuteSpec(BaseModel):
     centralizing_depth: float = Field(gt=0.0)
     shroud_line: LineSpec
     centralizing_line: LineSpec
+    crown_ring: RingSpec | None = None
+    centre_ring: RingSpec | None = None
+    centre_ring_diameter: float | None = Field(default=None, gt=0.0)
+
+    @model_validator(mode="after")
+    def validate_centre_ring(self) -> ParachuteSpec:
+        if self.centre_ring is not None and self.centre_ring_diameter is None:
+            raise ValueError("a centre ring needs centre_ring_diameter")
+        return self
+
+
+class ScoopSpec(BaseModel):
+    """A scoop: fabric hanging below the mouth over consecutive gores.
+
+    Attributes
+    ----------
+    first_gore : int
+        First gore (1..N) the scoop hangs from.
+    gore_count : int
+        Consecutive gores it spans (N: a full skirt).
+    height : float
+        Vertical depth below the mouth, m.
+    flare_deg : float
+        Outward angle of the scoop from the vertical, degrees (boundary format).
+    zone : str, optional
+        Material zone; default the mouth row's zone.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    first_gore: int = Field(ge=1)
+    gore_count: int = Field(ge=1)
+    height: float = Field(gt=0.0)
+    flare_deg: float = Field(default=10.0, ge=0.0, lt=60.0)
+    zone: str | None = None
 
 
 class RedLineSpec(BaseModel):
@@ -381,6 +461,7 @@ class DesignDocument(BaseModel):
     rigging: RiggingSpec
     parachute: ParachuteSpec | None = None
     turning_vents: list[TurningVentSpec] = Field(default_factory=list)
+    scoop: ScoopSpec | None = None
 
     @model_validator(mode="before")
     @classmethod
@@ -463,6 +544,7 @@ def _upgrade_v1_to_v2(raw: dict[str, Any]) -> dict[str, Any]:
     }
     upgraded.setdefault("parachute", None)
     upgraded.setdefault("turning_vents", [])
+    upgraded.setdefault("scoop", None)
     upgraded["schema_version"] = 2
     return upgraded
 

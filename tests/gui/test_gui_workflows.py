@@ -222,7 +222,7 @@ def test_manual_outline_override_is_flagged(gore_window: MainWindow) -> None:
             continue
         texts.append(item.text(0))
         rows += [item.child(i) for i in range(item.childCount())]
-    assert "Row B (manual override)" in texts
+    assert "Row B: body (ripstop_nylon) (manual override)" in texts
     w.patterns.clear_override.click()
     assert session.patterns.row("B").manual_outline is None
 

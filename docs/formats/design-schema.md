@@ -299,6 +299,7 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
     },
     "PanelRow": {
       "additionalProperties": false,
+      "description": "One horizontal panel row of every gore.\n\nAttributes\n----------\nletter : str\n    Row letter (mouth first).\nfinished_height : float\n    Finished height along the tape, m.\nzone : str, optional\n    Material zone (key of ``zones``), e.g. ``mouth`` for a Nomex row; a pattern\n    annotation of the row overrides it; default the first zone.",
       "properties": {
         "finished_height": {
           "exclusiveMinimum": 0,
@@ -310,6 +311,18 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
           "minLength": 1,
           "title": "Letter",
           "type": "string"
+        },
+        "zone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Zone"
         }
       },
       "required": [
@@ -321,7 +334,7 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
     },
     "ParachuteSpec": {
       "additionalProperties": false,
-      "description": "The parachute (deflation port) that closes the crown opening from inside.\n\nThe parachute's diameter follows from the envelope: it covers the parachute hole\n(``gores.parachute_hole_diameter``) and overlaps the envelope by ``gores.seal_overlap``\nmeasured along the fabric. One shroud line and one centralising line leave each\nradial seam of the parachute.\n\nAttributes\n----------\npanel_count : int\n    Radial parachute panels (and shroud lines), >= 3.\nbillow : float\n    Rise of the inflated cap over the hole, as a fraction of the hole diameter\n    (0 = flat), dimensionless.\nzone : str, optional\n    Material zone of the parachute fabric; default the design's first zone.\nshroud_attachment : float\n    Distance along the envelope load tape from the parachute edge down to where each\n    shroud line is attached, m.\ncentralizing_depth : float\n    Depth of the centralising-line confluence (red-line attachment) below the crown\n    opening, m.\nshroud_line, centralizing_line : LineSpec\n    Line classes.",
+      "description": "The parachute (deflation port) that closes the crown opening from inside.\n\nThe parachute's diameter follows from the envelope: it covers the parachute hole\n(``gores.parachute_hole_diameter``) and overlaps the envelope by ``gores.seal_overlap``\nmeasured along the fabric. One shroud line and one centralising line leave each\nradial seam of the parachute.\n\nAttributes\n----------\npanel_count : int\n    Radial parachute panels (and shroud lines), >= 3.\nbillow : float\n    Rise of the inflated cap over the hole, as a fraction of the hole diameter\n    (0 = flat), dimensionless.\nzone : str, optional\n    Material zone of the parachute fabric; default the design's first zone.\nshroud_attachment : float\n    Distance along the envelope load tape from the parachute edge down to where each\n    shroud line is attached, m.\ncentralizing_depth : float\n    Depth of the centralising-line confluence (red-line attachment) below the crown\n    opening, m.\nshroud_line, centralizing_line : LineSpec\n    Line classes.\ncrown_ring : RingSpec, optional\n    Ring sewn into the rim of the crown opening (its diameter is the opening's).\ncentre_ring : RingSpec, optional\n    Ring at the parachute apex where the radial tapes meet and the crown line is\n    attached; the parachute panels end at it.\ncentre_ring_diameter : float, optional\n    m; required with ``centre_ring``.",
       "properties": {
         "billow": {
           "maximum": 0.5,
@@ -336,6 +349,41 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
         },
         "centralizing_line": {
           "$ref": "#/$defs/LineSpec"
+        },
+        "centre_ring": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RingSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "centre_ring_diameter": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Centre Ring Diameter"
+        },
+        "crown_ring": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RingSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "panel_count": {
           "minimum": 3,
@@ -450,6 +498,33 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
       "title": "RiggingSpec",
       "type": "object"
     },
+    "RingSpec": {
+      "additionalProperties": false,
+      "description": "A load ring (crown ring at the opening rim, centre ring of the parachute).\n\nAttributes\n----------\nring_class : str\n    Ring description (alias ``class``), e.g. \"aluminium rod ring 8 mm\".\nlinear_mass : TaggedValue\n    Mass per length of the ring, kg/m.\nstrength : TaggedValue\n    Allowable axial (hoop) force of the ring section, N.\nrequired_safety_factor : TaggedValue\n    Minimum strength-to-limit-load ratio, dimensionless.",
+      "properties": {
+        "class": {
+          "title": "Class",
+          "type": "string"
+        },
+        "linear_mass": {
+          "$ref": "#/$defs/TaggedValue"
+        },
+        "required_safety_factor": {
+          "$ref": "#/$defs/TaggedValue"
+        },
+        "strength": {
+          "$ref": "#/$defs/TaggedValue"
+        }
+      },
+      "required": [
+        "class",
+        "linear_mass",
+        "strength",
+        "required_safety_factor"
+      ],
+      "title": "RingSpec",
+      "type": "object"
+    },
     "ScaleVariant": {
       "additionalProperties": false,
       "properties": {
@@ -477,6 +552,53 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
         "factor_k"
       ],
       "title": "ScaleVariant",
+      "type": "object"
+    },
+    "ScoopSpec": {
+      "additionalProperties": false,
+      "description": "A scoop: fabric hanging below the mouth over consecutive gores.\n\nAttributes\n----------\nfirst_gore : int\n    First gore (1..N) the scoop hangs from.\ngore_count : int\n    Consecutive gores it spans (N: a full skirt).\nheight : float\n    Vertical depth below the mouth, m.\nflare_deg : float\n    Outward angle of the scoop from the vertical, degrees (boundary format).\nzone : str, optional\n    Material zone; default the mouth row's zone.",
+      "properties": {
+        "first_gore": {
+          "minimum": 1,
+          "title": "First Gore",
+          "type": "integer"
+        },
+        "flare_deg": {
+          "default": 10.0,
+          "exclusiveMaximum": 60.0,
+          "minimum": 0.0,
+          "title": "Flare Deg",
+          "type": "number"
+        },
+        "gore_count": {
+          "minimum": 1,
+          "title": "Gore Count",
+          "type": "integer"
+        },
+        "height": {
+          "exclusiveMinimum": 0.0,
+          "title": "Height",
+          "type": "number"
+        },
+        "zone": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Zone"
+        }
+      },
+      "required": [
+        "first_gore",
+        "gore_count",
+        "height"
+      ],
+      "title": "ScoopSpec",
       "type": "object"
     },
     "SeamCurve": {
@@ -768,6 +890,17 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
       "default": 2,
       "title": "Schema Version",
       "type": "integer"
+    },
+    "scoop": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ScoopSpec"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "seam_types": {
       "items": {

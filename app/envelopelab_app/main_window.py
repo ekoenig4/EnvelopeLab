@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
                 "Rigging",
                 self.controller,
                 self.rigging,
-                scope={"parachute", "rigging", "turning_vents", "operating"},
+                scope={"parachute", "rigging", "turning_vents", "scoop", "operating"},
             ),
         }
         area = Qt.DockWidgetArea
