@@ -994,3 +994,116 @@ def rows_zones_mapping(design: DesignDocument, patterns: PatternSet) -> Mapping[
     """Zone of every design row."""
     assert design.gores is not None
     return {r.letter: row_zone(design, patterns, r.letter) for r in design.gores.panel_rows}
+
+
+# --------------------------------------------------------------------------------------
+# Display surface
+# --------------------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DisplaySurface:
+    """Envelope surface for display, with its gores, panel rows and seams (m).
+
+    The surface of revolution is tessellated so that every vertical seam (gore boundary)
+    and every horizontal seam (row boundary) is a mesh line; the fabric bulge between
+    seams is not shown.
+
+    Attributes
+    ----------
+    points : ndarray, shape (n, 3)
+        m.
+    faces : ndarray of int, shape (m, 3)
+        Triangles.
+    face_gore : ndarray of int, shape (m,)
+        Gore number (1..N) of each triangle; gore k lies between seams k-1 and k.
+    face_row : ndarray of int, shape (m,)
+        Index of the panel row (mouth first) of each triangle.
+    vertical_seams : list of ndarray
+        One meridian polyline per vertical seam (load tape), shape (k, 3).
+    horizontal_seams : list of ndarray
+        One closed ring per row boundary (mouth and top opening included), shape (k, 3).
+    row_letters : list of str
+        Row letters, mouth first.
+    """
+
+    points: FloatArray
+    faces: np.ndarray
+    face_gore: np.ndarray
+    face_row: np.ndarray
+    vertical_seams: list[FloatArray]
+    horizontal_seams: list[FloatArray]
+    row_letters: list[str]
+
+
+def display_surface(design: DesignDocument, per_gore: int = 6, per_row: int = 8) -> DisplaySurface:
+    """Display tessellation of a gore design (see :class:`DisplaySurface`).
+
+    Parameters
+    ----------
+    design : DesignDocument
+        Gore design; row heights along the tape in m.
+    per_gore : int
+        Segments across each gore.
+    per_row : int
+        Segments along the tape in each row.
+
+    Returns
+    -------
+    DisplaySurface
+        Points in m. Rows that do not reach the top (rows not fitted) end where they end.
+    """
+    assert design.gores is not None
+    profile = design_profile(design)
+    n = design.gores.count
+    length = profile.meridian_length
+    bounds = [0.0]
+    for row in design.gores.panel_rows:
+        bounds.append(min(bounds[-1] + row.finished_height, length))
+    stations = [0.0]
+    s_row: list[int] = []
+    for i, (s0, s1) in enumerate(zip(bounds[:-1], bounds[1:], strict=True)):
+        if s1 > s0:
+            stations += list(np.linspace(s0, s1, per_row + 1)[1:])
+            s_row += [i] * per_row
+    s = np.array(stations)
+    r, z = profile.radius_at(s), profile.height_at(s)
+    m = n * per_gore
+    phi = 2.0 * np.pi * np.arange(m) / m
+    pts = np.column_stack(
+        (np.outer(r, np.cos(phi)).ravel(), np.outer(r, np.sin(phi)).ravel(), np.repeat(z, m))
+    )
+    faces, gores, rows = [], [], []
+    for i in range(len(s) - 1):
+        for j in range(m):
+            a = i * m + j
+            b = i * m + (j + 1) % m
+            faces += [[a, b, b + m], [a, b + m, a + m]]
+            gores += [j // per_gore + 1] * 2
+            rows += [s_row[i]] * 2
+    ring = np.linspace(0.0, 2.0 * np.pi, 4 * m + 1)
+    seams_h = [
+        np.column_stack(
+            (
+                float(profile.radius_at(b)) * np.cos(ring),
+                float(profile.radius_at(b)) * np.sin(ring),
+                np.full_like(ring, float(profile.height_at(b))),
+            )
+        )
+        for b in dict.fromkeys(bounds)
+    ]
+    dense = np.linspace(0.0, bounds[-1], 200)
+    rd, zd = profile.radius_at(dense), profile.height_at(dense)
+    seams_v = [
+        np.column_stack((rd * math.cos(a), rd * math.sin(a), zd))
+        for a in 2.0 * np.pi * np.arange(n) / n
+    ]
+    return DisplaySurface(
+        points=pts,
+        faces=np.array(faces, dtype=np.int64),
+        face_gore=np.array(gores, dtype=np.int64),
+        face_row=np.array(rows, dtype=np.int64),
+        vertical_seams=seams_v,
+        horizontal_seams=seams_h,
+        row_letters=[row.letter for row in design.gores.panel_rows],
+    )

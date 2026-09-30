@@ -40,10 +40,22 @@ parachute, red line, flying wires and turning vents are added and checked in the
 beside), pressure Pa, masses kg. The **Materials** panel lists the fabric library with source
 tags and maps each material zone to a fabric.
 
+## The 3D design surface
+
+The 3D view draws the design as a solid surface: each panel row in its fabric's colour,
+every second gore slightly darker, the vertical seams (load tapes) as thick dark lines and
+the horizontal row seams as thinner grey rings, so individual gores and panels can be
+picked out. The parachute, rigging and scoop are a separate layer.
+
 ## The 2D pattern view
 
-The pattern view draws each panel row as cut (dashed) and finished (solid, filled with the
-zone's fabric colour) outlines with its label, grain arrow, notches, tapes and features.
+The pattern view is its own full-height column at the right of the window. It stacks the
+pieces vertically in the order they are sewn up a gore: the scoop (if any) at the bottom,
+the panel rows from the mouth up (e.g. the Nomex mouth row, then the nylon rows), and the
+parachute panel on top. Each panel row is drawn as cut (dashed) and finished (solid,
+filled with the zone's fabric colour) outlines with its label, grain arrow, notches, tapes
+and features; the parachute and scoop panels are read-only here (edit them in the
+Rigging panel and Properties).
 For the selected row you can set the label, grain direction, zone, seam allowance (for all
 rows or this row), add notches, tape paths across the panel and feature locations (drag a
 feature to move it).

@@ -54,6 +54,10 @@ from envelopelab_app.wizard import NewDesignWizard
 FILE_FILTER = f"EnvelopeLab projects (*{PROJECT_SUFFIX})"
 
 
+#: Minimum width of the vertical 2D pattern column, px.
+PATTERN_DOCK_WIDTH = 380
+
+
 class MainWindow(QMainWindow):
     """The application window.
 
@@ -140,9 +144,14 @@ class MainWindow(QMainWindow):
         self.tabifyDockWidget(self.docks["properties"], self.docks["materials"])
         self.tabifyDockWidget(self.docks["properties"], self.docks["rigging"])
         self.addDockWidget(area.RightDockWidgetArea, self.docks["view3d"])
-        self.addDockWidget(area.RightDockWidgetArea, self.docks["patterns"])
-        self.tabifyDockWidget(self.docks["view3d"], self.docks["patterns"])
-        self.addDockWidget(area.RightDockWidgetArea, self.docks["history"])
+        # The 2D pattern view is its own full-height column right of the 3D view, so the
+        # vertically stacked pieces (scoop, rows mouth up, parachute) read like a gore.
+        self.splitDockWidget(
+            self.docks["view3d"], self.docks["patterns"], Qt.Orientation.Horizontal
+        )
+        self.splitDockWidget(self.docks["view3d"], self.docks["history"], Qt.Orientation.Vertical)
+        # Wide enough for the pieces and the row form; the stack itself is tall.
+        self.docks["patterns"].setMinimumWidth(PATTERN_DOCK_WIDTH)
         self.addDockWidget(area.BottomDockWidgetArea, self.docks["validation"])
         self.addDockWidget(area.BottomDockWidgetArea, self.docks["runs"])
         self.tabifyDockWidget(self.docks["validation"], self.docks["runs"])

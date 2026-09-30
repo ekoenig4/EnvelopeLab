@@ -379,6 +379,8 @@ def test_preview_and_calculix_runs_show_distinct_solver_labels(
 
 def test_layer_list_without_renderer_names_every_source(gore_window: MainWindow) -> None:
     labels = gore_window.view3d.labels()
-    assert labels == {"design": "Design surface (profile, current)"}
+    assert labels == {
+        "design": "Design surface (profile, current): 8 gores x 4 panel rows, seams dark"
+    }
     item = gore_window.view3d.layer_list.item(0)
     assert item is not None and item.checkState() == Qt.CheckState.Checked

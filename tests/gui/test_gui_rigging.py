@@ -146,3 +146,36 @@ def test_scoop_can_be_added_and_is_drawn(gore_window: MainWindow) -> None:
     assert session.design.scoop.height == 0.8
     gore_window.rigging.buttons["remove_scoop"].click()
     assert session.design.scoop is None
+
+
+def test_patterns_are_stacked_vertically_in_their_own_column(gore_window: MainWindow) -> None:
+    _add_all(gore_window)
+    gore_window.rigging.buttons["add_scoop"].click()
+    gore_window.patterns.regenerate()
+    offsets = gore_window.patterns.view.offsets
+    letters = list(offsets)
+    assert letters == ["A", "B", "C", "D"]
+    # Scene y grows downward: each row above the previous one, all centred on x = 0.
+    ys = [offsets[k].y() for k in letters]
+    assert ys == sorted(ys, reverse=True) and all(offsets[k].x() == 0.0 for k in letters)
+    top = gore_window.patterns.parachute_item
+    bottom = gore_window.patterns.scoop_item
+    assert top is not None and bottom is not None
+    # Polygon extents (the item bounding rects include the cosmetic pen width).
+    top_rect = top.mapToScene(top.polygon()).boundingRect()
+    bottom_rect = bottom.mapToScene(bottom.polygon()).boundingRect()
+    assert top_rect.bottom() < offsets["D"].y()  # parachute above row D
+    assert bottom_rect.top() > offsets["A"].y()  # scoop below row A
+    assert gore_window.docks["patterns"] not in gore_window.tabifiedDockWidgets(
+        gore_window.docks["view3d"]
+    )
+
+
+def test_3d_design_layer_shows_gores_rows_and_seams(gore_window: MainWindow) -> None:
+    layer = gore_window.view3d.layers["design"]
+    assert "8 gores x 4 panel rows" in layer.label
+    assert layer.face_colors is not None and len(layer.face_colors) == len(layer.faces)
+    assert len(layer.polylines["vertical_seams"]) == 8
+    assert len(layer.polylines["horizontal_seams"]) == 5  # mouth, 3 row seams, top
+    # Neighbouring gores are shaded differently.
+    assert len({tuple(c) for c in layer.face_colors}) >= 2

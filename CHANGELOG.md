@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- 2D pattern view: pieces are stacked vertically as sewn up a gore (scoop, rows from the
+  mouth up, parachute on top) in their own full-height column right of the 3D view.
+- 3D view: the design surface is solid, coloured by each row's fabric with alternate gores
+  shaded, and draws the vertical (load-tape) and horizontal (row) seams, so individual
+  gores and panels are visible (`envelopelab.project.gore_design.display_surface`).
 - Panel layout from the mouth up: a mouth row in its own fabric (Nomex by default in the
   wizard, configurable height), N body rows (nylon), and the parachute as the top panel.
   Panel rows carry an optional design-level material zone (`gores.panel_rows[].zone`,
