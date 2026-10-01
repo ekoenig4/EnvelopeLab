@@ -9,8 +9,10 @@ import pytest
 from envelopelab.project import edits
 from envelopelab.project.dependencies import (
     ARTIFACTS,
+    EXTERNAL_GROUPS,
     INPUT_GROUPS,
     artifact_inputs,
+    fingerprints,
     invalidated_by,
 )
 from envelopelab.project.session import ProjectSession
@@ -58,7 +60,21 @@ def test_unknown_group_is_an_error() -> None:
 
 def test_every_group_is_read_by_some_artifact() -> None:
     read = set().union(*(artifact_inputs(a.name) for a in ARTIFACTS))
-    assert read == set(INPUT_GROUPS)
+    assert read == set(INPUT_GROUPS) | set(EXTERNAL_GROUPS)
+
+
+def test_library_fabric_values_invalidate_simulation_and_nesting() -> None:
+    assert invalidated_by({"fabric_properties"}) == {"simulation", "nesting", "export"}
+
+
+def test_missing_external_group_leaves_fingerprints_unchanged(session: ProjectSession) -> None:
+    """Without a library the fingerprints are those of the design alone (as before)."""
+    hashes = session.group_hashes()
+    plain = fingerprints(hashes)
+    assert session.fingerprints() == plain
+    with_library = fingerprints({**hashes, "fabric_properties": "0" * 64})
+    changed = {name for name in plain if plain[name] != with_library[name]}
+    assert changed == {"simulation", "nesting", "export"}
 
 
 def test_seam_allowance_edit_keeps_rest_mesh_and_simulation_current(
