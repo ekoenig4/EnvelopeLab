@@ -14,6 +14,7 @@ from envelopelab.project.dependencies import invalidated_by
 from envelopelab.project.model import RunRecord, utc_now
 from envelopelab.project.recovery import find_recoverable
 from envelopelab.project.session import ProjectSession
+from envelopelab.project.shape_family import QUANTITIES
 from envelopelab.project.simulation import build_solver_model
 from envelopelab_app.main_window import MainWindow, dock_titles
 from envelopelab_app.settings import load_preferences, recent_projects
@@ -295,9 +296,9 @@ def test_snapshots_versions_and_history_jumps(gore_window: MainWindow) -> None:
 def test_special_shape_wizard_and_measurements_stub(qtbot: QtBot, window: MainWindow) -> None:
     wizard = NewDesignWizard(window.controller.fabrics, window)
     qtbot.addWidget(wizard)
-    wizard.tabs.setCurrentIndex(2)
+    wizard.tabs.setCurrentWidget(wizard.measure_tab)
     assert not wizard.buttons.button(QDialogButtonBox.StandardButton.Ok).isEnabled()
-    wizard.tabs.setCurrentIndex(1)
+    wizard.tabs.setCurrentWidget(wizard.special_tab)
     wizard.mesh_path.setText(str(FIXTURES / "alien" / "reference" / "alien-reference.obj"))
     wizard.create_design()
     assert wizard.design is not None and wizard.design.envelope_type == "special"
@@ -309,6 +310,50 @@ def test_special_shape_wizard_and_measurements_stub(qtbot: QtBot, window: MainWi
     wizard.design = None
     wizard.create_design()
     assert wizard.design is None and wizard.error.text()
+
+
+def test_shape_file_wizard_holds_mouth_and_solves_the_rest(
+    qtbot: QtBot, window: MainWindow
+) -> None:
+    wizard = NewDesignWizard(window.controller.fabrics, window)
+    qtbot.addWidget(wizard)
+    wizard.tabs.setCurrentWidget(wizard.shape_tab)
+    tab = wizard.shape_tab
+    assert tab.load(str(FIXTURES / "smalley_90k" / "shape.yaml")), tab.status.text()
+    assert tab.held_names() == ["mouth_station", "top_station", "nominal_volume"]
+    assert tab.gores.value() == 20
+    assert "Converged" in tab.status.text()
+    names = list(QUANTITIES)
+    volume_row, mouth_row = names.index("nominal_volume"), names.index("mouth_diameter")
+    # Release the volume, type a 6 m mouth: the gore length (scale) is solved.
+    tab.cell(volume_row, 0).setCheckState(Qt.CheckState.Unchecked)
+    tab.cell(mouth_row, 2).setText("6")
+    assert tab.held_names() == ["mouth_station", "top_station", "mouth_diameter"]
+    wizard.create_design()
+    assert wizard.design is not None, wizard.error.text()
+    assert tab.solution is not None and tab.solution.free == ("gore_length",)
+    assert wizard.design.gores is not None
+    assert wizard.design.gores.mouth_diameter == pytest.approx(6.0, abs=1e-3)
+    assert wizard.design.gores.count == 20
+    # Imperial display of the same solution.
+    tab.units.setCurrentIndex(1)
+    assert float(tab.cell(mouth_row, 2).text()) == pytest.approx(6.0 / 0.3048, rel=1e-5)
+    # Four held values cannot be solved; no design is made.
+    tab.cell(volume_row, 0).setCheckState(Qt.CheckState.Checked)
+    wizard.design = None
+    wizard.create_design()
+    assert wizard.design is None
+    assert "exactly 3" in wizard.error.text()
+    # An unreachable target is reported unconverged; no design is made.
+    tab.cell(volume_row, 0).setCheckState(Qt.CheckState.Unchecked)
+    gore_row = names.index("gore_length")
+    tab.cell(names.index("mouth_station"), 0).setCheckState(Qt.CheckState.Unchecked)
+    tab.units.setCurrentIndex(0)
+    tab.cell(gore_row, 2).setText("10")
+    tab.cell(mouth_row, 2).setText("30")
+    wizard.create_design()
+    assert wizard.design is None
+    assert "NOT CONVERGED" in wizard.error.text()
 
 
 def test_refused_edit_is_reported(gore_window: MainWindow) -> None:

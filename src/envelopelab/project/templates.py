@@ -89,6 +89,7 @@ def new_design(
     ambient_pressure: float = 101325.0,
     payload_mass: float = 0.0,
     row_letters: Sequence[str] | None = None,
+    seal_overlap: float | None = None,
 ) -> DesignDocument:
     """A standard-gore design document.
 
@@ -116,6 +117,8 @@ def new_design(
         kg.
     row_letters : sequence of str, optional
         Row letters; default A, B, C, ...
+    seal_overlap : float, optional
+        Parachute seal overlap, m; default 0.1 of the top diameter.
 
     Returns
     -------
@@ -144,7 +147,7 @@ def new_design(
         "mouth_diameter": mouth_diameter,
         "crown_ring": top_diameter,
         "parachute_hole_diameter": top_diameter,
-        "seal_overlap": 0.1 * top_diameter,
+        "seal_overlap": 0.1 * top_diameter if seal_overlap is None else seal_overlap,
     }
     return DesignDocument.model_validate(payload).with_updated_hash()
 
