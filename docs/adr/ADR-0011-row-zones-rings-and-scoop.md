@@ -1,4 +1,4 @@
-# ADR-0010: Row zones, parachute rings and scoop in design schema v2
+# ADR-0011: Row zones, parachute rings and scoop in design schema v2
 
 - Status: Accepted
 - Date: 2026-09-30
@@ -8,7 +8,7 @@ Builders lay out an envelope as a Nomex row at the mouth, N nylon rows and the p
 at the top; the parachute has a crown ring at the rim of the opening and a centre ring at
 its apex, and a design may have a scoop below the mouth. Row materials lived only in the
 project's pattern annotations, so a new design could not state them, and schema v2
-(ADR-0009) had no rings or scoop.
+(ADR-0010) had no rings or scoop.
 
 ## Decision
 * Extend schema v2 (not yet released, so no version bump) with optional fields:

@@ -15,13 +15,13 @@ All notable changes to this project will be documented in this file.
 - Panel layout from the mouth up: a mouth row in its own fabric (Nomex by default in the
   wizard, configurable height), N body rows (nylon), and the parachute as the top panel.
   Panel rows carry an optional design-level material zone (`gores.panel_rows[].zone`,
-  ADR-0010); the pattern view's row zone still overrides it.
+  ADR-0011); the pattern view's row zone still overrides it.
 - Parachute crown ring (rim of the crown opening) and centre ring (apex, where the
   panels now end): circumference, limit hoop force, factor of safety and mass.
 - Optional scoop below the mouth over consecutive gores (depth, flare, fabric zone):
   flat panels that match the mouth row, mass, burner-frame clearance warning.
 - Parachute, red line, flying wires and turning vents are part of the design (design
-  schema v2, ADR-0009; v1 documents migrate on load, their hash checked first).
+  schema v2, ADR-0010; v1 documents migrate on load, their hash checked first).
   `envelopelab.rigging` computes the seated parachute and its flat panels, shroud and
   centralising line lengths, the shroud lines' limit tension, the red-line pull to open the
   parachute, the red-line route and length, flying-wire and crow's-foot geometry and limit
@@ -41,6 +41,20 @@ All notable changes to this project will be documented in this file.
 - Desktop application: Rigging panel (add/remove, lengths, loads, factors of safety, mass),
   Parachute / Rigging / Turning vents in the Design Tree and Properties (with units), a
   parachute and rigging layer in the 3D view, and the rigging mass in the live outputs.
+- Shared fabric library: fabrics created once can be used in every design. The library is
+  a per-user SQLite file (`materials.sqlite` in the application data folder, or
+  `$ENVELOPELAB_MATERIAL_LIBRARY` / Preferences → Fabric library file), replacing the
+  in-memory library that was reset at every start. The Materials panel gains **New fabric…**,
+  **Duplicate…**, **Edit…** and **Delete**, backed by a fabric form with a source tag on every
+  value. `FabricLibraryRepository.add_fabric` / `update_fabric` / `delete_fabric` validate
+  every write (`validate_fabric`). Example fabrics are read-only. Library files carry a
+  layout version (1; version 0 files are upgraded). See `user/fabric-library.md`,
+  `formats/fabric-library.md` and ADR-0009.
+- Staleness: the values of the library fabrics a design uses are a new external input group,
+  `fabric_properties`, read by simulation and nesting. Editing a fabric marks the results
+  built from it stale in every design that uses it, without marking the project modified.
+  Runs saved before this change show as stale once in the application (they did not record
+  fabric values); fingerprints computed without a library are unchanged.
 - Desktop application: software OpenGL (`LIBGL_ALWAYS_SOFTWARE=1`) is selected
   automatically under WSL, where the GPU driver drew the window black; new launcher options
   `--software-gl` and `--hardware-gl`. An explicit `LIBGL_ALWAYS_SOFTWARE` is respected.

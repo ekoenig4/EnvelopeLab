@@ -5,6 +5,7 @@ nav:
       - Installation: user/installation.md
       - Your first design: user/first-design.md
       - Editing designs: user/editing-designs.md
+      - Fabric library: user/fabric-library.md
       - Running simulations: user/running-simulations.md
       - Importing patterns: user/importing-patterns.md
       - Simulation preview: user/simulation-preview.md
@@ -33,6 +34,7 @@ nav:
       - Design schema: formats/design-schema.md
       - Pattern import mapping: formats/pattern-import-mapping.md
       - Project file: formats/project-file.md
+      - Fabric library file: formats/fabric-library.md
   - ADR:
       - ADR-0001: adr/ADR-0001-stack-choice.md
       - ADR-0002: adr/ADR-0002-gpl-3-licensing.md
@@ -42,8 +44,9 @@ nav:
       - ADR-0006: adr/ADR-0006-appendage-submodels-and-reality-check.md
       - ADR-0007: adr/ADR-0007-desktop-application-stack.md
       - ADR-0008: adr/ADR-0008-project-file-and-staleness.md
-      - ADR-0009: adr/ADR-0009-rigging-schema-v2.md
-      - ADR-0010: adr/ADR-0010-row-zones-rings-and-scoop.md
+      - ADR-0009: adr/ADR-0009-shared-fabric-library.md
+      - ADR-0010: adr/ADR-0010-rigging-schema-v2.md
+      - ADR-0011: adr/ADR-0011-row-zones-rings-and-scoop.md
 theme:
   name: material
 markdown_extensions:

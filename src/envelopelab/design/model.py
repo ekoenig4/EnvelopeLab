@@ -9,7 +9,7 @@ carries a source tag (:class:`TaggedValue`).
 
 Version history: 0 (no ``meta``), 1 (rigging names only), 2 (parachute, red-line,
 flying-wire and turning-vent placement, row zones, crown and centre rings, scoop; see
-``docs/adr/ADR-0009-rigging-schema-v2.md`` and ``ADR-0010``).
+``docs/adr/ADR-0010-rigging-schema-v2.md`` and ``ADR-0011``).
 """
 
 from __future__ import annotations

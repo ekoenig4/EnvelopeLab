@@ -14,15 +14,25 @@ depends on a set of *input groups* (slices of the design state, e.g. ``geometry`
     geometry, manual_outlines, tape_paths, feature_locations, tapes,
       vent_openings ──► assembly
     assembly, grain, row_zones ──► rest_mesh ──► simulation
-    operating, materials, tapes, seam_construction ──► simulation
+    operating, materials, fabric_properties, tapes, seam_construction ──► simulation
     geometry, manual_outlines ──► flattening
-    materials ──► nesting;  meta, rigging, turning_vents, scale_variants ──► export
+    materials, fabric_properties ──► nesting
+    meta, rigging, turning_vents, scale_variants ──► export
 
 The *fingerprint* of an artifact is the SHA-256 of its own input slices and the
 fingerprints of its upstream artifacts. An artifact built with fingerprint ``f`` is
 *current* while the design's fingerprint for it is still ``f`` and *stale* otherwise, so
 an edit that is undone makes the artifact current again, and a seam-allowance change
 (which only the ``patterns`` branch reads) never touches the rest mesh or simulations.
+
+``materials`` is the design's zone-to-fabric-id map. The fabrics themselves live in the
+fabric library shared by all designs, outside the project file, so their values form the
+separate *external* group ``fabric_properties`` (:data:`EXTERNAL_GROUPS`), supplied by
+whoever resolves the ids (the session, from the application's library). Editing a library
+fabric therefore marks the simulations and nesting built from it stale without changing
+the design. An external group whose hash is not supplied is left out of the fingerprints,
+so code that works without a library gets the same fingerprints as before the group
+existed.
 """
 
 from __future__ import annotations
@@ -58,6 +68,9 @@ INPUT_GROUPS: tuple[str, ...] = (
     "vent_openings",
     "scoop",
 )
+
+#: Input groups supplied from outside the project file (see module docstring).
+EXTERNAL_GROUPS: tuple[str, ...] = ("fabric_properties",)
 
 
 @dataclass(frozen=True)
@@ -118,11 +131,11 @@ ARTIFACTS: tuple[ArtifactSpec, ...] = (
     ArtifactSpec(
         "simulation",
         "Simulation",
-        ("operating", "materials", "tapes", "seam_construction"),
+        ("operating", "materials", "fabric_properties", "tapes", "seam_construction"),
         ("rest_mesh",),
     ),
     ArtifactSpec("flattening", "Flattening", ("geometry", "manual_outlines")),
-    ArtifactSpec("nesting", "Nesting", ("materials",), ("patterns",)),
+    ArtifactSpec("nesting", "Nesting", ("materials", "fabric_properties"), ("patterns",)),
     ArtifactSpec(
         "export", "Export", ("meta", "rigging", "turning_vents", "scale_variants"), ("nesting",)
     ),
@@ -234,7 +247,8 @@ def fingerprints(hashes: Mapping[str, str]) -> dict[str, str]:
     Parameters
     ----------
     hashes : mapping of str to str
-        Output of :func:`group_hashes`.
+        Output of :func:`group_hashes`, optionally with hashes of
+        :data:`EXTERNAL_GROUPS` added; an external group that is missing is left out.
 
     Returns
     -------
@@ -244,7 +258,9 @@ def fingerprints(hashes: Mapping[str, str]) -> dict[str, str]:
     out: dict[str, str] = {}
     for spec in ARTIFACTS:
         parts = {
-            "inputs": {g: hashes[g] for g in spec.inputs},
+            "inputs": {
+                g: hashes[g] for g in spec.inputs if g in hashes or g not in EXTERNAL_GROUPS
+            },
             "upstream": {u: out[u] for u in spec.upstream},
         }
         out[spec.name] = canonical_hash(parts)
@@ -289,7 +305,7 @@ def invalidated_by(groups: Iterable[str]) -> set[str]:
         artifact.
     """
     changed = set(groups)
-    unknown = changed - set(INPUT_GROUPS)
+    unknown = changed - set(INPUT_GROUPS) - set(EXTERNAL_GROUPS)
     if unknown:
         raise KeyError(f"unknown input group(s): {', '.join(sorted(unknown))}")
     direct = {a.name for a in ARTIFACTS if changed.intersection(a.inputs)}

@@ -163,6 +163,7 @@ class MainWindow(QMainWindow):
         self._build_status_bar()
         self._build_actions()
         self.controller.editRejected.connect(self._rejected)
+        self.controller.message.connect(lambda text: self.statusBar().showMessage(text, 8000))
         self.controller.fileChanged.connect(self._update_title)
         self.controller.stateChanged.connect(self._update_actions)
         self.controller.sessionChanged.connect(self._update_actions)
@@ -179,6 +180,13 @@ class MainWindow(QMainWindow):
         self._update_ccx_label()
         self._update_actions()
         self._update_title()
+        if self.controller.library_error is not None:
+            self.task_label.setText("Fabric library not opened (temporary library in use)")
+            if interactive:
+                QTimer.singleShot(
+                    0,
+                    lambda: self._error("Fabric library", self.controller.library_error or ""),
+                )
         if interactive:
             QTimer.singleShot(0, self.offer_recovery)
 

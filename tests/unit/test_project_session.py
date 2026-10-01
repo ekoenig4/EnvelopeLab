@@ -329,3 +329,65 @@ def test_new_from_template_copies_the_design_state_not_the_history(tmp_path: Pat
 def test_new_from_template_needs_a_name() -> None:
     with pytest.raises(ValueError, match="needs a name"):
         ProjectSession.from_template(FIXTURE, "  ")
+
+
+def test_library_fabric_edit_makes_runs_stale_but_not_the_file_dirty() -> None:
+    """A fabric edited in the shared library changes results, not the project file."""
+    from envelopelab.materials.repository import FabricLibraryRepository, fabric_data
+
+    library = FabricLibraryRepository()
+    library.seed_example_data()
+    values: dict[str, dict[str, Any] | None] = {}
+
+    def lookup(fabric_id: str) -> dict[str, Any] | None:
+        if fabric_id in values:
+            return values[fabric_id]
+        fabric = library.fabric(fabric_id)
+        return None if fabric is None else fabric_data(fabric)
+
+    s = fixture_session()
+    events: list[str] = []
+    s.add_listener(events.append)
+    s.set_fabric_lookup(lookup)
+    run = fake_run(s)
+    s.add_run(run, {})
+    s.mark_built("nesting")
+    s.mark_built("profile")
+    assert s.run_status(run) == "current"
+    fabric_id = next(iter(s.design.zones.values()))
+    changed = dict(lookup(fabric_id) or {})
+    changed["areal_mass"] = [60.0, "measured - coupon"]
+    values[fabric_id] = changed
+    events.clear()
+    s.refresh_fabrics()
+    assert events == ["artifacts"]
+    assert s.run_status(run) == "stale"
+    assert s.artifact_status("nesting") == "stale"
+    assert s.artifact_status("profile") == "current"
+    assert s.unsaved_groups() == set()
+    # Restoring the values makes the run current again (fingerprints, not edit order).
+    del values[fabric_id]
+    s.refresh_fabrics()
+    assert s.run_status(run) == "current"
+    # A fabric the library does not have is part of the fingerprint too.
+    values[fabric_id] = None
+    s.refresh_fabrics()
+    assert s.run_status(run) == "stale"
+
+
+def test_adding_an_unused_library_fabric_keeps_results_current() -> None:
+    import dataclasses
+
+    from envelopelab.materials.repository import FabricLibraryRepository, fabric_data
+
+    library = FabricLibraryRepository()
+    library.seed_example_data()
+    s = fixture_session()
+    s.set_fabric_lookup(lambda i: None if (f := library.fabric(i)) is None else fabric_data(f))
+    run = fake_run(s)
+    s.add_run(run, {})
+    template = library.fabric("nomex")
+    assert template is not None and "nomex" not in s.design.zones.values()
+    library.add_fabric(dataclasses.replace(template, fabric_id="new_fabric", name="New"))
+    s.refresh_fabrics()
+    assert s.run_status(run) == "current"
