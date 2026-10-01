@@ -1,4 +1,4 @@
-"""Application preferences and recent projects, stored with QSettings."""
+"""Application preferences, new-design wizard defaults and recent projects (QSettings)."""
 
 from __future__ import annotations
 
@@ -103,6 +103,83 @@ def save_preferences(settings: QSettings, prefs: Preferences) -> None:
     """Store ``prefs``."""
     for f in fields(Preferences):
         settings.setValue(f"preferences/{f.name}", getattr(prefs, f.name))
+    settings.sync()
+
+
+@dataclass
+class WizardDefaults:
+    """Starting values of the new-design wizard (boundary units, as the wizard shows them).
+
+    Attributes
+    ----------
+    name : str
+        Design name.
+    volume : float
+        Target volume, m^3.
+    height, width : float
+        Target height (mouth to top opening) and maximum diameter, m.
+    gores, rows : int
+        Gores N and body panel rows.
+    mouth_fraction, top_fraction : float
+        Mouth and top-opening diameters as fractions of the width.
+    fabric, mouth_fabric : str
+        Fabric ids of the body (and parachute) and of the mouth row; ``mouth_fabric`` empty:
+        no separate mouth row.
+    mouth_height : float
+        Mouth row height, m (0: the same as the body rows).
+    allowance_mm : float
+        Seam allowance, mm.
+    internal_c, ambient_c : float
+        Internal and ambient temperatures, degC.
+    """
+
+    name: str = "New envelope"
+    volume: float = 2200.0
+    height: float = 17.0
+    width: float = 16.0
+    gores: int = 12
+    rows: int = 5
+    mouth_fraction: float = 0.30
+    top_fraction: float = 0.25
+    fabric: str = "ripstop_nylon"
+    mouth_fabric: str = "nomex"
+    mouth_height: float = 0.0
+    allowance_mm: float = 25.0
+    internal_c: float = 100.0
+    ambient_c: float = 15.0
+
+
+def load_wizard_defaults(settings: QSettings) -> WizardDefaults:
+    """The user's wizard defaults (built-in values for missing or unreadable keys)."""
+    out = WizardDefaults()
+    for f in fields(WizardDefaults):
+        key = f"wizard/{f.name}"
+        if not settings.contains(key):
+            continue
+        text = str(settings.value(key))
+        default = getattr(out, f.name)
+        try:
+            if isinstance(default, str):
+                setattr(out, f.name, text)
+            elif isinstance(default, int):
+                setattr(out, f.name, int(float(text)))
+            else:
+                setattr(out, f.name, float(text))
+        except ValueError:
+            continue  # a hand-edited or corrupted value: keep the built-in default
+    return out
+
+
+def save_wizard_defaults(settings: QSettings, defaults: WizardDefaults) -> None:
+    """Store ``defaults`` as the user's wizard defaults."""
+    for f in fields(WizardDefaults):
+        settings.setValue(f"wizard/{f.name}", getattr(defaults, f.name))
+    settings.sync()
+
+
+def reset_wizard_defaults(settings: QSettings) -> None:
+    """Forget the user's wizard defaults (the built-in values apply again)."""
+    settings.remove("wizard")
     settings.sync()
 
 

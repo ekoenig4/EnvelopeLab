@@ -22,8 +22,9 @@ solver).
 
 * Every run row names its solver — **Preview (dynamic relaxation)** or **CalculiX
   verification** — on a solver-coloured background; the 3D view uses the same colours
-  (preview blue, CalculiX orange, rest mesh olive, reference mesh green, design surface
-  grey) and the same names in its layer list and legend.
+  (preview blue, CalculiX orange, rest mesh olive, reference mesh green; the design
+  surface in its fabric colours with dark seams) and the same names in its layer list and
+  legend.
 * Each run shows its **state** (CURRENT or STALE), whether it **converged**, the final
   **residual** (hover for what it measures), iterations, run time, nodes/elements, mesh
   size, volume, lift and material sources.

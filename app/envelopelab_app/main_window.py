@@ -10,6 +10,7 @@ from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
+    QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
@@ -37,6 +38,7 @@ from envelopelab_app.panels.history import HistoryPanel
 from envelopelab_app.panels.materials import MaterialsPanel
 from envelopelab_app.panels.patterns import PatternPanel
 from envelopelab_app.panels.properties import PropertiesPanel
+from envelopelab_app.panels.rigging import RiggingPanel
 from envelopelab_app.panels.runs import RunsPanel
 from envelopelab_app.panels.validation import ValidationPanel
 from envelopelab_app.panels.view3d import View3DPanel
@@ -51,6 +53,10 @@ from envelopelab_app.simulation import CALCULIX, PREVIEW, SimulationManager
 from envelopelab_app.wizard import NewDesignWizard
 
 FILE_FILTER = f"EnvelopeLab projects (*{PROJECT_SUFFIX})"
+
+
+#: Minimum width of the vertical 2D pattern column, px.
+PATTERN_DOCK_WIDTH = 380
 
 
 class MainWindow(QMainWindow):
@@ -93,6 +99,7 @@ class MainWindow(QMainWindow):
         self.view3d = View3DPanel(self.controller, enable_renderer=use_3d)
         self.patterns = PatternPanel(self.controller)
         self.history = HistoryPanel(self.controller)
+        self.rigging = RiggingPanel(self.controller)
         pattern_scope = artifact_inputs("patterns")
         self.docks: dict[str, PanelDock] = {
             "tree": PanelDock("Design Tree", self.controller, self.design_tree),
@@ -125,15 +132,27 @@ class MainWindow(QMainWindow):
                 artifacts=("patterns",),
             ),
             "history": PanelDock("History", self.controller, self.history),
+            "rigging": PanelDock(
+                "Rigging",
+                self.controller,
+                self.rigging,
+                scope={"parachute", "rigging", "turning_vents", "scoop", "operating"},
+            ),
         }
         area = Qt.DockWidgetArea
         self.addDockWidget(area.LeftDockWidgetArea, self.docks["tree"])
         self.addDockWidget(area.LeftDockWidgetArea, self.docks["properties"])
         self.tabifyDockWidget(self.docks["properties"], self.docks["materials"])
+        self.tabifyDockWidget(self.docks["properties"], self.docks["rigging"])
         self.addDockWidget(area.RightDockWidgetArea, self.docks["view3d"])
-        self.addDockWidget(area.RightDockWidgetArea, self.docks["patterns"])
-        self.tabifyDockWidget(self.docks["view3d"], self.docks["patterns"])
-        self.addDockWidget(area.RightDockWidgetArea, self.docks["history"])
+        # The 2D pattern view is its own full-height column right of the 3D view, so the
+        # vertically stacked pieces (scoop, rows mouth up, parachute) read like a gore.
+        self.splitDockWidget(
+            self.docks["view3d"], self.docks["patterns"], Qt.Orientation.Horizontal
+        )
+        self.splitDockWidget(self.docks["view3d"], self.docks["history"], Qt.Orientation.Vertical)
+        # Wide enough for the pieces and the row form; the stack itself is tall.
+        self.docks["patterns"].setMinimumWidth(PATTERN_DOCK_WIDTH)
         self.addDockWidget(area.BottomDockWidgetArea, self.docks["validation"])
         self.addDockWidget(area.BottomDockWidgetArea, self.docks["runs"])
         self.tabifyDockWidget(self.docks["validation"], self.docks["runs"])
@@ -204,6 +223,7 @@ class MainWindow(QMainWindow):
         std = QKeySequence.StandardKey
         self.new_action = self._action("&New design…", self.new_design_dialog, std.New)
         self.open_action = self._action("&Open…", self.open_dialog, std.Open)
+        self.template_action = self._action("New from &template…", self.template_dialog)
         self.save_action = self._action("&Save", self.save, std.Save)
         self.save_as_action = self._action("Save &As…", self.save_as_dialog, std.SaveAs)
         self.prefs_action = self._action("&Preferences…", self.preferences_dialog, std.Preferences)
@@ -226,6 +246,7 @@ class MainWindow(QMainWindow):
         menu = self.menuBar()
         file_menu = menu.addMenu("&File")
         file_menu.addAction(self.new_action)
+        file_menu.addAction(self.template_action)
         file_menu.addAction(self.open_action)
         self.recent_menu = file_menu.addMenu("Open &Recent")
         self.recent_menu.aboutToShow.connect(self._fill_recent)
@@ -477,10 +498,33 @@ class MainWindow(QMainWindow):
     def new_design_dialog(self) -> None:
         if not self.maybe_discard():
             return
-        wizard = NewDesignWizard(self.controller.fabrics, self)
+        wizard = NewDesignWizard(self.controller.fabrics, self, self.settings)
         if wizard.exec() and wizard.design is not None:
             self.new_project(wizard.design)
             self.controller.regenerate_patterns()
+
+    def new_from_template(self, path: str | Path, name: str) -> ProjectSession | None:
+        """Start an unsaved project whose design is a copy of the project at ``path``."""
+        try:
+            session = ProjectSession.from_template(path, name)
+        except (OSError, ValueError) as exc:
+            self._error(f"Could not use {path} as a template", str(exc))
+            return None
+        self.set_session(session)
+        self.controller.regenerate_patterns()
+        return session
+
+    def template_dialog(self) -> None:
+        if not self.maybe_discard():
+            return
+        path, _ = QFileDialog.getOpenFileName(self, "Template project", "", FILE_FILTER)
+        if not path:
+            return
+        name, ok = QInputDialog.getText(
+            self, "New from template", "Name of the new design:", text="New envelope"
+        )
+        if ok:
+            self.new_from_template(path, name)
 
     def open_dialog(self) -> None:
         if not self.maybe_discard():

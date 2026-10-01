@@ -47,6 +47,7 @@ from envelopelab.project.session import (
     ProjectSession,
 )
 from envelopelab.project.simulation import BuiltModel
+from envelopelab.rigging import RiggingOutputs, rigging_polylines
 from envelopelab_app.settings import Preferences
 
 T = TypeVar("T")
@@ -269,6 +270,18 @@ class WorkspaceController(QObject):
     def outputs(self) -> GoreOutputs | None:
         """Live outputs of the current gore design (None when they cannot be computed)."""
         return self._outputs
+
+    @property
+    def rigging(self) -> RiggingOutputs | None:
+        """Parachute, red line, flying wires and turning vents of the current gore design."""
+        return None if self._outputs is None else self._outputs.rigging
+
+    def rigging_polylines(self) -> dict[str, list[Any]]:
+        """3-D polylines of the rigging (m) for the 3D view; empty when unavailable."""
+        design, out = self.design, self.rigging
+        if design is None or out is None:
+            return {}
+        return rigging_polylines(design, out)
 
     @property
     def outputs_error(self) -> str | None:

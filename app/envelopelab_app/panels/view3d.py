@@ -1,4 +1,4 @@
-"""3D view: design surface, rest mesh, preview and CalculiX results, reference mesh.
+"""3D view: design surface, rigging, rest mesh, preview and CalculiX results, reference mesh.
 
 Every layer has its own colour and a label naming where it comes from; a stale or
 unconverged layer says so in its label (and is drawn grey or hatched), so a result is never
@@ -30,7 +30,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from envelopelab.project.gore_design import control_arrays, design_profile
+from envelopelab.project.gore_design import (
+    DisplaySurface,
+    control_arrays,
+    display_surface,
+    row_zone,
+)
 from envelopelab.project.model import SOLVER_LABELS, RunRecord
 from envelopelab_app.controller import WorkspaceController
 
@@ -41,7 +46,24 @@ LAYER_COLORS = {
     "envelopelab-preview": "#1f77b4",
     "calculix": "#ff7f0e",
     "reference": "#2ca02c",
+    "rigging": "#9467bd",
 }
+#: Line colours of the rigging layer, per element kind.
+RIGGING_COLORS = {
+    "parachute": "#9467bd",
+    "shroud_lines": "#8c564b",
+    "centralizing_lines": "#e377c2",
+    "red_line": "#d62728",
+    "flying_wires": "#17becf",
+    "turning_vents": "#e7ba52",
+    "scoop": "#843c39",
+    "vertical_seams": "#1a1a1a",
+    "horizontal_seams": "#4d4d4d",
+}
+#: Line widths of polyline kinds (pixels); default 2.
+LINE_WIDTHS = {"red_line": 4, "vertical_seams": 3, "horizontal_seams": 2}
+#: Brightness of every second gore, so that neighbouring gores are told apart.
+ALTERNATE_GORE_SHADE = 0.8
 
 
 @dataclass
@@ -70,6 +92,10 @@ class Layer:
         Zone name per triangle (for picking), optional.
     tapes : dict of str to ndarray
         Tape paths as node pairs, optional.
+    polylines : dict of str to list of ndarray
+        Line-only content (rigging, seams), m, keyed by element kind, optional.
+    face_colors : ndarray of uint8, shape (m, 3), optional
+        RGB colour per triangle (the design surface: row fabric, alternate gores shaded).
     """
 
     key: str
@@ -82,34 +108,13 @@ class Layer:
     visible: bool = True
     zones: list[str] = field(default_factory=list)
     tapes: dict[str, np.ndarray] = field(default_factory=dict)
+    polylines: dict[str, list[np.ndarray]] = field(default_factory=dict)
+    face_colors: np.ndarray | None = None
 
     @property
     def color(self) -> str:
         """Display colour (grey when stale)."""
         return "#c7c7c7" if self.stale else LAYER_COLORS[self.kind]
-
-
-def surface_of_revolution(
-    r: np.ndarray, z: np.ndarray, segments: int
-) -> tuple[np.ndarray, np.ndarray]:
-    """Triangles of a profile swept about the z axis (display only), m."""
-    angles = np.linspace(0.0, 2 * math.pi, segments, endpoint=False)
-    pts = np.array(
-        [
-            [ri * math.cos(a), ri * math.sin(a), zi]
-            for ri, zi in zip(r, z, strict=True)
-            for a in angles
-        ]
-    )
-    faces = []
-    for i in range(len(r) - 1):
-        for j in range(segments):
-            a = i * segments + j
-            b = i * segments + (j + 1) % segments
-            c = a + segments
-            d = b + segments
-            faces += [[a, b, d], [a, d, c]]
-    return pts, np.array(faces, dtype=np.int64)
 
 
 def pyvista_available() -> bool:
@@ -192,16 +197,34 @@ class View3DPanel(QWidget):
         session = self.controller.session
         if session is not None and session.design.gores is not None:
             try:
-                profile = design_profile(session.design)
-                idx = np.linspace(0, len(profile.r) - 1, 60).astype(int)
-                pts, faces = surface_of_revolution(
-                    profile.r[idx], profile.z[idx], 4 * session.design.gores.count
-                )
+                surface = display_surface(session.design)
+                n = session.design.gores.count
                 self.layers["design"] = Layer(
-                    "design", "design", "Design surface (profile, current)", pts, faces
+                    "design",
+                    "design",
+                    f"Design surface (profile, current): {n} gores x "
+                    f"{len(surface.row_letters)} panel rows, seams dark",
+                    surface.points,
+                    surface.faces,
+                    polylines={
+                        "vertical_seams": surface.vertical_seams,
+                        "horizontal_seams": surface.horizontal_seams,
+                    },
+                    face_colors=self._face_colors(surface),
                 )
             except ValueError:
                 pass
+            lines = self.controller.rigging_polylines()
+            if lines:
+                parts = ", ".join(k.replace("_", " ") for k in lines)
+                self.layers["rigging"] = Layer(
+                    "rigging",
+                    "rigging",
+                    f"Parachute and rigging (design, current): {parts}",
+                    np.zeros((0, 3)),
+                    np.zeros((0, 3), dtype=np.int64),
+                    polylines=lines,
+                )
         cache = self.controller.model_cache
         if session is not None and cache is not None:
             model = cache.built.model
@@ -248,6 +271,23 @@ class View3DPanel(QWidget):
                 self.layers[key].visible = value
         self._fill_list()
         self.redraw()
+
+    def _face_colors(self, surface: DisplaySurface) -> np.ndarray:
+        """Row fabric colour per triangle, every second gore darker (display only)."""
+        session = self.controller.session
+        assert session is not None
+        design = session.design
+        palette = []
+        for letter in surface.row_letters:
+            fabric_id = design.zones.get(row_zone(design, session.patterns, letter), "")
+            fabric = self.controller.fabrics.fabric(fabric_id) if fabric_id else None
+            color = QColor(fabric.color) if fabric is not None else QColor("#d9e7f5")
+            if not color.isValid():
+                color = QColor("#d9e7f5")
+            palette.append((color.red(), color.green(), color.blue()))
+        rgb = np.array(palette, dtype=np.float64)[surface.face_row]
+        rgb[surface.face_gore % 2 == 0] *= ALTERNATE_GORE_SHADE
+        return np.asarray(rgb.astype(np.uint8))
 
     def _fill_list(self) -> None:
         self.layer_list.blockSignals(True)
@@ -307,12 +347,27 @@ class View3DPanel(QWidget):
         plotter.clear_spline_widgets()
         legend = []
         for layer in self.layers.values():
+            if layer.visible and layer.polylines:
+                for kind, polylines in layer.polylines.items():
+                    for line in polylines:
+                        plotter.add_mesh(
+                            pv.lines_from_points(np.asarray(line, dtype=float)),
+                            color=RIGGING_COLORS.get(kind, layer.color),
+                            line_width=LINE_WIDTHS.get(kind, 2),
+                        )
+                if len(layer.faces) == 0:
+                    legend.append([layer.label, layer.color])
             if not layer.visible or len(layer.faces) == 0:
                 continue
             faces = np.hstack([np.full((len(layer.faces), 1), 3), layer.faces]).ravel()
             mesh = pv.PolyData(np.asarray(layer.points, dtype=float), faces)
-            style = "wireframe" if layer.kind in ("rest", "design") else "surface"
+            style = "wireframe" if layer.kind == "rest" else "surface"
             opacity = 0.35 if layer.kind == "reference" else 1.0
+            if layer.face_colors is not None and not layer.stale:
+                mesh.cell_data["rgb"] = layer.face_colors
+                plotter.add_mesh(mesh, scalars="rgb", rgb=True, name=layer.key, show_edges=False)
+                legend.append([layer.label, layer.color])
+                continue
             if self.section.isChecked() and layer.kind != "design":
                 plotter.add_mesh_clip_plane(mesh, color=layer.color, style=style, opacity=opacity)
             else:

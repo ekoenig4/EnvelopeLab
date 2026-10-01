@@ -222,7 +222,7 @@ def test_manual_outline_override_is_flagged(gore_window: MainWindow) -> None:
             continue
         texts.append(item.text(0))
         rows += [item.child(i) for i in range(item.childCount())]
-    assert "Row B (manual override)" in texts
+    assert "Row B: body (ripstop_nylon) (manual override)" in texts
     w.patterns.clear_override.click()
     assert session.patterns.row("B").manual_outline is None
 
@@ -379,6 +379,8 @@ def test_preview_and_calculix_runs_show_distinct_solver_labels(
 
 def test_layer_list_without_renderer_names_every_source(gore_window: MainWindow) -> None:
     labels = gore_window.view3d.labels()
-    assert labels == {"design": "Design surface (profile, current)"}
+    assert labels == {
+        "design": "Design surface (profile, current): 8 gores x 4 panel rows, seams dark"
+    }
     item = gore_window.view3d.layer_list.item(0)
     assert item is not None and item.checkState() == Qt.CheckState.Checked

@@ -40,6 +40,26 @@ UNITS = {
     "payload_mass": "kg",
     "finished_height": "m",
     "factor_k": "-",
+    "billow": "- (rise / hole diameter)",
+    "shroud_attachment": "m",
+    "centralizing_depth": "m",
+    "spare_length": "m",
+    "frame_radius": "m",
+    "frame_drop": "m",
+    "frame_azimuth_deg": "deg",
+    "crows_foot_drop": "m",
+    "opening_width": "m",
+    "centre_ring_diameter": "m",
+    "height": "m",
+    "flare_deg": "deg",
+}
+#: Unit of a tagged ``value`` field, by the name of the field that holds it.
+VALUE_UNITS = {
+    "strength": "N",
+    "linear_mass": "kg/m",
+    "load_factor": "-",
+    "required_safety_factor": "-",
+    "discharge_coefficient": "-",
 }
 
 EDITABLE_SECTIONS = (
@@ -48,7 +68,10 @@ EDITABLE_SECTIONS = (
     "tapes",
     "seam_types",
     "operating",
+    "parachute",
     "rigging",
+    "turning_vents",
+    "scoop",
     "special",
     "zones",
 )
@@ -105,8 +128,13 @@ class PropertiesPanel(QWidget):
             return
         data = session.design.model_dump(by_alias=True, mode="json").get(self.section)
         self.title.setText(f"<b>{self.section.replace('_', ' ').title()}</b>")
-        if data is None:
-            self.form_layout.addWidget(QLabel("(not used by this design)"))
+        if data is None or data == []:
+            text = (
+                "(not defined — add it in the Rigging panel)"
+                if self.section in ("parachute", "turning_vents", "scoop")
+                else "(not used by this design)"
+            )
+            self.form_layout.addWidget(QLabel(text))
             return
         self._build(data, (self.section,), self.form_layout)
         self.form_layout.addStretch(1)
@@ -135,6 +163,8 @@ class PropertiesPanel(QWidget):
                 lambda sub=sub, v=value, e=editor: self._edited(sub, v, e)
             )
             unit = UNITS.get(name, "")
+            if name == "value" and len(sub) >= 2:
+                unit = VALUE_UNITS.get(str(sub[-2]), "")
             if name.endswith("temperature") and isinstance(value, (int, float)):
                 unit = f"K ({float(value) - 273.15:.1f} °C)"
             label = f"{name.replace('_', ' ')}" + (f" [{unit}]" if unit else "")

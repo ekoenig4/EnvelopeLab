@@ -48,4 +48,9 @@ def test_renderer_draws_layers_and_edits_the_profile_with_the_spline_widget(
     image = tmp_path / "view.png"
     w.view3d.plotter.screenshot(str(image))
     assert image.stat().st_size > 1000
+    for key in ("add_parachute", "add_red_line", "add_flying_wires", "add_vents"):
+        w.rigging.buttons[key].click()
+    assert "rigging" in w.view3d.labels()
+    w.view3d.plotter.screenshot(str(image))
+    assert image.stat().st_size > 1000
     w.close()

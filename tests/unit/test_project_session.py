@@ -299,6 +299,38 @@ def test_restoring_a_version_or_snapshot_reproduces_its_content_hash(
     assert s.content_hash() == snap.content_hash
 
 
+def test_new_from_template_copies_the_design_state_not_the_history(tmp_path: Path) -> None:
+    from envelopelab.rigging import default_scoop, with_default_rigging
+
+    base = ProjectSession.open(FIXTURE)
+    design = with_default_rigging(base.design)
+    design = design.model_copy(update={"scoop": default_scoop(design)})
+    base.set_design_value(("scoop",), design.scoop.model_dump(mode="json"))  # type: ignore[union-attr]
+    base.set_design_value(("parachute",), design.parachute.model_dump(by_alias=True, mode="json"))  # type: ignore[union-attr]
+    base.set_row_pattern("B", {"grain_angle_deg": 12.0}, "grain")
+    base.create_snapshot("before")
+    template_path = base.save(tmp_path / "template.elproj")
+
+    s = ProjectSession.from_template(template_path, "My second balloon")
+    d = s.design
+    assert d.meta.name == "My second balloon"
+    assert d.meta.version_id != base.design.meta.version_id and d.meta.parent_id is None
+    assert d.meta.content_hash == d.compute_content_hash()
+    assert d.scoop is not None and d.parachute is not None
+    assert s.patterns.row("B").grain_angle_deg == 12.0
+    assert s.project.snapshots == [] and s.project.runs == [] and s.project.versions == []
+    assert [e.action for e in s.project.provenance] == ["new from template"]
+    assert s.path is None and not s.is_dirty
+    # Editing the copy leaves the template file unchanged.
+    s.set_design_value(("operating", "payload_mass"), 123.0)
+    assert load_project(template_path).state.design.operating.payload_mass != 123.0
+
+
+def test_new_from_template_needs_a_name() -> None:
+    with pytest.raises(ValueError, match="needs a name"):
+        ProjectSession.from_template(FIXTURE, "  ")
+
+
 def test_library_fabric_edit_makes_runs_stale_but_not_the_file_dirty() -> None:
     """A fabric edited in the shared library changes results, not the project file."""
     from envelopelab.materials.repository import FabricLibraryRepository, fabric_data
