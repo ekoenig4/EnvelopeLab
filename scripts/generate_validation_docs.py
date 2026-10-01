@@ -9,6 +9,7 @@ from envelopelab.validation import (
     analytic_geometry,
     pattern_import,
     preview_solver,
+    rigging,
     shape_families,
 )
 
@@ -16,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 ANALYTIC = ROOT / "docs" / "validation" / "analytic-geometry.md"
 FIXTURES = ROOT / "docs" / "validation" / "pattern-import-fixtures.md"
 PREVIEW = ROOT / "docs" / "validation" / "preview-solver-benchmarks.md"
+RIGGING = ROOT / "docs" / "validation" / "rigging-benchmarks.md"
 CALCULIX = ROOT / "docs" / "validation" / "preview-vs-calculix"  # .json, .md, .svg
 SPECIAL = ROOT / "docs" / "validation" / "special-shape-fixtures"  # .json, .md
 SHAPES = ROOT / "docs" / "validation" / "shape-families.md"
@@ -38,7 +40,7 @@ SPECIAL_FIXTURE_NOTES = [
 
 def main(argv: list[str] | None = None) -> None:
     """Regenerate all pages, or only those named (``analytic``, ``fixtures``, ``preview``,
-    ``shapes``, ``calculix``, ``special``).
+    ``shapes``, ``rigging``, ``calculix``, ``special``).
 
     ``calculix`` runs the CalculiX verification study (needs ``ccx``, several minutes) and
     ``special`` the special-shape feature benchmarks (CalculiX rows when ``ccx`` is
@@ -49,6 +51,7 @@ def main(argv: list[str] | None = None) -> None:
         "fixtures",
         "preview",
         "shapes",
+        "rigging",
     }
     failed: list[str] = []
     ANALYTIC.parent.mkdir(parents=True, exist_ok=True)
@@ -60,6 +63,10 @@ def main(argv: list[str] | None = None) -> None:
         summaries = pattern_import.run_fixtures(pattern_import.fixture_paths(ROOT))
         FIXTURES.write_text(pattern_import.render_markdown(summaries), encoding="utf-8")
         failed += [s.name for s in summaries if not s.passed]
+    if "rigging" in pages:
+        rig_results = rigging.run_benchmarks()
+        RIGGING.write_text(rigging.render_markdown(rig_results), encoding="utf-8")
+        failed += [r.name for r in rig_results if not r.passed]
     if "preview" in pages:
         bench = preview_solver.run_benchmarks(ENVELOPE_FIXTURE)
         PREVIEW.write_text(preview_solver.render_markdown(bench), encoding="utf-8")

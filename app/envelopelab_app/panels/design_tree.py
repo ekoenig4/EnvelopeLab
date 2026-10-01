@@ -7,6 +7,7 @@ from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 
 from envelopelab.project.dependencies import ARTIFACTS
+from envelopelab.project.gore_design import row_zone
 from envelopelab_app.controller import WorkspaceController
 
 STATUS_COLORS = {"current": "#155724", "stale": "#b00020", "not built": "#6c757d"}
@@ -20,7 +21,10 @@ SECTIONS = (
     ("seam_types", "Seam types", "seam_allowance"),
     ("operating", "Operating conditions", "operating"),
     ("features", "Features", "features"),
-    ("rigging", "Rigging", "rigging"),
+    ("parachute", "Parachute", "parachute"),
+    ("rigging", "Rigging (red line, flying wires)", "rigging"),
+    ("turning_vents", "Turning vents", "turning_vents"),
+    ("scoop", "Scoop", "scoop"),
     ("special", "Special shape", "geometry"),
 )
 
@@ -74,7 +78,10 @@ class DesignTreePanel(QWidget):
                 continue
             if target == "special" and design.special is None:
                 continue
-            item = self._add(root, title, target, "● unsaved" if group in unsaved else "")
+            state = "● unsaved" if group in unsaved else ""
+            if target in ("parachute", "scoop") and getattr(design, target) is None:
+                state = (state + " not defined").strip()
+            item = self._add(root, title, target, state)
             if target == "gores" and design.gores is not None:
                 self._add(
                     item,
@@ -88,7 +95,16 @@ class DesignTreePanel(QWidget):
                         if session.patterns.row(row.letter).manual_outline
                         else ""
                     )
-                    self._add(rows, f"Row {row.letter}{flag}", f"row:{row.letter}")
+                    zone = row_zone(design, session.patterns, row.letter)
+                    fabric = design.zones.get(zone, "?")
+                    self._add(
+                        rows, f"Row {row.letter}: {zone} ({fabric}){flag}", f"row:{row.letter}"
+                    )
+                if design.parachute is not None:
+                    self._add(rows, "Top: parachute", "parachute")
+            if target == "turning_vents":
+                for vent in design.turning_vents:
+                    self._add(item, f"{vent.name} (seam {vent.seam})", "turning_vents")
             if target == "zones":
                 for zone, fabric in design.zones.items():
                     self._add(item, f"{zone}: {fabric}", "zones")

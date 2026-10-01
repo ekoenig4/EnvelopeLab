@@ -10,12 +10,14 @@ depends on a set of *input groups* (slices of the design state, e.g. ``geometry`
 
     geometry ──► profile
     geometry, seam_allowance, manual_outlines, labels, grain, row_zones,
-      tape_paths, feature_locations ──► patterns ──► nesting ──► export
-    geometry, manual_outlines, tape_paths, feature_locations, tapes ──► assembly
+      tape_paths, feature_locations, parachute, scoop ──► patterns ──► nesting ──► export
+    geometry, manual_outlines, tape_paths, feature_locations, tapes,
+      vent_openings ──► assembly
     assembly, grain, row_zones ──► rest_mesh ──► simulation
     operating, materials, fabric_properties, tapes, seam_construction ──► simulation
     geometry, manual_outlines ──► flattening
-    materials, fabric_properties ──► nesting;  meta, rigging, scale_variants ──► export
+    materials, fabric_properties ──► nesting
+    meta, rigging, turning_vents, scale_variants ──► export
 
 The *fingerprint* of an artifact is the SHA-256 of its own input slices and the
 fingerprints of its upstream artifacts. An artifact built with fingerprint ``f`` is
@@ -61,6 +63,10 @@ INPUT_GROUPS: tuple[str, ...] = (
     "meta",
     "rigging",
     "scale_variants",
+    "parachute",
+    "turning_vents",
+    "vent_openings",
+    "scoop",
 )
 
 #: Input groups supplied from outside the project file (see module docstring).
@@ -104,12 +110,22 @@ ARTIFACTS: tuple[ArtifactSpec, ...] = (
             "row_zones",
             "tape_paths",
             "feature_locations",
+            "parachute",
+            "scoop",
         ),
     ),
     ArtifactSpec(
         "assembly",
         "Assembly (seam graph)",
-        ("geometry", "manual_outlines", "tape_paths", "feature_locations", "features", "tapes"),
+        (
+            "geometry",
+            "manual_outlines",
+            "tape_paths",
+            "feature_locations",
+            "features",
+            "tapes",
+            "vent_openings",
+        ),
     ),
     ArtifactSpec("rest_mesh", "Rest mesh", ("grain", "row_zones"), ("assembly",)),
     ArtifactSpec(
@@ -120,7 +136,9 @@ ARTIFACTS: tuple[ArtifactSpec, ...] = (
     ),
     ArtifactSpec("flattening", "Flattening", ("geometry", "manual_outlines")),
     ArtifactSpec("nesting", "Nesting", ("materials", "fabric_properties"), ("patterns",)),
-    ArtifactSpec("export", "Export", ("meta", "rigging", "scale_variants"), ("nesting",)),
+    ArtifactSpec(
+        "export", "Export", ("meta", "rigging", "turning_vents", "scale_variants"), ("nesting",)
+    ),
 )
 
 _BY_NAME: dict[str, ArtifactSpec] = {a.name: a for a in ARTIFACTS}
@@ -171,7 +189,12 @@ def input_groups(design: Mapping[str, Any], patterns: Mapping[str, Any]) -> dict
             "envelope_type": design.get("envelope_type"),
             "count": gores.get("count"),
             "points": gores.get("meridian_profile_control_points"),
-            "rows": gores.get("panel_rows"),
+            # A row's zone is a material choice (row_zones), not geometry.
+            "rows": [
+                {k: v for k, v in r.items() if k != "zone"} for r in gores.get("panel_rows") or []
+            ]
+            if gores.get("panel_rows") is not None
+            else None,
             "mouth_diameter": gores.get("mouth_diameter"),
             "crown_ring": gores.get("crown_ring"),
             "parachute_hole_diameter": gores.get("parachute_hole_diameter"),
@@ -186,7 +209,12 @@ def input_groups(design: Mapping[str, Any], patterns: Mapping[str, Any]) -> dict
         "manual_outlines": per_row("manual_outline"),
         "labels": {"text": per_row("label_text"), "notches": per_row("notches")},
         "grain": per_row("grain_angle_deg"),
-        "row_zones": per_row("zone"),
+        "row_zones": {
+            "patterns": per_row("zone"),
+            "design": {
+                r["letter"]: r["zone"] for r in gores.get("panel_rows") or [] if r.get("zone")
+            },
+        },
         "tape_paths": per_row("tape_paths"),
         "feature_locations": per_row("feature_locations"),
         "tapes": design.get("tapes"),
@@ -196,6 +224,15 @@ def input_groups(design: Mapping[str, Any], patterns: Mapping[str, Any]) -> dict
         "meta": {k: v for k, v in (design.get("meta") or {}).items() if k == "name"},
         "rigging": design.get("rigging"),
         "scale_variants": design.get("scale_variants"),
+        "parachute": design.get("parachute"),
+        "turning_vents": design.get("turning_vents") or [],
+        "scoop": design.get("scoop"),
+        # Only vents simulated open change the sewn assembly.
+        "vent_openings": [
+            {k: v[k] for k in ("name", "seam", "rows")}
+            for v in design.get("turning_vents") or []
+            if v.get("simulate_open")
+        ],
     }
 
 

@@ -24,12 +24,32 @@ and the 3D panel lists its layers without drawing them.
 
 1. **File ▸ New design…** opens the wizard. On the **Standard gore** tab enter:
     * target **volume**, **height** (mouth to top opening) and **maximum diameter**;
-    * the number of **gores N** and **panel rows**;
+    * the number of **gores N**;
+    * the **mouth row fabric** (default Nomex, next to the burner; or no separate mouth
+      row) and its **height** along the tape (0: the same as each body row);
+    * the number of **body panel rows** above the mouth row (nylon by default);
     * mouth and top-opening diameters as fractions of the width;
-    * the fabric, seam allowance and the internal and ambient temperatures.
+    * the body and parachute fabric, seam allowance and the internal and ambient
+      temperatures.
+
+   The envelope is then, from the mouth up: the mouth row (zone `mouth`), the body rows
+   (zone `body`) and, as the top panel, the parachute over the crown opening with its
+   crown ring and centre ring ([parachute and rigging](rigging.md)).
 2. Press **OK**. The wizard finds a profile with exactly that height and width whose
    volume is the target (within 0.1 %). When the volume cannot be reached with that height
    and width, the wizard says which volumes can.
+
+### Your own starting balloon
+
+* **Save as my defaults** (in the wizard) stores the values on the Standard gore tab; the
+  wizard opens with them from then on. **Reset to built-in defaults** goes back to the
+  values the program ships with.
+* **File ▸ New from template…** starts a new, unsaved design as a copy of any saved
+  project: shape, panel rows and fabrics, tapes, operating conditions, parachute and rings,
+  red line, flying wires, turning vents, scoop, pattern annotations and constraint locks.
+  You give the copy a name; it gets its own version id. The template's snapshots,
+  versions, simulation runs and history are not copied, and the template file is never
+  changed.
 
 The other tabs create a **special shape from an imported mesh** (OBJ, STL or PLY in m; the
 design references the mesh, panels are added later) and **design from measurements**

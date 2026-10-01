@@ -182,6 +182,32 @@ class ProjectSession:
         """Open a project file."""
         return cls(load_project(path), path, fabric_lookup)
 
+    @classmethod
+    def from_template(cls, path: str | Path, name: str) -> ProjectSession:
+        """New, unsaved project whose design starts as a copy of a saved project's.
+
+        The design state and the constraint locks are copied
+        (:func:`envelopelab.project.templates.state_from_template`); the provenance log
+        of the new project records the template.
+        """
+        from envelopelab.project.templates import state_from_template
+
+        template = load_project(path)
+        project = Project(
+            state=state_from_template(template, name),
+            locks=template.locks.model_copy(deep=True),
+        )
+        session = cls(project)
+        session.log(
+            "new from template",
+            "design",
+            f"design state copied from {Path(path).name} ({template.state.design.meta.name}, "
+            f"version {template.state.design.meta.version_id})",
+        )
+        # Like a new project from the wizard: nothing to save until the first edit.
+        session._aux_dirty = False
+        return session
+
     # -- listeners ----------------------------------------------------------------------
 
     def add_listener(self, listener: Listener) -> None:

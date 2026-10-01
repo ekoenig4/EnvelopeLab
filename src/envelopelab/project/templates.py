@@ -1,8 +1,11 @@
-"""New-design templates: standard gore, special shape from a mesh, design from measurements.
+"""New-design templates: standard gore, special shape from a mesh, a saved project as a
+template, design from measurements.
 
 Every value a template fills in without the user's input is a generic default the user is
-expected to review (tape classes, seam type, rigging names); none of them is a material
-property. Material properties come from the fabric library and carry its source tags.
+expected to review (tape classes, seam type, rigging names, the default parachute, red
+line and flying wires of :mod:`envelopelab.rigging.defaults`). Fabric properties come
+from the fabric library and carry its source tags; the default line and cable strengths
+are tagged ``assumed``.
 """
 
 from __future__ import annotations
@@ -11,8 +14,13 @@ import uuid
 from collections.abc import Sequence
 from pathlib import Path
 
-from envelopelab.design.model import DesignDocument
-from envelopelab.project.model import utc_now
+from envelopelab.design.model import (
+    CURRENT_SCHEMA_VERSION,
+    DEFAULT_LOAD_FACTOR,
+    DEFAULT_SAFETY_FACTOR,
+    DesignDocument,
+)
+from envelopelab.project.model import DesignState, Project, utc_now
 
 #: Generic tape classes (width m, strength N) used by new designs; review before building.
 DEFAULT_TAPES = {
@@ -45,7 +53,7 @@ def _common(
     payload_mass: float,
 ) -> dict[str, object]:
     return {
-        "schema_version": 1,
+        "schema_version": CURRENT_SCHEMA_VERSION,
         "meta": _meta(name),
         "zones": {"body": fabric_id},
         "tapes": DEFAULT_TAPES,
@@ -68,10 +76,13 @@ def _common(
         "scale_variants": [],
         "rigging": {
             "crown_line": "crown line",
-            "red_line": "deflation line",
-            "flying_wires": [],
-            "parachute_confluence_centering": "centred",
+            "load_factor": dict(DEFAULT_LOAD_FACTOR),
+            "required_safety_factor": dict(DEFAULT_SAFETY_FACTOR),
+            "red_line": None,
+            "flying_wires": None,
         },
+        "parachute": None,
+        "turning_vents": [],
     }
 
 
@@ -90,6 +101,9 @@ def new_design(
     payload_mass: float = 0.0,
     row_letters: Sequence[str] | None = None,
     seal_overlap: float | None = None,
+    rigging: bool = True,
+    row_zones: Sequence[str | None] | None = None,
+    extra_zones: dict[str, str] | None = None,
 ) -> DesignDocument:
     """A standard-gore design document.
 
@@ -119,6 +133,13 @@ def new_design(
         Row letters; default A, B, C, ...
     seal_overlap : float, optional
         Parachute seal overlap, m; default 0.1 of the top diameter.
+    rigging : bool
+        Add the default parachute, red line and flying wires
+        (:func:`envelopelab.rigging.with_default_rigging`).
+    row_zones : sequence of str or None, optional
+        Material zone of each row (None: the ``body`` zone).
+    extra_zones : dict of str to str, optional
+        More zones (name to fabric id) next to ``body``, e.g. ``{"mouth": "nomex"}``.
 
     Returns
     -------
@@ -137,19 +158,30 @@ def new_design(
         ambient_pressure,
         payload_mass,
     )
+    if row_zones is not None and len(row_zones) != len(row_heights):
+        raise ValueError("row_zones and row_heights differ in length")
+    zones_of_rows = list(row_zones) if row_zones is not None else [None] * len(row_heights)
+    if extra_zones:
+        payload["zones"] = {**payload["zones"], **extra_zones}  # type: ignore[dict-item]
     payload["envelope_type"] = "gore"
     payload["gores"] = {
         "count": gore_count,
         "meridian_profile_control_points": [{"x": float(r), "y": float(z)} for r, z in points],
         "panel_rows": [
-            {"letter": letters[i], "finished_height": float(h)} for i, h in enumerate(row_heights)
+            {"letter": letters[i], "finished_height": float(h), "zone": zones_of_rows[i]}
+            for i, h in enumerate(row_heights)
         ],
         "mouth_diameter": mouth_diameter,
         "crown_ring": top_diameter,
         "parachute_hole_diameter": top_diameter,
         "seal_overlap": 0.1 * top_diameter if seal_overlap is None else seal_overlap,
     }
-    return DesignDocument.model_validate(payload).with_updated_hash()
+    document = DesignDocument.model_validate(payload)
+    if rigging:
+        from envelopelab.rigging import with_default_rigging
+
+        document = with_default_rigging(document)
+    return document.with_updated_hash()
 
 
 def special_design_from_mesh(
@@ -204,6 +236,38 @@ def special_design_from_mesh(
         "panel_list": [],
     }
     return DesignDocument.model_validate(payload).with_updated_hash()
+
+
+def state_from_template(template: Project, name: str) -> DesignState:
+    """The design state of a saved project, as the start of a new design.
+
+    Everything that is designed is kept: the design document (shape, rows and their
+    zones, materials, tapes, seams, features, operating conditions, parachute, rigging,
+    turning vents, scoop) and the pattern annotations. The copy is a new design: its name
+    is ``name``, it gets a new version id, no parent, the current time and a new content
+    hash. Snapshots, versions, run records and the provenance log of the template are not
+    part of the state and are not copied.
+
+    Parameters
+    ----------
+    template : Project
+        The template project.
+    name : str
+        Name of the new design.
+
+    Returns
+    -------
+    DesignState
+        Independent copy (editing it does not change ``template``).
+    """
+    if not name.strip():
+        raise ValueError("a design from a template needs a name")
+    state = template.state.model_copy(deep=True)
+    meta = _meta(name.strip())
+    data = state.design.model_dump(by_alias=True, mode="json")
+    data["meta"] = meta
+    design = DesignDocument.model_validate(data).with_updated_hash()
+    return DesignState(design=design, patterns=state.patterns)
 
 
 MEASUREMENTS_NOT_IMPLEMENTED = (

@@ -3,7 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-- Shape files (`envelopelab.shape` v1, ADR-0009): a normalized gore table (radius against
+- Shape files (`envelopelab.shape` v1, ADR-0012): a normalized gore table (radius against
   tape length, fractions of the gore length) plus the three held values that fix a design,
   with explicit units. `envelopelab.project.shape_family` solves any three held values
   (e.g. the mouth diameter) for the gore length and cut stations and makes a standard-gore
@@ -13,6 +13,44 @@ All notable changes to this project will be documented in this file.
   result changes. Against its spreadsheet, the Smalley table's integrated volume
   coefficient is 0.15 % higher (0.12605 vs 0.12586), so holding its 92,000 ft³ gives gores
   0.05 % shorter (90.035 ft vs 90.081 ft).
+- New-design wizard: **Save as my defaults** / **Reset to built-in defaults** (stored in the
+  application settings). **File ▸ New from template…** starts a new design as a copy of a
+  saved project's design state (`ProjectSession.from_template`,
+  `envelopelab.project.templates.state_from_template`).
+- 2D pattern view: pieces are stacked vertically as sewn up a gore (scoop, rows from the
+  mouth up, parachute on top) in their own full-height column right of the 3D view.
+- 3D view: the design surface is solid, coloured by each row's fabric with alternate gores
+  shaded, and draws the vertical (load-tape) and horizontal (row) seams, so individual
+  gores and panels are visible (`envelopelab.project.gore_design.display_surface`).
+- Panel layout from the mouth up: a mouth row in its own fabric (Nomex by default in the
+  wizard, configurable height), N body rows (nylon), and the parachute as the top panel.
+  Panel rows carry an optional design-level material zone (`gores.panel_rows[].zone`,
+  ADR-0011); the pattern view's row zone still overrides it.
+- Parachute crown ring (rim of the crown opening) and centre ring (apex, where the
+  panels now end): circumference, limit hoop force, factor of safety and mass.
+- Optional scoop below the mouth over consecutive gores (depth, flare, fabric zone):
+  flat panels that match the mouth row, mass, burner-frame clearance warning.
+- Parachute, red line, flying wires and turning vents are part of the design (design
+  schema v2, ADR-0010; v1 documents migrate on load, their hash checked first).
+  `envelopelab.rigging` computes the seated parachute and its flat panels, shroud and
+  centralising line lengths, the shroud lines' limit tension, the red-line pull to open the
+  parachute, the red-line route and length, flying-wire and crow's-foot geometry and limit
+  tensions, and turning-vent thrust, torque, air and heat loss; every factor-of-safety
+  failure, unreachable opening and inconsistent placement is a Validation error. Benchmarks
+  against hand calculations: `validation/rigging-benchmarks.md`. Guides: `user/rigging.md`,
+  `theory/rigging.md`.
+- New designs get a default parachute (one shroud line per load tape), red line and flying
+  wires to a four-point burner frame; generic line and cable strengths are `assumed`.
+- **Changed result:** the live lift margin now subtracts the parachute and rigging mass
+  (parachute fabric, tapes and thread, lines, wires, crow's-foot legs, vent control lines).
+  Designs without rigging (all migrated v1 designs) are unchanged; for a new 2000 m^3,
+  12-gore design from the wizard (generic 65 g/m^2 fabric) the margin drops by 6.2 kg
+  (of which 1.8 kg are the default crown and centre rings).
+- Turning vents marked `simulate_open` are left open (`open_seams`) in the preview and
+  CalculiX models; other vents are simulated closed, as before.
+- Desktop application: Rigging panel (add/remove, lengths, loads, factors of safety, mass),
+  Parachute / Rigging / Turning vents in the Design Tree and Properties (with units), a
+  parachute and rigging layer in the 3D view, and the rigging mass in the live outputs.
 - Shared fabric library: fabrics created once can be used in every design. The library is
   a per-user SQLite file (`materials.sqlite` in the application data folder, or
   `$ENVELOPELAB_MATERIAL_LIBRARY` / Preferences → Fabric library file), replacing the

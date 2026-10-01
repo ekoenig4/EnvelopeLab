@@ -11,6 +11,7 @@ nav:
       - Importing patterns: user/importing-patterns.md
       - Simulation preview: user/simulation-preview.md
       - Reality Check report: user/reality-check-report.md
+      - Parachute and rigging: user/rigging.md
   - Developer:
       - Setup: dev/setup.md
       - CalculiX installation: dev/calculix-installation.md
@@ -23,6 +24,7 @@ nav:
       - Appendage pressure and load paths: theory/appendage-pressure-and-load-paths.md
       - Design editing and staleness: theory/design-editing.md
       - Shape families: theory/shape-families.md
+      - Parachute and rigging: theory/rigging.md
   - Validation:
       - Analytic geometry: validation/analytic-geometry.md
       - Pattern-import fixtures: validation/pattern-import-fixtures.md
@@ -30,6 +32,7 @@ nav:
       - Preview vs CalculiX: validation/preview-vs-calculix.md
       - Special-shape fixtures: validation/special-shape-fixtures.md
       - Shape-family benchmarks: validation/shape-families.md
+      - Rigging benchmarks: validation/rigging-benchmarks.md
   - Formats:
       - Design schema: formats/design-schema.md
       - Pattern import mapping: formats/pattern-import-mapping.md
@@ -45,8 +48,10 @@ nav:
       - ADR-0006: adr/ADR-0006-appendage-submodels-and-reality-check.md
       - ADR-0007: adr/ADR-0007-desktop-application-stack.md
       - ADR-0008: adr/ADR-0008-project-file-and-staleness.md
-      - ADR-0009: adr/ADR-0009-shape-files.md
       - ADR-0009: adr/ADR-0009-shared-fabric-library.md
+      - ADR-0010: adr/ADR-0010-rigging-schema-v2.md
+      - ADR-0011: adr/ADR-0011-row-zones-rings-and-scoop.md
+      - ADR-0012: adr/ADR-0012-shape-files.md
 theme:
   name: material
 markdown_extensions:

@@ -60,7 +60,9 @@ applied inside the root search. Valid range: targets whose volume lies between t
 
 The design state is split into input groups (geometry, seam allowance, seam construction,
 manual outlines, labels, grain, row zones, tape paths, feature locations, tapes, materials,
-operating conditions, features, meta, rigging, scale variants). `materials` is the design's
+operating conditions, features, meta, rigging, scale variants, parachute, turning vents,
+vent openings, scoop). Row zones include both the design rows' zones and the pattern
+annotations; a row's zone is not part of the geometry group. `materials` is the design's
 zone-to-fabric-id map; the values of those fabrics live in the fabric library shared by all
 designs, outside the file, and form the external group *fabric properties* (supplied by the
 application's library, left out when no library is attached). Each artifact reads some
@@ -69,13 +71,13 @@ groups and some upstream artifacts:
 | Artifact | Reads | Upstream |
 |---|---|---|
 | profile | geometry | |
-| patterns | geometry, seam allowance, manual outlines, labels, grain, row zones, tape paths, feature locations | |
-| assembly | geometry, manual outlines, tape paths, feature locations, features, tapes | |
+| patterns | geometry, seam allowance, manual outlines, labels, grain, row zones, tape paths, feature locations, parachute, scoop | |
+| assembly | geometry, manual outlines, tape paths, feature locations, features, tapes, vent openings | |
 | rest mesh | grain, row zones | assembly |
 | simulation | operating, materials, fabric properties, tapes, seam construction | rest mesh |
 | flattening | geometry, manual outlines | |
 | nesting | materials, fabric properties | patterns |
-| export | meta, rigging, scale variants | nesting |
+| export | meta, rigging, turning vents, scale variants | nesting |
 
 The fingerprint of an artifact is the SHA-256 of its input groups (canonical JSON) and its
 upstream fingerprints. An artifact or run is *current* when it was built from the current

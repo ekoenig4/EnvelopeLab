@@ -1,4 +1,4 @@
-# ADR-0009: Shape files for normalized gore tables and held-value design solving
+# ADR-0012: Shape files for normalized gore tables and held-value design solving
 
 - Status: Accepted
 - Date: 2026-10-01

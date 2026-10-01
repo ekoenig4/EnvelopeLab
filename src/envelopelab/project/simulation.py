@@ -6,7 +6,9 @@ the way a builder's DXF patterns would be:
 1. :func:`write_build_pack` draws every panel row (finished SEW outline, CUT outline,
    label ``PANEL <row> x<N>``, grain arrow, tape paths) into a DXF file in mm and writes
    the build-pack YAML (one ring of N gores; mouth fixed, crown closed by an unmeshed
-   parachute; load tapes from the design's tape classes).
+   parachute; load tapes from the design's tape classes; turning vents marked
+   ``simulate_open`` as vertical seams left open over their rows, hemmed with the
+   vertical tape class).
 2. :func:`build_solver_model` runs :func:`envelopelab.assembly.pipeline.import_build_pack`
    (import, seam graph, seam audit, Gmsh, virtual sewing, initial shape) and
    :func:`envelopelab.solvers.model.model_from_rest_model` with the design's operating
@@ -288,6 +290,17 @@ def write_build_pack(
                         "load_tape": tapes.vertical.tape_class,
                         "construction_order": 2,
                     },
+                    "open_seams": [
+                        {
+                            "name": _opening_name(vent.name),
+                            "gores": [vent.seam, vent.seam % n + 1],
+                            "rows": vent.rows,
+                            "kind": "vent",
+                            "hem": {"load_tape": tapes.vertical.tape_class},
+                        }
+                        for vent in design.turning_vents
+                        if vent.simulate_open
+                    ],
                 }
             ],
             "mesh": {"target_edge_length_mm": mesh_mm},
@@ -300,6 +313,11 @@ def write_build_pack(
         encoding="utf-8",
     )
     return target
+
+
+def _opening_name(name: str) -> str:
+    """Opening id of a turning vent (letters, digits, ``_`` and ``-``)."""
+    return "vent-" + "".join(c if c.isalnum() or c in "_-" else "-" for c in name)
 
 
 class BuildError(RuntimeError):

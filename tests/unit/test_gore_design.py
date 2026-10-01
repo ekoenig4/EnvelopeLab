@@ -74,8 +74,12 @@ def test_mass_estimate_uses_library_areal_mass_with_sources() -> None:
     assert zone.finished_area == pytest.approx(out.area, rel=0.02)  # flat gores vs revolution
     assert "assumed - verify" in out.sources and "assumed" in out.sources
     assert out.lift_margin == pytest.approx(
-        out.gross_lift / G0.value - out.envelope_mass - design.operating.payload_mass
+        out.gross_lift / G0.value
+        - out.envelope_mass
+        - (out.rigging_mass or 0.0)
+        - design.operating.payload_mass
     )
+    assert out.rigging_mass is not None and out.rigging_mass > 0.0
 
 
 def test_invalid_rows_report_instead_of_hiding() -> None:
@@ -184,3 +188,21 @@ def test_editable_outline_has_the_generated_edge_lengths() -> None:
 def test_design_from_measurements_is_a_documented_stub() -> None:
     with pytest.raises(NotImplementedError, match="not implemented"):
         design_from_measurements()
+
+
+def test_display_surface_follows_gores_and_rows() -> None:
+    import numpy as np
+
+    from envelopelab.project.gore_design import display_surface, standard_gore_design
+
+    design = standard_gore_design("d", 2000.0, 17.0, 16.0, 12, 5, mouth_fabric_id="nomex")
+    ds = display_surface(design, per_gore=4, per_row=3)
+    assert ds.faces.shape == (2 * 12 * 4 * 6 * 3, 3)
+    assert set(ds.face_gore.tolist()) == set(range(1, 13))
+    assert np.bincount(ds.face_row).tolist() == [2 * 48 * 3] * 6
+    # Seam k lies at azimuth 2 pi k / N; seam N at 0.
+    seam = ds.vertical_seams[0]
+    assert np.allclose(seam[:, 1], 0.0) and np.all(seam[:, 0] > 0.0)
+    radii = [float(np.hypot(*ring[0, :2])) for ring in ds.horizontal_seams]
+    assert radii[0] == pytest.approx(design.gores.mouth_diameter / 2, abs=1e-3)  # type: ignore[union-attr]
+    assert len(ds.horizontal_seams) == 7
