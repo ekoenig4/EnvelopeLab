@@ -6,13 +6,16 @@ directory and reads its text output back; it never links or imports CalculiX. No
 else in EnvelopeLab (geometry, editing, pattern import, the preview solver, build-pack
 export) needs CalculiX, and the Python package has no CalculiX dependency to install.
 
-Version 2.20 or newer is required; the benchmarks are run with 2.21.
+Version 2.20 or newer is required; the benchmarks are run with 2.21. An older `ccx` is
+found but refused: **Run CalculiX** stays disabled and the status bar says *CalculiX too
+old*, because older builds can crash on EnvelopeLab's models.
 
 ## Install `ccx`
 
 | Platform | Command |
 |---|---|
-| Debian, Ubuntu | `sudo apt-get install calculix-ccx` |
+| Debian, Ubuntu 24.04 (also under WSL) | `sudo apt-get install calculix-ccx` (2.21) |
+| Ubuntu 22.04 (also under WSL) | its `calculix-ccx` is 2.17, too old: use conda-forge (below) |
 | Any OS with conda | `conda install -c conda-forge calculix` |
 | Windows, macOS | the conda-forge package, or a build from <https://www.calculix.de> |
 

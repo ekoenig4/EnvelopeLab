@@ -10,6 +10,7 @@ import pytest
 
 from calculix_adapter import (
     SETUP_MESSAGE,
+    CalculixInstallation,
     CalculixNotFoundError,
     CalculixRunError,
     CalculixSettings,
@@ -226,3 +227,32 @@ def test_silent_crash_names_the_signal_and_keeps_the_files(tmp_path: Path) -> No
     assert str(work) in message
     assert (work / "job.inp").is_file()
     assert (work / "job.log").is_file()
+
+
+@pytest.mark.parametrize(
+    ("version", "ok"),
+    [
+        ("2.17", False),
+        ("2.19.1", False),
+        ("2.20", True),
+        ("2.21", True),
+        ("2.22", True),
+        ("3.0", True),
+    ],
+)
+def test_minimum_version(version: str, ok: bool) -> None:
+    assert CalculixInstallation(Path("ccx"), version).supported is ok
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses a POSIX shell script as a fake ccx")
+def test_too_old_ccx_is_found_but_refused(tmp_path: Path) -> None:
+    """Ubuntu 22.04's apt package is 2.17: found, but never run."""
+    fake = tmp_path / "ccx"
+    fake.write_text("#!/bin/sh\necho 'This is Version 2.17'\n")
+    fake.chmod(0o755)
+    found = find_calculix(fake)
+    assert found is not None and not found.supported
+    with pytest.raises(CalculixNotFoundError) as info:
+        require_calculix(fake)
+    message = str(info.value)
+    assert "2.17" in message and "2.20 or newer" in message and str(fake.resolve()) in message

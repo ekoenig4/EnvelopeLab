@@ -337,7 +337,9 @@ class MainWindow(QMainWindow):
             self.ccx_label.setText(f"CalculiX {self.simulation.calculix_version}")
             self.ccx_label.setStyleSheet("")
         else:
-            self.ccx_label.setText("CalculiX not installed — Run CalculiX disabled")
+            unusable = "too old" in self.simulation.calculix_message
+            what = "too old" if unusable else "not installed"
+            self.ccx_label.setText(f"CalculiX {what} — Run CalculiX disabled")
             self.ccx_label.setStyleSheet("color: #b00020; font-weight: bold;")
         self.ccx_label.setToolTip(self.simulation.calculix_message)
         self._update_actions()

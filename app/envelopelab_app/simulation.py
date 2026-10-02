@@ -179,11 +179,14 @@ class SimulationManager(QObject):
             self.calculix_message = (
                 "CalculiX (ccx) is not installed, so 'Run CalculiX' is disabled.\n" + SETUP_MESSAGE
             )
+        elif not found.supported:
+            self.calculix_version = None
+            self.calculix_message = "'Run CalculiX' is disabled. " + found.unsupported_message
         else:
             self.calculix_version = found.version
             self.calculix_message = f"CalculiX {found.version} found at {found.executable}"
         self.calculixChanged.emit()
-        return found is not None
+        return self.calculix_version is not None
 
     @property
     def calculix_available(self) -> bool:

@@ -12,6 +12,8 @@ from pathlib import Path
 #: Environment variable that points at a specific ``ccx`` executable.
 ENV_VAR = "ENVELOPELAB_CCX"
 _CANDIDATES = ("ccx", "ccx_2.22", "ccx_2.21", "ccx_2.20", "ccx.exe")
+#: Oldest supported CalculiX (docs/dev/calculix-installation.md); older builds are refused.
+MIN_VERSION = (2, 20)
 
 SETUP_MESSAGE = """\
 CalculiX (ccx) was not found, so verification solves cannot run.
@@ -45,6 +47,27 @@ class CalculixInstallation:
 
     executable: Path
     version: str
+
+    @property
+    def supported(self) -> bool:
+        """True for version :data:`MIN_VERSION` or newer."""
+        parts = tuple(int(p) for p in re.findall(r"\d+", self.version)[:2])
+        return parts >= MIN_VERSION
+
+    @property
+    def unsupported_message(self) -> str:
+        """Why this ``ccx`` is refused (empty when it is supported)."""
+        if self.supported:
+            return ""
+        minimum = ".".join(str(v) for v in MIN_VERSION)
+        return (
+            f"CalculiX {self.version} at {self.executable} is too old: version {minimum} or "
+            "newer is required (older builds can crash on EnvelopeLab's models). Ubuntu "
+            "22.04's calculix-ccx package is 2.17; install 2.21 from conda-forge "
+            "(conda install -c conda-forge calculix) or Ubuntu 24.04, and point "
+            "Preferences > CalculiX or ENVELOPELAB_CCX at it. "
+            "See docs/dev/calculix-installation.md."
+        )
 
 
 def _version(executable: Path) -> str | None:
@@ -89,8 +112,16 @@ def find_calculix(explicit: str | Path | None = None) -> CalculixInstallation | 
 
 
 def require_calculix(explicit: str | Path | None = None) -> CalculixInstallation:
-    """Like :func:`find_calculix` but raise :class:`CalculixNotFoundError` with setup help."""
+    """Like :func:`find_calculix` but raise :class:`CalculixNotFoundError` with setup help.
+
+    Raises
+    ------
+    CalculixNotFoundError
+        When no ``ccx`` is found, or the one found is older than :data:`MIN_VERSION`.
+    """
     found = find_calculix(explicit)
     if found is None:
         raise CalculixNotFoundError(SETUP_MESSAGE)
+    if not found.supported:
+        raise CalculixNotFoundError(found.unsupported_message)
     return found

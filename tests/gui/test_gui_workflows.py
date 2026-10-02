@@ -460,3 +460,20 @@ def test_layer_list_without_renderer_names_every_source(gore_window: MainWindow)
     }
     item = gore_window.view3d.layer_list.item(0)
     assert item is not None and item.checkState() == Qt.CheckState.Checked
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses a POSIX shell script as a fake ccx")
+def test_too_old_calculix_disables_run_calculix(gore_window: MainWindow, tmp_path: Path) -> None:
+    fake = tmp_path / "ccx"
+    fake.write_text("#!/bin/sh\necho 'This is Version 2.17'\n")
+    fake.chmod(0o755)
+    w = gore_window
+    prefs = load_preferences(w.settings)
+    prefs.ccx_path = str(fake)
+    w.apply_preferences(prefs)
+    assert not w.simulation.calculix_available
+    assert not w.runs.run_calculix.isEnabled()
+    assert "2.17" in w.simulation.calculix_message
+    assert "2.20 or newer" in w.simulation.calculix_message
+    assert "too old" in w.ccx_label.text()
+    assert w.simulation.start(CALCULIX) is False

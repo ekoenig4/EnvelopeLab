@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- The documented CalculiX minimum (2.20) is enforced: an older `ccx` (e.g. Ubuntu 22.04's
+  2.17) is found but refused, with the reason and how to install 2.21; the status bar says
+  *CalculiX too old* and `scripts/install_env.sh` warns.
 - CalculiX crashes are diagnosable: the message names the signal or Windows status
   (e.g. *segmentation fault (SIGSEGV)*, *access violation (0xC0000005)*; Windows crash
   codes were previously not recognised as crashes), the model size, and says when `ccx`

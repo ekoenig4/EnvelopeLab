@@ -244,8 +244,12 @@ except ImportError:
     print("CalculiX adapter: not installed")
 else:
     found = find_calculix()
-    print(f"CalculiX: {found.version} at {found.executable}" if found else
-          "CalculiX: ccx not found (Run CalculiX will be disabled; see docs/dev/calculix-installation.md)")
+    if found is None:
+        print("CalculiX: ccx not found (Run CalculiX will be disabled; see docs/dev/calculix-installation.md)")
+    elif not found.supported:
+        print("!! " + found.unsupported_message)
+    else:
+        print(f"CalculiX: {found.version} at {found.executable}")
 EOF
     case ",$EXTRAS," in
         *,gui,*)
