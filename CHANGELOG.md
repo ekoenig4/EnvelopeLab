@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Shape files (`envelopelab.shape` v1, ADR-0012): a normalized gore table (radius against
+  tape length, fractions of the gore length) plus the three held values that fix a design,
+  with explicit units. `envelopelab.project.shape_family` solves any three held values
+  (e.g. the mouth diameter) for the gore length and cut stations and makes a standard-gore
+  design. The app has a new **New design ▸ From shape file** tab. Fixture
+  `tests/fixtures/smalley_90k` (Balloon Builders Journal 90K table with its source
+  spreadsheet) and a generated page `validation/shape-families.md`. No existing numerical
+  result changes. Against its spreadsheet, the Smalley table's integrated volume
+  coefficient is 0.15 % higher (0.12605 vs 0.12586), so holding its 92,000 ft³ gives gores
+  0.05 % shorter (90.035 ft vs 90.081 ft).
 - New-design wizard: **Save as my defaults** / **Reset to built-in defaults** (stored in the
   application settings). **File ▸ New from template…** starts a new design as a copy of a
   saved project's design state (`ProjectSession.from_template`,

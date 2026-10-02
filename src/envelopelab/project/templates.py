@@ -100,6 +100,7 @@ def new_design(
     ambient_pressure: float = 101325.0,
     payload_mass: float = 0.0,
     row_letters: Sequence[str] | None = None,
+    seal_overlap: float | None = None,
     rigging: bool = True,
     row_zones: Sequence[str | None] | None = None,
     extra_zones: dict[str, str] | None = None,
@@ -130,6 +131,8 @@ def new_design(
         kg.
     row_letters : sequence of str, optional
         Row letters; default A, B, C, ...
+    seal_overlap : float, optional
+        Parachute seal overlap, m; default 0.1 of the top diameter.
     rigging : bool
         Add the default parachute, red line and flying wires
         (:func:`envelopelab.rigging.with_default_rigging`).
@@ -171,7 +174,7 @@ def new_design(
         "mouth_diameter": mouth_diameter,
         "crown_ring": top_diameter,
         "parachute_hole_diameter": top_diameter,
-        "seal_overlap": 0.1 * top_diameter,
+        "seal_overlap": 0.1 * top_diameter if seal_overlap is None else seal_overlap,
     }
     document = DesignDocument.model_validate(payload)
     if rigging:

@@ -1,4 +1,5 @@
-"""New-design wizard: standard gore from targets, special shape from a mesh, measurements."""
+"""New-design wizard: standard gore from targets, from a shape file, special shape from a
+mesh, measurements."""
 
 from __future__ import annotations
 
@@ -33,6 +34,7 @@ from envelopelab_app.settings import (
     reset_wizard_defaults,
     save_wizard_defaults,
 )
+from envelopelab_app.shape_tab import ShapeFileTab
 
 
 def _spin(value: float, low: float, high: float, suffix: str, decimals: int = 2) -> QDoubleSpinBox:
@@ -126,7 +128,11 @@ class NewDesignWizard(QDialog):
         )
         self.tabs.addTab(gore, "Standard gore")
 
+        self.shape_tab = ShapeFileTab([f.fabric_id for f in fabrics.fabrics()])
+        self.tabs.addTab(self.shape_tab, "From shape file")
+
         special = QWidget()
+        self.special_tab = special
         sform = QFormLayout(special)
         self.special_name = QLineEdit("Special shape")
         self.mesh_path = QLineEdit()
@@ -143,6 +149,7 @@ class NewDesignWizard(QDialog):
         self.tabs.addTab(special, "Special shape from mesh")
 
         measure = QWidget()
+        self.measure_tab = measure
         mlayout = QVBoxLayout(measure)
         note = QLabel(MEASUREMENTS_NOT_IMPLEMENTED)
         note.setWordWrap(True)
@@ -229,11 +236,12 @@ class NewDesignWizard(QDialog):
 
     def _tab_changed(self, index: int) -> None:
         ok = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
-        ok.setEnabled(index != 2)
+        ok.setEnabled(self.tabs.widget(index) is not self.measure_tab)
         self.error.setText("")
 
     def create_design(self) -> None:
         """Build the design from the current tab; errors are shown in the dialog."""
+        current = self.tabs.currentWidget()
         try:
             if self.tabs.currentIndex() == 0:
                 w = self.target_width.value()
@@ -254,7 +262,9 @@ class NewDesignWizard(QDialog):
                     mouth_fabric_id=None if mouth == NO_MOUTH_ROW else mouth,
                     mouth_row_height=self.mouth_height.value() or None,
                 )
-            elif self.tabs.currentIndex() == 1:
+            elif current is self.shape_tab:
+                self.design = self.shape_tab.design()
+            elif current is not self.measure_tab:
                 self.design = special_design_from_mesh(
                     self.special_name.text().strip() or "Special shape",
                     self.mesh_path.text().strip(),

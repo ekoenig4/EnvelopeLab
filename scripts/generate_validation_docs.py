@@ -5,7 +5,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from envelopelab.validation import analytic_geometry, pattern_import, preview_solver, rigging
+from envelopelab.validation import (
+    analytic_geometry,
+    pattern_import,
+    preview_solver,
+    rigging,
+    shape_families,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 ANALYTIC = ROOT / "docs" / "validation" / "analytic-geometry.md"
@@ -14,6 +20,7 @@ PREVIEW = ROOT / "docs" / "validation" / "preview-solver-benchmarks.md"
 RIGGING = ROOT / "docs" / "validation" / "rigging-benchmarks.md"
 CALCULIX = ROOT / "docs" / "validation" / "preview-vs-calculix"  # .json, .md, .svg
 SPECIAL = ROOT / "docs" / "validation" / "special-shape-fixtures"  # .json, .md
+SHAPES = ROOT / "docs" / "validation" / "shape-families.md"
 ENVELOPE_FIXTURE = ROOT / "tests" / "fixtures" / "spherical_envelope" / "build-pack.yaml"
 # Regression fixture of the special-shape page: which features to run, with generic
 # assumed materials for its material zones and tapes, and the known limitations.
@@ -33,7 +40,7 @@ SPECIAL_FIXTURE_NOTES = [
 
 def main(argv: list[str] | None = None) -> None:
     """Regenerate all pages, or only those named (``analytic``, ``fixtures``, ``preview``,
-    ``rigging``, ``calculix``, ``special``).
+    ``shapes``, ``rigging``, ``calculix``, ``special``).
 
     ``calculix`` runs the CalculiX verification study (needs ``ccx``, several minutes) and
     ``special`` the special-shape feature benchmarks (CalculiX rows when ``ccx`` is
@@ -43,6 +50,7 @@ def main(argv: list[str] | None = None) -> None:
         "analytic",
         "fixtures",
         "preview",
+        "shapes",
         "rigging",
     }
     failed: list[str] = []
@@ -63,6 +71,10 @@ def main(argv: list[str] | None = None) -> None:
         bench = preview_solver.run_benchmarks(ENVELOPE_FIXTURE)
         PREVIEW.write_text(preview_solver.render_markdown(bench), encoding="utf-8")
         failed += [r.name for r in bench.results if not r.passed]
+    if "shapes" in pages:
+        shape_results = shape_families.run_benchmarks(ROOT)
+        SHAPES.write_text(shape_families.render_markdown(shape_results), encoding="utf-8")
+        failed += [r.name for r in shape_results if not r.passed]
     if "calculix" in pages:
         # Imported here: the adapter is optional and the other pages must not need it.
         from calculix_adapter import validation as calculix_validation
