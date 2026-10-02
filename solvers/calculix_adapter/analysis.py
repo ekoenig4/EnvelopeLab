@@ -473,6 +473,66 @@ class CalculixCancelledError(RuntimeError):
     """The verification solve was cancelled (``ccx`` was stopped; there is no result)."""
 
 
+#: POSIX signals a crashed ``ccx`` dies of, and what they usually mean.
+_SIGNALS: dict[int, str] = {
+    4: "illegal instruction (SIGILL): the ccx build does not match this CPU",
+    6: "aborted (SIGABRT)",
+    7: "bus error (SIGBUS)",
+    8: "floating-point exception (SIGFPE)",
+    9: "killed (SIGKILL): usually the system ran out of memory",
+    11: "segmentation fault (SIGSEGV): often too small a stack for this mesh, or out of memory",
+}
+#: Windows NTSTATUS codes of a crashed process.
+_NTSTATUS: dict[int, str] = {
+    0xC0000005: "access violation (0xC0000005)",
+    0xC00000FD: "stack overflow (0xC00000FD): too small a stack for this mesh",
+    0xC0000017: "out of memory (0xC0000017)",
+    0xC000001D: "illegal instruction (0xC000001D)",
+    0xC0000094: "integer division by zero (0xC0000094)",
+    0xC0000409: "stack buffer overrun (0xC0000409)",
+    0xC000013A: "interrupted (0xC000013A)",
+}
+
+
+def describe_crash(returncode: int) -> str | None:
+    """What a ``ccx`` exit code says about a crash, or None for an ordinary exit.
+
+    Parameters
+    ----------
+    returncode : int
+        ``subprocess`` return code: negative for a POSIX signal; on Windows an NTSTATUS
+        code (>= 0xC0000000, or its signed 32-bit value).
+
+    Returns
+    -------
+    str or None
+        e.g. ``"segmentation fault (SIGSEGV): ..."``.
+    """
+    if returncode < 0 and -returncode < 64:
+        signal = -returncode
+        return _SIGNALS.get(signal, f"killed by signal {signal}")
+    status = returncode & 0xFFFFFFFF
+    if status >= 0xC0000000:
+        return _NTSTATUS.get(status, f"crashed with status 0x{status:08X}")
+    return None
+
+
+def deck_size(path: Path) -> str:
+    """Node and element counts of a written deck (for error messages)."""
+    nodes = elements = 0
+    block = ""
+    with path.open(encoding="utf-8", errors="replace") as f:
+        for line in f:
+            if line.startswith("*"):
+                block = line.split(",")[0].strip().upper()
+            elif line.strip() and not line.startswith("**"):
+                if block == "*NODE":
+                    nodes += 1
+                elif block == "*ELEMENT":
+                    elements += 1
+    return f"{nodes} nodes, {elements} elements"
+
+
 def _run_job(
     inst: CalculixInstallation,
     deck: DeckInput,
@@ -516,8 +576,19 @@ def _run_job(
     (workdir / f"{JOB}.log").write_text(log, encoding="utf-8")
     if "*ERROR reading" in log or "*ERROR in calinput" in log:
         raise CalculixRunError(f"CalculiX rejected the input deck:\n{log[-2000:]}")
-    if proc.returncode < 0:
-        raise CalculixRunError(f"CalculiX crashed (signal {-proc.returncode}):\n{log[-2000:]}")
+    crash = describe_crash(proc.returncode)
+    if crash is not None:
+        # ccx buffers its output, so a crash usually loses all of it.
+        output = (
+            f"Last output:\n{log[-2000:]}"
+            if log.strip()
+            else "ccx printed nothing before it died (its output buffer was lost)."
+        )
+        raise CalculixRunError(
+            f"CalculiX crashed: {crash} (exit code {proc.returncode}, model "
+            f"{deck_size(workdir / f'{JOB}.inp')}). {output}\n"
+            f"The input deck and log are kept in {workdir}"
+        )
     return proc.returncode == 0 and steps_completed(workdir / f"{JOB}.sta", deck.n_steps)
 
 
@@ -541,7 +612,8 @@ def run_calculix(
         Solver settings.
     workdir : str or Path, optional
         Directory for the CalculiX files of the last job (kept); default a temporary
-        directory that is removed.
+        directory that is removed, except after a :class:`CalculixRunError`, whose message
+        names it.
     mesh_options : dict, optional
         Mesh settings recorded in the run manifest.
     start_positions : ndarray, shape (n, 3), optional
@@ -569,7 +641,8 @@ def run_calculix(
     calculix_adapter.CalculixNotFoundError
         When ``ccx`` is not installed (the message explains how to install it).
     CalculixRunError
-        When CalculiX rejects the input deck or crashes.
+        When CalculiX rejects the input deck or crashes; the message names the crash
+        (signal or Windows status) and the folder holding the deck and log.
     CalculixCancelledError
         When ``cancel`` was set.
     """
@@ -583,12 +656,17 @@ def run_calculix(
     else:
         work = Path(workdir)
         work.mkdir(parents=True, exist_ok=True)
+    keep = False
     try:
         return _solve(
             model, settings, inst, work, start, mesh_options, start_positions, progress, cancel
         )
+    except CalculixRunError:
+        # The error names this folder: its deck and log are what diagnose the failure.
+        keep = True
+        raise
     finally:
-        if temp is not None:
+        if temp is not None and not keep:
             shutil.rmtree(temp, ignore_errors=True)
 
 
@@ -669,7 +747,13 @@ def _solve(
         held = prob.deck(x, axes, mats, sig0, [LoadStep("held", f_ext)], True, 0.0, 1.0)
         report("held")
         if not _run_job(inst, held, work, s.threads, cancel):
-            raise CalculixRunError("CalculiX failed on a held (fully fixed) job")
+            log_path = work / f"{JOB}.log"
+            tail = log_path.read_text(encoding="utf-8")[-2000:] if log_path.is_file() else ""
+            raise CalculixRunError(
+                "CalculiX did not complete the held (fully fixed) job, which needs no "
+                f"iterations. Last output:\n{tail or '(none)'}\n"
+                f"The input deck and log are kept in {work}"
+            )
         f_int = read_reactions(work / f"{JOB}.dat", prob.n) + prob.tape_forces(x)
         balance = f_int - f_ext
         start_residual, _ = prob.split_planes(np.where(prob.fixed_mask, 0.0, balance))

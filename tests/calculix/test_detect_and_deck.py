@@ -11,10 +11,13 @@ import pytest
 from calculix_adapter import (
     SETUP_MESSAGE,
     CalculixNotFoundError,
+    CalculixRunError,
+    CalculixSettings,
     find_calculix,
     require_calculix,
     run_calculix,
 )
+from calculix_adapter.analysis import describe_crash
 from calculix_adapter.deck import DeckInput, LoadStep, _f, write_deck
 from calculix_adapter.detect import ENV_VAR
 from calculix_adapter.results import read_cvg, read_element_stress, steps_completed
@@ -173,3 +176,53 @@ def test_explicit_executable_and_version(tmp_path: Path) -> None:
     fake.chmod(0o755)
     found = find_calculix(fake)
     assert found is not None and found.version == "2.99"
+
+
+@pytest.mark.parametrize(
+    ("code", "words"),
+    [
+        (-11, "segmentation fault (SIGSEGV)"),
+        (-9, "killed (SIGKILL)"),
+        (-6, "aborted (SIGABRT)"),
+        (0xC0000005, "access violation (0xC0000005)"),
+        (0xC00000FD, "stack overflow (0xC00000FD)"),
+        (-1073741819, "access violation (0xC0000005)"),  # same status, signed
+    ],
+)
+def test_crash_exit_codes_are_named(code: int, words: str) -> None:
+    assert words in (describe_crash(code) or "")
+
+
+@pytest.mark.parametrize("code", [0, 1, 201])
+def test_ordinary_exit_codes_are_not_crashes(code: int) -> None:
+    assert describe_crash(code) is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses a POSIX shell script as a fake ccx")
+def test_silent_crash_names_the_signal_and_keeps_the_files(tmp_path: Path) -> None:
+    """A ccx that dies before printing anything still gives a usable error."""
+    fake = tmp_path / "ccx"
+    # Answers the version query, then dies like a crashed ccx: no output at all.
+    fake.write_text(
+        '#!/bin/sh\nif [ "$1" = "-v" ]; then echo "This is Version 2.21"; exit 0; fi\n'
+        "kill -SEGV $$\n"
+    )
+    fake.chmod(0o755)
+    mesh = sheet(1.0, 1.0, 1, 1)
+    model = SolverModel.uniform(
+        mesh.positions,
+        mesh.triangles,
+        mesh.rest_uv,
+        MembraneMaterial.isotropic("f", 1e5),
+        OperatingConditions(1.2, 1.2, self_weight=False),
+        constraints=[NodeConstraint("all", np.arange(4))],
+    )
+    work = tmp_path / "work"
+    with pytest.raises(CalculixRunError) as info:
+        run_calculix(model, CalculixSettings(executable=str(fake)), workdir=work)
+    message = str(info.value)
+    assert "segmentation fault (SIGSEGV)" in message
+    assert "printed nothing" in message
+    assert str(work) in message
+    assert (work / "job.inp").is_file()
+    assert (work / "job.log").is_file()

@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- CalculiX crashes are diagnosable: the message names the signal or Windows status
+  (e.g. *segmentation fault (SIGSEGV)*, *access violation (0xC0000005)*; Windows crash
+  codes were previously not recognised as crashes), the model size, and says when `ccx`
+  printed nothing. The app keeps the last CalculiX run's deck and log in a
+  *calculix-last-run* folder (or `ENVELOPELAB_CALCULIX_DIR`) instead of deleting them, and
+  `run_calculix` keeps its temporary folder after a run error. No numerical result changes.
 - Shape files (`envelopelab.shape` v1, ADR-0012): a normalized gore table (radius against
   tape length, fractions of the gore length) plus the three held values that fix a design,
   with explicit units. `envelopelab.project.shape_family` solves any three held values

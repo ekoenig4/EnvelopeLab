@@ -12,6 +12,7 @@ explanation when it is missing.
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 import time
 from dataclasses import dataclass
@@ -48,6 +49,9 @@ class RunRequest:
     mesh_mm: float
     ccx_path: str | None
     start_positions: np.ndarray | None = None
+    #: CalculiX working folder, emptied at the start of a run and kept afterwards so its
+    #: deck and log can be inspected (default: a temporary folder).
+    ccx_workdir: Path | None = None
 
 
 class SolveWorker(QThread):
@@ -84,7 +88,7 @@ class SolveWorker(QThread):
                 if req.solver == PREVIEW:
                     result = self._preview(built)
                 else:
-                    result = self._calculix(built, Path(tmp) / "ccx")
+                    result = self._calculix(built, req.ccx_workdir or Path(tmp) / "ccx")
                 if result is None:
                     return
                 record, arrays = run_record(result, built, req.fingerprints["simulation"])
@@ -121,6 +125,7 @@ class SolveWorker(QThread):
                 p.fraction,
             )
 
+        shutil.rmtree(workdir, ignore_errors=True)
         try:
             return run_calculix(
                 built.model,
@@ -211,6 +216,7 @@ class SimulationManager(QObject):
             mesh_mm=mesh,
             ccx_path=prefs.ccx_path or None,
             start_positions=self._warm_start(solver, fingerprints["simulation"], mesh),
+            ccx_workdir=prefs.resolved_calculix_dir() if solver == CALCULIX else None,
         )
         # SQLite connections cannot cross threads: the worker gets an immutable copy.
         worker = SolveWorker(request, self.controller.fabrics.catalog())

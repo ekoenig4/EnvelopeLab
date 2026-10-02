@@ -59,6 +59,13 @@ class Preferences:
             return Path(env)
         return app_data_dir() / "recovery"
 
+    def resolved_calculix_dir(self) -> Path:
+        """Folder of the last CalculiX run's files (deck, log, results), kept after it."""
+        env = os.environ.get("ENVELOPELAB_CALCULIX_DIR")
+        if env:
+            return Path(env)
+        return app_data_dir() / "calculix-last-run"
+
     def resolved_material_library(self) -> Path:
         """Fabric library file shared by all designs."""
         if self.material_library:

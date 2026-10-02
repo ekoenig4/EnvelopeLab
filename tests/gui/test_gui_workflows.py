@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import numpy as np
@@ -194,6 +195,36 @@ def test_run_calculix_is_disabled_without_ccx(gore_window: MainWindow, tmp_path:
     assert "not installed" in message and "calculix-installation.md" in message
     assert "not installed" in w.runs.run_calculix.toolTip()
     assert w.simulation.start(CALCULIX) is False
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses a POSIX shell script as a fake ccx")
+def test_calculix_crash_names_the_crash_and_keeps_its_files(
+    qtbot: QtBot, gore_window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A ccx that dies silently: the message says how, and the deck stays on disk."""
+    runs = tmp_path / "ccx-runs"
+    monkeypatch.setenv("ENVELOPELAB_CALCULIX_DIR", str(runs))
+    fake = tmp_path / "ccx"
+    fake.write_text(
+        '#!/bin/sh\nif [ "$1" = "-v" ]; then echo "This is Version 2.21"; exit 0; fi\n'
+        "kill -SEGV $$\n"
+    )
+    fake.chmod(0o755)
+    w = gore_window
+    prefs = load_preferences(w.settings)
+    prefs.ccx_path = str(fake)
+    w.apply_preferences(prefs)
+    assert w.simulation.calculix_available
+    failures: list[str] = []
+    w.simulation.failed.connect(failures.append)
+    assert w.simulation.start(CALCULIX)
+    qtbot.waitUntil(lambda: bool(failures), timeout=120_000)
+    qtbot.waitUntil(lambda: not w.simulation.running, timeout=60_000)
+    message = failures[0]
+    assert "segmentation fault (SIGSEGV)" in message
+    assert "printed nothing" in message
+    assert str(runs) in message
+    assert (runs / "job.inp").is_file() and (runs / "job.log").is_file()
 
 
 def test_manual_outline_override_is_flagged(gore_window: MainWindow) -> None:

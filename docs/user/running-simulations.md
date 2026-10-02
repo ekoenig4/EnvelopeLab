@@ -56,6 +56,21 @@ converged preview of the same mesh exists, CalculiX starts from its shape (it is
 accepted only on its own convergence criteria). CalculiX can take minutes where the
 preview takes seconds; coarse meshes may not converge and are reported so.
 
+### When CalculiX fails or crashes
+
+The files of the last CalculiX run (input deck `job.inp`, log `job.log`, results) are kept
+in the *calculix-last-run* folder of the application data folder, or in
+`ENVELOPELAB_CALCULIX_DIR` when that is set. The folder is emptied when the next CalculiX
+run starts. A failure message names the folder.
+
+When `ccx` crashes, the message names the cause the operating system reported, for example
+*segmentation fault (SIGSEGV)*, *killed (SIGKILL)* (usually out of memory) or, on Windows,
+*access violation (0xC0000005)* or *stack overflow (0xC00000FD)*, along with the model's
+node and element counts. `ccx` buffers its output, so a crashed run often leaves an empty
+log; the message says so instead of showing nothing. Running `ccx -i job` in that folder
+from a terminal shows what `ccx` printed before it died. Try a coarser CalculiX mesh
+(**Preferences**) to check whether the crash depends on the model size.
+
 ## Saved results
 
 Run records are saved in the project and their result arrays next to it
