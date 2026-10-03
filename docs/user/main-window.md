@@ -26,8 +26,9 @@ title is drawn in red.
 
 ## Resizing
 
-Every divider between areas can be dragged. Forms that are taller than the space available
-scroll instead of growing the window, so the window fits a 1280 × 800 screen. Only the
+Every divider between areas can be dragged. A mode page or form that needs more space
+than the window has scrolls instead of growing the window, so the window fits a
+1280 × 800 screen, also with large system fonts. Only the
 sidebar can be collapsed (drag its divider to the left edge, or **View ▸ Show sidebar**);
 the mode page and the warnings strip always keep some space.
 

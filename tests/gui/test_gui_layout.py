@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+
+import pytest
 from PySide6.QtCore import QSettings
-from PySide6.QtWidgets import QSplitter
+from PySide6.QtWidgets import QApplication, QSplitter
 from pytestqt.qtbot import QtBot
 
 from envelopelab_app import layout
 from envelopelab_app.main_window import MainWindow, panel_titles
 
-from .gui_support import make_window
+from .gui_support import GORE_PROJECT, make_window
 
 #: The window must fit a 1280 x 800 laptop screen (px).
 SMALL_SCREEN = (1280, 800)
@@ -19,18 +22,45 @@ def sizes(window: MainWindow, name: str) -> list[int]:
     return layout.named_splitters(window)[name].sizes()
 
 
+@pytest.fixture
+def large_font(qapp: QApplication) -> Iterator[None]:
+    """Twice the default font size, standing in for the larger widget metrics of other
+    platforms and of accessibility font settings (macOS and Windows CI runners needed
+    more space than Linux with the same layout)."""
+    original = qapp.font()
+    font = qapp.font()
+    font.setPointSizeF(2.0 * font.pointSizeF())
+    qapp.setFont(font)
+    yield
+    qapp.setFont(original)
+
+
+def assert_fits_small_screen(window: MainWindow) -> None:
+    hint = window.minimumSizeHint()
+    assert hint.width() <= SMALL_SCREEN[0] and hint.height() <= SMALL_SCREEN[1]
+    window.resize(*SMALL_SCREEN)
+    assert (window.width(), window.height()) == SMALL_SCREEN
+
+
 def test_window_fits_a_small_screen(gore_window: MainWindow) -> None:
     # The dock layout needed at least 2137 x 1036 px with the fixture project open.
-    hint = gore_window.minimumSizeHint()
-    assert hint.width() <= SMALL_SCREEN[0] and hint.height() <= SMALL_SCREEN[1]
-    gore_window.resize(*SMALL_SCREEN)
-    assert (gore_window.width(), gore_window.height()) == SMALL_SCREEN
+    assert_fits_small_screen(gore_window)
+
+
+def test_window_fits_a_small_screen_with_large_font(
+    qtbot: QtBot, settings: QSettings, large_font: None
+) -> None:
+    window = make_window(qtbot, settings)
+    assert window.open_project(GORE_PROJECT) is not None
+    assert_fits_small_screen(window)
 
 
 def test_each_mode_shows_its_panels_and_always_the_warnings(gore_window: MainWindow) -> None:
     w = gore_window
     assert [w.mode_tabs.tabText(i) for i in range(w.mode_tabs.count())][0] == "Shape"
-    assert w.mode() == "shape" and w.mode_stack.currentWidget() is w.gore_editor
+    assert w.mode() == "shape" and w.mode_pages["shape"] is w.gore_editor
+    page = w.mode_stack.currentWidget()
+    assert page is not None and page.isAncestorOf(w.gore_editor)
     for key in layout.MODE_KEYS:
         w.set_mode(key)
         assert w.mode() == key and w.mode_actions[key].isChecked()

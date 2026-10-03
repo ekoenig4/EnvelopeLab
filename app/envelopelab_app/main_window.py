@@ -10,11 +10,13 @@ from PySide6.QtCore import QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFrame,
     QInputDialog,
     QLabel,
     QMainWindow,
     QMessageBox,
     QProgressBar,
+    QScrollArea,
     QSplitter,
     QStackedWidget,
     QTabBar,
@@ -226,8 +228,18 @@ class MainWindow(QMainWindow):
         self.mode_tabs.setObjectName("modeTabs")
         self.mode_tabs.setExpanding(False)
         self.mode_tabs.setDrawBase(False)
+        #: Content of each mode page (inside its scroll area).
+        self.mode_pages = pages
         for key, label in MODES:
-            self.mode_stack.addWidget(pages[key])
+            # A stacked widget is as large as its largest page, hidden pages included, so
+            # each page scrolls when the window is smaller than its content instead of
+            # setting the window's minimum size (which depends on platform font metrics).
+            scroll = QScrollArea()
+            scroll.setObjectName(f"{key}ModePage")
+            scroll.setWidget(pages[key])
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            self.mode_stack.addWidget(scroll)
             self.mode_tabs.addTab(label)
         self.mode_tabs.currentChanged.connect(self._mode_changed)
 
