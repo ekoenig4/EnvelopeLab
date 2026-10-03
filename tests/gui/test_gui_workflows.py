@@ -16,7 +16,7 @@ from envelopelab.project.recovery import find_recoverable
 from envelopelab.project.session import ProjectSession
 from envelopelab.project.shape_family import QUANTITIES
 from envelopelab.project.simulation import build_solver_model
-from envelopelab_app.main_window import MainWindow, dock_titles
+from envelopelab_app.main_window import MainWindow, panel_titles
 from envelopelab_app.settings import load_preferences, recent_projects
 from envelopelab_app.simulation import CALCULIX
 from envelopelab_app.wizard import NewDesignWizard
@@ -73,7 +73,7 @@ def table_column(window: MainWindow, column: int) -> list[str]:
 
 
 def test_window_starts_with_every_panel(window: MainWindow) -> None:
-    titles = {d.base_title for d in window.docks.values()}
+    titles = {p.base_title for p in window.panels.values()}
     assert REQUIRED_PANELS <= titles
     menus = [a.text() for a in window.menuBar().actions()]
     assert menus == ["&File", "&Edit", "&Design", "&Simulation", "&View"]
@@ -107,7 +107,7 @@ def test_create_edit_undo_redo_save_reopen(
     assert edited != created
     assert session.stack.history() == ["Move control point 3"]
     assert window.gore_editor.outputs["volume"].text() != volume_before  # live outputs
-    assert "●" in window.docks["tree"].windowTitle()  # dirty indicator
+    assert "●" in window.panels["tree"].windowTitle()  # dirty indicator
     # A drag on the profile canvas ends in the same command type.
     window.gore_editor.canvas.pointMoved.emit(1, 2.0, 2.2)
     assert session.stack.history()[-1] == "Move control point 2"
@@ -121,7 +121,7 @@ def test_create_edit_undo_redo_save_reopen(
 
     path = tmp_path / "smoke.elproj"
     assert window.save_to(path)
-    assert not session.is_dirty and "●" not in window.docks["tree"].windowTitle()
+    assert not session.is_dirty and "●" not in window.panels["tree"].windowTitle()
     assert recent_projects(settings)[0] == path.resolve()
 
     other = make_window(qtbot, settings)
@@ -150,7 +150,7 @@ def test_seam_allowance_marks_patterns_stale_but_not_the_rest_mesh(
     assert status["rest_mesh"] == "current" and status["assembly"] == "current"
     assert invalidated_by({"seam_allowance"}) == {"patterns", "nesting", "export"}
     assert "STALE" in w.patterns.banner.text()
-    titles = dock_titles(w)
+    titles = panel_titles(w)
     assert "[STALE]" in titles["patterns"] and "[STALE]" not in titles["view3d"]
     messages = " ".join(w.validation.messages())
     assert "patterns is stale" in messages and "rest mesh is stale" not in messages
@@ -166,13 +166,13 @@ def test_internal_temperature_marks_simulation_results_stale(gore_window: MainWi
     record, arrays = fake_run(session)
     session.add_run(record, arrays)
     assert table_column(w, 1) == ["CURRENT"]
-    assert "[STALE]" not in dock_titles(w)["runs"]
+    assert "[STALE]" not in panel_titles(w)["runs"]
 
     w.controller.select("operating")
     w.properties.set_field(("operating", "internal_temperature"), "383.15")
     assert session.design.operating.internal_temperature == pytest.approx(383.15)
     assert table_column(w, 1) == ["STALE"]
-    assert "[STALE]" in dock_titles(w)["runs"]
+    assert "[STALE]" in panel_titles(w)["runs"]
     assert "[STALE]" in w.view3d.labels()["envelopelab-preview"]
     assert any("STALE" in m for m in w.validation.messages())
     w.undo_action.trigger()
@@ -189,6 +189,7 @@ def test_run_calculix_is_disabled_without_ccx(gore_window: MainWindow, tmp_path:
     assert not w.runs.run_calculix.isEnabled()
     assert w.preview_action.isEnabled() and w.runs.run_preview.isEnabled()
     assert "not installed" in w.ccx_label.text()
+    w.show_panel("runs")
     assert w.runs.calculix_label.isVisible()
     message = w.runs.calculix_label.text()
     assert "not installed" in message and "calculix-installation.md" in message

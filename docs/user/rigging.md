@@ -10,7 +10,7 @@ The models behind the numbers are described in [theory](../theory/rigging.md).
 
 ## The Rigging panel
 
-The **Rigging** dock (tabbed with Properties) has buttons to add or remove each element and
+The **Rigging** mode (**View ▸ Rigging**, Ctrl+3) has buttons to add or remove each element and
 shows what the design gives:
 
 * **Parachute**: diameter, panel count, fabric length and area, the size of one panel,

@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Main window: workflow modes (Shape, Patterns, Rigging, 3D / Simulation, History; Ctrl+1
+  to Ctrl+5) replace the nine dock panels. The Design Tree / Properties sidebar and the
+  Validation / Warnings strip stay visible in every mode, and mode tabs show ● and [STALE].
+  The window now resizes down to under 1280 × 800 px (it could not shrink below
+  2137 × 1036 px with a project open). The layout is remembered between sessions, and
+  **View ▸ Save layout / Load saved layout / Reset layout** were added (ADR-0013).
 - Shape files (`envelopelab.shape` v1, ADR-0012): a normalized gore table (radius against
   tape length, fractions of the gore length) plus the three held values that fix a design,
   with explicit units. `envelopelab.project.shape_family` solves any three held values
