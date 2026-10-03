@@ -131,6 +131,9 @@ class WizardDefaults:
         Seam allowance, mm.
     internal_c, ambient_c : float
         Internal and ambient temperatures, degC.
+    loft_ratio : float
+        Constant gore loft, lobe-radius ratio k = ρ/r, dimensionless (1: small bulge, no
+        loft stored).
     """
 
     name: str = "New envelope"
@@ -147,6 +150,7 @@ class WizardDefaults:
     allowance_mm: float = 25.0
     internal_c: float = 100.0
     ambient_c: float = 15.0
+    loft_ratio: float = 1.0
 
 
 def load_wizard_defaults(settings: QSettings) -> WizardDefaults:

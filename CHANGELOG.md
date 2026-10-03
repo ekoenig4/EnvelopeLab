@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Gore loft (ADR-0014): the bulge of each gore between its load tapes is now a design
+  input, the lobe-radius ratio k = ρ/r along the gore (stations as fractions of the tape
+  length, interpolated). Set it in the standard-gore editor's **Gore loft** table, as one
+  ratio in the new-design wizard, or as a `loft` block in shape files. Flat patterns, the
+  mass estimate, volume, gross lift, lift margin, the volume lock, the 3D lobes and the
+  simulation's sewn panels all follow it. Design schema version 3 (`gores.loft`; v2 files
+  migrate to no loft). Designs without a loft are unchanged (k = 1, the small-bulge gore):
+  no existing numerical result changes. New analytic benchmarks for the lofted volume and
+  area (`validation/analytic-geometry.md`).
 - Main window: workflow modes (Shape, Patterns, Rigging, 3D / Simulation, History; Ctrl+1
   to Ctrl+5) replace the nine dock panels. The Design Tree / Properties sidebar and the
   Validation / Warnings strip stay visible in every mode, and mode tabs show ● and [STALE].

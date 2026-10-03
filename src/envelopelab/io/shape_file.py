@@ -14,6 +14,7 @@ from typing import Any
 
 import yaml
 
+from envelopelab.geometry.gore import GoreLoft, GoreWidthModel
 from envelopelab.project.shape_family import (
     QUANTITIES,
     VARIABLES,
@@ -143,7 +144,8 @@ class ShapeFile:
         if "gore_length" in self.hold:
             length = self.hold["gore_length"]
         elif "nominal_volume" in self.hold:
-            length = (self.hold["nominal_volume"] / self.shape.volume_coefficient) ** (1 / 3)
+            coefficient = self.shape.nominal_volume_coefficient(self.gore_count)
+            length = (self.hold["nominal_volume"] / coefficient) ** (1 / 3)
         else:
             length = 20.0
         return ShapeParameters(
@@ -184,6 +186,40 @@ def _hold_value(shape: NormalizedShape, name: str, value: object) -> float:
     return parse_quantity(value, QUANTITIES[name].dimension, f"design.hold.{name}")
 
 
+def _parse_loft(raw: object, stations: dict[str, float]) -> GoreLoft | None:
+    """The ``loft`` block: ``{ratio: k}`` or ``{stations: [[s, k], ...]}`` (s a fraction
+    of L or a station name; k the lobe-radius ratio, dimensionless)."""
+    if raw is None:
+        return None
+    if not isinstance(raw, dict) or ("ratio" in raw) == ("stations" in raw):
+        raise ShapeFileError("loft: give either 'ratio' (constant) or 'stations' ([s, k] list)")
+    try:
+        if "ratio" in raw:
+            return GoreLoft.constant(float(raw["ratio"]))
+        table = raw["stations"]
+        if not isinstance(table, list) or not table:
+            raise ShapeFileError("loft.stations: a list of [s, k] entries")
+        points: list[tuple[float, float]] = []
+        for entry in table:
+            if not isinstance(entry, list) or len(entry) != 2:
+                raise ShapeFileError("loft.stations: each entry is [s, k]")
+            s, k = entry
+            if isinstance(s, str):
+                if s not in stations:
+                    named = ", ".join(stations) or "none"
+                    raise ShapeFileError(
+                        f"loft.stations: unknown station {s!r} (named stations: {named})"
+                    )
+                s = stations[s]
+            points.append((float(s), float(k)))
+        points.sort()
+        return GoreLoft(tuple(s for s, _ in points), tuple(k for _, k in points))
+    except (TypeError, ValueError) as exc:
+        if isinstance(exc, ShapeFileError):
+            raise
+        raise ShapeFileError(f"loft: {exc}") from exc
+
+
 def parse_shape_file(raw: object, path: Path) -> ShapeFile:
     """Validate a parsed shape-file mapping and convert it to SI.
 
@@ -211,14 +247,26 @@ def parse_shape_file(raw: object, path: Path) -> ShapeFile:
     except (TypeError, ValueError, IndexError) as exc:
         raise ShapeFileError("profile.stations: each entry is [s, r]") from exc
     stations = {str(k): float(v) for k, v in (raw.get("stations") or {}).items()}
+    loft = _parse_loft(raw.get("loft"), stations)
     try:
-        shape = NormalizedShape(s=s, r=r, stations=stations, source=source)  # type: ignore[arg-type]
+        shape = NormalizedShape(
+            s=s,  # type: ignore[arg-type]
+            r=r,  # type: ignore[arg-type]
+            stations=stations,
+            source=source,
+            loft=loft,
+        )
     except ValueError as exc:
         raise ShapeFileError(f"profile: {exc}") from exc
     design = _require(raw, "design", dict)
     hold_raw = _require(design, "hold", dict, "design.")
     hold = {str(k): _hold_value(shape, str(k), v) for k, v in hold_raw.items()}
     gore_count = _require(design, "gore_count", int, "design.")
+    if loft is not None:
+        try:
+            GoreWidthModel.lofted(gore_count, loft)
+        except ValueError as exc:
+            raise ShapeFileError(f"loft: {exc}") from exc
     allowance = parse_quantity(
         design.get("seam_allowance", "0 m"), "length", "design.seam_allowance"
     )

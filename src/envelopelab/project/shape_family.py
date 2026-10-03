@@ -32,14 +32,25 @@ Computed quantities (SI)
 ------------------------
 ``nominal_volume``
     :math:`V_n = c L^3`, closed shape from pole to pole; :math:`c` is the volume of the
-    spline through all stations at :math:`L = 1` (the spreadsheets' "volume").
+    spline through all stations at :math:`L = 1` (the spreadsheets' "volume"). With a
+    loft, the lofted volume of the closed shape
+    (:func:`envelopelab.geometry.gore.lofted_volume`).
 ``envelope_volume``, ``height``, ``max_diameter``, ``tape_length``
-    Of the profile from the mouth to the top opening; open ends closed by flat discs.
+    Of the profile from the mouth to the top opening; open ends closed by flat discs. The
+    volume is the lofted volume (tapes plus fabric lobes).
 ``mouth_diameter``, ``top_diameter``
     :math:`2 r(s_m)`, :math:`2 r(s_t)`.
 ``max_cut_gore_width``
-    :math:`2 (\pi r_{max} / N + a)` with seam allowance :math:`a` per edge (small-bulge
-    gore, :func:`envelopelab.geometry.gore.half_width_small_bulge`).
+    :math:`2 (\max_s w(s) + a)` with seam allowance :math:`a` per edge; :math:`w` is the
+    flat half-width of the lofted gore, :math:`\pi r / N` for the small-bulge gore
+    (:func:`envelopelab.geometry.gore.half_width_small_bulge`).
+
+Loft
+----
+A shape family may carry a loft (:class:`~envelopelab.geometry.gore.GoreLoft`): the
+lobe-radius ratio :math:`k` at stations given as fractions of :math:`L`. A design cut at
+:math:`s_m, s_t` uses it re-expressed in fractions of its own tape length,
+:math:`f = (s - s_m)/(s_t - s_m)` (:meth:`NormalizedShape.design_loft`).
 
 Assumptions and valid range: axisymmetric envelope with a tape on every gore seam, fabric
 stretch neglected, the table smooth enough for a cubic spline between stations (error
@@ -70,7 +81,13 @@ from scipy.interpolate import CubicSpline
 from scipy.optimize import brentq, least_squares
 
 from envelopelab.design.model import DesignDocument
-from envelopelab.geometry.gore import MeridianProfile
+from envelopelab.geometry.gore import (
+    GoreLoft,
+    GoreWidthModel,
+    MeridianProfile,
+    gore_half_widths,
+    lofted_volume,
+)
 from envelopelab.project.gore_design import PROFILE_SAMPLES, VOLUME_TOLERANCE, profile_from_arrays
 
 FloatArray = np.ndarray
@@ -151,12 +168,16 @@ class NormalizedShape:
         Named stations (e.g. ``mouth``, ``vent``), fraction of L.
     source : str
         Source tag of the table (``datasheet``, ``measured`` or ``assumed``).
+    loft : GoreLoft, optional
+        Lobe-radius ratio along the gore, stations as fractions of L; ``None`` for
+        small-bulge gores.
     """
 
     s: FloatArray
     r: FloatArray
     stations: Mapping[str, float] = field(default_factory=dict)
     source: str = "assumed"
+    loft: GoreLoft | None = None
     z: FloatArray = field(init=False, repr=False)
     _spline_r: CubicSpline = field(init=False, repr=False)
 
@@ -218,6 +239,41 @@ class NormalizedShape:
         for a convex profile.
         """
         return MeridianProfile.from_points(self.r, self.z).volume
+
+    def design_loft(self, lower: float, upper: float) -> GoreLoft | None:
+        """The loft of a design cut between two stations (fractions of L).
+
+        Returns
+        -------
+        GoreLoft or None
+            Stations as fractions of the design's tape length, ``(s - lower) / (upper -
+            lower)``: the loft stations inside the cut plus the interpolated ratios at
+            both ends; a constant loft stays constant. ``None`` without a loft.
+        """
+        if self.loft is None:
+            return None
+        if not 0.0 <= lower < upper <= 1.0:
+            raise ValueError("stations must satisfy 0 <= mouth < top <= 1")
+        if len(set(self.loft.ratios)) == 1:
+            return GoreLoft.constant(self.loft.ratios[0])
+        inside = [s for s in self.loft.stations if lower < s < upper]
+        stations = [lower, *inside, upper]
+        ratios = self.loft.ratio_at(np.array(stations))
+        span = upper - lower
+        return GoreLoft(
+            stations=tuple(min(max((s - lower) / span, 0.0), 1.0) for s in stations),
+            ratios=tuple(float(k) for k in ratios),
+        )
+
+    def nominal_volume_coefficient(self, gore_count: int) -> float:
+        """Closed-shape volume at L = 1 with the loft of ``gore_count`` gores, dimensionless.
+
+        Equals :attr:`volume_coefficient` without a loft.
+        """
+        if self.loft is None:
+            return self.volume_coefficient
+        profile = profile_from_arrays(self.r, self.z)
+        return lofted_volume(profile, GoreWidthModel.lofted(gore_count, self.loft))
 
     def resolve_station(self, value: float | str) -> float:
         """A station given as a number (fraction of L) or a station name."""
@@ -298,19 +354,26 @@ def evaluate(shape: NormalizedShape, params: ShapeParameters) -> dict[str, float
         raise ValueError("a design needs at least 3 gores")
     profile = design_profile(shape, params)
     length = params.gore_length
+    loft = shape.design_loft(params.mouth_station, params.top_station)
+    if loft is None:
+        volume = profile.volume
+        half_width = math.pi * profile.max_width / 2.0 / params.gore_count
+    else:
+        width_model = GoreWidthModel.lofted(params.gore_count, loft)
+        volume = lofted_volume(profile, width_model)
+        half_width = float(np.max(gore_half_widths(profile, width_model)[1]))
     return {
         "gore_length": length,
         "mouth_station": params.mouth_station,
         "top_station": params.top_station,
-        "nominal_volume": shape.volume_coefficient * length**3,
-        "envelope_volume": profile.volume,
+        "nominal_volume": shape.nominal_volume_coefficient(params.gore_count) * length**3,
+        "envelope_volume": volume,
         "height": profile.height,
         "max_diameter": profile.max_width,
         "mouth_diameter": 2.0 * float(profile.r[0]),
         "top_diameter": 2.0 * float(profile.r[-1]),
         "tape_length": profile.meridian_length,
-        "max_cut_gore_width": 2.0
-        * (math.pi * profile.max_width / 2.0 / params.gore_count + params.seam_allowance),
+        "max_cut_gore_width": 2.0 * (half_width + params.seam_allowance),
     }
 
 
@@ -552,8 +615,9 @@ def shape_design(
 ) -> DesignDocument:
     r"""Standard-gore design document of a solved shape-family design.
 
-    The control points are those of :func:`design_profile` (so the editor shows the same
-    volume, height and diameters), the panel rows split the tape length equally, and the
+    The control points are those of :func:`design_profile` and the loft that of
+    :meth:`NormalizedShape.design_loft` (so the editor shows the same volume, height and
+    diameters), the panel rows split the tape length equally, and the
     parachute seal overlap is the tape distance from the ``parachute_overlap`` station to
     the top opening when the shape names one (else the template default).
 
@@ -615,6 +679,7 @@ def shape_design(
         ambient_pressure=ambient_pressure,
         payload_mass=payload_mass,
         seal_overlap=overlap,
+        loft=shape.design_loft(params.mouth_station, params.top_station),
     )
 
 

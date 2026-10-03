@@ -200,6 +200,8 @@ def input_groups(design: Mapping[str, Any], patterns: Mapping[str, Any]) -> dict
             "parachute_hole_diameter": gores.get("parachute_hole_diameter"),
             "seal_overlap": gores.get("seal_overlap"),
             "special": design.get("special"),
+            # Only a set loft enters, so designs without one keep their fingerprints.
+            **({"loft": gores["loft"]} if gores.get("loft") is not None else {}),
         },
         "seam_allowance": {
             "seam_types": [s.get("allowance") for s in seam_types],

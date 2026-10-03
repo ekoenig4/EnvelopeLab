@@ -30,13 +30,16 @@ and the 3D panel lists its layers without drawing them.
     * the number of **body panel rows** above the mouth row (nylon by default);
     * mouth and top-opening diameters as fractions of the width;
     * the body and parachute fabric, seam allowance and the internal and ambient
-      temperatures.
+      temperatures;
+    * the **gore loft** as one lobe ratio \(k = \rho/r\) (1: the classic small-bulge
+      gore; see [editing designs](editing-designs.md#the-standard-gore-editor) to vary
+      it along the gore).
 
    The envelope is then, from the mouth up: the mouth row (zone `mouth`), the body rows
    (zone `body`) and, as the top panel, the parachute over the crown opening with its
    crown ring and centre ring ([parachute and rigging](rigging.md)).
 2. Press **OK**. The wizard finds a profile with exactly that height and width whose
-   volume is the target (within 0.1 %). When the volume cannot be reached with that height
+   volume, with the loft, is the target (within 0.1 %). When the volume cannot be reached with that height
    and width, the wizard says which volumes can.
 
 ### Your own starting balloon

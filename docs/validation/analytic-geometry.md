@@ -13,12 +13,18 @@ shown.
 | Cylinder R=3 m H=10 m volume | 282.743 | 282.743 | m^3 | < 1e-06 | 0.001 | pass |
 | Cylinder R=3 m H=10 m area | 188.496 | 188.496 | m^2 | < 1e-06 | 0.001 | pass |
 | Sphere, 24 small-bulge gores x 8 rows: N x flat area | 804.247 | 804.248 | m^2 | < 1e-06 | 0.001 | pass |
+| Sphere R=8 m, 24 flat gores (k = inf): lofted volume | 2120.24 | 2120.25 | m^3 | < 1e-06 | 0.001 | pass |
+| Cylinder R=3 m H=10 m, 12 gores, k = 1.5: lofted volume | 278.398 | 278.398 | m^3 | < 1e-06 | 0.001 | pass |
+| Cylinder R=3 m H=10 m, 12 gores, k = 1.5: fabric area | 187.287 | 187.287 | m^2 | < 1e-06 | 0.001 | pass |
+| Sphere R=8 m, 24 gores, k = 2: fabric area | 802.523 | 802.523 | m^2 | < 1e-06 | 0.001 | pass |
 | Round trip r(s), spherical zone, N=24, small bulge | - | - | m | 0.004 mm | 1 mm | pass |
 | Round trip z(s), spherical zone, N=24, small bulge | - | - | m | 0.016 mm | 1 mm | pass |
 | Round trip r(s), spherical zone, N=24, chord, flat | - | - | m | 0.004 mm | 1 mm | pass |
 | Round trip z(s), spherical zone, N=24, chord, flat | - | - | m | 0.016 mm | 1 mm | pass |
 | Round trip r(s), spherical zone, N=24, chord, bulge radius 4 m | - | - | m | 0.004 mm | 1 mm | pass |
 | Round trip z(s), spherical zone, N=24, chord, bulge radius 4 m | - | - | m | 0.016 mm | 1 mm | pass |
+| Round trip r(s), spherical zone, N=24, loft k 1.5 to 0.8 | - | - | m | 0.004 mm | 1 mm | pass |
+| Round trip z(s), spherical zone, N=24, loft k 1.5 to 0.8 | - | - | m | 0.016 mm | 1 mm | pass |
 | dp gradient, 15 degC / 100 degC, sea level | 2.73648 | 2.736 | Pa/m | 0.00018 | 0.01 | pass |
 | Gross lift, 2 610 m^3, 15 degC / 100 degC, sea level | 7142.21 | 7142 | N | 3e-05 | 0.01 | pass |
 | ISA pressure at 1 000 m | 89874.6 | 89874.6 | Pa | < 1e-06 | 0.0001 | pass |

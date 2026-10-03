@@ -16,8 +16,12 @@ Assumptions (see docs/theory/gore-geometry.md for the full statement)
 * Axisymmetric envelope with ``n_gores`` identical gores and a tape on every gore seam.
 * Gore length coordinate equals tape arc length; fabric stretch is neglected.
 * Horizontal seams are straight lines across the flat gore (constant :math:`s`).
-* Volume and area are those of the surface of revolution through the tapes; open ends
-  (mouth, crown hole) are closed by flat discs for the volume only.
+* Between adjacent tapes the fabric is a circular lobe (the gore's *loft*); its radius is
+  set by the width model (:class:`GoreWidthModel`, :class:`GoreLoft`). The small-bulge
+  form puts the lobe on the circle through the tapes.
+* :attr:`MeridianProfile.volume` and :attr:`MeridianProfile.area` are those of the
+  surface of revolution through the tapes; :func:`lofted_volume` and :func:`lofted_area`
+  add the lobes. Open ends (mouth, crown hole) are closed by flat discs for the volume.
 
 References
 ----------
@@ -263,12 +267,136 @@ def half_width_chord(
         raise ValueError("bulge radius must be >= r*sin(pi/N) (half the tape spacing)")
     with np.errstate(invalid="ignore", divide="ignore"):
         arc = rho * np.arcsin(np.clip(half_chord / rho, 0.0, 1.0))
+    # Where the tapes meet (r = 0) a lobe radius proportional to r is 0 too: no width.
+    arc = np.where(half_chord == 0.0, 0.0, arc)
     return _as_array(np.where(np.isinf(rho), half_chord, arc))
+
+
+def lobe_area_factor(n_gores: int, ratio: npt.ArrayLike) -> FloatArray:
+    r"""Cross-section area of a lofted envelope relative to the circle through the tapes.
+
+    The section is the regular N-gon through the tapes (circumradius r) plus N circular
+    segments of radius :math:`\rho = k r` on its sides:
+
+    .. math::
+
+        \frac{A}{\pi r^2} = \frac{N}{\pi}\left[\sin\frac{\pi}{N}\cos\frac{\pi}{N}
+            + k^2(\theta - \sin\theta\cos\theta)\right],
+        \qquad \theta = \arcsin\frac{\sin(\pi/N)}{k}
+
+    with :math:`\theta` the half-angle of each lobe arc. The factor is 1 for :math:`k = 1`
+    (the small-bulge circle) and :math:`N\sin(2\pi/N)/(2\pi)` for flat gores
+    (:math:`k \to \infty`).
+
+    Parameters
+    ----------
+    n_gores : int
+        Number of gores N (>= 3).
+    ratio : array_like
+        Lobe-radius ratio :math:`k = \rho/r`, dimensionless, >= sin(π/N); ``inf`` for flat.
+
+    Returns
+    -------
+    ndarray
+        Area factor, dimensionless.
+
+    References
+    ----------
+    Circular-segment area: any geometry handbook, e.g. CRC Standard Mathematical Tables,
+    31st ed. (2003), sec. 4.5.
+    """
+    _check_gores(n_gores)
+    k = _as_array(ratio)
+    sin_n, cos_n = math.sin(math.pi / n_gores), math.cos(math.pi / n_gores)
+    if np.any(k < sin_n * (1.0 - 1e-12)):
+        raise ValueError("lobe-radius ratio must be >= sin(pi/N)")
+    finite = np.isfinite(k)
+    k_safe = np.where(finite, k, 1.0)
+    theta = np.arcsin(np.clip(sin_n / k_safe, 0.0, 1.0))
+    segment = np.where(finite, k_safe**2 * (theta - np.sin(theta) * np.cos(theta)), 0.0)
+    return _as_array(n_gores / math.pi * (sin_n * cos_n + segment))
 
 
 def _check_gores(n_gores: int) -> None:
     if n_gores < 3:
         raise ValueError("n_gores must be >= 3")
+
+
+@dataclass(frozen=True)
+class GoreLoft:
+    r"""Loft of a gore: the lobe-radius ratio :math:`k = \rho / r` along the tape.
+
+    The fabric between two adjacent tapes bulges as a circular lobe of radius
+    :math:`\rho = k(f)\, r(s)`, with :math:`f = s / L_t` the fraction of the tape length
+    :math:`L_t` (mouth to top opening). :math:`k` is interpolated linearly between the
+    stations and held constant beyond the first and last one. :math:`k = 1` is the
+    small-bulge form (lobe on the circle through the tapes); a larger :math:`k` is a
+    flatter lobe and a narrower gore, a smaller one a fuller lobe and a wider gore, down to
+    a half-circle lobe at :math:`k = \sin(\pi/N)`.
+
+    Attributes
+    ----------
+    stations : tuple of float
+        Fractions of the tape length, dimensionless, strictly increasing in [0, 1].
+    ratios : tuple of float
+        Lobe-radius ratio k at each station, dimensionless, positive and finite.
+    """
+
+    stations: tuple[float, ...]
+    ratios: tuple[float, ...]
+
+    def __post_init__(self) -> None:
+        f = np.asarray(self.stations, dtype=np.float64)
+        k = np.asarray(self.ratios, dtype=np.float64)
+        if f.ndim != 1 or f.size < 1 or f.shape != k.shape:
+            raise ValueError("a loft needs one or more stations, each with a ratio")
+        if np.any(f < 0.0) or np.any(f > 1.0):
+            raise ValueError("loft stations are fractions of the tape length (0..1)")
+        if np.any(np.diff(f) <= 0.0):
+            raise ValueError("loft stations must be strictly increasing")
+        if not np.all(np.isfinite(k)) or np.any(k <= 0.0):
+            raise ValueError("loft ratios must be positive and finite")
+        object.__setattr__(self, "stations", tuple(float(v) for v in f))
+        object.__setattr__(self, "ratios", tuple(float(v) for v in k))
+
+    @classmethod
+    def constant(cls, ratio: float) -> GoreLoft:
+        """The same lobe-radius ratio (dimensionless) along the whole gore."""
+        return cls(stations=(0.0,), ratios=(float(ratio),))
+
+    @property
+    def min_ratio(self) -> float:
+        """Smallest lobe-radius ratio, dimensionless."""
+        return min(self.ratios)
+
+    def ratio_at(self, fraction: npt.ArrayLike) -> FloatArray:
+        """Lobe-radius ratio k (dimensionless) at fractions of the tape length."""
+        return _as_array(
+            np.interp(_as_array(fraction), np.array(self.stations), np.array(self.ratios))
+        )
+
+
+def loft_extra_width(n_gores: int, ratio: npt.ArrayLike) -> FloatArray:
+    r"""Extra flat gore width of a lobe over the flat tape-to-tape chord, fraction.
+
+    .. math:: e = \frac{k \arcsin(\sin(\pi/N)/k)}{\sin(\pi/N)} - 1
+
+    Parameters
+    ----------
+    n_gores : int
+        Number of gores N (>= 3).
+    ratio : array_like
+        Lobe-radius ratio k, dimensionless (>= sin(π/N)); ``inf`` gives 0.
+
+    Returns
+    -------
+    ndarray
+        Extra width as a fraction of the chord width, dimensionless (0.01 = 1 %).
+    """
+    _check_gores(n_gores)
+    sin_n = math.sin(math.pi / n_gores)
+    k = _as_array(ratio)
+    return _as_array(half_width_chord(1.0, n_gores, k) / sin_n - 1.0)
 
 
 @dataclass(frozen=True)
@@ -282,50 +410,106 @@ class GoreWidthModel:
     form : {"small_bulge", "chord"}
         Width formula; see :func:`half_width_small_bulge` and :func:`half_width_chord`.
     bulge_radius : float or None
-        Chord form only: constant lobe radius ρ, m. ``None`` with ``bulge_ratio`` also
-        ``None`` means a flat chord (ρ = ∞).
+        Chord form only: constant lobe radius ρ, m. ``None`` with ``bulge_ratio`` and
+        ``loft`` also ``None`` means a flat chord (ρ = ∞).
     bulge_ratio : float or None
         Chord form only: lobe radius as a multiple of the local tape radius, ρ = k r,
-        dimensionless. Mutually exclusive with ``bulge_radius``.
+        dimensionless.
+    loft : GoreLoft or None
+        Chord form only: lobe-radius ratio k varying along the tape. The width then
+        depends on the station as well as the radius, so the ``fraction`` argument of
+        :meth:`half_width` is required. At most one of ``bulge_radius``, ``bulge_ratio``
+        and ``loft`` is given.
     """
 
     n_gores: int
     form: WidthForm = "small_bulge"
     bulge_radius: float | None = None
     bulge_ratio: float | None = None
+    loft: GoreLoft | None = None
 
     def __post_init__(self) -> None:
         _check_gores(self.n_gores)
-        if self.bulge_radius is not None and self.bulge_ratio is not None:
-            raise ValueError("give bulge_radius or bulge_ratio, not both")
-        if self.form == "small_bulge" and (
-            self.bulge_radius is not None or self.bulge_ratio is not None
-        ):
+        given = [v for v in (self.bulge_radius, self.bulge_ratio, self.loft) if v is not None]
+        if len(given) > 1:
+            raise ValueError("give at most one of bulge_radius, bulge_ratio and loft")
+        if self.form == "small_bulge" and given:
             raise ValueError("bulge parameters apply to the chord form only")
-        if self.bulge_ratio is not None and self.bulge_ratio < math.sin(math.pi / self.n_gores):
+        min_ratio = math.sin(math.pi / self.n_gores)
+        if self.bulge_ratio is not None and self.bulge_ratio < min_ratio:
             raise ValueError("bulge_ratio must be >= sin(pi/N)")
+        if self.loft is not None and self.loft.min_ratio < min_ratio:
+            raise ValueError(
+                f"loft ratio {self.loft.min_ratio:g} is below sin(pi/N) = {min_ratio:.4f} "
+                f"for {self.n_gores} gores (a lobe cannot be more than a half circle)"
+            )
         if self.bulge_radius is not None and self.bulge_radius <= 0.0:
             raise ValueError("bulge_radius must be positive")
 
-    def half_width(self, radius: npt.ArrayLike) -> FloatArray:
-        """Flat half-width, m, for tape radius ``radius`` (m)."""
+    @classmethod
+    def lofted(cls, n_gores: int, loft: GoreLoft | None) -> GoreWidthModel:
+        """Width model of a gore with ``loft``; ``None`` is the small-bulge form (k = 1)."""
+        if loft is None:
+            return cls(n_gores=n_gores, form="small_bulge")
+        return cls(n_gores=n_gores, form="chord", loft=loft)
+
+    def lobe_ratio(
+        self, radius: npt.ArrayLike, fraction: npt.ArrayLike | None = None
+    ) -> FloatArray:
+        """Lobe-radius ratio k = ρ/r (dimensionless; ``inf`` for a flat chord).
+
+        Parameters
+        ----------
+        radius : array_like
+            Tape radius, m.
+        fraction : array_like, optional
+            Fraction of the tape length, dimensionless; required with a ``loft``.
+        """
+        r = _as_array(radius)
+        if self.form == "small_bulge":
+            return _as_array(np.ones_like(r))
+        if self.loft is not None:
+            if fraction is None:
+                raise ValueError("a lofted width model needs the station fraction")
+            return _as_array(np.broadcast_to(self.loft.ratio_at(fraction), r.shape))
+        if self.bulge_ratio is not None:
+            return _as_array(np.full_like(r, self.bulge_ratio))
+        if self.bulge_radius is None:
+            return _as_array(np.full_like(r, math.inf))
+        with np.errstate(divide="ignore"):
+            return _as_array(self.bulge_radius / r)
+
+    def half_width(
+        self, radius: npt.ArrayLike, fraction: npt.ArrayLike | None = None
+    ) -> FloatArray:
+        """Flat half-width, m, for tape radius ``radius`` (m).
+
+        ``fraction`` (of the tape length, dimensionless) is required with a ``loft``.
+        """
         if self.form == "small_bulge":
             return half_width_small_bulge(radius, self.n_gores)
         r = _as_array(radius)
+        if self.loft is not None:
+            return half_width_chord(r, self.n_gores, self.lobe_ratio(r, fraction) * r)
         if self.bulge_ratio is not None:
             return half_width_chord(r, self.n_gores, self.bulge_ratio * r)
         rho = math.inf if self.bulge_radius is None else self.bulge_radius
         return half_width_chord(r, self.n_gores, rho)
 
-    def full_width(self, radius: npt.ArrayLike) -> FloatArray:
-        """Flat full width 2w, m, for tape radius ``radius`` (m)."""
-        return 2.0 * self.half_width(radius)
+    def full_width(
+        self, radius: npt.ArrayLike, fraction: npt.ArrayLike | None = None
+    ) -> FloatArray:
+        """Flat full width 2w, m, for tape radius ``radius`` (m); see :meth:`half_width`."""
+        return 2.0 * self.half_width(radius, fraction)
 
-    def radius_from_full_width(self, width: npt.ArrayLike) -> FloatArray:
+    def radius_from_full_width(
+        self, width: npt.ArrayLike, fraction: npt.ArrayLike | None = None
+    ) -> FloatArray:
         r"""Invert :meth:`full_width`: tape radius, m, from flat full gore width, m.
 
         Small bulge: :math:`r = N w_{full} / (2\pi)`. Chord form with constant ρ:
-        :math:`r = \rho \sin(w/\rho) / \sin(\pi/N)`; with ρ = k r:
+        :math:`r = \rho \sin(w/\rho) / \sin(\pi/N)`; with ρ = k r (``bulge_ratio`` or
+        a ``loft``, which needs ``fraction``):
         :math:`r = w / (k \arcsin(\sin(\pi/N)/k))`, where :math:`w` is the half-width.
         """
         half = 0.5 * _as_array(width)
@@ -333,6 +517,9 @@ class GoreWidthModel:
         if self.form == "small_bulge":
             return half * n / math.pi
         sin_n = math.sin(math.pi / n)
+        if self.loft is not None:
+            ratio = self.lobe_ratio(half, fraction)
+            return _as_array(half / (ratio * np.arcsin(sin_n / ratio)))
         if self.bulge_ratio is not None:
             k = self.bulge_ratio
             return _as_array(half / (k * math.asin(sin_n / k)))
@@ -466,7 +653,74 @@ def gore_half_widths(
         Stations s (m) and half-widths w (m).
     """
     stations = profile.s if s is None else _as_array(s)
-    return stations, width_model.half_width(profile.radius_at(stations))
+    fraction = stations / profile.meridian_length
+    return stations, width_model.half_width(profile.radius_at(stations), fraction)
+
+
+def lofted_volume(profile: MeridianProfile, width_model: GoreWidthModel) -> float:
+    r"""Enclosed volume of the lofted envelope (tapes plus fabric lobes), m^3.
+
+    Each horizontal section is the circle through the tapes scaled by the lobe area
+    factor :math:`c(k, N)` (:func:`lobe_area_factor`), so
+
+    .. math:: V = \sum_i c_{i+\frac12}\, \frac{\pi}{3}(r_i^2 + r_i r_{i+1} + r_{i+1}^2)
+              (z_{i+1} - z_i)
+
+    with :math:`c` evaluated at the middle of each polyline segment. The small-bulge form
+    (:math:`c = 1`) returns :attr:`MeridianProfile.volume` exactly.
+
+    Parameters
+    ----------
+    profile : MeridianProfile
+        Meridian (tape) profile, m.
+    width_model : GoreWidthModel
+        Gore count and lobe shape.
+
+    Returns
+    -------
+    float
+        Volume, m^3; open ends closed by flat discs.
+
+    Notes
+    -----
+    The lobe is taken in the horizontal section, as the width model takes it across the
+    flat gore; both are exact for a vertical tape and good while the lobes are shallow
+    compared with the meridian curvature radius.
+    """
+    if width_model.form == "small_bulge":
+        return profile.volume
+    s_mid = 0.5 * (profile.s[:-1] + profile.s[1:])
+    r_mid = 0.5 * (profile.r[:-1] + profile.r[1:])
+    k = width_model.lobe_ratio(r_mid, s_mid / profile.meridian_length)
+    factor = lobe_area_factor(width_model.n_gores, k)
+    r0, r1 = profile.r[:-1], profile.r[1:]
+    dz = np.diff(profile.z)
+    return abs(float(np.sum(factor * math.pi / 3.0 * (r0 * r0 + r0 * r1 + r1 * r1) * dz)))
+
+
+def lofted_area(profile: MeridianProfile, width_model: GoreWidthModel) -> float:
+    r"""Fabric area of the lofted envelope (N flat gores, finished), m^2.
+
+    .. math:: A = 2N \int_0^{L_t} w(s)\, ds \approx N \sum_i (w_i + w_{i+1})\, \Delta s_i
+
+    The small-bulge form returns :attr:`MeridianProfile.area` exactly.
+
+    Parameters
+    ----------
+    profile : MeridianProfile
+        Meridian (tape) profile, m.
+    width_model : GoreWidthModel
+        Gore count and lobe shape.
+
+    Returns
+    -------
+    float
+        Area, m^2.
+    """
+    if width_model.form == "small_bulge":
+        return profile.area
+    _, half = gore_half_widths(profile, width_model)
+    return float(width_model.n_gores * np.sum((half[:-1] + half[1:]) * np.diff(profile.s)))
 
 
 def _row_stations(profile: MeridianProfile, s0: float, s1: float, minimum: int) -> FloatArray:
@@ -632,7 +886,12 @@ def split_rows(
             LoftStation(
                 fraction=float(f),
                 y=float(f) * height,
-                width=float(width_model.full_width(profile.radius_at(s0 + float(f) * height))),
+                width=float(
+                    width_model.full_width(
+                        profile.radius_at(s0 + float(f) * height),
+                        (s0 + float(f) * height) / profile.meridian_length,
+                    )
+                ),
             )
             for f in loft_fractions
         )
@@ -791,7 +1050,9 @@ def profile_from_gore_widths(
     """
     s_raw = _as_array(stations)
     s = s_raw - s_raw[0]
-    measured = width_model.radius_from_full_width(widths)
+    measured = width_model.radius_from_full_width(
+        widths, None if width_model.loft is None else s / s[-1]
+    )
     if s.size < 8 or s.shape != measured.shape:
         raise ValueError("need at least 8 stations with one width each")
     if np.any(np.diff(s) <= 0.0):

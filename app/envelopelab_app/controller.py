@@ -230,6 +230,7 @@ class WorkspaceController(QObject):
             "move_control_point",
             "insert_control_point",
             "delete_control_point",
+            "set_loft",
         ):
             kwargs.setdefault("keep_rows_fitted", self.prefs.keep_rows_fitted)
         result = self.attempt(func, self.session, *args, **kwargs)

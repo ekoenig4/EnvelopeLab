@@ -24,8 +24,11 @@ from envelopelab.atmosphere import (
     pressure_gradient,
 )
 from envelopelab.geometry.gore import (
+    GoreLoft,
     GoreWidthModel,
     MeridianProfile,
+    lofted_area,
+    lofted_volume,
     profile_from_gore_widths,
     split_rows,
 )
@@ -90,12 +93,79 @@ def _round_trip(
     profile: MeridianProfile, model: GoreWidthModel, stations: int = 150
 ) -> tuple[float, float]:
     s = np.linspace(0.0, profile.meridian_length, stations)
-    widths = model.full_width(profile.radius_at(s))
+    widths = model.full_width(profile.radius_at(s), s / profile.meridian_length)
     result = profile_from_gore_widths(s, widths, model)
     z_ref = profile.height_at(s) - profile.z[0]
     radius_error = float(np.max(np.abs(result.profile.radius_at(s) - profile.radius_at(s))))
     height_error = float(np.max(np.abs(result.profile.height_at(s) - z_ref)))
     return radius_error, height_error
+
+
+def _loft_benchmarks(sphere: MeridianProfile, radius: float) -> list[BenchmarkResult]:
+    r"""Lofted volume and fabric area against closed forms.
+
+    The hand values use the lobe geometry directly: each gore's lobe is an arc of radius
+    :math:`\rho` with central angle :math:`2\theta`, :math:`\sin\theta = c/(2\rho)` on the
+    tape-to-tape chord :math:`c = 2r\sin(\pi/N)`; the section is the N-gon (area
+    :math:`\tfrac{N}{2} r^2 \sin(2\pi/N)`) plus N segments
+    :math:`\tfrac{\rho^2}{2}(2\theta - \sin 2\theta)`, and the gore width is the arc
+    :math:`2\rho\theta`.
+    """
+    n = 24
+    out: list[BenchmarkResult] = []
+    # Flat gores on a sphere: every section is the N-gon inscribed in the circle of r(z).
+    flat = GoreWidthModel(n, "chord")
+    out.append(
+        BenchmarkResult(
+            "Sphere R=8 m, 24 flat gores (k = inf): lofted volume",
+            lofted_volume(sphere, flat),
+            n / 2.0 * math.sin(2.0 * math.pi / n) * 4.0 / 3.0 * radius**3,
+            "m^3",
+            "relative",
+            1e-3,
+        )
+    )
+    # Constant lobe ratio k on a cylinder of radius a and height h: constant section.
+    a, h, n_cyl, k = 3.0, 10.0, 12, 1.5
+    cylinder = MeridianProfile.from_control_points([a, a], [0.0, h], samples=11)
+    rho = k * a
+    theta = math.asin(a * math.sin(math.pi / n_cyl) / rho)
+    section = n_cyl / 2.0 * a * a * math.sin(2.0 * math.pi / n_cyl) + n_cyl * rho * rho / 2.0 * (
+        2.0 * theta - math.sin(2.0 * theta)
+    )
+    lobed = GoreWidthModel(n_cyl, "chord", loft=GoreLoft.constant(k))
+    out += [
+        BenchmarkResult(
+            "Cylinder R=3 m H=10 m, 12 gores, k = 1.5: lofted volume",
+            lofted_volume(cylinder, lobed),
+            section * h,
+            "m^3",
+            "relative",
+            1e-3,
+        ),
+        BenchmarkResult(
+            "Cylinder R=3 m H=10 m, 12 gores, k = 1.5: fabric area",
+            lofted_area(cylinder, lobed),
+            n_cyl * 2.0 * rho * theta * h,
+            "m^2",
+            "relative",
+            1e-3,
+        ),
+    ]
+    # Constant k on a sphere: w = k r asin(sin(pi/N)/k) and the integral of r ds is 2R^2.
+    k_sphere = 2.0
+    g = k_sphere * math.asin(math.sin(math.pi / n) / k_sphere)
+    out.append(
+        BenchmarkResult(
+            "Sphere R=8 m, 24 gores, k = 2: fabric area",
+            lofted_area(sphere, GoreWidthModel(n, "chord", loft=GoreLoft.constant(k_sphere))),
+            2.0 * n * g * 2.0 * radius**2,
+            "m^2",
+            "relative",
+            1e-3,
+        )
+    )
+    return out
 
 
 def run_benchmarks() -> list[BenchmarkResult]:
@@ -162,11 +232,14 @@ def run_benchmarks() -> list[BenchmarkResult]:
             1e-3,
         )
     )
+    results += _loft_benchmarks(sphere, radius)
     zone = _sphere(radius, -math.radians(60.0), math.radians(80.0))
+    varying_loft = GoreLoft(stations=(0.0, 1.0), ratios=(1.5, 0.8))
     for label, width_model in (
         ("small bulge", model),
         ("chord, flat", GoreWidthModel(24, "chord")),
         ("chord, bulge radius 4 m", GoreWidthModel(24, "chord", bulge_radius=0.5 * radius)),
+        ("loft k 1.5 to 0.8", GoreWidthModel(24, "chord", loft=varying_loft)),
     ):
         radius_error, height_error = _round_trip(zone, width_model)
         results += [
