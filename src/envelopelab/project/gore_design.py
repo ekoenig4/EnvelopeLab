@@ -7,9 +7,13 @@ panel-row heights along the tape (m). This module turns that into the objects of
 
 Live outputs
 ------------
-* Profile: meridian length, height :math:`H`, maximum diameter :math:`D`, volume
-  :math:`V` and fabric area :math:`A` of the surface of revolution
-  (:class:`~envelopelab.geometry.gore.MeridianProfile`).
+* Profile: meridian length, height :math:`H`, maximum diameter :math:`D`
+  (:class:`~envelopelab.geometry.gore.MeridianProfile`), and the volume :math:`V` and
+  fabric area :math:`A` of the lofted envelope: tapes plus the fabric lobe between
+  adjacent tapes set by the design's loft
+  (:func:`~envelopelab.geometry.gore.lofted_volume`,
+  :func:`~envelopelab.geometry.gore.lofted_area`; without a loft, the small-bulge gore,
+  these equal the surface of revolution through the tapes).
 * Gross lift :math:`L = V(\rho_{amb} - \rho_{int})g` with dry-air densities
   :math:`\rho = p/(R T)` at the design's ambient pressure and the ambient and internal
   temperatures (:func:`envelopelab.atmosphere.gas_density`).
@@ -26,7 +30,7 @@ value (lengths within 1 mm, volume within 0.1 %, the AGENTS.md defaults):
 
 * **height** — heights are scaled about the mouth, :math:`z' = z_0 + k (z - z_0)`;
 * **maximum diameter** — radii are scaled, :math:`r' = k r`;
-* **volume** — the scale factor of the free dimension is found by Brent's method
+* **volume** (lofted, as shown) — the scale factor of the free dimension is found by Brent's method
   [Brent]_: radii when the diameter is free, else heights when the height is free, else
   the *fullness* :math:`r' = r_{max} (r / r_{max})^{1/k}`, which keeps the maximum
   radius and changes the other radii (including the mouth);
@@ -44,7 +48,8 @@ Wizard profile
 with :math:`R = D/2`, cut at the mouth radius below the equator and at the top-opening
 radius above it; :math:`b` is chosen so that the cut height is :math:`H`, and the exponent
 :math:`n` (fullness; 2 is an ellipse) is found by Brent's method so that the volume is the
-target. Achievable volumes lie between the :math:`n = 1.2` and :math:`n = 12` shapes.
+target (the lofted volume when the design has a loft). Achievable volumes lie between the
+:math:`n = 1.2` and :math:`n = 12` shapes.
 
 Assumptions and valid range: axisymmetric envelope, one tape per gore seam, fabric stretch
 neglected (see ``docs/theory/gore-geometry.md``); tape and thread masses use the generic
@@ -71,10 +76,13 @@ from envelopelab.atmosphere import gas_density, gross_lift
 from envelopelab.design.model import DesignDocument
 from envelopelab.geometry.gore import (
     LENGTH_TOLERANCE,
+    GoreLoft,
     GoreWidthModel,
     MeridianProfile,
     PanelRow,
     SeamAllowance,
+    lofted_area,
+    lofted_volume,
     split_rows,
 )
 from envelopelab.mass_estimate import (
@@ -163,6 +171,29 @@ def design_profile(design: DesignDocument) -> MeridianProfile:
     if r.size < 2:
         raise ValueError("a profile needs at least two control points")
     return profile_from_arrays(r, z)
+
+
+def design_loft(design: DesignDocument) -> GoreLoft | None:
+    """Loft of a gore design (lobe-radius ratio along the tape); None for small bulge."""
+    if design.gores is None or design.gores.loft is None:
+        return None
+    return GoreLoft(
+        stations=tuple(p.station for p in design.gores.loft),
+        ratios=tuple(p.ratio for p in design.gores.loft),
+    )
+
+
+def design_width_model(design: DesignDocument) -> GoreWidthModel:
+    """Flat gore width model of a gore design: gore count and loft."""
+    if design.gores is None:
+        raise ValueError("not a standard-gore design")
+    return GoreWidthModel.lofted(design.gores.count, design_loft(design))
+
+
+def design_volume(design: DesignDocument, profile: MeridianProfile | None = None) -> float:
+    """Enclosed volume of a gore design with its loft, m^3 (see the module docstring)."""
+    profile = profile or design_profile(design)
+    return lofted_volume(profile, design_width_model(design))
 
 
 def default_allowance(design: DesignDocument) -> float:
@@ -258,7 +289,7 @@ def panel_rows(
     total, length = rows_coverage(design, profile)
     if abs(total - length) > LENGTH_TOLERANCE:
         raise ValueError(f"panel rows cover {total:.4f} m but the meridian is {length:.4f} m long")
-    width = GoreWidthModel(n_gores=design.gores.count, form="small_bulge")
+    width = design_width_model(design)
     rows: list[PanelRow] = []
     start = 0.0
     specs = design.gores.panel_rows
@@ -294,9 +325,9 @@ class GoreOutputs:
     meridian_length, height, max_diameter : float
         m.
     volume : float
-        m^3.
+        Enclosed volume of the lofted envelope, m^3.
     area : float
-        Fabric surface area through the tapes, m^2.
+        Fabric area of the lofted envelope (N flat finished gores), m^2.
     ambient_density, internal_density : float
         kg/m^3.
     gross_lift : float
@@ -374,11 +405,13 @@ def gore_outputs(
     """
     assert design.gores is not None
     profile = design_profile(design)
+    width_model = design_width_model(design)
+    volume = lofted_volume(profile, width_model)
     op = design.operating
     findings: list[DesignFinding] = []
     rho_a = gas_density(op.ambient_pressure, op.ambient_temperature)
     rho_i = gas_density(op.ambient_pressure, op.internal_temperature)
-    lift = gross_lift(profile.volume, rho_a, rho_i)
+    lift = gross_lift(volume, rho_a, rho_i)
     if op.internal_temperature <= op.ambient_temperature:
         findings.append(
             DesignFinding(
@@ -419,14 +452,14 @@ def gore_outputs(
     rigging = rigging_outputs(design, patterns, fabrics, profile)
     if mass is not None:
         margin = lift_margin(
-            profile.volume, rho_a, rho_i, mass.total_mass + rigging.total_mass, op.payload_mass
+            volume, rho_a, rho_i, mass.total_mass + rigging.total_mass, op.payload_mass
         ).margin
     return GoreOutputs(
         meridian_length=profile.meridian_length,
         height=profile.height,
         max_diameter=profile.max_width,
-        volume=profile.volume,
-        area=profile.area,
+        volume=volume,
+        area=lofted_area(profile, width_model),
         ambient_density=rho_a,
         internal_density=rho_i,
         gross_lift=lift,
@@ -556,6 +589,11 @@ def _fuller(r: FloatArray, z: FloatArray, k: float) -> tuple[FloatArray, FloatAr
     return r_max * np.power(np.clip(r / r_max, 0.0, 1.0), 1.0 / k), z
 
 
+def _volume(r: FloatArray, z: FloatArray, width_model: GoreWidthModel | None) -> float:
+    profile = profile_from_arrays(r, z)
+    return profile.volume if width_model is None else lofted_volume(profile, width_model)
+
+
 def _hold(
     r: FloatArray, z: FloatArray, target: float, which: Literal["height", "diameter"]
 ) -> tuple[FloatArray, FloatArray]:
@@ -591,7 +629,10 @@ def _hold_lengths(
 
 
 def apply_locks(
-    r: FloatArray, z: FloatArray, locks: ConstraintLocks
+    r: FloatArray,
+    z: FloatArray,
+    locks: ConstraintLocks,
+    width_model: GoreWidthModel | None = None,
 ) -> tuple[FloatArray, FloatArray]:
     """Correct edited control points so every locked quantity keeps its value.
 
@@ -601,6 +642,10 @@ def apply_locks(
         Edited control-point radii and heights, m.
     locks : ConstraintLocks
         Locked height (m), volume (m^3) and maximum diameter (m).
+    width_model : GoreWidthModel, optional
+        Gore count and loft of the design: the locked volume is the lofted volume
+        (:func:`~envelopelab.geometry.gore.lofted_volume`); default the surface of
+        revolution through the tapes.
 
     Returns
     -------
@@ -629,7 +674,7 @@ def apply_locks(
 
     def residual(k: float) -> float:
         rr, zz = _hold_lengths(*transform(r, z, k), locks)
-        return profile_from_arrays(rr, zz).volume / target - 1.0
+        return _volume(rr, zz, width_model) / target - 1.0
 
     lo, hi = 0.8, 1.25
     f_lo, f_hi = residual(lo), residual(hi)
@@ -642,9 +687,9 @@ def apply_locks(
         raise LockError(f"no profile with the locked volume {target:.2f} m^3 near this edit")
     k = float(brentq(residual, lo, hi, xtol=1e-10, rtol=1e-12))
     r, z = _hold_lengths(*transform(r, z, k), locks)
-    profile = profile_from_arrays(r, z)
-    if abs(profile.volume / target - 1.0) > VOLUME_TOLERANCE:
-        raise LockError(f"volume lock missed: {profile.volume:.2f} vs {target:.2f} m^3")
+    volume = _volume(r, z, width_model)
+    if abs(volume / target - 1.0) > VOLUME_TOLERANCE:
+        raise LockError(f"volume lock missed: {volume:.2f} vs {target:.2f} m^3")
     return r, z
 
 
@@ -660,8 +705,9 @@ def check_locks(design: DesignDocument, locks: ConstraintLocks) -> list[str]:
         and abs(profile.max_width - locks.max_diameter) > LENGTH_TOLERANCE
     ):
         out.append(f"max diameter {profile.max_width:.4f} m, locked {locks.max_diameter:.4f} m")
-    if locks.volume is not None and abs(profile.volume / locks.volume - 1.0) > VOLUME_TOLERANCE:
-        out.append(f"volume {profile.volume:.2f} m^3, locked {locks.volume:.2f} m^3")
+    volume = lofted_volume(profile, design_width_model(design))
+    if locks.volume is not None and abs(volume / locks.volume - 1.0) > VOLUME_TOLERANCE:
+        out.append(f"volume {volume:.2f} m^3, locked {locks.volume:.2f} m^3")
     if locks.gore_count is not None and design.gores.count != locks.gore_count:
         out.append(f"gore count {design.gores.count}, locked {locks.gore_count}")
     return out
@@ -848,6 +894,7 @@ def wizard_control_points(
     mouth_diameter: float,
     top_diameter: float,
     count: int = 11,
+    width_model: GoreWidthModel | None = None,
 ) -> tuple[FloatArray, FloatArray]:
     """Control points whose profile has the target volume, height and width.
 
@@ -861,6 +908,9 @@ def wizard_control_points(
         m.
     count : int
         Control points.
+    width_model : GoreWidthModel, optional
+        Gore count and loft: the target is then the lofted volume; default the surface of
+        revolution through the tapes.
 
     Returns
     -------
@@ -882,7 +932,7 @@ def wizard_control_points(
         return _hold_lengths(r, z, locks)
 
     def residual(n: float) -> float:
-        return profile_from_arrays(*shape(n)).volume - target_volume
+        return _volume(*shape(n), width_model) - target_volume
 
     lo, hi = EXPONENT_RANGE
     f_lo, f_hi = residual(lo), residual(hi)
@@ -913,6 +963,7 @@ def standard_gore_design(
     payload_mass: float = 0.0,
     mouth_fabric_id: str | None = None,
     mouth_row_height: float | None = None,
+    loft: GoreLoft | None = None,
 ) -> DesignDocument:
     """New standard-gore design from target volume, height and width.
 
@@ -945,6 +996,9 @@ def standard_gore_design(
     mouth_row_height : float, optional
         Finished height of the mouth row along the tape, m; default the same as each
         body row.
+    loft : GoreLoft, optional
+        Lobe-radius ratio along the gore (dimensionless); default none (small bulge). The
+        target volume is the lofted volume.
 
     Returns
     -------
@@ -955,7 +1009,14 @@ def standard_gore_design(
 
     mouth = mouth_diameter if mouth_diameter is not None else 0.3 * target_width
     top = top_diameter if top_diameter is not None else 0.25 * target_width
-    r, z = wizard_control_points(target_volume, target_height, target_width, mouth, top)
+    r, z = wizard_control_points(
+        target_volume,
+        target_height,
+        target_width,
+        mouth,
+        top,
+        width_model=GoreWidthModel.lofted(gore_count, loft),
+    )
     length = profile_from_arrays(r, z).meridian_length
     row_zones: list[str | None] | None = None
     if mouth_fabric_id is None:
@@ -987,6 +1048,7 @@ def standard_gore_design(
         payload_mass=payload_mass,
         row_zones=row_zones,
         extra_zones=None if mouth_fabric_id is None else {"mouth": mouth_fabric_id},
+        loft=loft,
     )
 
 
@@ -1003,11 +1065,13 @@ def rows_zones_mapping(design: DesignDocument, patterns: PatternSet) -> Mapping[
 
 @dataclass(frozen=True)
 class DisplaySurface:
-    """Envelope surface for display, with its gores, panel rows and seams (m).
+    r"""Envelope surface for display, with its gores, panel rows and seams (m).
 
-    The surface of revolution is tessellated so that every vertical seam (gore boundary)
-    and every horizontal seam (row boundary) is a mesh line; the fabric bulge between
-    seams is not shown.
+    The lofted envelope is tessellated so that every vertical seam (gore boundary) and
+    every horizontal seam (row boundary) is a mesh line. Between adjacent tapes each
+    horizontal section is the design's fabric lobe, a circular arc of radius
+    :math:`\rho = k r` (:func:`lobe_ring`); without a loft (:math:`k = 1`) that is the
+    surface of revolution through the tapes.
 
     Attributes
     ----------
@@ -1034,6 +1098,49 @@ class DisplaySurface:
     vertical_seams: list[FloatArray]
     horizontal_seams: list[FloatArray]
     row_letters: list[str]
+
+
+def lobe_ring(radius: float, ratio: float, n_gores: int, per_gore: int) -> FloatArray:
+    r"""Horizontal section of a lofted envelope: N circular lobes between the tapes (m).
+
+    Gore :math:`g` lies between the tapes at angles :math:`2\pi g/N` and
+    :math:`2\pi (g+1)/N`. Its lobe is the arc of radius :math:`\rho = k r` through both
+    tapes, bulging outward; at arc angle :math:`t \in [-\theta, \theta]`,
+    :math:`\theta = \arcsin(\sin(\pi/N)/k)`, the point lies at
+
+    .. math:: a = r\cos\frac{\pi}{N} - \rho\cos\theta + \rho\cos t, \qquad
+              b = \rho \sin t
+
+    along and across the gore's bisector. For :math:`k = 1` this is the circle of radius r.
+
+    Parameters
+    ----------
+    radius : float
+        Tape radius r, m.
+    ratio : float
+        Lobe-radius ratio k, dimensionless (>= sin(π/N)).
+    n_gores : int
+        Gores N.
+    per_gore : int
+        Points per gore (the first is on the gore's left tape).
+
+    Returns
+    -------
+    ndarray, shape (N * per_gore, 2)
+        x, y, m, counter-clockwise from the tape at angle 0.
+    """
+    sin_n, cos_n = math.sin(math.pi / n_gores), math.cos(math.pi / n_gores)
+    theta = math.asin(min(sin_n / ratio, 1.0))
+    rho = ratio * radius
+    t = theta * (-1.0 + 2.0 * np.arange(per_gore) / per_gore)
+    a = radius * cos_n - rho * math.cos(theta) + rho * np.cos(t)
+    b = rho * np.sin(t)
+    out = []
+    for g in range(n_gores):
+        phi = 2.0 * math.pi * (g + 0.5) / n_gores
+        c, s = math.cos(phi), math.sin(phi)
+        out.append(np.column_stack((a * c - b * s, a * s + b * c)))
+    return np.vstack(out)
 
 
 def display_surface(design: DesignDocument, per_gore: int = 6, per_row: int = 8) -> DisplaySurface:
@@ -1068,11 +1175,11 @@ def display_surface(design: DesignDocument, per_gore: int = 6, per_row: int = 8)
             s_row += [i] * per_row
     s = np.array(stations)
     r, z = profile.radius_at(s), profile.height_at(s)
+    width_model = design_width_model(design)
+    k = width_model.lobe_ratio(r, s / length)
     m = n * per_gore
-    phi = 2.0 * np.pi * np.arange(m) / m
-    pts = np.column_stack(
-        (np.outer(r, np.cos(phi)).ravel(), np.outer(r, np.sin(phi)).ravel(), np.repeat(z, m))
-    )
+    xy = np.vstack([lobe_ring(float(a), float(b), n, per_gore) for a, b in zip(r, k, strict=True)])
+    pts = np.column_stack((xy, np.repeat(z, m)))
     faces, gores, rows = [], [], []
     for i in range(len(s) - 1):
         for j in range(m):
@@ -1081,17 +1188,14 @@ def display_surface(design: DesignDocument, per_gore: int = 6, per_row: int = 8)
             faces += [[a, b, b + m], [a, b + m, a + m]]
             gores += [j // per_gore + 1] * 2
             rows += [s_row[i]] * 2
-    ring = np.linspace(0.0, 2.0 * np.pi, 4 * m + 1)
-    seams_h = [
-        np.column_stack(
-            (
-                float(profile.radius_at(b)) * np.cos(ring),
-                float(profile.radius_at(b)) * np.sin(ring),
-                np.full_like(ring, float(profile.height_at(b))),
-            )
-        )
-        for b in dict.fromkeys(bounds)
-    ]
+    seams_h = []
+    for bound in dict.fromkeys(bounds):
+        rb = float(profile.radius_at(bound))
+        kb = float(width_model.lobe_ratio(rb, bound / length))
+        ring = lobe_ring(rb, kb, n, 4 * per_gore)
+        ring = np.vstack((ring, ring[:1]))
+        z_ring = np.full(len(ring), float(profile.height_at(bound)))
+        seams_h.append(np.column_stack((ring, z_ring)))
     dense = np.linspace(0.0, bounds[-1], 200)
     rd, zd = profile.radius_at(dense), profile.height_at(dense)
     seams_v = [

@@ -42,12 +42,23 @@ design.
 ## Computed quantities
 
 * Nominal volume \( V_n = c L^3 \): \( c \) is the volume of the closed shape at
-  \( L = 1 \), from pole to pole.
+  \( L = 1 \), from pole to pole (with a loft, the lofted volume of the closed shape for
+  the design's gore count).
 * Envelope volume, height, maximum diameter and tape length of the profile from the mouth
-  to the top opening. Open ends are closed by flat discs
-  ([gore geometry](gore-geometry.md)).
+  to the top opening. Open ends are closed by flat discs; the volume is the lofted volume
+  ([gore geometry](gore-geometry.md#gore-loft-lobe-bulge-between-tapes-goreloft)).
 * Mouth and top diameters \( 2r(s_m) \), \( 2r(s_t) \).
-* Maximum cut gore width \( 2(\pi r_{max}/N + a) \) (small-bulge gore).
+* Maximum cut gore width \( 2(\max_s w(s) + a) \), \( w \) the flat half-width of the
+  lofted gore (\( \pi r/N \) for the small-bulge gore).
+
+## Loft
+
+A shape family may carry a loft: the lobe-radius ratio \( k = \rho/r \) at stations
+\( s \) given as fractions of \( L \) (or station names). A design cut at
+\( s_m, s_t \) gets the loft re-expressed in fractions of its own tape length,
+\( f = (s - s_m)/(s_t - s_m) \), with the interpolated ratios at both cuts
+(`NormalizedShape.design_loft`), so the editor shows the same lofted volume as the shape
+solve.
 
 ## Solving
 

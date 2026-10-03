@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab.design.model import DesignDocument
+from envelopelab.geometry.gore import GoreLoft
 from envelopelab.materials.repository import FabricLibraryRepository
 from envelopelab.project.gore_design import standard_gore_design
 from envelopelab.project.templates import (
@@ -93,6 +94,11 @@ class NewDesignWizard(QDialog):
         self.allowance = _spin(25.0, 0.0, 200.0, " mm", 1)
         self.internal = _spin(100.0, -50.0, 200.0, " °C", 1)
         self.ambient = _spin(15.0, -60.0, 60.0, " °C", 1)
+        self.loft_ratio = _spin(1.0, 0.05, 50.0, "", 3)
+        self.loft_ratio.setToolTip(
+            "Lobe-radius ratio k = ρ/r of the fabric bulge between load tapes "
+            "(1 = small bulge; larger = flatter). Vary it along the gore in the editor."
+        )
         for label, widget in (
             ("Name", self.name),
             ("Target volume", self.volume),
@@ -108,6 +114,7 @@ class NewDesignWizard(QDialog):
             ("Seam allowance", self.allowance),
             ("Internal temperature", self.internal),
             ("Ambient temperature", self.ambient),
+            ("Gore loft, lobe ratio k = ρ/r", self.loft_ratio),
         ):
             form.addRow(label, widget)
         self.save_defaults = QPushButton("Save as my defaults")
@@ -192,6 +199,7 @@ class NewDesignWizard(QDialog):
         self.allowance.setValue(d.allowance_mm)
         self.internal.setValue(d.internal_c)
         self.ambient.setValue(d.ambient_c)
+        self.loft_ratio.setValue(d.loft_ratio)
 
     def current_defaults(self) -> WizardDefaults:
         """The standard-gore fields as wizard defaults."""
@@ -211,6 +219,7 @@ class NewDesignWizard(QDialog):
             allowance_mm=self.allowance.value(),
             internal_c=self.internal.value(),
             ambient_c=self.ambient.value(),
+            loft_ratio=self.loft_ratio.value(),
         )
 
     def store_defaults(self) -> None:
@@ -261,6 +270,9 @@ class NewDesignWizard(QDialog):
                     ambient_temperature=self.ambient.value() + 273.15,
                     mouth_fabric_id=None if mouth == NO_MOUTH_ROW else mouth,
                     mouth_row_height=self.mouth_height.value() or None,
+                    loft=None
+                    if self.loft_ratio.value() == 1.0
+                    else GoreLoft.constant(self.loft_ratio.value()),
                 )
             elif current is self.shape_tab:
                 self.design = self.shape_tab.design()

@@ -1,4 +1,5 @@
-"""Standard-gore editor: profile canvas, control-point and panel-row tables, locks, outputs."""
+"""Standard-gore editor: profile canvas, control-point, panel-row and loft tables, locks,
+outputs."""
 
 from __future__ import annotations
 
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from envelopelab.geometry.gore import loft_extra_width
 from envelopelab.project.gore_design import control_arrays, profile_from_arrays, row_zone
 from envelopelab_app.controller import WorkspaceController
 
@@ -204,6 +206,32 @@ class GoreEditor(QWidget):
         fit = QPushButton("Fit rows to meridian")
         fit.clicked.connect(lambda: self.controller.edit("fit_rows"))
 
+        self.loft_table = QTableWidget(0, 3)
+        self.loft_table.setObjectName("loftTable")
+        self.loft_table.setHorizontalHeaderLabels(
+            ["station (0–1)", "lobe ratio k = ρ/r", "extra width"]
+        )
+        self.loft_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.loft_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.loft_table.setToolTip(
+            "Fabric bulge between adjacent load tapes. Each gore's lobe is a circular arc of "
+            "radius ρ = k·r (r = tape radius), interpolated between stations along the tape\n"
+            "(station: fraction of the tape length, 0 at the mouth, 1 at the top opening).\n"
+            "k = 1: small bulge (lobe on the circle through the tapes); larger k: flatter, "
+            "narrower gores; smaller k: fuller, wider gores.\n"
+            "Extra width: flat gore width over the straight tape-to-tape chord."
+        )
+        self.loft_table.itemChanged.connect(self._loft_edited)
+        self.loft_status = QLabel()
+        self.loft_status.setObjectName("loftStatus")
+        self.loft_status.setWordWrap(True)
+        add_loft = QPushButton("Add station")
+        add_loft.clicked.connect(self._add_loft_station)
+        del_loft = QPushButton("Remove station")
+        del_loft.clicked.connect(self._remove_loft_station)
+        clear_loft = QPushButton("Small bulge (no loft)")
+        clear_loft.clicked.connect(lambda: self.controller.edit("set_loft", None))
+
         self.gore_count = QSpinBox()
         self.gore_count.setRange(3, 200)
         self.gore_count.editingFinished.connect(self._count_edited)
@@ -261,6 +289,13 @@ class GoreEditor(QWidget):
         for b in (split, merge, fit):
             row_buttons.addWidget(b)
         side_layout.addLayout(row_buttons)
+        side_layout.addWidget(QLabel("Gore loft (lobe bulge between tapes)"))
+        side_layout.addWidget(self.loft_status)
+        side_layout.addWidget(self.loft_table)
+        loft_buttons = QHBoxLayout()
+        for b in (add_loft, del_loft, clear_loft):
+            loft_buttons.addWidget(b)
+        side_layout.addLayout(loft_buttons)
         side_layout.addWidget(locks_box)
         side_layout.addWidget(outputs_box)
 
@@ -308,6 +343,8 @@ class GoreEditor(QWidget):
                 self.canvas.clear()
                 self.points_table.setRowCount(0)
                 self.rows_table.setRowCount(0)
+                self.loft_table.setRowCount(0)
+                self.loft_status.setText("")
                 for label in self.outputs.values():
                     label.setText("-")
                 self.output_message.setText(
@@ -329,6 +366,7 @@ class GoreEditor(QWidget):
                 self.rows_table.setItem(i, 1, _item(f"{row.finished_height:.4f}"))
                 zone = row_zone(design, session.patterns, row.letter)
                 self.rows_table.setItem(i, 2, _item(zone))
+            self._show_loft()
             self.gore_count.setValue(design.gores.count)
             locks = session.project.locks
             for name, box in self.locks.items():
@@ -337,6 +375,70 @@ class GoreEditor(QWidget):
             self._show_outputs()
         finally:
             self._updating = False
+
+    def _show_loft(self) -> None:
+        design = self.controller.design
+        assert design is not None and design.gores is not None
+        n = design.gores.count
+        points = design.gores.loft or []
+        self.loft_table.setRowCount(len(points))
+        for i, point in enumerate(points):
+            extra = float(loft_extra_width(n, point.ratio))
+            self.loft_table.setItem(i, 0, _item(f"{point.station:.4f}"))
+            self.loft_table.setItem(i, 1, _item(f"{point.ratio:.4f}"))
+            self.loft_table.setItem(i, 2, _item(f"{extra * 100:.2f} %", editable=False))
+        if points:
+            self.loft_status.setText(f"{len(points)} station(s); k ≥ {math.sin(math.pi / n):.4f}")
+        else:
+            small = float(loft_extra_width(n, 1.0))
+            self.loft_status.setText(
+                f"No loft: small-bulge gores (k = 1, extra width {small * 100:.2f} %). "
+                "Add a station to set one."
+            )
+
+    def _loft_points(self) -> list[tuple[float, float]]:
+        design = self.controller.design
+        assert design is not None and design.gores is not None
+        return [(p.station, p.ratio) for p in design.gores.loft or []]
+
+    def _loft_edited(self, item: QTableWidgetItem) -> None:
+        design = self.controller.design
+        if self._updating or design is None or design.gores is None or item.column() > 1:
+            return
+        try:
+            value = float(item.text().replace("%", ""))
+        except ValueError:
+            self.controller.editRejected.emit(f"not a number: {item.text()!r}")
+            self.refresh()
+            return
+        points = self._loft_points()
+        station, ratio = points[item.row()]
+        points[item.row()] = (value, ratio) if item.column() == 0 else (station, value)
+        if self.controller.edit("set_loft", points) is None:
+            self.refresh()
+
+    def _add_loft_station(self) -> None:
+        points = self._loft_points()
+        if not points:
+            self.controller.edit("set_loft", [(0.0, 1.0)])
+            return
+        # Middle of the widest gap (ends included), with the interpolated ratio, so the
+        # new station does not change the loft until it is edited.
+        stations = [p[0] for p in points]
+        bounds = sorted({0.0, *stations, 1.0})
+        gaps = [(b - a, a, b) for a, b in zip(bounds, bounds[1:], strict=False)]
+        _, a, b = max(gaps)
+        station = 0.5 * (a + b)
+        ratio = float(np.interp(station, stations, [p[1] for p in points]))
+        self.controller.edit("set_loft", [*points, (station, ratio)])
+
+    def _remove_loft_station(self) -> None:
+        rows = self.loft_table.selectionModel().selectedRows()
+        if not rows:
+            return
+        points = self._loft_points()
+        del points[rows[0].row()]
+        self.controller.edit("set_loft", points or None)
 
     def _show_outputs(self) -> None:
         out = self.controller.outputs

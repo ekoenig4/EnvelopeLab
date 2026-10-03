@@ -24,6 +24,22 @@ in the undo history. Nothing is edited by hand in JSON.
 * **Panel rows**: finished height along the tape (m) and fabric zone per row; *Split row*,
   *Merge with next*, and *Fit rows to meridian*. With *Keep panel rows fitted*
   (Preferences, on by default) every profile edit rescales the rows in the same command.
+* **Gore loft**: how far each gore bulges between its two load tapes. Each row of the
+  table is a *station* along the tape (0 at the mouth, 1 at the top opening) and its
+  *lobe ratio* \(k = \rho/r\), the radius of the fabric lobe over the tape radius; the
+  ratio is interpolated between stations and held beyond the first and last. *Extra
+  width* shows how much wider than the straight tape-to-tape chord the flat gore is.
+    * \(k = 1\) (no loft, the default) is the classic small-bulge gore, \(w = \pi r/N\).
+    * \(k > 1\) makes flatter lobes and narrower gores; less fabric and less volume.
+    * \(k < 1\) makes fuller lobes and wider gores, down to a half circle at
+      \(k = \sin(\pi/N)\), the smallest value accepted.
+
+  *Add station* inserts one in the middle of the widest gap without changing the loft
+  until you edit it; *Remove station* deletes the selected one; *Small bulge (no loft)*
+  clears the table. The flat patterns, the 3D lobes, the volume, lift and mass all
+  follow the loft, and the simulation sews the lofted panels. With *Fixed volume* locked,
+  a loft edit also corrects the profile to keep the volume. See
+  [theory](../theory/gore-geometry.md#gore-loft-lobe-bulge-between-tapes-goreloft).
 * **Constraint locks**: *Fixed height*, *Fixed volume*, *Fixed maximum diameter* and
   *Fixed N* hold the value the quantity had when the lock was switched on. Profile edits
   are corrected to keep every locked value (lengths within 1 mm, volume within 0.1 %); an
@@ -47,7 +63,8 @@ create fabrics there once (**New fabric…**, **Duplicate…**) and use them any
 The 3D view draws the design as a solid surface: each panel row in its fabric's colour,
 every second gore slightly darker, the vertical seams (load tapes) as thick dark lines and
 the horizontal row seams as thinner grey rings, so individual gores and panels can be
-picked out. The parachute, rigging and scoop are a separate layer.
+picked out. Between the tapes each gore bulges as its loft's lobe (a circle through the
+tapes without a loft). The parachute, rigging and scoop are a separate layer.
 
 ## The 2D pattern view
 

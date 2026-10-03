@@ -52,8 +52,82 @@ Limits: \(\rho \to \infty\) gives the flat chord \(w = r\sin(\pi/N)\); \(\rho = 
 small-bulge form. `GoreWidthModel(n_gores, "chord", bulge_radius=ρ)` uses a constant ρ (m);
 `bulge_ratio=k` uses \(\rho = k\,r(s)\). Flat chord ≤ lobe ≤ small bulge for \(k \ge 1\).
 
-In the chord form, \(r\) and the volume/area above refer to the tape surface; the lobe volume
-between tapes is not added.
+The `MeridianProfile` volume and area above are those of the tape surface (the surface of
+revolution through the tapes). The lofted volume and area below add the lobes.
+
+## Gore loft (lobe bulge between tapes) — `GoreLoft`
+
+A design's **loft** sets how much each gore bulges between its two load tapes. It is the
+lobe-radius ratio
+
+\[
+k(f) = \frac{\rho}{r}, \qquad f = \frac{s}{L_t} \in [0, 1],
+\]
+
+given at stations \(f\) along the tape (fraction of the tape length \(L_t\) from the mouth
+to the top opening), interpolated linearly between stations and held constant beyond the
+first and last. The flat half-width is the chord form with \(\rho = k(f)\,r(s)\):
+
+\[
+w(s) = k\,r \arcsin\!\left(\frac{\sin(\pi/N)}{k}\right),
+\qquad k \ge \sin(\pi/N).
+\]
+
+| \(k\) | Lobe | Gore width |
+|---|---|---|
+| \(\sin(\pi/N)\) | half circle (fullest possible) | \(\tfrac{\pi}{2}\) × chord |
+| \(< 1\) | fuller than the tape circle | wider than small bulge |
+| \(1\) | on the circle through the tapes (**small bulge**, the default) | \(\pi r / N\) |
+| \(> 1\) | flatter | narrower |
+| \(\infty\) | flat chord | \(r \sin(\pi/N)\) |
+
+The editor also shows the **extra width** over the flat chord,
+\(e = k \arcsin(\sin(\pi/N)/k) / \sin(\pi/N) - 1\) (`loft_extra_width`); for \(k = 1\) it is
+\((\pi/N)/\sin(\pi/N) - 1\), e.g. 1.15 % for 12 gores. A design without a loft is the
+small-bulge gore, bit for bit.
+
+**Lofted cross-section.** A horizontal section is the regular N-gon through the tapes plus
+N circular segments of radius \(\rho\), half-angle \(\theta = \arcsin(\sin(\pi/N)/k)\):
+
+\[
+\frac{A}{\pi r^2} = c(k, N) = \frac{N}{\pi}\left[\sin\frac{\pi}{N}\cos\frac{\pi}{N}
+  + k^2(\theta - \sin\theta\cos\theta)\right]
+\]
+
+(`lobe_area_factor`; \(c = 1\) for \(k = 1\), \(c = N\sin(2\pi/N)/(2\pi)\) for flat gores).
+
+**Lofted volume and area** (`lofted_volume`, `lofted_area`):
+
+\[
+V = \sum_i c_{i+\frac12}\,\frac{\pi}{3}(r_i^2 + r_i r_{i+1} + r_{i+1}^2)(z_{i+1} - z_i),
+\qquad
+A = 2N \int_0^{L_t} w(s)\,ds .
+\]
+
+\(A\) is the area of the N flat finished gores, the same fabric the mass estimate cuts. The
+editor's volume, gross lift, lift margin and the volume lock use \(V\); the wizard and shape
+families solve for it.
+
+**Display.** The 3D view draws each horizontal section as the lobes
+(`lobe_ring`): at arc angle \(t \in [-\theta, \theta]\) a point lies at
+\(a = r\cos(\pi/N) - \rho\cos\theta + \rho\cos t\) along and \(b = \rho \sin t\) across the
+gore's bisector.
+
+**Assumptions and valid range.** The lobe is a circular arc in the horizontal section, as
+the width model takes it across the flat gore. Both are exact for a vertical tape and good
+while the lobes are shallow compared with the meridian curvature radius; near a nearly
+horizontal tape (crown) the true lobe lies in the plane normal to the tape. The loft is a
+*design* input: the pressurised lobe shape follows from the flat patterns in the preview
+and CalculiX solvers, which sew the lofted panels.
+
+**Benchmarks** (`docs/validation/analytic-geometry.md`): flat gores on a sphere against the
+inscribed-polygon volume \(\tfrac{N}{2}\sin(2\pi/N)\cdot\tfrac43 R^3\); a 12-gore cylinder
+with \(k = 1.5\) against the hand polygon-plus-segment volume and arc-length area; a 24-gore
+sphere with \(k = 2\) against \(A = 4NR^2 k\arcsin(\sin(\pi/N)/k)\); and the inverse round
+trip with \(k\) varying from 1.5 to 0.8.
+
+References: circular-segment area, CRC Standard Mathematical Tables, 31st ed. (2003),
+sec. 4.5; surfaces of revolution, Struik (1988).
 
 ## Panel rows — `split_rows`
 
@@ -74,7 +148,8 @@ meridian within 1 mm (unless `require_full_coverage=False`).
 * **Loft table**: finished full widths \(2w\) at 0, 25, 50, 75 and 100 % of each row height
   (configurable).
 
-Check: with the small-bulge form, \(N \sum A_{finished} = \int 2\pi r\,ds = A\) exactly.
+Check: with the small-bulge form, \(N \sum A_{finished} = \int 2\pi r\,ds = A\) exactly; with a
+loft, \(N \sum A_{finished}\) equals the lofted area \(A\) above.
 
 ## Inverse: measured widths → profile — `profile_from_gore_widths`
 

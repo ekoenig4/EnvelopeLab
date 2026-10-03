@@ -13,13 +13,15 @@ from typing import Any
 
 import numpy as np
 
-from envelopelab.geometry.gore import LENGTH_TOLERANCE
+from envelopelab.geometry.gore import LENGTH_TOLERANCE, GoreLoft, GoreWidthModel
 from envelopelab.project.dependencies import canonical_hash
 from envelopelab.project.gore_design import (
     LockError,
     apply_locks,
     control_arrays,
     design_profile,
+    design_volume,
+    design_width_model,
     editable_outline,
     fit_row_heights,
     outline_edges,
@@ -76,7 +78,7 @@ def set_control_points(
     z = np.array([p[1] for p in points], dtype=np.float64)
     if not (np.all(np.isfinite(r)) and np.all(np.isfinite(z))):
         raise ValueError("control points must be finite")
-    r, z = apply_locks(r, z, session.project.locks)
+    r, z = apply_locks(r, z, session.project.locks, design_width_model(session.design))
     profile = profile_from_arrays(r, z)
 
     def mutate(design: dict[str, Any], _patterns: dict[str, Any]) -> None:
@@ -144,6 +146,77 @@ def set_gore_count(session: ProjectSession, count: int) -> bool:
     if locked is not None and count != locked:
         raise LockError(f"the gore count is locked at {locked}")
     return session.set_design_value(("gores", "count"), int(count), f"Set gore count to {count}")
+
+
+def set_loft(
+    session: ProjectSession,
+    points: Sequence[tuple[float, float]] | None,
+    keep_rows_fitted: bool = True,
+) -> bool:
+    """Set the gore loft: (station, ratio) pairs, or None for small-bulge gores.
+
+    A loft changes the enclosed volume, so while the volume is locked the control points
+    are corrected in the same command (:func:`~envelopelab.project.gore_design.apply_locks`
+    with the new loft), and the panel rows are refitted when ``keep_rows_fitted`` is set.
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit.
+    points : sequence of (float, float) or None
+        Stations as fractions of the tape length (0 mouth .. 1 top opening) and the
+        lobe-radius ratio k = ρ/r at each, dimensionless. They are sorted by station.
+        ``None`` or empty removes the loft (k = 1 everywhere).
+    keep_rows_fitted : bool
+        Rescale the panel rows when a volume lock moves the profile.
+
+    Returns
+    -------
+    bool
+        Whether the design changed.
+
+    Raises
+    ------
+    LockError
+        When the locked volume cannot be held with the new loft.
+    ValueError
+        For an invalid loft (stations outside 0..1 or repeated, ratio below sin(π/N)).
+    """
+    design = session.design
+    assert design.gores is not None
+    loft: GoreLoft | None = None
+    if points:
+        ordered = sorted((float(f), float(k)) for f, k in points)
+        loft = GoreLoft(tuple(f for f, _ in ordered), tuple(k for _, k in ordered))
+    width_model = GoreWidthModel.lofted(design.gores.count, loft)
+    value = (
+        None
+        if loft is None
+        else [{"station": f, "ratio": k} for f, k in zip(loft.stations, loft.ratios, strict=True)]
+    )
+    new_points: list[dict[str, float]] | None = None
+    heights: list[float] | None = None
+    if session.project.locks.volume is not None:
+        r0, z0 = control_arrays(design)
+        r, z = apply_locks(r0, z0, session.project.locks, width_model)
+        if not (np.array_equal(r, r0) and np.array_equal(z, z0)):
+            new_points = [{"x": float(a), "y": float(b)} for a, b in zip(r, z, strict=True)]
+            if keep_rows_fitted:
+                heights = fit_row_heights(
+                    [row.finished_height for row in design.gores.panel_rows],
+                    profile_from_arrays(r, z).meridian_length,
+                )
+
+    def mutate(data: dict[str, Any], _patterns: dict[str, Any]) -> None:
+        gores = _gores(data)
+        gores["loft"] = value
+        if new_points is not None:
+            gores["meridian_profile_control_points"] = new_points
+        if heights is not None:
+            for row, h in zip(gores["panel_rows"], heights, strict=True):
+                row["finished_height"] = h
+
+    return session.edit("Remove gore loft" if loft is None else "Set gore loft", mutate)
 
 
 def set_row_heights(session: ProjectSession, heights: Sequence[float], description: str) -> bool:
@@ -224,7 +297,7 @@ def set_lock(session: ProjectSession, name: str, enabled: bool) -> ConstraintLoc
         profile = design_profile(session.design)
         value = {
             "height": profile.height,
-            "volume": profile.volume,
+            "volume": design_volume(session.design, profile),
             "max_diameter": profile.max_width,
             "gore_count": session.design.gores.count,
         }[name]

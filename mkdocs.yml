@@ -54,6 +54,7 @@ nav:
       - ADR-0011: adr/ADR-0011-row-zones-rings-and-scoop.md
       - ADR-0012: adr/ADR-0012-shape-files.md
       - ADR-0013: adr/ADR-0013-workflow-modes-layout.md
+      - ADR-0014: adr/ADR-0014-gore-loft.md
 theme:
   name: material
 markdown_extensions:

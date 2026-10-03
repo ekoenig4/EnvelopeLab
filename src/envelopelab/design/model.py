@@ -1,4 +1,4 @@
-"""Design document schema (``schema_version`` 2) and its migrations.
+"""Design document schema (``schema_version`` 3) and its migrations.
 
 A design document holds everything a builder decides: the envelope shape (standard gores
 or a special shape), materials, tapes, seams, features, operating conditions, the
@@ -9,19 +9,21 @@ carries a source tag (:class:`TaggedValue`).
 
 Version history: 0 (no ``meta``), 1 (rigging names only), 2 (parachute, red-line,
 flying-wire and turning-vent placement, row zones, crown and centre rings, scoop; see
-``docs/adr/ADR-0010-rigging-schema-v2.md`` and ``ADR-0011``).
+``docs/adr/ADR-0010-rigging-schema-v2.md`` and ``ADR-0011``), 3 (gore loft, the lobe
+bulge of the fabric between load tapes; ``docs/adr/ADR-0014-gore-loft.md``).
 """
 
 from __future__ import annotations
 
 import json
+import math
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-CURRENT_SCHEMA_VERSION = 2
+CURRENT_SCHEMA_VERSION = 3
 
 SourceTagName = Literal["datasheet", "measured", "assumed"]
 
@@ -72,7 +74,34 @@ class PanelRow(BaseModel):
     zone: str | None = None
 
 
+class LoftPoint(BaseModel):
+    r"""One station of a gore loft (lobe bulge between load tapes).
+
+    Attributes
+    ----------
+    station : float
+        Position along the load tape as a fraction of the tape length from the mouth
+        (0) to the top opening (1), dimensionless.
+    ratio : float
+        Lobe-radius ratio :math:`k = \rho / r`: radius of the fabric lobe between two
+        adjacent tapes over the tape radius, dimensionless. 1 is the small-bulge gore
+        (lobe on the circle through the tapes); larger is flatter, smaller is fuller.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    station: float = Field(ge=0, le=1)
+    ratio: float = Field(gt=0, allow_inf_nan=False)
+
+
 class GoreSpec(BaseModel):
+    """Standard-gore envelope: meridian, gores, panel rows and openings (m).
+
+    ``loft`` sets the lobe bulge of every gore (:class:`LoftPoint`), interpolated linearly
+    between stations and constant beyond the first and last; ``None`` is the small-bulge
+    gore (ratio 1 everywhere).
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     count: int = Field(ge=3)
@@ -82,11 +111,30 @@ class GoreSpec(BaseModel):
     crown_ring: float = Field(gt=0)
     parachute_hole_diameter: float = Field(gt=0)
     seal_overlap: float = Field(ge=0)
+    loft: list[LoftPoint] | None = None
 
     @model_validator(mode="after")
     def validate_overlap(self) -> GoreSpec:
         if self.seal_overlap >= self.parachute_hole_diameter / 2:
             raise ValueError("seal overlap must be less than hole radius")
+        return self
+
+    @model_validator(mode="after")
+    def validate_loft(self) -> GoreSpec:
+        if self.loft is None:
+            return self
+        if not self.loft:
+            raise ValueError("a loft needs at least one station (or none for small bulge)")
+        stations = [p.station for p in self.loft]
+        if any(b <= a for a, b in zip(stations, stations[1:], strict=False)):
+            raise ValueError("loft stations must be strictly increasing")
+        limit = math.sin(math.pi / self.count)
+        low = min(p.ratio for p in self.loft)
+        if low < limit:
+            raise ValueError(
+                f"loft ratio {low:g} is below sin(pi/N) = {limit:.4f} for {self.count} gores "
+                "(a lobe cannot be more than a half circle)"
+            )
         return self
 
 
@@ -549,6 +597,15 @@ def _upgrade_v1_to_v2(raw: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_v2_to_v3(raw: dict[str, Any]) -> dict[str, Any]:
+    """Version 3 adds the gore loft; version-2 gores are small-bulge gores (no loft)."""
+    upgraded = dict(raw)
+    if isinstance(upgraded.get("gores"), dict):
+        upgraded["gores"] = {**upgraded["gores"], "loft": None}
+    upgraded["schema_version"] = 3
+    return upgraded
+
+
 def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
     """Upgrade raw design data to :data:`CURRENT_SCHEMA_VERSION`, one version at a time."""
     version = int(raw.get("schema_version", 0))
@@ -558,6 +615,8 @@ def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
             upgraded = _upgrade_v0_to_v1(upgraded)
         elif version == 1:
             upgraded = _upgrade_v1_to_v2(upgraded)
+        elif version == 2:
+            upgraded = _upgrade_v2_to_v3(upgraded)
         else:
             raise ValueError(f"unsupported schema version: {version}")
         version += 1

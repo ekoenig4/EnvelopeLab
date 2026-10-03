@@ -31,4 +31,7 @@ says **NOT CONVERGED** and gives the reachable range, and no design is made.
     the same volume has gores about 0.05 % (14 mm on a 27 m gore) shorter than the
     spreadsheet's. Hold the gore length to reproduce the spreadsheet's cut exactly.
 
+A shape file can also define the gore **loft** (the lobe bulge between load tapes) along
+the shape; the design gets it for its own cut, and the volumes in the table include it.
+
 To write your own shape file, see the [format](../formats/shape-file.md).

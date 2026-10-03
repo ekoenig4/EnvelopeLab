@@ -430,3 +430,38 @@ def test_layer_list_without_renderer_names_every_source(gore_window: MainWindow)
     }
     item = gore_window.view3d.layer_list.item(0)
     assert item is not None and item.checkState() == Qt.CheckState.Checked
+
+
+def test_gore_loft_table_edits_are_undoable(gore_window: MainWindow) -> None:
+    w = gore_window
+    editor = w.gore_editor
+    design = w.controller.design
+    assert design is not None and design.gores is not None and design.gores.loft is None
+    volume = w.controller.outputs.volume if w.controller.outputs else None
+    assert editor.loft_table.rowCount() == 0 and "small-bulge" in editor.loft_status.text()
+    editor._add_loft_station()
+    design = w.controller.design
+    assert design is not None and design.gores is not None
+    assert [(p.station, p.ratio) for p in design.gores.loft or []] == [(0.0, 1.0)]
+    assert editor.loft_table.rowCount() == 1
+    ratio_item = editor.loft_table.item(0, 1)
+    assert ratio_item is not None
+    ratio_item.setText("1.5")
+    design = w.controller.design
+    assert design is not None and design.gores is not None and design.gores.loft is not None
+    assert design.gores.loft[0].ratio == 1.5
+    extra_item = editor.loft_table.item(0, 2)
+    assert extra_item is not None and extra_item.text().endswith("%")
+    outputs = w.controller.outputs
+    assert outputs is not None and volume is not None and outputs.volume < volume
+    ratio_item = editor.loft_table.item(0, 1)
+    assert ratio_item is not None
+    ratio_item.setText("0.01")  # below sin(pi/N): refused
+    design = w.controller.design
+    assert design is not None and design.gores is not None and design.gores.loft is not None
+    assert design.gores.loft[0].ratio == 1.5
+    assert w.controller.session is not None
+    w.controller.session.undo()
+    w.controller.session.undo()
+    design = w.controller.design
+    assert design is not None and design.gores is not None and design.gores.loft is None

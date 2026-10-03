@@ -152,7 +152,7 @@ clean exit, and offered for recovery at the next start otherwise.
           "type": "array"
         },
         "schema_version": {
-          "default": 2,
+          "default": 3,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -472,6 +472,7 @@ clean exit, and offered for recovery at the next start otherwise.
     },
     "GoreSpec": {
       "additionalProperties": false,
+      "description": "Standard-gore envelope: meridian, gores, panel rows and openings (m).\n\n``loft`` sets the lobe bulge of every gore (:class:`LoftPoint`), interpolated linearly\nbetween stations and constant beyond the first and last; ``None`` is the small-bulge\ngore (ratio 1 everywhere).",
       "properties": {
         "count": {
           "minimum": 3,
@@ -482,6 +483,21 @@ clean exit, and offered for recovery at the next start otherwise.
           "exclusiveMinimum": 0,
           "title": "Crown Ring",
           "type": "number"
+        },
+        "loft": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/LoftPoint"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Loft"
         },
         "meridian_profile_control_points": {
           "items": {
@@ -546,6 +562,29 @@ clean exit, and offered for recovery at the next start otherwise.
         "linear_mass"
       ],
       "title": "LineSpec",
+      "type": "object"
+    },
+    "LoftPoint": {
+      "additionalProperties": false,
+      "description": "One station of a gore loft (lobe bulge between load tapes).\n\nAttributes\n----------\nstation : float\n    Position along the load tape as a fraction of the tape length from the mouth\n    (0) to the top opening (1), dimensionless.\nratio : float\n    Lobe-radius ratio :math:`k = \\rho / r`: radius of the fabric lobe between two\n    adjacent tapes over the tape radius, dimensionless. 1 is the small-bulge gore\n    (lobe on the circle through the tapes); larger is flatter, smaller is fuller.",
+      "properties": {
+        "ratio": {
+          "exclusiveMinimum": 0,
+          "title": "Ratio",
+          "type": "number"
+        },
+        "station": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Station",
+          "type": "number"
+        }
+      },
+      "required": [
+        "station",
+        "ratio"
+      ],
+      "title": "LoftPoint",
       "type": "object"
     },
     "ManualOutline": {

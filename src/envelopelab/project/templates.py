@@ -20,6 +20,7 @@ from envelopelab.design.model import (
     DEFAULT_SAFETY_FACTOR,
     DesignDocument,
 )
+from envelopelab.geometry.gore import GoreLoft
 from envelopelab.project.model import DesignState, Project, utc_now
 
 #: Generic tape classes (width m, strength N) used by new designs; review before building.
@@ -104,6 +105,7 @@ def new_design(
     rigging: bool = True,
     row_zones: Sequence[str | None] | None = None,
     extra_zones: dict[str, str] | None = None,
+    loft: GoreLoft | None = None,
 ) -> DesignDocument:
     """A standard-gore design document.
 
@@ -140,6 +142,9 @@ def new_design(
         Material zone of each row (None: the ``body`` zone).
     extra_zones : dict of str to str, optional
         More zones (name to fabric id) next to ``body``, e.g. ``{"mouth": "nomex"}``.
+    loft : GoreLoft, optional
+        Lobe-radius ratio along the gore (stations as fractions of the tape length,
+        dimensionless); default none (small-bulge gores).
 
     Returns
     -------
@@ -175,6 +180,9 @@ def new_design(
         "crown_ring": top_diameter,
         "parachute_hole_diameter": top_diameter,
         "seal_overlap": 0.1 * top_diameter if seal_overlap is None else seal_overlap,
+        "loft": None
+        if loft is None
+        else [{"station": f, "ratio": k} for f, k in zip(loft.stations, loft.ratios, strict=True)],
     }
     document = DesignDocument.model_validate(payload)
     if rigging:
