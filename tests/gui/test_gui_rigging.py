@@ -166,9 +166,9 @@ def test_patterns_are_stacked_vertically_in_their_own_column(gore_window: MainWi
     bottom_rect = bottom.mapToScene(bottom.polygon()).boundingRect()
     assert top_rect.bottom() < offsets["D"].y()  # parachute above row D
     assert bottom_rect.top() > offsets["A"].y()  # scoop below row A
-    assert gore_window.docks["patterns"] not in gore_window.tabifiedDockWidgets(
-        gore_window.docks["view3d"]
-    )
+    # The pattern view has its own mode, apart from the 3D view.
+    assert gore_window.panel_modes["patterns"] == "patterns"
+    assert gore_window.panel_modes["view3d"] != "patterns"
 
 
 def test_3d_design_layer_shows_gores_rows_and_seams(gore_window: MainWindow) -> None:

@@ -19,7 +19,7 @@ then are **not saved**; the file itself is left untouched.
 
 ## Creating a fabric
 
-1. Open the **Materials** panel (tabbed with **Properties**).
+1. Open the **Materials** panel (in the **Patterns** mode, Ctrl+2).
 2. Press **New fabric…**, or select a fabric and press **Duplicate…** to start from its
    values.
 3. Enter an id (letters, digits, `_`, `.`, `-`; it cannot be changed later), a name and

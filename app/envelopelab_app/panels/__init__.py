@@ -1,1 +1,1 @@
-"""Dockable panels of the main window."""
+"""Panels of the main window."""

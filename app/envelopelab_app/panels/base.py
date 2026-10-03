@@ -1,10 +1,10 @@
-"""Dockable panel with a dirty-state and staleness indicator in its title."""
+"""Titled panel with a dirty-state and staleness indicator in its header."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 
-from PySide6.QtWidgets import QDockWidget, QWidget
+from PySide6.QtWidgets import QFrame, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from envelopelab.project.dependencies import INPUT_GROUPS, artifact_inputs
 from envelopelab_app.controller import WorkspaceController
@@ -20,9 +20,12 @@ def scope_of(artifacts: Iterable[str]) -> set[str]:
     return out
 
 
-class PanelDock(QDockWidget):
-    """A dock whose title shows ``●`` for unsaved changes in its scope and ``[STALE]``
-    when an artifact it displays is stale.
+class Panel(QFrame):
+    """A titled panel whose header shows ``●`` for unsaved changes in its scope and
+    ``[STALE]`` when an artifact it displays is stale.
+
+    The full title (with indicators) is also the widget's ``windowTitle()``, so the main
+    window can repeat the indicators on the mode tab that holds the panel.
 
     Parameters
     ----------
@@ -39,6 +42,9 @@ class PanelDock(QDockWidget):
     runs : bool
         The panel also shows run records (unsaved runs count as changes, stale runs as
         stale).
+    scroll : bool
+        Put the content in a scroll area, so a tall form does not set the window's
+        minimum height.
     """
 
     def __init__(
@@ -49,15 +55,30 @@ class PanelDock(QDockWidget):
         scope: Iterable[str] | None = None,
         artifacts: Iterable[str] = (),
         runs: bool = False,
+        scroll: bool = False,
     ) -> None:
-        super().__init__(title)
+        super().__init__()
         self.base_title = title
         self.controller = controller
         self.scope = set(scope) if scope is not None else set(INPUT_GROUPS)
         self.artifacts = tuple(artifacts)
         self.runs = runs
-        self.setObjectName(title.replace(" ", "") + "Dock")
-        self.setWidget(widget)
+        self.setObjectName(title.replace(" ", "").replace("/", "") + "Panel")
+        self.content = widget
+        self.header = QLabel(title)
+        self.header.setObjectName("panelHeader")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(self.header)
+        if scroll:
+            area = QScrollArea()
+            area.setWidget(widget)
+            area.setWidgetResizable(True)
+            area.setFrameShape(QFrame.Shape.NoFrame)
+            layout.addWidget(area)
+        else:
+            layout.addWidget(widget)
         for signal in (
             controller.stateChanged,
             controller.fileChanged,
@@ -87,10 +108,13 @@ class PanelDock(QDockWidget):
         return False
 
     def update_indicator(self) -> None:
-        """Refresh the title."""
+        """Refresh the header and the window title."""
         title = self.base_title
         if self.unsaved():
             title += f" {UNSAVED_MARK}"
         if self.stale():
             title += " [STALE]"
+        self.header.setText(title)
+        colour = "color: #b00020; " if self.stale() else ""
+        self.header.setStyleSheet(f"{colour}font-weight: bold; padding: 2px 4px;")
         self.setWindowTitle(title)

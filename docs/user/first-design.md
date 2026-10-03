@@ -57,7 +57,7 @@ design references the mesh, panels are added later) and **design from measuremen
 
 ## Read the live outputs
 
-The central **gore editor** shows the meridian profile, its control points, the panel rows
+The **gore editor** (the **Shape** mode, see [the main window](main-window.md)) shows the meridian profile, its control points, the panel rows
 and the **Live outputs**, recomputed after every edit:
 
 | Output | Meaning |
@@ -76,7 +76,7 @@ fabric library with its source tag (see [theory](../theory/design-editing.md)).
 ## Save
 
 **File ▸ Save** writes a project file (`*.elproj`, [format](../formats/project-file.md)).
-Panel titles show **●** while there are unsaved changes in what they display. While there
+Panel titles and mode tabs show **●** while there are unsaved changes in what they display. While there
 are unsaved changes an autosave file is written every few minutes (**File ▸
 Preferences**); after a crash the next start offers to recover it. **File ▸ Open Recent**
 lists the last ten projects.

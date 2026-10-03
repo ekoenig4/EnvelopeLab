@@ -256,6 +256,8 @@ class PatternPanel(QWidget):
         scroll.setWidget(form_box)
         scroll.setWidgetResizable(True)
         splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setObjectName("patternPanelSplitter")
+        splitter.setChildrenCollapsible(False)
         splitter.addWidget(self.view)
         splitter.addWidget(scroll)
         # A tall drawing for the vertical stack of pieces; the row form below it.

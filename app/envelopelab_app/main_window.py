@@ -1,4 +1,4 @@
-"""EnvelopeLab main window: project files, dockable panels, undo/redo, runs, autosave."""
+"""EnvelopeLab main window: project files, workflow modes, undo/redo, runs, autosave."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
     QInputDialog,
@@ -15,6 +15,10 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QProgressBar,
+    QSplitter,
+    QStackedWidget,
+    QTabBar,
+    QVBoxLayout,
     QWidget,
 )
 
@@ -29,10 +33,12 @@ from envelopelab.project.recovery import (
     write_autosave,
 )
 from envelopelab.project.session import ProjectSession
+from envelopelab_app import layout as layout_state
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.dialogs import PreferencesDialog
 from envelopelab_app.gore_editor import GoreEditor
-from envelopelab_app.panels.base import PanelDock
+from envelopelab_app.layout import MODE_KEYS, MODES
+from envelopelab_app.panels.base import UNSAVED_MARK, Panel
 from envelopelab_app.panels.design_tree import DesignTreePanel
 from envelopelab_app.panels.history import HistoryPanel
 from envelopelab_app.panels.materials import MaterialsPanel
@@ -53,10 +59,6 @@ from envelopelab_app.simulation import CALCULIX, PREVIEW, SimulationManager
 from envelopelab_app.wizard import NewDesignWizard
 
 FILE_FILTER = f"EnvelopeLab projects (*{PROJECT_SUFFIX})"
-
-
-#: Minimum width of the vertical 2D pattern column, px.
-PATTERN_DOCK_WIDTH = 380
 
 
 class MainWindow(QMainWindow):
@@ -89,7 +91,6 @@ class MainWindow(QMainWindow):
         self.resize(1500, 950)
 
         self.gore_editor = GoreEditor(self.controller)
-        self.setCentralWidget(self.gore_editor)
         use_3d = self.prefs.enable_3d if enable_3d is None else enable_3d
         self.design_tree = DesignTreePanel(self.controller)
         self.properties = PropertiesPanel(self.controller)
@@ -101,14 +102,14 @@ class MainWindow(QMainWindow):
         self.history = HistoryPanel(self.controller)
         self.rigging = RiggingPanel(self.controller)
         pattern_scope = artifact_inputs("patterns")
-        self.docks: dict[str, PanelDock] = {
-            "tree": PanelDock("Design Tree", self.controller, self.design_tree),
-            "properties": PanelDock("Properties", self.controller, self.properties),
-            "materials": PanelDock(
+        self.panels: dict[str, Panel] = {
+            "tree": Panel("Design Tree", self.controller, self.design_tree),
+            "properties": Panel("Properties", self.controller, self.properties),
+            "materials": Panel(
                 "Materials", self.controller, self.materials, scope={"materials", "row_zones"}
             ),
-            "validation": PanelDock("Validation / Warnings", self.controller, self.validation),
-            "runs": PanelDock(
+            "validation": Panel("Validation / Warnings", self.controller, self.validation),
+            "runs": Panel(
                 "Simulation Runs",
                 self.controller,
                 self.runs,
@@ -116,7 +117,7 @@ class MainWindow(QMainWindow):
                 artifacts=("simulation",),
                 runs=True,
             ),
-            "view3d": PanelDock(
+            "view3d": Panel(
                 "3D View",
                 self.controller,
                 self.view3d,
@@ -124,41 +125,23 @@ class MainWindow(QMainWindow):
                 artifacts=("rest_mesh",),
                 runs=True,
             ),
-            "patterns": PanelDock(
+            "patterns": Panel(
                 "2D Pattern View",
                 self.controller,
                 self.patterns,
                 scope=pattern_scope,
                 artifacts=("patterns",),
             ),
-            "history": PanelDock("History", self.controller, self.history),
-            "rigging": PanelDock(
+            "history": Panel("History", self.controller, self.history),
+            "rigging": Panel(
                 "Rigging",
                 self.controller,
                 self.rigging,
                 scope={"parachute", "rigging", "turning_vents", "scoop", "operating"},
+                scroll=True,
             ),
         }
-        area = Qt.DockWidgetArea
-        self.addDockWidget(area.LeftDockWidgetArea, self.docks["tree"])
-        self.addDockWidget(area.LeftDockWidgetArea, self.docks["properties"])
-        self.tabifyDockWidget(self.docks["properties"], self.docks["materials"])
-        self.tabifyDockWidget(self.docks["properties"], self.docks["rigging"])
-        self.addDockWidget(area.RightDockWidgetArea, self.docks["view3d"])
-        # The 2D pattern view is its own full-height column right of the 3D view, so the
-        # vertically stacked pieces (scoop, rows mouth up, parachute) read like a gore.
-        self.splitDockWidget(
-            self.docks["view3d"], self.docks["patterns"], Qt.Orientation.Horizontal
-        )
-        self.splitDockWidget(self.docks["view3d"], self.docks["history"], Qt.Orientation.Vertical)
-        # Wide enough for the pieces and the row form; the stack itself is tall.
-        self.docks["patterns"].setMinimumWidth(PATTERN_DOCK_WIDTH)
-        self.addDockWidget(area.BottomDockWidgetArea, self.docks["validation"])
-        self.addDockWidget(area.BottomDockWidgetArea, self.docks["runs"])
-        self.tabifyDockWidget(self.docks["validation"], self.docks["runs"])
-        self.docks["properties"].raise_()
-        self.docks["view3d"].raise_()
-        self.docks["validation"].raise_()
+        self._build_workspace()
 
         self._build_status_bar()
         self._build_actions()
@@ -187,10 +170,87 @@ class MainWindow(QMainWindow):
                     0,
                     lambda: self._error("Fabric library", self.controller.library_error or ""),
                 )
+        self.restore_last_layout()
         if interactive:
             QTimer.singleShot(0, self.offer_recovery)
 
     # -- construction -------------------------------------------------------------------
+
+    def _splitter(self, name: str, orientation: Qt.Orientation, *widgets: QWidget) -> QSplitter:
+        splitter = QSplitter(orientation)
+        splitter.setObjectName(name)
+        splitter.setChildrenCollapsible(False)
+        for i, widget in enumerate(widgets):
+            splitter.addWidget(widget)
+            # Explicit per child: a nested splitter would otherwise count as collapsible.
+            splitter.setCollapsible(i, False)
+        return splitter
+
+    def _build_workspace(self) -> None:
+        """Mode tabs over [sidebar | mode pages], above the Validation / Warnings strip.
+
+        Each panel lives in exactly one place (the 3D renderer cannot be moved between
+        parents safely), and only the sidebar may be collapsed: the mode page and the
+        warnings strip always stay visible.
+        """
+        vertical = Qt.Orientation.Vertical
+        horizontal = Qt.Orientation.Horizontal
+        pages: dict[str, QWidget] = {
+            "shape": self.gore_editor,
+            "patterns": self._splitter(
+                "patternsModeSplitter",
+                horizontal,
+                self.panels["patterns"],
+                self.panels["materials"],
+            ),
+            "rigging": self.panels["rigging"],
+            "simulate": self._splitter(
+                "simulateSplitter", vertical, self.panels["view3d"], self.panels["runs"]
+            ),
+            "history": self.panels["history"],
+        }
+        #: Mode holding each panel (the sidebar and warnings strip show in every mode).
+        self.panel_modes: dict[str, str | None] = {
+            "tree": None,
+            "properties": None,
+            "validation": None,
+            "patterns": "patterns",
+            "materials": "patterns",
+            "rigging": "rigging",
+            "view3d": "simulate",
+            "runs": "simulate",
+            "history": "history",
+        }
+        self.mode_stack = QStackedWidget()
+        self.mode_tabs = QTabBar()
+        self.mode_tabs.setObjectName("modeTabs")
+        self.mode_tabs.setExpanding(False)
+        self.mode_tabs.setDrawBase(False)
+        for key, label in MODES:
+            self.mode_stack.addWidget(pages[key])
+            self.mode_tabs.addTab(label)
+        self.mode_tabs.currentChanged.connect(self._mode_changed)
+
+        sidebar = self._splitter(
+            "sidebarSplitter", vertical, self.panels["tree"], self.panels["properties"]
+        )
+        side = self._splitter("sideSplitter", horizontal, sidebar, self.mode_stack)
+        side.setCollapsible(0, True)
+        side.setStretchFactor(1, 1)
+        outer = self._splitter("outerSplitter", vertical, side, self.panels["validation"])
+        outer.setStretchFactor(0, 1)
+
+        central = QWidget()
+        layout = QVBoxLayout(central)
+        layout.setContentsMargins(4, 2, 4, 0)
+        layout.setSpacing(2)
+        layout.addWidget(self.mode_tabs)
+        layout.addWidget(outer)
+        self.setCentralWidget(central)
+        for panel in self.panels.values():
+            panel.windowTitleChanged.connect(self._update_mode_tabs)
+        layout_state.apply_defaults(self)
+        self._update_mode_tabs()
 
     def _build_status_bar(self) -> None:
         bar = self.statusBar()
@@ -272,8 +332,27 @@ class MainWindow(QMainWindow):
         sim_menu.addSeparator()
         sim_menu.addAction(self.detect_action)
         view_menu = menu.addMenu("&View")
-        for dock in self.docks.values():
-            view_menu.addAction(dock.toggleViewAction())
+        self.mode_actions: dict[str, QAction] = {}
+        mode_group = QActionGroup(self)
+        for i, (key, label) in enumerate(MODES):
+            action = self._action(label, self._mode_slot(key), f"Ctrl+{i + 1}")
+            action.setCheckable(True)
+            mode_group.addAction(action)
+            view_menu.addAction(action)
+            self.mode_actions[key] = action
+        self.mode_actions[self.mode()].setChecked(True)
+        view_menu.addSeparator()
+        self.sidebar_action = self._action("Show &sidebar", self.toggle_sidebar)
+        self.sidebar_action.setCheckable(True)
+        self.sidebar_action.setChecked(True)
+        view_menu.addAction(self.sidebar_action)
+        view_menu.addSeparator()
+        self.save_layout_action = self._action("Sa&ve layout", self.save_layout)
+        self.load_layout_action = self._action("&Load saved layout", self.load_saved_layout)
+        self.reset_layout_action = self._action("&Reset layout", self.reset_layout)
+        for action in (self.save_layout_action, self.load_layout_action, self.reset_layout_action):
+            view_menu.addAction(action)
+        view_menu.aboutToShow.connect(self._update_layout_actions)
         toolbar = self.addToolBar("Main")
         toolbar.setObjectName("mainToolbar")
         for action in (
@@ -288,6 +367,120 @@ class MainWindow(QMainWindow):
             self.cancel_action,
         ):
             toolbar.addAction(action)
+
+    # -- modes and layout ---------------------------------------------------------------
+
+    def mode(self) -> str:
+        """Key of the visible workflow mode."""
+        return MODE_KEYS[self.mode_tabs.currentIndex()]
+
+    def set_mode(self, key: str) -> None:
+        """Show the workflow mode ``key`` (one of ``layout.MODE_KEYS``)."""
+        self.mode_tabs.setCurrentIndex(MODE_KEYS.index(key))
+
+    def show_panel(self, key: str) -> None:
+        """Switch to the mode that holds panel ``key`` (and show the sidebar for its
+        panels)."""
+        mode = self.panel_modes[key]
+        if mode is not None:
+            self.set_mode(mode)
+        elif key in ("tree", "properties") and not self.sidebar_visible():
+            self.toggle_sidebar()
+
+    def panel_visible(self, key: str) -> bool:
+        """Panel ``key`` is on screen in the current mode."""
+        mode = self.panel_modes[key]
+        if mode is None:
+            return key == "validation" or self.sidebar_visible()
+        return mode == self.mode()
+
+    def _mode_slot(self, key: str) -> Callable[[], None]:
+        return lambda: self.set_mode(key)
+
+    def _mode_changed(self, index: int) -> None:
+        self.mode_stack.setCurrentIndex(index)
+        action = getattr(self, "mode_actions", {}).get(MODE_KEYS[index])
+        if action is not None:
+            action.setChecked(True)
+
+    def _update_mode_tabs(self) -> None:
+        """Repeat the panels' ● and [STALE] indicators on the tab of their mode (the
+        Shape mode has no panel of its own; the sidebar's Design Tree carries its ●)."""
+        for i, (key, label) in enumerate(MODES):
+            panels = [self.panels[p] for p, m in self.panel_modes.items() if m == key]
+            text = label
+            if any(p.unsaved() for p in panels):
+                text += f" {UNSAVED_MARK}"
+            if any(p.stale() for p in panels):
+                text += " [STALE]"
+            self.mode_tabs.setTabText(i, text)
+
+    def _side_splitter(self) -> QSplitter:
+        return layout_state.named_splitters(self)["sideSplitter"]
+
+    def sidebar_visible(self) -> bool:
+        """The design tree / properties sidebar is not collapsed."""
+        return self._side_splitter().sizes()[0] > 0
+
+    def toggle_sidebar(self) -> None:
+        """Collapse or re-open the design tree / properties sidebar."""
+        splitter = self._side_splitter()
+        total = sum(splitter.sizes())
+        if self.sidebar_visible():
+            splitter.setSizes([0, total])
+        else:
+            default = layout_state.DEFAULT_SIZES["sideSplitter"]
+            width = max(1, total) * default[0] // sum(default)
+            splitter.setSizes([width, max(1, total) - width])
+        self.sidebar_action.setChecked(self.sidebar_visible())
+
+    def _update_layout_actions(self) -> None:
+        self.sidebar_action.setChecked(self.sidebar_visible())
+        self.load_layout_action.setEnabled(
+            layout_state.load(self.settings, layout_state.SAVED_SLOT) is not None
+        )
+
+    def capture_layout(self) -> layout_state.LayoutState:
+        """The current mode, splitter sizes and window geometry."""
+        return layout_state.capture(self, self.mode(), self.saveGeometry())
+
+    def apply_layout(self, state: layout_state.LayoutState, geometry: bool = False) -> None:
+        """Show ``state``'s mode and splitter sizes (and window geometry if asked)."""
+        if geometry and not state.geometry.isEmpty():
+            self.restoreGeometry(state.geometry)
+        layout_state.apply_splitters(self, state)
+        self.set_mode(state.mode)
+        self.sidebar_action.setChecked(self.sidebar_visible())
+
+    def save_layout(self) -> None:
+        """View ▸ Save layout: store the current layout for Load saved layout."""
+        layout_state.store(self.settings, layout_state.SAVED_SLOT, self.capture_layout())
+        self._task("Layout saved")
+
+    def load_saved_layout(self) -> bool:
+        """View ▸ Load saved layout (the window keeps its size). False if none is saved."""
+        state = layout_state.load(self.settings, layout_state.SAVED_SLOT)
+        if state is None:
+            self._task("No saved layout")
+            return False
+        self.apply_layout(state)
+        self._task("Saved layout loaded")
+        return True
+
+    def reset_layout(self) -> None:
+        """View ▸ Reset layout: default splitter sizes and the Shape mode."""
+        layout_state.apply_defaults(self)
+        self.set_mode(MODE_KEYS[0])
+        self.sidebar_action.setChecked(True)
+        self._task("Layout reset")
+
+    def restore_last_layout(self) -> bool:
+        """Restore the layout of the last window closed (False if none is stored)."""
+        state = layout_state.load(self.settings, layout_state.LAST_SLOT)
+        if state is None:
+            return False
+        self.apply_layout(state, geometry=True)
+        return True
 
     # -- state display ------------------------------------------------------------------
 
@@ -594,13 +787,14 @@ class MainWindow(QMainWindow):
             self.simulation.cancel()
             self.simulation.wait(30_000)
         discard(self.autosave_path())
+        layout_state.store(self.settings, layout_state.LAST_SLOT, self.capture_layout())
         self.view3d.close_renderer()
         event.accept()
 
 
-def dock_titles(window: MainWindow) -> dict[str, str]:
-    """Current dock titles (with indicators), for tests and scripting."""
-    return {key: dock.windowTitle() for key, dock in window.docks.items()}
+def panel_titles(window: MainWindow) -> dict[str, str]:
+    """Current panel titles (with indicators), for tests and scripting."""
+    return {key: panel.windowTitle() for key, panel in window.panels.items()}
 
 
-__all__ = ["MainWindow", "QWidget", "dock_titles"]
+__all__ = ["MainWindow", "QWidget", "panel_titles"]
