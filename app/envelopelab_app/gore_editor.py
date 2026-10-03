@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QFormLayout,
+    QFrame,
     QGraphicsEllipseItem,
     QGraphicsItem,
     QGraphicsPathItem,
@@ -22,6 +23,7 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QTableWidget,
@@ -262,14 +264,21 @@ class GoreEditor(QWidget):
         side_layout.addWidget(locks_box)
         side_layout.addWidget(outputs_box)
 
+        # The tables and outputs scroll, so they do not set the window's minimum height.
+        side_scroll = QScrollArea()
+        side_scroll.setWidget(side)
+        side_scroll.setWidgetResizable(True)
+        side_scroll.setFrameShape(QFrame.Shape.NoFrame)
         splitter = QSplitter()
+        splitter.setObjectName("goreEditorSplitter")
+        splitter.setChildrenCollapsible(False)
         splitter.addWidget(self.canvas)
-        splitter.addWidget(side)
+        splitter.addWidget(side_scroll)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
         layout = QVBoxLayout(self)
         layout.addWidget(self.header)
-        layout.addWidget(splitter)
+        layout.addWidget(splitter, 1)
 
         controller.stateChanged.connect(self.refresh)
         controller.sessionChanged.connect(self.refresh)

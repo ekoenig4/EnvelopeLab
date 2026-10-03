@@ -4,6 +4,7 @@ nav:
   - User guide:
       - Installation: user/installation.md
       - Your first design: user/first-design.md
+      - The main window: user/main-window.md
       - Editing designs: user/editing-designs.md
       - Designs from a shape file: user/shape-files.md
       - Fabric library: user/fabric-library.md
@@ -52,6 +53,7 @@ nav:
       - ADR-0010: adr/ADR-0010-rigging-schema-v2.md
       - ADR-0011: adr/ADR-0011-row-zones-rings-and-scoop.md
       - ADR-0012: adr/ADR-0012-shape-files.md
+      - ADR-0013: adr/ADR-0013-workflow-modes-layout.md
 theme:
   name: material
 markdown_extensions:

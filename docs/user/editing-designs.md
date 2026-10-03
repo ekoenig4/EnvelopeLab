@@ -51,7 +51,7 @@ picked out. The parachute, rigging and scoop are a separate layer.
 
 ## The 2D pattern view
 
-The pattern view is its own full-height column at the right of the window. It stacks the
+The pattern view fills the **Patterns** mode (Ctrl+2), beside the Materials panel. It stacks the
 pieces vertically in the order they are sewn up a gore: the scoop (if any) at the bottom,
 the panel rows from the mouth up (e.g. the Nomex mouth row, then the nylon rows), and the
 parachute panel on top. Each panel row is drawn as cut (dashed) and finished (solid,
