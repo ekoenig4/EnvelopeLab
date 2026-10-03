@@ -15,7 +15,7 @@ old*, because older builds can crash on EnvelopeLab's models.
 | Platform | Command |
 |---|---|
 | Debian, Ubuntu 24.04 (also under WSL) | `sudo apt-get install calculix-ccx` (2.21) |
-| Ubuntu 22.04 (also under WSL) | its `calculix-ccx` is 2.17, too old: use conda-forge (below) |
+| Ubuntu 20.04 / 22.04 (also under WSL) | their `calculix-ccx` (2.11 / 2.17) is too old: use conda-forge (below) |
 | Any OS with conda | `conda install -c conda-forge calculix` |
 | Windows, macOS | the conda-forge package, or a build from <https://www.calculix.de> |
 

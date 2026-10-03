@@ -62,8 +62,9 @@ class CalculixInstallation:
         minimum = ".".join(str(v) for v in MIN_VERSION)
         return (
             f"CalculiX {self.version} at {self.executable} is too old: version {minimum} or "
-            "newer is required (older builds can crash on EnvelopeLab's models). Ubuntu "
-            "22.04's calculix-ccx package is 2.17; install 2.21 from conda-forge "
+            "newer is required (older builds can crash on EnvelopeLab's models). The "
+            "calculix-ccx package of Ubuntu 20.04 is 2.11 and of 22.04 is 2.17; install 2.21 "
+            "from conda-forge "
             "(conda install -c conda-forge calculix) or Ubuntu 24.04, and point "
             "Preferences > CalculiX or ENVELOPELAB_CCX at it. "
             "See docs/dev/calculix-installation.md."

@@ -256,3 +256,11 @@ def test_too_old_ccx_is_found_but_refused(tmp_path: Path) -> None:
         require_calculix(fake)
     message = str(info.value)
     assert "2.17" in message and "2.20 or newer" in message and str(fake.resolve()) in message
+
+
+def test_ubuntu_2004_ccx_is_refused_with_the_fix() -> None:
+    """Reported on WSL Ubuntu 20.04: apt's ccx 2.11 crashed on a 1500 mm envelope model."""
+    inst = CalculixInstallation(Path("/usr/bin/ccx"), "2.11")
+    assert not inst.supported
+    assert "2.11" in inst.unsupported_message
+    assert "conda-forge" in inst.unsupported_message
