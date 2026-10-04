@@ -59,6 +59,22 @@ GEOMETRY_TOLERANCE = 1e-3  # m (AGENTS.md geometry default)
 LENGTH_TOLERANCE = 1e-3  # relative (AGENTS.md default 0.1 %)
 STUDY_MESH_SIZES = (0.3, 0.2, 0.15)  # m
 STUDY_GORES = 16
+#: How far a fresh study may differ from the committed one, per column: ("rel", fraction)
+#: or ("abs", value in the column's unit). Physical results use the platform tolerance of
+#: ``envelopelab.validation.pages``; node counts, the wrinkled fraction and the lowest FoS
+#: (a peak value) depend on the mesh, which Gmsh/OpenCASCADE builds slightly differently on
+#: each operating system (observed on CI: 2 % in node count, 5 % in lowest FoS, 1 point of
+#: wrinkled fraction; issue ekoenig4/EnvelopeLab#14). Source: assumed.
+STUDY_TOLERANCES: dict[str, tuple[str, float]] = {
+    "mesh_size_m": ("rel", 0.0),
+    "designed_height_m": ("rel", 1e-6),
+    "area_distortion": ("rel", 1e-3),
+    "projected_height_m": ("rel", 5e-3),
+    "chamber_pressure_pa": ("rel", 5e-3),
+    "nodes": ("rel", 0.03),
+    "lowest_fos": ("rel", 0.10),
+    "skin_wrinkled_fraction": ("abs", 0.05),
+}
 
 
 def sphere_envelope(rows: int = 4) -> EnvelopeSurface:
@@ -423,6 +439,35 @@ def solve_study(mesh_sizes: tuple[float, ...] = STUDY_MESH_SIZES) -> list[dict[s
     return rows
 
 
+def study_differences(committed: list[dict[str, Any]], fresh: list[dict[str, Any]]) -> list[str]:
+    """Differences of a fresh dome study from the committed one beyond
+    :data:`STUDY_TOLERANCES` (rows, skin rest, status and convergence must match exactly).
+
+    Parameters
+    ----------
+    committed, fresh : list of dict
+        Study rows (:func:`solve_study`; m, Pa, fractions).
+
+    Returns
+    -------
+    list of str
+        One message per difference; empty when the studies agree.
+    """
+    if len(committed) != len(fresh):
+        return [f"{len(committed)} rows committed, {len(fresh)} fresh"]
+    out: list[str] = []
+    for k, (a, b) in enumerate(zip(committed, fresh, strict=True)):
+        for key in ("skin_rest", "status", "converged"):
+            if a[key] != b[key]:
+                out.append(f"row {k + 1} {key}: {a[key]!r} vs {b[key]!r}")
+        for key, (kind, tol) in STUDY_TOLERANCES.items():
+            va, vb = float(a[key]), float(b[key])
+            diff = abs(va - vb) if kind == "abs" else abs(va - vb) / max(abs(va), 1e-300)
+            if diff > tol:
+                out.append(f"row {k + 1} {key}: {va:.6g} vs {vb:.6g}")
+    return out
+
+
 def render_geometry(results: list[BenchmarkResult]) -> list[str]:
     """Markdown lines of the geometry table."""
     lines = [
@@ -493,6 +538,11 @@ def render_markdown(results: list[BenchmarkResult], study: list[dict[str, Any]])
         "(uniaxially tensioned) skin and as a dome slightly taller than designed. The",
         "wrinkled fraction is a mesh-dependent indicator, not a prediction of visible",
         "wrinkles; the projected height is the shape measure to read.",
+        "",
+        "The mesh is built by Gmsh, which meshes the host patch slightly differently on each",
+        "operating system: node counts, the wrinkled fraction and the lowest factor of",
+        "safety (a peak value) can differ by a few percent from these Linux values; the",
+        "heights and the chamber pressure agree within 0.5 %.",
         "",
     ]
     return "\n".join(lines)

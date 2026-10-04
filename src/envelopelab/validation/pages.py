@@ -6,6 +6,11 @@ platform tolerance. Converged solves of weakly determined quantities (displaceme
 wrinkled fabric, near-mechanisms) differ by about 0.1 % between CPU architectures
 (observed: Linux x86-64 vs macOS arm64), which moves the last printed digit; any fixed
 rounding has boundaries where such a change flips a digit.
+
+Numbers that are round-off zeros on both pages (magnitude at most :data:`ABSOLUTE`, e.g. a
+closed-form seam error of 6.7e-16 m on one machine and 8.9e-16 m on another) match: their
+value is the order of float64 round-off, not a result. Whether a benchmark passes is
+asserted by its own test against its tolerance, not by this comparison.
 """
 
 from __future__ import annotations
@@ -18,6 +23,10 @@ NUMBER = re.compile(r"(?<![\w.])-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?")
 RELATIVE = 5e-3
 #: Absolute tolerance on percentages, percentage points.
 PERCENT_POINTS = 0.5
+#: Magnitude at or below which two numbers are both round-off zeros (unit of the page's
+#: column; every page reports SI values or fractions of order 1, for which float64
+#: round-off after a few thousand operations stays below this).
+ABSOLUTE = 1e-12
 
 
 def page_differences(
@@ -59,7 +68,9 @@ def page_differences(
         integer = not any(c in ta + tb for c in ".eE")
         va, vb = float(ta), float(tb)
         percent = committed[a.end() : a.end() + 2].lstrip().startswith("%")
-        if integer:
+        if max(abs(va), abs(vb)) <= ABSOLUTE:
+            ok = True
+        elif integer:
             ok = False
         elif percent:
             ok = abs(va - vb) <= percent_points

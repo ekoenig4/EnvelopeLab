@@ -49,3 +49,8 @@ leaves cloth the pressure cannot take up: the solver reports it as wrinkled
 (uniaxially tensioned) skin and as a dome slightly taller than designed. The
 wrinkled fraction is a mesh-dependent indicator, not a prediction of visible
 wrinkles; the projected height is the shape measure to read.
+
+The mesh is built by Gmsh, which meshes the host patch slightly differently on each
+operating system: node counts, the wrinkled fraction and the lowest factor of
+safety (a peak value) can differ by a few percent from these Linux values; the
+heights and the chamber pressure agree within 0.5 %.
