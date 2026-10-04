@@ -15,13 +15,13 @@ Primitives on a generic sphere of radius 8 m with 24 gores, axis along the envel
 | Frustum 0.8/0.3 m, L=1.5 m on a sphere R=8 m: developed tip edge | 0.471238 | 0.471239 | m | < 1e-06 m | 1 mm | pass |
 | Frustum 0.8/0.3 m, L=1.5 m on a sphere R=8 m: developed side edge | 1.62489 | 1.62489 | m | < 1e-06 m | 1 mm | pass |
 | Frustum 0.8/0.3 m, L=1.5 m on a sphere R=8 m: footprint length | 5.11346 | 5.11347 | m | 3.2e-06 | 0.001 | pass |
-| Hemispherical dome a=1 m, 8 gores: area distortion | 0.0374053 | 0 | - | 0.037 | 1 | pass |
-| Hemispherical dome a=1 m, 16 gores: area distortion | 0.00930121 | 0 | - | 0.0093 | 0.01 | pass |
+| Hemispherical dome a=1 m, 8 gores: area distortion | 0.0374052 | 0 | - | 0.037 | 1 | pass |
+| Hemispherical dome a=1 m, 16 gores: area distortion | 0.00930119 | 0 | - | 0.0093 | 0.01 | pass |
 | Hemispherical dome a=1 m, 16 gores: footprint length | 6.28332 | 6.28319 | m | 2.1e-05 | 0.001 | pass |
 | Hemispherical dome a=1 m, 16 gores: skin rim length | 6.28332 | 6.28319 | m | 2.2e-05 | 0.001 | pass |
 | Hemispherical dome a=1 m, 16 gores: designed height | 1 | 1 | m | < 1e-06 m | 1 mm | pass |
-| Hemispherical dome a=1 m, 16 gores: skin seam sides | 6.30607e-14 | 0 | m | < 1e-06 m | 1 mm | pass |
-| Hemispherical dome a=1 m, 32 gores: area distortion | 0.00233106 | 0 | - | 0.0023 | 0.01 | pass |
+| Hemispherical dome a=1 m, 16 gores: skin seam sides | 7.21645e-14 | 0 | m | < 1e-06 m | 1 mm | pass |
+| Hemispherical dome a=1 m, 32 gores: area distortion | 0.00233103 | 0 | - | 0.0023 | 0.01 | pass |
 | Revolved quarter circle a=1 m, 16 gores: footprint length | 6.28332 | 6.28319 | m | 2.1e-05 | 0.001 | pass |
 | Revolved quarter circle a=1 m, 16 gores: designed height | 1 | 1 | m | < 1e-06 m | 1 mm | pass |
 | Revolved straight profile 0.8/0.3 m: developed side edge | 1.62489 | 1.62489 | m | < 1e-06 m | 1 mm | pass |
@@ -29,7 +29,7 @@ Primitives on a generic sphere of radius 8 m with 24 gores, axis along the envel
 | Free-form sphere mesh r=1 m (48 x 96), 12 panels: designed height | 1 | 1 | m | < 1e-06 m | 1 mm | pass |
 | Free-form sphere mesh r=1 m (48 x 96), 12 panels: rim length | 0 | 0 | m | < 1e-06 m | 1 mm | pass |
 | Free-form sphere mesh r=1 m (48 x 96), 12 panels: skin seam sides | 8.88178e-16 | 0 | m | < 1e-06 m | 1 mm | pass |
-| Dome on load tape and row seam (4 panel runs): attachment marks off the footprint | 1.01114e-06 | 0 | m | 0.001 mm | 1 mm | pass |
+| Dome on load tape and row seam (4 panel runs): attachment marks off the footprint | 1.03143e-06 | 0 | m | 0.001 mm | 1 mm | pass |
 
 ## Inflated dome, preview solver
 
@@ -37,7 +37,7 @@ A 16-gore dome (base radius 1 m, height 1.2 m) on the same envelope, fed through
 
 | Skin rest | Mesh (m) | Nodes | Status | Projected height (m) | Designed (m) | Deviation | Skin wrinkled | Lowest FoS | Chamber (Pa) |
 |---|---|---|---|---|---|---|---|---|---|
-| cut pattern | 0.3 | 471 | converged | 1.2041 | 1.2000 | +0.3 % | 62 % | 90 | 17.6 |
+| cut pattern | 0.3 | 471 | converged | 1.2041 | 1.2000 | +0.3 % | 62 % | 91 | 17.6 |
 | cut pattern | 0.2 | 853 | converged | 1.2088 | 1.2000 | +0.7 % | 73 % | 81 | 17.6 |
 | designed shape | 0.2 | 853 | converged | 1.2019 | 1.2000 | +0.2 % | 0 % | 80 | 17.6 |
 | cut pattern | 0.15 | 1435 | converged | 1.2064 | 1.2000 | +0.5 % | 61 % | 119 | 17.6 |

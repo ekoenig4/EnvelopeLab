@@ -149,6 +149,10 @@ CheckSeverity = Literal["info", "warning", "error"]
 ROOT_TOLERANCE = 1e-7
 """Bisection tolerance of a footprint point along its skin meridian, m (source: assumed)."""
 
+FOOTPRINT_GRID = 241
+"""Path samples per skin meridian that bracket the footprint crossing before bisection
+(about 1 % of the path; a second crossing finer than that is not detected)."""
+
 DEFAULT_TOLERANCE = 0.003
 """Default length tolerance of the pattern checks, m (AGENTS.md sewn-edge default, 3 mm;
 source: assumed)."""
@@ -1003,7 +1007,9 @@ class _Skin:
     def _footprint(self, phi: FloatArray) -> FloatArray:
         name = self.primitive.name
         reach = 2.0 * max(float(self.rho_m[0]), self.total)
-        u = np.linspace(-reach, self.total, 801)
+        # The grid only brackets the crossing (and detects a second one); bisection then
+        # finds it to ROOT_TOLERANCE, so a coarse grid gives the same footprint.
+        u = np.linspace(-reach, self.total, FOOTPRINT_GRID)
         uu, pp = np.meshgrid(u, phi)
         sd = self.surface.signed_distance(self.at_u(uu, pp)).reshape(uu.shape)
         if np.any(sd[:, 0] >= 0.0):

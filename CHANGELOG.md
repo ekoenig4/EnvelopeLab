@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Placing a special shape is 2-2.5x faster (the footprint search samples 241 instead of
+  801 points before bisecting); footprints and cut outlines change by less than 0.5 µm.
+  On the special-shape validation page the dome study's inflated heights move by at
+  most 3.6 µm and its lowest factor of safety by at most 0.24 % (90.34 to 90.56); every
+  check still passes.
 - Faster preview solves (ADR-0019): the solver's element kernel (membrane strain,
   tension-field stress, internal and pressure forces, nodal sums) runs as one compiled
   loop when the optional `fast` extra (Numba) is installed: 3-4x faster (fixture envelope

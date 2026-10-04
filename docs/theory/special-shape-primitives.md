@@ -63,9 +63,11 @@ profile that flares outward at its base (an onion or a ball) would run into the 
 continued backwards, so its wall drops straight down the axis instead. The
 footprint point on meridian \( \phi \) is the last crossing of that line from inside to
 outside the envelope. It is found by sampling the signed distance to the meridian curve
-and bisecting to \(10^{-7}\) m. So the skin always reaches the envelope, including where a
-leaned base circle dips below it. A meridian that crosses the envelope more than once (the
-skin touching the envelope again) is rejected.
+at 241 points along the path (about 1 % of its length apart), which brackets the
+crossing, and bisecting to \(10^{-7}\) m. So the skin always reaches the envelope,
+including where a leaned base circle dips below it. A meridian that crosses the envelope
+more than once (the skin touching the envelope again) is rejected; a second crossing
+closer than the sample spacing is not detected.
 
 ## Cutting pattern
 

@@ -260,3 +260,17 @@ def test_invalid_revolved_profiles_are_rejected(
 
     with pytest.raises(PrimitiveError, match=message):
         design_primitive(Revolved("r", Placement(1, EQUATOR), profile), SPHERE)
+
+
+def test_coarse_footprint_grid_gives_the_same_pattern(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The footprint grid only brackets the crossing; bisection finds it to 0.1 µm."""
+    from envelopelab.features import primitives
+
+    dome = Dome("d", Placement(1, EQUATOR, 0.0, 30.0, 45.0), 0.4, 0.5, 12)
+    coarse = design_primitive(dome, SPHERE)
+    monkeypatch.setattr(primitives, "FOOTPRINT_GRID", 801)
+    fine = design_primitive(dome, SPHERE)
+    assert len(coarse.pieces) == len(fine.pieces)
+    for a, b in zip(coarse.pieces, fine.pieces, strict=True):
+        assert np.abs(a.cut - b.cut).max() < 1e-6
+    assert np.abs(coarse.footprint_points - fine.footprint_points).max() < 1e-6
