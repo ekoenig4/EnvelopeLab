@@ -116,6 +116,41 @@ gores (see [Special-shape primitives](../validation/special-shape-primitives.md)
 | area distortion | largest relative difference of a piece's flat and designed area | 1 % (assumed) |
 | feed hole inside footprint | — | inside |
 
+## Free-form shapes from a mesh
+
+A `FreeformShape` is a closed triangle mesh in its own frame: \(z\) along the axis,
+\(x\) up the tape, origin at the base point. It is placed with the same axis frame as
+the parametric shapes and **clipped at the envelope**. Every edge whose ends lie on either
+side of the envelope is cut where the signed distance is zero (bisection to
+\(10^{-7}\) m), and the part inside is dropped. The cut edge is the footprint; it must be
+one loop turning once round the axis. The point where the axis leaves the mesh (the
+*pole*) is inserted as a vertex. The skin is then cut along the half-planes
+\( \phi_j = 2\pi j/M - \pi/M \), so every panel is a disc bounded by the footprint, two seams
+and the pole.
+
+**Flattening** [Levy, Liu]. Each panel is mapped by least-squares conformal maps, then
+by as-rigid-as-possible iterations that fit every triangle's best rotation and solve the
+cotangent-weighted Laplace system
+
+\[
+\min_{\mathbf{u}} \sum_t \sum_{(i,j)\in t} c_{ij}
+\lVert (\mathbf{u}_i - \mathbf{u}_j) - R_t(\mathbf{x}_i - \mathbf{x}_j) \rVert^2,
+\]
+
+with the seam and footprint edges weighted up. The boundary is then rebuilt with
+every edge at its exact 3D length. Its edge directions come from that solution, and the
+closure gap is removed by the least-norm change of the edge angles, which changes no
+length. The interior is relaxed again with the boundary held. Footprint and seams
+keep their true lengths and both sides of every seam match exactly. The strain of
+flattening a doubly curved panel goes into its interior and is reported as *area
+distortion* and *edge strain* (largest relative change of a triangle side, limit 2 %,
+assumed).
+
+The sub-model meshes every flat panel round the footprint nodes like the parametric
+shapes. Its interior nodes start on the mesh (barycentric in the flat panel), and every
+triangle rests in its flat panel. No faceting correction is applied: the mesh is taken as
+the designed surface.
+
 ## Sub-model with an as-cut skin
 
 `primitive_appendage` builds an `AppendageSpec` with `skin_mode="designed"`. The skin
@@ -164,6 +199,11 @@ local envelope radius, and leans that make the skin touch the envelope again, ar
 rejected. Leans are limited to 75°.
 
 ## References
+
+- [Levy] B. Lévy, S. Petitjean, N. Ray and J. Maillot, "Least squares conformal maps for
+  automatic texture atlas generation", ACM Trans. Graph. 21(3) (2002) 362-371.
+- [Liu] L. Liu, L. Zhang, Y. Xu, C. Gotsman and S. J. Gortler, "A local/global approach to
+  mesh parameterization", Comput. Graph. Forum 27(5) (2008) 1495-1504.
 
 - [Struik] D. J. Struik, *Lectures on Classical Differential Geometry*, 2nd ed., Dover
   (1988), sec. 2-1 and 2-8 (surfaces of revolution; developable cones and cylinders).

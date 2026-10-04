@@ -85,6 +85,37 @@ along the load tape from the mouth, in metres. The lean tilts the shape's axis a
 the envelope normal: `lean_toward_deg` 0 leans it up towards the crown, 90 towards the
 next gore and 180 down towards the mouth.
 
+**Shapes from Blender.** Model anything else (an ear, a curved horn, a face) in Blender
+and bring it in as a `FreeformShape`:
+
+* model it in metres around the origin, with **Z out of the envelope** (the shape's
+  axis), **X up the balloon** towards the crown, and the origin where the axis meets the
+  envelope;
+* make it a closed surface and **sink its base a little below Z = 0**, as you would for a
+  boolean union with the balloon. EnvelopeLab cuts away everything inside the envelope,
+  and the cut edge becomes the footprint;
+* the axis must leave the shape through its top. The panels are cut along half-planes
+  through the axis, like gores, and meet there;
+* export it with **File ▸ Export ▸ Wavefront (.obj)** using the default settings (or STL).
+
+```python
+from envelopelab.features.primitives import FreeformShape
+from envelopelab.io.blender import read_shape_mesh
+
+ear = FreeformShape(
+    "ear",
+    Placement(gore=4, tape_position=13.0, lean_deg=15),
+    read_shape_mesh("ear.obj"),  # Blender's default OBJ axes, metres
+    panels=12,
+)
+d = design_primitive(ear, surface, feed_hole_radius=0.3)
+```
+
+Each panel is flattened so that its footprint edge and both seam edges keep their exact
+lengths. Then both sides of every seam match and the rim matches the footprint. The
+flattening strain of a curved panel goes into its interior, and the *area distortion*
+and *edge strain* checks report it: use more panels until they pass.
+
 ## 2. Read the result
 
 ```python
@@ -200,9 +231,10 @@ doesn't, the sheet was scaled when it was printed. The layers and the index are 
 from envelopelab.features.scene import export_scene
 
 export_scene(
-    "balloon.obj", surface,
-    designs=[d],                    # shapes as designed
-    solved=[(d, am, result)],       # and as simulated (from step 3)
+    "balloon.obj",
+    surface,
+    designs=[d],  # shapes as designed
+    solved=[(d, am, result)],  # and as simulated (from step 3)
 )
 ```
 
@@ -216,8 +248,13 @@ default.
 
 ## Limitations
 
-* Revolved shapes are symmetric about their axis. Shapes that are not (ears, curved
-  horns, faces) need the mesh import, which is planned next.
+* Revolved shapes are symmetric about their axis. Use a Blender mesh for anything
+  else.
+* A free-form shape's axis must leave the mesh through its top, and each panel must be
+  a single piece. A strongly curved horn may need a leaned placement, or more panels.
+* A free-form shape rests in its flattened panels exactly as the mesh describes it. Use
+  a mesh fine enough to follow the curved surface (the solver does not correct a coarse
+  mesh's flat facets).
 * The envelope is the surface of revolution through the load tapes. The lobe bulge
   between tapes is not included when placing the footprint, and marks across a lofted
   gore are placed in proportion to its flat width.

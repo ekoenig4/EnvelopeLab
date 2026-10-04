@@ -1,7 +1,8 @@
 r"""Parametric special-shape primitives on a standard-gore envelope.
 
 A primitive (a dome, a tube or a revolved profile) is placed on the envelope designed by
-the gore editor.
+the gore editor; a shape modelled as a mesh is placed the same way
+(:class:`FreeformShape`, :mod:`envelopelab.features.freeform`).
 This module derives everything a builder needs to make it from that placement alone:
 
 * the **footprint**: the line where the primitive's skin meets the envelope, and its
@@ -134,6 +135,7 @@ from envelopelab.geometry.gore import (
     polygon_area,
 )
 from envelopelab.geometry.polygon import offset_polygon, points_in_polygon
+from envelopelab.io.reference_mesh import ReferenceMesh
 from envelopelab.materials.membrane import TapeMaterial
 from envelopelab.solvers.membrane import FloatArray, IntArray
 
@@ -141,7 +143,7 @@ if TYPE_CHECKING:
     from envelopelab.design.model import DesignDocument
     from envelopelab.project.model import PatternSet
 
-PrimitiveKind = Literal["dome", "tube", "revolved"]
+PrimitiveKind = Literal["dome", "tube", "revolved", "mesh"]
 CheckSeverity = Literal["info", "warning", "error"]
 
 ROOT_TOLERANCE = 1e-7
@@ -595,7 +597,67 @@ class Revolved:
             raise PrimitiveError(f"{self.name}: the smoothed profile crosses the axis")
 
 
-Primitive = Dome | Tube | Revolved
+@dataclass(frozen=True)
+class FreeformShape:
+    """Any shape modelled as a triangle mesh (e.g. in Blender); see
+    :mod:`envelopelab.features.freeform`.
+
+    Attributes
+    ----------
+    name : str
+        Feature name.
+    placement : Placement
+        Base point and lean of the mesh's frame.
+    mesh : ReferenceMesh
+        Closed triangle mesh in its own frame, m: :math:`z` along the axis out of the
+        envelope, :math:`x` up the tape, origin at the base point; sunk a little below
+        :math:`z = 0` so it reaches into the envelope
+        (:func:`envelopelab.io.blender.read_shape_mesh`).
+    panels : int
+        Number of skin panels M (>= 2), cut along half-planes through the axis.
+    marks_per_piece : int
+        Match marks per panel on the rim (>= 1).
+    """
+
+    name: str
+    placement: Placement
+    mesh: ReferenceMesh = field(repr=False)
+    panels: int = 6
+    marks_per_piece: int = 2
+
+    kind: PrimitiveKind = field(default="mesh", init=False)
+
+    @property
+    def pieces(self) -> int:
+        """Number of skin panels."""
+        return self.panels
+
+    @property
+    def closed_tip(self) -> bool:
+        """False: the panels meet at the pole where the axis leaves the mesh."""
+        return False
+
+    @property
+    def tip_radius(self) -> float:
+        """0: the panels meet in a point."""
+        return 0.0
+
+    @property
+    def tip_height(self) -> float:
+        """Highest point of the mesh along the axis, m."""
+        return float(np.asarray(self.mesh.vertices)[:, 2].max())
+
+    def validate(self) -> None:
+        """Raise :class:`PrimitiveError` for out-of-range values."""
+        _check_common(self.name, self.placement, self.marks_per_piece)
+        if len(self.mesh.triangles) < 4:
+            raise PrimitiveError(f"{self.name}: the mesh has too few triangles")
+        if self.panels < 2:
+            raise PrimitiveError(f"{self.name}: a free-form shape needs at least 2 panels")
+
+
+Primitive = Dome | Tube | Revolved | FreeformShape
+RevolvedPrimitive = Dome | Tube | Revolved
 
 
 def _check_common(name: str, placement: Placement, marks: int) -> None:
@@ -801,7 +863,7 @@ class PrimitiveDesign:
     marks: list[MatchMark]
     feed_hole: FeedHoleMark | None
     checks: list[DesignCheck]
-    _skin: _Skin = field(repr=False)
+    _skin: Any = field(repr=False)
 
     @property
     def footprint_length(self) -> float:
@@ -895,7 +957,7 @@ class _Skin:
 
     def __init__(
         self,
-        primitive: Primitive,
+        primitive: RevolvedPrimitive,
         surface: EnvelopeSurface,
         base: FloatArray,
         axis: FloatArray,
@@ -986,6 +1048,15 @@ class _Skin:
         """3D skin points at parameters ``(t, phi)``, m."""
         t, phi = np.broadcast_arrays(np.asarray(t, float), np.asarray(phi, float))
         return self.at_u(self.u_of(t.ravel(), phi.ravel()), phi.ravel())
+
+    def rim_points(self, phi: FloatArray) -> FloatArray:
+        """Footprint points at angles ``phi`` round the axis (rad), m."""
+        phi = np.asarray(phi, float)
+        return self.at(np.zeros(len(phi)), phi)
+
+    def factory(self, design: PrimitiveDesign, host: HostSurface) -> _SkinFactory:
+        """Skin factory of the sub-model (see :func:`primitive_appendage`)."""
+        return _SkinFactory(design, host)
 
     def max_height(self) -> float:
         t, ph = np.meshgrid(np.linspace(0.0, 1.0, 81), self.phi[::4])
@@ -1182,7 +1253,7 @@ def _pieces(skin: _Skin, primitive: Primitive) -> list[_Piece]:
 
 
 def _piece_label(primitive: Primitive, k: int) -> str:
-    return f"{primitive.name}-{'P' if primitive.kind == 'tube' else 'G'}{k + 1}"
+    return f"{primitive.name}-{'G' if primitive.kind in ('dome', 'revolved') else 'P'}{k + 1}"
 
 
 def _outline(piece: _Piece, n: int = 97) -> tuple[FloatArray, dict[str, FloatArray]]:
@@ -1331,6 +1402,20 @@ def design_primitive(
         raise PrimitiveError(f"{primitive.name}: tape position must be within (0, {length:.3f}) m")
     s0, theta0 = pl.tape_position, surface.theta_at(pl.gore, pl.across)
     base, axis, b1, b2 = _axis_frame(surface, pl, s0, theta0)
+    if isinstance(primitive, FreeformShape):
+        return _design_freeform(
+            primitive,
+            surface,
+            s0,
+            theta0,
+            base,
+            axis,
+            b1,
+            b2,
+            seam_allowance,
+            feed_hole_radius,
+            tolerance,
+        )
     skin = _Skin(primitive, surface, base, axis, b1, b2, samples)
     fp = skin.at(np.zeros(samples), skin.phi)
     fp_s, fp_theta, _ = surface.locate(fp)
@@ -1457,7 +1542,11 @@ def _checks(design: PrimitiveDesign, pieces: list[_Piece], tol: float) -> list[D
         a, b = design.pieces[j], design.pieces[(j + 1) % m]
         worst_pair = max(worst_pair, abs(_length(a.edges["right"]) - _length(b.edges["left"])))
         phi = pieces[j].phi_b
-        seam3d = _length(skin.at(t, np.full(len(t), phi)))
+        seam3d = (
+            skin.seam_length(j + 1)
+            if isinstance(p, FreeformShape)
+            else _length(skin.at(t, np.full(len(t), phi)))
+        )
         worst_flat = max(
             worst_flat,
             abs(_length(a.edges["right"]) / seam3d - 1.0),
@@ -1482,7 +1571,7 @@ def _checks(design: PrimitiveDesign, pieces: list[_Piece], tol: float) -> list[D
         "warning",
         "largest relative difference between a flat seam edge and the designed 3D seam "
         + (
-            "(flattening a doubly curved gore lengthens its seams, so the sewn dome is "
+            "(flattening a doubly curved piece changes its seams, so the sewn dome is "
             "fuller than designed; more gores reduce it, the simulation predicts it)"
             if not _developable(p)
             else "(frustum panels are exact developments)"
@@ -1935,11 +2024,11 @@ def primitive_appendage(
     seams = _seams(prim)
     phis: list[float] = []
     for a, b in zip(seams[:-1], seams[1:], strict=True):
-        arc = _length(skin.at(np.zeros(65), np.linspace(a, b, 65)))
+        arc = _length(skin.rim_points(np.linspace(a, b, 65)))
         count = max(2, int(math.ceil(arc / mesh_size)))
         phis += list(np.linspace(a, b, count, endpoint=False))
     phi = np.array(phis)
-    s, theta, _ = design.surface.locate(skin.at(np.zeros(len(phi)), phi))
+    s, theta, _ = design.surface.locate(skin.rim_points(phi))
     host = host_surface_at(design)
     chart = _chart(design, s, theta)
     lo, hi = chart.min(axis=0), chart.max(axis=0)
@@ -1983,7 +2072,7 @@ def primitive_appendage(
         name=prim.name,
         footprint=chart,
         skin_mode="designed",
-        skin_mesh=_SkinFactory(design, host),
+        skin_mesh=skin.factory(design, host),
         match_points=prim.pieces * prim.marks_per_piece,
         match_start=(0.0, 1.0),
         host=host,
@@ -1997,3 +2086,118 @@ def primitive_appendage(
         pressure=pressure,
         intended={"projected_height_m": design.designed_height},
     )
+
+
+def _design_freeform(
+    shape: FreeformShape,
+    surface: EnvelopeSurface,
+    s0: float,
+    theta0: float,
+    base: FloatArray,
+    axis: FloatArray,
+    b1: FloatArray,
+    b2: FloatArray,
+    seam_allowance: float,
+    feed_hole_radius: float | None,
+    tolerance: float,
+) -> PrimitiveDesign:
+    """:func:`design_primitive` for a free-form mesh shape."""
+    from envelopelab.features.freeform import (
+        EDGE_STRAIN_LIMIT,
+        build_mesh_skin,
+        cut_outline,
+        panel_outline,
+    )
+
+    try:
+        skin = build_mesh_skin(shape, surface, base, axis, b1, b2)
+    except FeatureBuildError as exc:
+        raise PrimitiveError(str(exc)) from exc
+    order = np.argsort(np.mod(skin.rim_phi, 2.0 * math.pi))
+    fp = skin.x[skin.rim_loop][order]
+    fp_phi = np.mod(skin.rim_phi, 2.0 * math.pi)[order]
+    fp_s, fp_theta, _ = surface.locate(fp)
+    g_centre = shape.placement.gore - 0.5 + shape.placement.across
+    pieces: list[CutPiece] = []
+    strain = 0.0
+    for k, panel in enumerate(skin.panels):
+        finished, edges = panel_outline(panel)
+        e3 = panel.x[panel.tri]
+        ef = panel.flat[panel.tri]
+        for a, b in ((0, 1), (1, 2), (2, 0)):
+            l3 = np.linalg.norm(e3[:, a] - e3[:, b], axis=1)
+            lf = np.linalg.norm(ef[:, a] - ef[:, b], axis=1)
+            strain = max(strain, float(np.abs(lf / l3 - 1.0).max()))
+        area = 0.5 * float(
+            np.linalg.norm(np.cross(e3[:, 1] - e3[:, 0], e3[:, 2] - e3[:, 0]), axis=1).sum()
+        )
+        pieces.append(
+            CutPiece(
+                label=_piece_label(shape, k),
+                finished=finished,
+                cut=cut_outline(finished, seam_allowance),
+                rim=edges.pop("rim"),
+                edges=edges,
+                surface_area=area,
+            )
+        )
+    marks = []
+    count = shape.pieces * shape.marks_per_piece
+    for j in range(count):
+        phi = 2.0 * math.pi * j / count
+        point = skin.rim_points(np.array([phi]))
+        s_m, th_m, _ = surface.locate(point)
+        gore, row, host_xy = _host_location(surface, float(s_m[0]), float(th_m[0]), g_centre)
+        k = skin.panel_of(phi)
+        pxy = skin.rim_flat(k, np.array([phi]))[0]
+        marks.append(
+            MatchMark(
+                number=j + 1,
+                phi_deg=math.degrees(phi),
+                gore=gore,
+                row=row,
+                host_xy=host_xy,
+                piece=_piece_label(shape, k),
+                piece_xy=(float(pxy[0]), float(pxy[1])),
+            )
+        )
+    feed = None
+    if feed_hole_radius is not None:
+        if feed_hole_radius <= 0.0:
+            raise PrimitiveError(f"{shape.name}: feed hole radius must be positive")
+        gore, row, centre = _host_location(surface, s0, theta0, g_centre)
+        feed = FeedHoleMark(gore, row, centre, feed_hole_radius)
+    design = PrimitiveDesign(
+        primitive=shape,
+        surface=surface,
+        base_s=s0,
+        base_theta=theta0,
+        base_point=base,
+        axis=axis,
+        b1=b1,
+        b2=b2,
+        footprint_phi=fp_phi,
+        footprint_points=fp,
+        footprint_s=fp_s,
+        footprint_theta=fp_theta,
+        pieces=pieces,
+        attachment=_attachment(surface, fp_s, fp_theta, g_centre),
+        marks=marks,
+        feed_hole=feed,
+        checks=[],
+        _skin=skin,
+    )
+    checks = _checks(design, skin.panels, tolerance)  # type: ignore[arg-type]
+    checks.append(
+        DesignCheck(
+            "edge strain",
+            strain,
+            EDGE_STRAIN_LIMIT,
+            "-",
+            "info" if strain <= EDGE_STRAIN_LIMIT else "warning",
+            "largest relative difference between a flat triangle side and the same side "
+            "on the mesh (use more panels to reduce it)",
+        )
+    )
+    design.checks = checks
+    return design

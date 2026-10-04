@@ -35,6 +35,7 @@ from envelopelab.features.primitives import (
     AREA_DISTORTION_LIMIT,
     Dome,
     EnvelopeSurface,
+    FreeformShape,
     Placement,
     Revolved,
     RowBand,
@@ -43,6 +44,7 @@ from envelopelab.features.primitives import (
     primitive_appendage,
 )
 from envelopelab.geometry.gore import MeridianProfile
+from envelopelab.io.reference_mesh import ReferenceMesh
 from envelopelab.solvers.dynamic_relaxation import solve
 from envelopelab.solvers.model import OperatingConditions
 from envelopelab.solvers.simulation import from_preview
@@ -71,6 +73,51 @@ def sphere_envelope(rows: int = 4) -> EnvelopeSurface:
         for k, (a, b) in enumerate(zip(edges[:-1], edges[1:], strict=True))
     ]
     return EnvelopeSurface(profile, SPHERE_GORES, rows=bands)
+
+
+def ellipsoid_mesh(
+    rx: float, ry: float, rz: float, centre_z: float, rings: int = 24, segments: int = 48
+) -> ReferenceMesh:
+    """Closed UV ellipsoid mesh (semi-axes and centre height, m) for free-form tests.
+
+    Parameters
+    ----------
+    rx, ry, rz : float
+        Semi-axes along x, y and z, m.
+    centre_z : float
+        Height of the centre, m (negative sinks it into the envelope).
+    rings, segments : int
+        Divisions from pole to pole and round the z axis.
+
+    Returns
+    -------
+    ReferenceMesh
+        Outward-oriented triangles, m.
+    """
+    v: list[tuple[float, float, float]] = []
+    f: list[list[int]] = []
+    for i in range(1, rings):
+        th = math.pi * i / rings
+        for j in range(segments):
+            ph = 2.0 * math.pi * j / segments
+            v.append(
+                (
+                    rx * math.sin(th) * math.cos(ph),
+                    ry * math.sin(th) * math.sin(ph),
+                    centre_z + rz * math.cos(th),
+                )
+            )
+    top, bottom = len(v), len(v) + 1
+    v += [(0.0, 0.0, centre_z + rz), (0.0, 0.0, centre_z - rz)]
+    for i in range(rings - 2):
+        for j in range(segments):
+            a, b = i * segments + j, i * segments + (j + 1) % segments
+            f += [[a, a + segments, b + segments], [a, b + segments, b]]
+    last = (rings - 2) * segments
+    for j in range(segments):
+        f.append([top, j, (j + 1) % segments])
+        f.append([bottom, last + (j + 1) % segments, last + j])
+    return ReferenceMesh(np.array(v), np.array(f, dtype=np.int64), "generic ellipsoid")
 
 
 def _equator(surface: EnvelopeSurface) -> float:
@@ -239,6 +286,47 @@ def geometry_benchmarks() -> list[BenchmarkResult]:
             GEOMETRY_TOLERANCE,
         )
     )
+
+    # A sphere mesh round the base point meets the envelope sphere in a circle of radius
+    # r sqrt(1 - (r / 2R)^2), to its chord error; its sewn edges keep their true lengths.
+    ball = ellipsoid_mesh(1.0, 1.0, 1.0, 0.0, rings=48, segments=96)
+    mesh = design_primitive(FreeformShape("mesh", Placement(1, s_eq), ball, 12), surface)
+    mcheck = {c.name: c for c in mesh.checks}
+    tag = "Free-form sphere mesh r=1 m (48 x 96), 12 panels"
+    out += [
+        BenchmarkResult(
+            f"{tag}: footprint length",
+            mesh.footprint_length,
+            2.0 * math.pi * math.sqrt(1.0 - (1.0 / (2.0 * radius)) ** 2),
+            "m",
+            "relative",
+            1e-3,
+        ),
+        BenchmarkResult(
+            f"{tag}: designed height",
+            mesh.designed_height,
+            1.0,
+            "m",
+            "absolute",
+            GEOMETRY_TOLERANCE,
+        ),
+        BenchmarkResult(
+            f"{tag}: rim length",
+            mcheck["rim length"].value,
+            0.0,
+            "m",
+            "absolute",
+            GEOMETRY_TOLERANCE,
+        ),
+        BenchmarkResult(
+            f"{tag}: skin seam sides",
+            mcheck["skin seam match"].value,
+            0.0,
+            "m",
+            "absolute",
+            GEOMETRY_TOLERANCE,
+        ),
+    ]
 
     # Attachment marks map back onto the footprint (dome straddling a load tape and a
     # row seam).

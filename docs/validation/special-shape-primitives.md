@@ -25,6 +25,10 @@ Primitives on a generic sphere of radius 8 m with 24 gores, axis along the envel
 | Revolved quarter circle a=1 m, 16 gores: footprint length | 6.28332 | 6.28319 | m | 2.1e-05 | 0.001 | pass |
 | Revolved quarter circle a=1 m, 16 gores: designed height | 1 | 1 | m | < 1e-06 m | 1 mm | pass |
 | Revolved straight profile 0.8/0.3 m: developed side edge | 1.62489 | 1.62489 | m | < 1e-06 m | 1 mm | pass |
+| Free-form sphere mesh r=1 m (48 x 96), 12 panels: footprint length | 6.26922 | 6.2709 | m | 0.00027 | 0.001 | pass |
+| Free-form sphere mesh r=1 m (48 x 96), 12 panels: designed height | 1 | 1 | m | < 1e-06 m | 1 mm | pass |
+| Free-form sphere mesh r=1 m (48 x 96), 12 panels: rim length | 0 | 0 | m | < 1e-06 m | 1 mm | pass |
+| Free-form sphere mesh r=1 m (48 x 96), 12 panels: skin seam sides | 8.88178e-16 | 0 | m | < 1e-06 m | 1 mm | pass |
 | Dome on load tape and row seam (4 panel runs): attachment marks off the footprint | 1.01114e-06 | 0 | m | 0.001 mm | 1 mm | pass |
 
 ## Inflated dome, preview solver

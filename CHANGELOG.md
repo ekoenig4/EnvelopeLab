@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Free-form special shapes from a mesh (ADR-0018, `FreeformShape`,
+  `envelopelab.features.freeform`): import a closed shape modelled in Blender (OBJ, STL
+  or PLY), place it on the envelope, and EnvelopeLab clips it at the envelope (the cut
+  edge is the footprint), cuts it into panels along half-planes through its axis and
+  flattens each panel. Footprint and seam edges keep their exact lengths and the
+  interior strain is reported. The same attachment lines, match marks, build-pack
+  export, Blender scene and as-cut sub-model as the other shapes. New rows in
+  `validation/special-shape-primitives.md`. No existing numerical result changes.
 - Blender mesh exchange (ADR-0017, `envelopelab.io.blender`, `envelopelab.features.scene`):
   export the envelope, each special shape as designed and each solved skin as one OBJ
   scene with named objects, written Y up so Blender's default OBJ import shows it upright
