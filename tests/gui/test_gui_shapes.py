@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
+import numpy as np
 import pytest
 
 from envelopelab.export.qa import check_pack
@@ -168,3 +170,64 @@ def test_refused_rename_restores_the_name(gore_window: MainWindow) -> None:
     panel.name_edit.editingFinished.emit()
     assert panel.selected == "Ear"
     assert [s.name for s in panel.specs()] == ["Dome", "Ear"]
+
+
+def _surface_point(window: MainWindow, gore: int, tape: float, across: float = 0.0) -> Any:
+    surface = window.controller.envelope_surface()
+    assert surface is not None
+    theta = surface.theta_at(gore, across)
+    return surface.point(np.array([tape]), np.array([theta]))[0]
+
+
+def test_drag_moves_a_shape_in_one_undo_step(gore_window: MainWindow) -> None:
+    gore_window.shapes.add_shape("dome")
+    _placed(gore_window)
+    view = gore_window.view3d
+    session = gore_window.controller.session
+    assert session is not None
+    before = session.state.shapes[0].placement
+    assert view.begin_shape_drag("Dome")
+    for tape in (4.5, 5.0, 5.5):  # a drag is many moves, one edit
+        placement = view.drag_shape_to(_surface_point(gore_window, 4, tape, 0.25))
+        assert placement is not None and view.drag is not None
+        assert view.drag.outline is not None and len(view.drag.outline) > 10
+    assert "gore 4" in view.info.text()
+    history = len(session.stack.history())
+    assert view.end_shape_drag()
+    after = session.state.shapes[0].placement
+    assert (after.gore, after.tape_position, after.across) == (4, 5.5, 0.25)
+    assert after.lean_deg == before.lean_deg
+    assert len(session.stack.history()) == history + 1
+    _placed(gore_window)
+    assert gore_window.shapes.placed("Dome") is not None  # re-placed at the new spot
+    gore_window.undo()
+    assert session.state.shapes[0].placement == before
+
+
+def test_drag_without_moving_or_of_unknown_shape_changes_nothing(
+    gore_window: MainWindow,
+) -> None:
+    gore_window.shapes.add_shape("tube")
+    view = gore_window.view3d
+    session = gore_window.controller.session
+    assert session is not None
+    history = len(session.stack.history())
+    assert not view.begin_shape_drag("Nope")
+    assert view.begin_shape_drag("Tube")
+    assert not view.end_shape_drag()  # released where it started
+    assert view.begin_shape_drag("Tube")
+    view.drag_shape_to(_surface_point(gore_window, 2, 3.0))
+    view.cancel_shape_drag()
+    assert view.drag is None and len(session.stack.history()) == history
+
+
+def test_drag_button_opens_the_3d_view_with_dragging_on(gore_window: MainWindow) -> None:
+    gore_window.show_panel("shapes")
+    gore_window.shapes.add_shape("dome")
+    assert gore_window.shapes.drag_button.isEnabled()
+    gore_window.shapes.drag_button.click()
+    assert gore_window.panel_visible("view3d")
+    assert gore_window.view3d.drag_shapes.isChecked()
+    assert "drag it over the envelope" in gore_window.view3d.info.text()
+    gore_window.view3d.pick.setChecked(True)  # picking and dragging exclude each other
+    assert not gore_window.view3d.drag_shapes.isChecked()

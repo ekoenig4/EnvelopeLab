@@ -18,6 +18,7 @@ from PySide6.QtCore import QObject, Signal
 
 from envelopelab.design.model import DesignDocument
 from envelopelab.features.metrics import REQUIRED_FOS
+from envelopelab.features.primitives import EnvelopeSurface
 from envelopelab.geometry.gore import PanelRow
 from envelopelab.materials.repository import (
     Fabric,
@@ -48,6 +49,7 @@ from envelopelab.project.session import (
     EVENT_STATE,
     ProjectSession,
 )
+from envelopelab.project.shapes import envelope_surface
 from envelopelab.project.simulation import BuiltModel
 from envelopelab.rigging import RiggingOutputs, rigging_polylines
 from envelopelab_app.settings import Preferences
@@ -307,6 +309,21 @@ class WorkspaceController(QObject):
             return ""
         hashes = self.session.group_hashes()
         return canonical_hash({g: hashes[g] for g in SHAPE_HOST_GROUPS})
+
+    def envelope_surface(self) -> EnvelopeSurface | None:
+        """Surface the special shapes are placed on (None: no gore design or not buildable),
+        built once per change."""
+        s = self.session
+        if s is None or s.design.gores is None:
+            return None
+
+        def build() -> EnvelopeSurface | None:
+            try:
+                return envelope_surface(s.design, s.patterns)
+            except ValueError:  # includes PrimitiveError
+                return None
+
+        return self._cached("envelope_surface", build)
 
     def sync_shapes(self) -> None:
         """Start placing the shapes whose specification or envelope changed (worker)."""

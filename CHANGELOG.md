@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Drag special shapes in the 3D view: with **Drag special shapes** on (or **Drag in 3D
+  view…** in the Special shapes panel), press on a shape and drag it over the envelope; a
+  ring previews where its base will sit, and releasing moves it (gore, tape position and
+  position across the gore; lean kept) as one undo step.
 - Special shapes in the 3D view are drawn in their layer colour; they were drawn with
   their dense mesh edges and looked like black blobs.
 - Special shapes in the desktop application: a new **Special shapes** mode adds domes,

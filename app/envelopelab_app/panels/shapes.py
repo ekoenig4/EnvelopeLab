@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -215,6 +215,9 @@ class PiecePreview(QWidget):
 class ShapesPanel(QWidget):
     """See module docstring."""
 
+    #: The user wants to drag shape ``name`` in the 3D view (the main window shows it).
+    dragRequested = Signal(str)  # noqa: N815 (Qt naming)
+
     def __init__(self, controller: WorkspaceController) -> None:
         super().__init__()
         self.controller = controller
@@ -303,6 +306,12 @@ class ShapesPanel(QWidget):
         self.sim_tree.setMinimumHeight(120)
         self.export_pack_button = QPushButton("Export build pack…")
         self.export_pack_button.clicked.connect(self._export_pack_dialog)
+        self.drag_button = QPushButton("Drag in 3D view…")
+        self.drag_button.setToolTip(
+            "Open the 3D view with dragging on: press on the shape, drag it over the "
+            "envelope and release to place it"
+        )
+        self.drag_button.clicked.connect(self._request_drag)
         self.export_blender_button = QPushButton("Export to Blender (OBJ)…")
         self.export_blender_button.clicked.connect(self._export_blender_dialog)
         sim_box = QGroupBox("Simulation")
@@ -324,6 +333,7 @@ class ShapesPanel(QWidget):
         middle_layout.setContentsMargins(0, 0, 0, 0)
         middle_layout.addWidget(left)
         middle_layout.addWidget(self.status)
+        middle_layout.addWidget(self.drag_button)
         middle_layout.addWidget(self.form_box)
         middle_layout.addWidget(self.profile_box)
         middle_layout.addWidget(sim_box)
@@ -585,6 +595,10 @@ class ShapesPanel(QWidget):
         if self.controller.defer_hidden and self.isVisible():
             QMessageBox.warning(self, "Shape simulation", message)
 
+    def _request_drag(self) -> None:
+        if self.selected is not None:
+            self.dragRequested.emit(self.selected)
+
     def _selection(self, target: str) -> None:
         if target.startswith("shape:"):
             self.select(target.removeprefix("shape:"))
@@ -642,6 +656,7 @@ class ShapesPanel(QWidget):
         gore = self.controller.is_gore
         self.add_button.setEnabled(gore)
         self.duplicate_button.setEnabled(has)
+        self.drag_button.setEnabled(has)
         self.remove_button.setEnabled(has)
         self.simulate_button.setEnabled(has and not running and self.placed() is not None)
         self.cancel_button.setEnabled(running)

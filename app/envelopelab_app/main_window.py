@@ -161,6 +161,7 @@ class MainWindow(QMainWindow):
         self._build_actions()
         self.controller.editRejected.connect(self._rejected)
         self.controller.selectionChanged.connect(self._selection_mode)
+        self.shapes.dragRequested.connect(self.drag_shape_in_3d)
         self.controller.message.connect(lambda text: self.statusBar().showMessage(text, 8000))
         self.controller.fileChanged.connect(self._update_title)
         self.controller.stateChanged.connect(self._update_actions)
@@ -425,6 +426,15 @@ class MainWindow(QMainWindow):
 
     def _mode_slot(self, key: str) -> Callable[[], None]:
         return lambda: self.set_mode(key)
+
+    def drag_shape_in_3d(self, name: str) -> None:
+        """Show the 3D view with shape dragging on, ready to move shape ``name``."""
+        self.show_panel("view3d")
+        self.view3d.drag_shapes.setChecked(True)
+        self.view3d.info.setText(
+            f"Press on {name} (or any special shape) and drag it over the envelope; release "
+            "to place it. Edit > Undo moves it back."
+        )
 
     def _selection_mode(self, target: str) -> None:
         """Show the Special shapes mode when a shape is selected (tree, warnings)."""

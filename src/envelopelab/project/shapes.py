@@ -20,9 +20,13 @@ if TYPE_CHECKING:
     from envelopelab.design.model import DesignDocument
     from envelopelab.features.primitives import EnvelopeSurface, Primitive, PrimitiveDesign
     from envelopelab.project.model import PatternSet
+    from envelopelab.solvers.membrane import FloatArray
 
 ShapeKind = Literal["dome", "tube", "revolved", "mesh"]
 SHAPE_KINDS: tuple[ShapeKind, ...] = ("dome", "tube", "revolved", "mesh")
+#: A dragged base point stays this far inside the ends of the load tape, m (source:
+#: assumed; a placement needs 0 < tape position < tape length).
+DRAG_MARGIN = 1e-3
 
 
 class ShapePlacement(BaseModel):
@@ -269,3 +273,84 @@ def shape_fabrics(
     zone = row_zone(design, patterns, host_row(placed))
     host = design.zones.get(zone) or next(iter(design.zones.values()), "")
     return host, spec.fabric or host
+
+
+def placement_at(
+    surface: EnvelopeSurface, point: FloatArray, current: ShapePlacement
+) -> ShapePlacement:
+    """The placement whose base point is the envelope point nearest ``point``.
+
+    Used to drag a shape over the envelope: gore, tape position and position across the
+    gore follow the point; the lean of ``current`` is kept.
+
+    Parameters
+    ----------
+    surface : EnvelopeSurface
+        Envelope (:func:`envelope_surface`).
+    point : ndarray, shape (3,)
+        A point on or near the envelope, m (e.g. picked on the 3D view's design surface).
+    current : ShapePlacement
+        Placement being changed (its lean is kept).
+
+    Returns
+    -------
+    ShapePlacement
+        Gore from 1, tape position (m) kept 1 mm inside the tape's ends, across in
+        [-0.5, 0.5], rounded to 0.1 mm and 1e-4 of the gore width.
+    """
+    s, theta, _ = surface.locate(np.asarray(point, dtype=np.float64).reshape(1, 3))
+    length = float(surface.profile.meridian_length)
+    tape = min(max(float(s[0]), DRAG_MARGIN), length - DRAG_MARGIN)
+    g = float(surface.gore_position(theta)[0])
+    cell = min(int(math.floor(g)), surface.gore_count - 1)
+    across = min(max(g - cell - 0.5, -0.5), 0.5)
+    return current.model_copy(
+        update={"gore": cell + 1, "tape_position": round(tape, 4), "across": round(across, 4)}
+    )
+
+
+def base_radius(spec: ShapeSpec) -> float:
+    """Radius of the circle a shape stands on, m (for a mesh: its largest radius)."""
+    if isinstance(spec, DomeShape | TubeShape):
+        return float(spec.base_radius)
+    if isinstance(spec, RevolvedShape):
+        return float(spec.profile[0][0])
+    v = np.asarray(spec.vertices, dtype=np.float64)
+    return float(np.hypot(v[:, 0], v[:, 1]).max())
+
+
+def footprint_preview(
+    surface: EnvelopeSurface, placement: ShapePlacement, radius: float, samples: int = 64
+) -> FloatArray:
+    """Approximate footprint ring of a shape at ``placement``, on the envelope, m.
+
+    A circle of ``radius`` round the base point in the tangent plane, moved onto the
+    envelope surface. It ignores the lean and the shape's own footprint search
+    (:func:`shape_design`), so it is only a drag preview, never a pattern.
+
+    Parameters
+    ----------
+    surface : EnvelopeSurface
+        Envelope.
+    placement : ShapePlacement
+        Base point (lean ignored).
+    radius : float
+        Circle radius, m (:func:`base_radius`).
+    samples : int
+        Points round the ring.
+
+    Returns
+    -------
+    ndarray, shape (samples + 1, 3)
+        Closed ring (first point repeated), m.
+    """
+    s0 = placement.tape_position
+    theta0 = surface.theta_at(placement.gore, placement.across)
+    centre = surface.point(np.array([s0]), np.array([theta0]))[0]
+    e_hoop, e_up, _ = surface.frame(s0, theta0)
+    a = np.linspace(0.0, 2.0 * math.pi, samples + 1)
+    ring = centre + radius * (np.outer(np.cos(a), e_hoop) + np.outer(np.sin(a), e_up))
+    s, theta, _ = surface.locate(ring)
+    length = float(surface.profile.meridian_length)
+    out: FloatArray = surface.point(np.clip(s, 0.0, length), theta)
+    return out

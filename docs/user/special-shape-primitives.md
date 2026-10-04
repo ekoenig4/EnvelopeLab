@@ -44,12 +44,21 @@ shapes**, or its tab).
    line dashed, the rim sewn to the envelope in red) with their sizes and areas, and the
    **attachment lines** on each envelope panel. The **3D View** shows the shape on the
    envelope.
-4. **Simulate shape (preview solver)** solves the shape's sub-model (choose the mesh
+4. To move a shape by hand, press **Drag in 3D view…** (or tick **Drag special shapes**
+   in the 3D View). Press the left mouse button on a shape and drag it over the
+   envelope: a magenta ring shows where its base will sit, and the 3D View's info line
+   gives the gore, the tape position from the mouth and the position across the gore.
+   Release to place it there; the shape is placed again in the background and the move
+   is one undo step (**Edit ▸ Undo** moves it back). The lean set in the form is kept.
+   Pressing anywhere else still turns the view. The ring is an approximate preview (a
+   circle of the base radius, without the lean); the real footprint, pattern and checks
+   come when the shape is placed.
+5. **Simulate shape (preview solver)** solves the shape's sub-model (choose the mesh
    size; finer is slower) in the background. **Cancel** stops it. The result lists the
    convergence status, iterations, final residual, mesh size, heights above the envelope
    as designed and inflated, chamber pressure, wrinkled fraction, rim tape tension and
    the factor of safety of each region. It is drawn in the 3D View as a separate layer.
-5. **Export build pack…** writes the envelope rows and every shape's pieces and marking
+6. **Export build pack…** writes the envelope rows and every shape's pieces and marking
    sheets (DXF, PDF and `index.json`, section 4). **Export to Blender (OBJ)…** writes the
    envelope, every shape and every current shape simulation (section 5).
 

@@ -18,14 +18,19 @@ from envelopelab.project.model import (
 )
 from envelopelab.project.session import ProjectSession
 from envelopelab.project.shapes import (
+    DRAG_MARGIN,
     DomeShape,
     MeshShape,
+    RevolvedShape,
     ShapePlacement,
     TubeShape,
+    base_radius,
     default_shape,
     envelope_surface,
+    footprint_preview,
     host_row,
     mesh_shape,
+    placement_at,
     shape_design,
     shape_fabrics,
 )
@@ -165,3 +170,50 @@ def test_shape_fabric_defaults_to_the_host_row(session: ProjectSession) -> None:
     assert host == skin == "ripstop_nylon"
     other = spec.model_copy(update={"fabric": "nomex"})
     assert shape_fabrics(other, session.design, session.patterns, placed) == (host, "nomex")
+
+
+def test_dragging_to_a_surface_point_recovers_its_placement(session: ProjectSession) -> None:
+    surface = envelope_surface(session.design, session.patterns)
+    start = ShapePlacement(gore=1, tape_position=4.0, lean_deg=20.0, lean_toward_deg=90.0)
+    for gore, tape, across in [(3, 5.0, 0.2), (8, 2.5, -0.45), (1, 6.0, 0.0)]:
+        theta = surface.theta_at(gore, across)
+        point = surface.point(np.array([tape]), np.array([theta]))[0]
+        moved = placement_at(surface, point, start)
+        assert moved.gore == gore
+        assert moved.across == pytest.approx(across, abs=1e-4)
+        assert moved.tape_position == pytest.approx(tape, abs=1e-4)
+        assert (moved.lean_deg, moved.lean_toward_deg) == (20.0, 90.0)  # lean kept
+
+
+def test_drag_point_off_the_tape_ends_stays_placeable(session: ProjectSession) -> None:
+    surface = envelope_surface(session.design, session.patterns)
+    start = ShapePlacement(gore=1, tape_position=4.0)
+    below = np.array([0.0, 0.0, float(surface.profile.z[0]) - 5.0])
+    above = np.array([0.0, 0.0, float(surface.profile.z.max()) + 5.0])
+    length = float(surface.profile.meridian_length)
+    assert placement_at(surface, below, start).tape_position >= DRAG_MARGIN
+    assert placement_at(surface, above, start).tape_position <= length - DRAG_MARGIN
+
+
+def test_footprint_preview_is_a_ring_on_the_envelope(session: ProjectSession) -> None:
+    surface = envelope_surface(session.design, session.patterns)
+    spec = _dome(session)
+    placement = ShapePlacement(gore=2, tape_position=4.5, across=0.1)
+    ring = footprint_preview(surface, placement, base_radius(spec), samples=48)
+    assert ring.shape == (49, 3) and np.allclose(ring[0], ring[-1])
+    assert np.abs(surface.signed_distance(ring)).max() < 1e-9
+    centre = surface.point(np.array([4.5]), np.array([surface.theta_at(2, 0.1)]))[0]
+    distance = np.linalg.norm(ring - centre, axis=1)
+    assert np.allclose(distance, spec.base_radius, rtol=0.01)
+
+
+def test_base_radius_of_every_kind(session: ProjectSession) -> None:
+    assert base_radius(_dome(session)) == _dome(session).base_radius
+    revolved = default_shape("revolved", session.design, "Nose")
+    assert isinstance(revolved, RevolvedShape)
+    assert base_radius(revolved) == revolved.profile[0][0]
+    mesh = ellipsoid_mesh(0.3, 0.2, 0.4, -0.1, rings=8, segments=12)
+    blob = mesh_shape(
+        "Blob", mesh.vertices, mesh.triangles, ShapePlacement(gore=1, tape_position=4)
+    )
+    assert base_radius(blob) == pytest.approx(0.3, rel=1e-9)
