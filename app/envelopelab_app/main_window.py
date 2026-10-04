@@ -48,6 +48,7 @@ from envelopelab_app.panels.patterns import PatternPanel
 from envelopelab_app.panels.properties import PropertiesPanel
 from envelopelab_app.panels.rigging import RiggingPanel
 from envelopelab_app.panels.runs import RunsPanel
+from envelopelab_app.panels.shapes import ShapesPanel
 from envelopelab_app.panels.validation import ValidationPanel
 from envelopelab_app.panels.view3d import View3DPanel
 from envelopelab_app.settings import (
@@ -106,6 +107,7 @@ class MainWindow(QMainWindow):
         self.patterns = PatternPanel(self.controller)
         self.history = HistoryPanel(self.controller)
         self.rigging = RiggingPanel(self.controller)
+        self.shapes = ShapesPanel(self.controller)
         pattern_scope = artifact_inputs("patterns")
         self.panels: dict[str, Panel] = {
             "tree": Panel("Design Tree", self.controller, self.design_tree),
@@ -145,12 +147,20 @@ class MainWindow(QMainWindow):
                 scope={"parachute", "rigging", "turning_vents", "scoop", "operating"},
                 scroll=True,
             ),
+            "shapes": Panel(
+                "Special Shapes",
+                self.controller,
+                self.shapes,
+                scope={"shapes"},
+                artifacts=("shapes",),
+            ),
         }
         self._build_workspace()
 
         self._build_status_bar()
         self._build_actions()
         self.controller.editRejected.connect(self._rejected)
+        self.controller.selectionChanged.connect(self._selection_mode)
         self.controller.message.connect(lambda text: self.statusBar().showMessage(text, 8000))
         self.controller.fileChanged.connect(self._update_title)
         self.controller.stateChanged.connect(self._update_actions)
@@ -211,6 +221,7 @@ class MainWindow(QMainWindow):
                 self.panels["materials"],
             ),
             "rigging": self.panels["rigging"],
+            "shapes": self.panels["shapes"],
             "simulate": self._splitter(
                 "simulateSplitter", vertical, self.panels["view3d"], self.panels["runs"]
             ),
@@ -224,6 +235,7 @@ class MainWindow(QMainWindow):
             "patterns": "patterns",
             "materials": "patterns",
             "rigging": "rigging",
+            "shapes": "shapes",
             "view3d": "simulate",
             "runs": "simulate",
             "history": "history",
@@ -413,6 +425,11 @@ class MainWindow(QMainWindow):
 
     def _mode_slot(self, key: str) -> Callable[[], None]:
         return lambda: self.set_mode(key)
+
+    def _selection_mode(self, target: str) -> None:
+        """Show the Special shapes mode when a shape is selected (tree, warnings)."""
+        if target == "shapes" or target.startswith("shape:"):
+            self.show_panel("shapes")
 
     def _mode_changed(self, index: int) -> None:
         self.mode_stack.setCurrentIndex(index)
@@ -803,6 +820,10 @@ class MainWindow(QMainWindow):
         if self.simulation.running:
             self.simulation.cancel()
             self.simulation.wait(30_000)
+        if self.controller.shape_simulator.running:
+            self.controller.shape_simulator.cancel()
+            self.controller.shape_simulator.wait(30_000)
+        self.controller.shapes.wait(30_000)
         discard(self.autosave_path())
         layout_state.store(self.settings, layout_state.LAST_SLOT, self.capture_layout())
         self.view3d.close_renderer()

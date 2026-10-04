@@ -48,6 +48,8 @@ LAYER_COLORS = {
     "calculix": "#ff7f0e",
     "reference": "#2ca02c",
     "rigging": "#9467bd",
+    "shape": "#e7298a",
+    "shape-simulated": "#7570b3",
 }
 #: Line colours of the rigging layer, per element kind.
 RIGGING_COLORS = {
@@ -76,7 +78,8 @@ class Layer:
     key : str
         Unique id.
     kind : str
-        ``design``, ``rest``, ``envelopelab-preview``, ``calculix`` or ``reference``.
+        ``design``, ``rest``, ``envelopelab-preview``, ``calculix``, ``reference``,
+        ``rigging``, ``shape`` (a special shape as designed) or ``shape-simulated``.
     label : str
         Text shown in the list and the scene legend.
     points : ndarray, shape (n, 3)
@@ -216,6 +219,7 @@ class View3DPanel(QWidget):
                 controller.runsChanged,
                 controller.artifactsChanged,
                 controller.sessionChanged,
+                controller.shapesChanged,
             ),
             defer_hidden=lambda: controller.defer_hidden,
         )
@@ -284,6 +288,8 @@ class View3DPanel(QWidget):
                     np.zeros((0, 3), dtype=np.int64),
                     polylines=lines,
                 )
+        if session is not None:
+            self._shape_layers()
         cache = self.controller.model_cache
         if session is not None and cache is not None:
             model = cache.built.model
@@ -330,6 +336,44 @@ class View3DPanel(QWidget):
                 self.layers[key].visible = value
         self._fill_list()
         self.redraw()
+
+    def _shape_layers(self) -> None:
+        """Special shapes as designed and their latest shape simulations."""
+        from envelopelab.features.scene import designed_object, simulated_object
+
+        service = self.controller.shapes
+        for name in service.keys:
+            result = service.result(name)
+            if result is None or result.design is None:
+                continue
+            obj = designed_object(result.design)
+            self.layers[f"shape:{name}"] = Layer(
+                f"shape:{name}",
+                "shape",
+                f"Special shape {name} (as designed, current)",
+                obj.vertices,
+                obj.triangles,
+            )
+        for name, sim in service.simulations.items():
+            if name not in service.keys:
+                continue
+            obj = simulated_object(sim.design, sim.appendage, sim.result)
+            stale = service.simulation_status(name) != "current"
+            converged = bool(sim.result.converged)
+            label = f"Special shape {name}, preview solver result"
+            if not converged:
+                label += " [NOT CONVERGED]"
+            if stale:
+                label += " [STALE]"
+            self.layers[f"shape-sim:{name}"] = Layer(
+                f"shape-sim:{name}",
+                "shape-simulated",
+                label,
+                obj.vertices,
+                obj.triangles,
+                stale,
+                converged,
+            )
 
     def _face_colors(self, surface: DisplaySurface) -> np.ndarray:
         """Row fabric colour per triangle, every second gore darker (display only)."""

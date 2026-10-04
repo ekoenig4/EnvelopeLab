@@ -2,8 +2,9 @@
 
 The controller owns the open session, turns session events into Qt signals, keeps the
 derived data the panels show (live gore outputs, the last generated patterns, the last
-built solver model) and reports refused edits. It contains no engineering math: every
-number comes from :mod:`envelopelab`.
+built solver model, the placed special shapes, computed in a worker thread by
+:class:`~envelopelab_app.shapes_service.ShapeService`) and reports refused edits. It
+contains no engineering math: every number comes from :mod:`envelopelab`.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Any, TypeVar
 from PySide6.QtCore import QObject, Signal
 
 from envelopelab.design.model import DesignDocument
+from envelopelab.features.metrics import REQUIRED_FOS
 from envelopelab.geometry.gore import PanelRow
 from envelopelab.materials.repository import (
     Fabric,
@@ -26,7 +28,7 @@ from envelopelab.materials.repository import (
     open_user_library,
 )
 from envelopelab.project import edits
-from envelopelab.project.dependencies import ARTIFACTS, ArtifactStatus
+from envelopelab.project.dependencies import ARTIFACTS, ArtifactStatus, canonical_hash
 from envelopelab.project.gore_design import (
     DesignFinding,
     GoreOutputs,
@@ -49,6 +51,10 @@ from envelopelab.project.session import (
 from envelopelab.project.simulation import BuiltModel
 from envelopelab.rigging import RiggingOutputs, rigging_polylines
 from envelopelab_app.settings import Preferences
+from envelopelab_app.shapes_service import ShapeService, ShapeSimulator
+
+#: Input groups of the envelope a special shape reads (its key, see ``shape_host_hash``).
+SHAPE_HOST_GROUPS = ("geometry", "row_zones", "materials")
 
 T = TypeVar("T")
 
@@ -82,6 +88,7 @@ class WorkspaceController(QObject):
     selectionChanged = Signal(str)  # noqa: N815
     editRejected = Signal(str)  # noqa: N815
     libraryChanged = Signal()  # noqa: N815
+    shapesChanged = Signal()  # noqa: N815 (placed shapes or shape simulations changed)
     message = Signal(str)
 
     def __init__(self, prefs: Preferences, fabrics: FabricLibraryRepository | None = None) -> None:
@@ -105,6 +112,9 @@ class WorkspaceController(QObject):
         #: interactive application; off for scripted windows that read hidden panels.
         self.defer_hidden = False
         self._derived: dict[str, tuple[int, Any]] = {}
+        self.shapes = ShapeService()
+        self.shapes.updated.connect(self._shapes_updated)
+        self.shape_simulator = ShapeSimulator(self.shapes)
 
     def bump(self) -> None:
         """Start a new change (call before emitting the signals that announce it)."""
@@ -190,9 +200,11 @@ class WorkspaceController(QObject):
         self.session = session
         self.patterns_cache = None
         self.model_cache = None
+        self.shapes.reset()
         if session is not None:
             session.set_fabric_lookup(self.fabric_lookup)
         self._refresh_outputs()
+        self.sync_shapes()
         if session is not None:
             session.add_listener(self._on_event)
             if self.prefs.auto_regenerate_patterns:
@@ -208,12 +220,14 @@ class WorkspaceController(QObject):
         self.bump()
         if event == EVENT_STATE:
             self._refresh_outputs()
+            self.sync_shapes()
             if self.prefs.auto_regenerate_patterns:
                 self.regenerate_patterns(emit=False)
             self.stateChanged.emit()
             self.artifactsChanged.emit()
             self.fileChanged.emit()
         elif event == EVENT_ARTIFACTS:
+            self.sync_shapes()
             self.artifactsChanged.emit()
         elif event == EVENT_RUNS:
             self.runsChanged.emit()
@@ -284,6 +298,103 @@ class WorkspaceController(QObject):
         self.selection = target
         self.bump()
         self.selectionChanged.emit(target)
+
+    # -- special shapes -----------------------------------------------------------------
+
+    def shape_host_hash(self) -> str:
+        """Hash of the envelope inputs the special shapes are placed from."""
+        if self.session is None:
+            return ""
+        hashes = self.session.group_hashes()
+        return canonical_hash({g: hashes[g] for g in SHAPE_HOST_GROUPS})
+
+    def sync_shapes(self) -> None:
+        """Start placing the shapes whose specification or envelope changed (worker)."""
+        s = self.session
+        if s is None:
+            self.shapes.sync(None, None, [], "")
+            return
+        self.shapes.sync(
+            s.design,
+            s.patterns,
+            list(s.state.shapes),
+            self.shape_host_hash(),
+            s.fingerprints()["simulation"],
+        )
+
+    def _shapes_updated(self) -> None:
+        s = self.session
+        if s is not None and not s.state.shapes:
+            s.tracker.forget("shapes")  # nothing to build, so never stale
+        elif s is not None and not self.shapes.pending:
+            s.tracker.mark_built("shapes", s.fingerprints()["shapes"])
+        self.bump()
+        self.shapesChanged.emit()
+
+    def shape_findings(self) -> list[DesignFinding]:
+        """Findings of the special shapes: placement errors, pattern checks, simulations."""
+        s = self.session
+        if s is None:
+            return []
+        out: list[DesignFinding] = []
+        for spec in s.state.shapes:
+            target = f"shape:{spec.name}"
+            label = f"shape {spec.name}"
+            result = self.shapes.result(spec.name)
+            if result is None:
+                out.append(DesignFinding("shape_pending", "info", f"{label}: being placed", target))
+            elif result.design is None:
+                out.append(
+                    DesignFinding(
+                        "shape_error", "error", f"{label} cannot be placed: {result.error}", target
+                    )
+                )
+            else:
+                for check in result.design.checks:
+                    if check.severity != "info":
+                        out.append(
+                            DesignFinding(
+                                f"shape_{check.name}",
+                                check.severity,
+                                f"{label}: {check.message}",
+                                target,
+                            )
+                        )
+            sim = self.shapes.simulations.get(spec.name)
+            if sim is None:
+                continue
+            if self.shapes.simulation_status(spec.name) == "stale":
+                out.append(
+                    DesignFinding(
+                        "shape_simulation_stale",
+                        "warning",
+                        f"{label}: simulation is STALE: the shape or the envelope changed",
+                        target,
+                    )
+                )
+            m = sim.metrics
+            if not m.converged:
+                out.append(
+                    DesignFinding(
+                        "shape_not_converged",
+                        "error",
+                        f"{label}: simulation did NOT converge ({m.status}); its results are "
+                        "not final",
+                        target,
+                    )
+                )
+            for region, fos in sorted(m.fos.items()):
+                if fos < REQUIRED_FOS:
+                    out.append(
+                        DesignFinding(
+                            "shape_fos",
+                            "error",
+                            f"{label}: factor of safety of {region} is {fos:.2f}, below the "
+                            f"required {REQUIRED_FOS:g}",
+                            target,
+                        )
+                    )
+        return out
 
     # -- derived data -------------------------------------------------------------------
 
@@ -466,5 +577,6 @@ class WorkspaceController(QObject):
                             f.code, "error", f"{label}: {f.message}", f"run:{record.run_id}"
                         )
                     )
+        out += self.shape_findings()
         order = {"error": 0, "warning": 1, "info": 2}
         return sorted(out, key=lambda f: order[f.severity])

@@ -37,6 +37,7 @@ class ValidationPanel(QWidget):
                 controller.artifactsChanged,
                 controller.runsChanged,
                 controller.sessionChanged,
+                controller.shapesChanged,
             ),
             defer_hidden=lambda: controller.defer_hidden,
         )

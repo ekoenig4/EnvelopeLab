@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Special shapes in the desktop application: a new **Special shapes** mode adds domes,
+  tubes, revolved profiles and imported Blender meshes to a standard envelope, edits
+  them with undo, shows their pattern checks, cut pieces and attachment lines, simulates
+  them with the preview solver, and exports the build pack and a Blender scene. Shapes
+  are placed in a background thread, so editing never waits for them. Unplaceable
+  shapes, failed checks, unconverged, failing or stale shape simulations are listed in
+  Validation / Warnings. The 3D / Simulation and History shortcuts move to Ctrl+5 and
+  Ctrl+6.
+- Project files are now format version 2 (ADR-0020): they store the special shapes.
+  Version 1 files open unchanged (no shapes); older releases cannot open version 2 files.
 - Placing a special shape is 2-2.5x faster (the footprint search samples 241 instead of
   801 points before bisecting); footprints and cut outlines change by less than 0.5 µm.
   On the special-shape validation page the dome study's inflated heights move by at

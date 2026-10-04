@@ -19,9 +19,48 @@ EnvelopeLab works out:
     and a result that did not converge is not a prediction. The builder is responsible
     for airworthiness.
 
-!!! note "Python API for now"
-    Primitives are available from Python (`envelopelab.features.primitives`). They are
-    not yet in the desktop application or in the design file.
+The shapes are part of the project: they are saved in the project file, undone and redone
+with the rest of the design, and kept in snapshots and versions. Use them in the desktop
+application ([below](#in-the-desktop-application)) or from Python (sections 1 to 5).
+
+## In the desktop application
+
+Open a standard-gore project and choose the **Special shapes** mode (**View ▸ Special
+shapes**, or its tab).
+
+1. **Add shape** ▸ **Dome**, **Tube** or **Revolved profile** adds a shape sized from your
+   envelope on gore 1, about halfway up the tape. **Import mesh (OBJ/STL/PLY)…** adds a
+   free-form shape modelled in Blender (metres, Y up for OBJ as Blender exports it; Z up
+   for STL and PLY). The mesh is stored in the project, so the file is no longer needed.
+2. Edit the shape in the **Parameters** form: placement (gore, tape position from the
+   mouth in m, position across the gore, lean and lean direction in degrees), sizes in m,
+   number of skin gores or panels, match marks per piece, seam allowance, an optional
+   feed hole in the envelope, and the skin fabric (by default the fabric of the envelope
+   row the shape sits on). A revolved shape's profile is edited in its table (radius and
+   height in m, base first, axis last). Every change is one undo step.
+3. The shape is placed in the background while you keep editing; the list says
+   **being placed…** until it is done (usually under a second). The right-hand side then
+   shows the **pattern checks**, a drawing of the **cut pieces** (finished line solid, cut
+   line dashed, the rim sewn to the envelope in red) with their sizes and areas, and the
+   **attachment lines** on each envelope panel. The **3D View** shows the shape on the
+   envelope.
+4. **Simulate shape (preview solver)** solves the shape's sub-model (choose the mesh
+   size; finer is slower) in the background. **Cancel** stops it. The result lists the
+   convergence status, iterations, final residual, mesh size, heights above the envelope
+   as designed and inflated, chamber pressure, wrinkled fraction, rim tape tension and
+   the factor of safety of each region. It is drawn in the 3D View as a separate layer.
+5. **Export build pack…** writes the envelope rows and every shape's pieces and marking
+   sheets (DXF, PDF and `index.json`, section 4). **Export to Blender (OBJ)…** writes the
+   envelope, every shape and every current shape simulation (section 5).
+
+Nothing is hidden. A shape that cannot be placed (for example a base too large for the
+local curvature), a failed check, a simulation that did NOT converge, a factor of safety
+below 5, and a simulation that is **STALE** because the shape or the envelope changed
+after it ran are shown in red in the panel and listed in **Validation / Warnings**.
+Selecting such a warning opens the shape. The build pack is not written while a shape
+is being placed or cannot be placed, so a pack never leaves a shape out without saying
+so. Shape simulations are kept until the project is closed; they are not saved in the
+project file.
 
 ## 1. Place a shape
 
@@ -259,3 +298,5 @@ default.
   between tapes is not included when placing the footprint, and marks across a lofted
   gore are placed in proportion to its flat width.
 * Seam allowances, stitching and tape widths are not part of the simulation model.
+* In the desktop application, shape simulations use the preview solver with assumed
+  stiffness values and are not saved with the project; run them again after reopening.

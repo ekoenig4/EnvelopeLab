@@ -52,6 +52,7 @@ class DesignTreePanel(QWidget):
                 controller.snapshotsChanged,
                 controller.sessionChanged,
                 controller.fileChanged,
+                controller.shapesChanged,
             ),
             defer_hidden=lambda: controller.defer_hidden,
         )
@@ -114,6 +115,27 @@ class DesignTreePanel(QWidget):
             if target == "zones":
                 for zone, fabric in design.zones.items():
                     self._add(item, f"{zone}: {fabric}", "zones")
+        if session.state.shapes:
+            state = "● unsaved" if "shapes" in unsaved else ""
+            shapes = self._add(
+                root, f"Special shapes ({len(session.state.shapes)})", "shapes", state
+            )
+            for shape in session.state.shapes:
+                result = self.controller.shapes.result(shape.name)
+                text = (
+                    "being placed"
+                    if result is None
+                    else "CANNOT BE PLACED"
+                    if result.design is None
+                    else "placed"
+                    if result.design.ok
+                    else "CHECKS FAILED"
+                )
+                child = self._add(
+                    shapes, f"{shape.name} ({shape.kind})", f"shape:{shape.name}", text
+                )
+                if text.isupper():
+                    child.setForeground(1, QBrush(QColor(STATUS_COLORS["stale"])))
         artifacts = self._add(self.tree, "Derived artifacts", "artifacts")
         for spec in ARTIFACTS:
             status = self.controller.artifact_status(spec.name)

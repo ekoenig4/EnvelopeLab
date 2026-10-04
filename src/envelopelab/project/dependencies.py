@@ -1,6 +1,7 @@
 """Dependency graph of derived design artifacts and their staleness.
 
-A project holds one *design state* (the design document plus the pattern annotations).
+A project holds one *design state* (the design document, the pattern annotations and
+the special shapes).
 Everything derived from it (flat patterns, the seam graph, the as-sewn rest mesh,
 simulation results, flattening, nesting and exports) is an *artifact*. Each artifact
 depends on a set of *input groups* (slices of the design state, e.g. ``geometry`` or
@@ -18,6 +19,7 @@ depends on a set of *input groups* (slices of the design state, e.g. ``geometry`
     geometry, manual_outlines ──► flattening
     materials, fabric_properties ──► nesting
     meta, rigging, turning_vents, scale_variants ──► export
+    geometry, row_zones, materials, shapes ──► shapes
 
 The *fingerprint* of an artifact is the SHA-256 of its own input slices and the
 fingerprints of its upstream artifacts. An artifact built with fingerprint ``f`` is
@@ -38,7 +40,7 @@ existed.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import Any, Literal
@@ -67,6 +69,7 @@ INPUT_GROUPS: tuple[str, ...] = (
     "turning_vents",
     "vent_openings",
     "scoop",
+    "shapes",
 )
 
 #: Input groups supplied from outside the project file (see module docstring).
@@ -139,6 +142,7 @@ ARTIFACTS: tuple[ArtifactSpec, ...] = (
     ArtifactSpec(
         "export", "Export", ("meta", "rigging", "turning_vents", "scale_variants"), ("nesting",)
     ),
+    ArtifactSpec("shapes", "Special shapes", ("geometry", "row_zones", "materials", "shapes")),
 )
 
 _BY_NAME: dict[str, ArtifactSpec] = {a.name: a for a in ARTIFACTS}
@@ -155,7 +159,11 @@ def canonical_hash(value: Any) -> str:
     return sha256(text.encode("utf-8")).hexdigest()
 
 
-def input_groups(design: Mapping[str, Any], patterns: Mapping[str, Any]) -> dict[str, Any]:
+def input_groups(
+    design: Mapping[str, Any],
+    patterns: Mapping[str, Any],
+    shapes: Sequence[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
     """Split a design state into its input groups.
 
     Parameters
@@ -165,6 +173,8 @@ def input_groups(design: Mapping[str, Any], patterns: Mapping[str, Any]) -> dict
         mode="json")``); lengths in m, temperatures in K, pressures in Pa.
     patterns : mapping
         Pattern annotations as JSON data (``PatternSet.model_dump(mode="json")``).
+    shapes : sequence of mapping
+        Special shapes as JSON data (``ShapeSpec.model_dump(mode="json")``); m, deg.
 
     Returns
     -------
@@ -235,6 +245,7 @@ def input_groups(design: Mapping[str, Any], patterns: Mapping[str, Any]) -> dict
             for v in design.get("turning_vents") or []
             if v.get("simulate_open")
         ],
+        "shapes": [dict(s) for s in shapes],
     }
 
 
