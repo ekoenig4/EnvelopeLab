@@ -33,7 +33,8 @@ never hidden. The builder is responsible for airworthiness.
                        appendages and parametric primitives), report (Reality
                        Check), project (sessions, dependency graph, project
                        files), rigging (parachute, red
-                       line, flying wires, turning vents); planned: export)
+                       line, flying wires, turning vents), export (build packs:
+                       DXF, PDF, index and output QA))
     tests/             unit/, property/, benchmarks/, regression/, fixtures/, gui/
     docs/              MkDocs site: user/, theory/, validation/, dev/, formats/, adr/
     scripts/           dev utilities: verify.py, generate_validation_docs.py,
@@ -79,7 +80,7 @@ Mark tests that take more than a few seconds with `@pytest.mark.slow` (the marke
 registered in `pyproject.toml`). Benchmark pages under `docs/validation/` are generated
 from `envelopelab.validation`; a test fails when a committed page is stale, so regenerate
 and commit it with any change that moves a benchmark value. Build-pack output QA (§6.6)
-will be added to `verify.py` together with the export code.
+runs in `verify.py` through `scripts/check_build_pack.py`.
 
 ### 6.2 Verification rules
 - **Run it, don't assume it.** Never say code works without running it. Quote the

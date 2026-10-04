@@ -9,6 +9,7 @@ COMMANDS: list[list[str]] = [
     [sys.executable, "-m", "mypy", "src", "solvers", "app", "tests"],
     [sys.executable, "-m", "pytest"],
     [sys.executable, "-m", "mkdocs", "build", "--strict"],
+    [sys.executable, "scripts/check_build_pack.py"],
 ]
 
 

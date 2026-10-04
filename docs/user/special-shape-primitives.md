@@ -21,8 +21,7 @@ EnvelopeLab works out:
 
 !!! note "Python API for now"
     Primitives are available from Python (`envelopelab.features.primitives`). They are
-    not yet in the desktop application or in the design file, and the cutting pattern is
-    not yet exported as DXF or PDF (planned with the build-pack export).
+    not yet in the desktop application or in the design file.
 
 ## 1. Place a shape
 
@@ -161,6 +160,39 @@ through its feed hole. The result shows:
 Check `result.converged` before reading anything. A result that did not converge is not
 a prediction. The same model can be verified with CalculiX (`calculix_adapter.run_calculix`)
 or run through the [Reality Check report](reality-check-report.md) workflow.
+
+## 4. Export the cutting patterns
+
+```python
+from envelopelab.export.build_pack import export_build_pack
+from envelopelab.export.qa import check_pack
+
+export_build_pack(
+    design,
+    [d],  # the envelope and its placed shapes
+    "build-pack/",
+    skin_fabric={"ear": "ripstop red"},  # per shape, or one name for all
+    roll_width=60 * 0.0254,  # m (60 in roll)
+)
+assert check_pack("build-pack/") == []  # the output QA, from the files alone
+```
+
+The pack contains:
+
+* one DXF per piece, in millimetres: the envelope's row panels (cut once per gore) and
+  every gore, panel and tip disc of each shape;
+* a **marking sheet** for each envelope panel a shape crosses: the panel with the
+  footprint line, the numbered match marks and the feed hole drawn where they go. Mark
+  them on the cut panels before sewing the envelope;
+* `pattern.pdf`: every sheet at 1:1 on pages as wide as your fabric roll. A sheet wider
+  than the roll is split into numbered strips;
+* `index.json`: every file with its piece, cut count, fabric, finished size, and which
+  edges are sewn together.
+
+Before cutting, **measure the calibration line** on every printed or plotted sheet. It
+must measure what its label says (for example 500 mm with ticks every 100 mm). If it
+doesn't, the sheet was scaled when it was printed. The layers and the index are described in
+[Build pack](../formats/build-pack.md).
 
 ## Limitations
 

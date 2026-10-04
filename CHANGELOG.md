@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Build-pack export (ADR-0016, `envelopelab.export`): cutting patterns of the envelope
+  rows and of every special shape's pieces, plus marking sheets for the envelope panels
+  each shape crosses (footprint line, numbered match marks, feed hole). One DXF per
+  sheet in mm, one `pattern.pdf` at 1:1 on roll-width pages (60 in by default; wide
+  sheets are split into strips), and `index.json` with pieces, cut counts, fabrics,
+  finished sizes and sewn edge pairs. Generated calibration lines and headers. The output
+  QA of AGENTS.md §6.6 (`envelopelab.export.qa.check_pack`) now runs in
+  `scripts/verify.py`. The Reality Check PDF writes its page size with two decimals; its
+  content is unchanged.
 - Special-shape primitives: a third shape, `Revolved`, spins any profile you give as
   points (spline or straight segments) about the feature's axis: noses, bulbs, onions,
   balls, flared horns. It closes in an apex or a flat tip disc, has the same attachment
@@ -19,7 +28,7 @@ All notable changes to this project will be documented in this file.
   checks rim length, seam pairs and flattening distortion. `primitive_appendage` builds a
   sub-model whose skin rests in the cut pieces (new builder skin mode `designed`, on the
   true envelope surface), so the preview solver and CalculiX show how the sewn shape
-  holds under pressure. Python API only for now (no app, design file or DXF export yet).
+  holds under pressure. Python API only for now (no app or design file yet).
   New generated page `validation/special-shape-primitives.md`. No existing numerical
   result changes.
 - Gore loft (ADR-0014): the bulge of each gore between its load tapes is now a design

@@ -43,6 +43,7 @@ nav:
       - Project file: formats/project-file.md
       - Shape file: formats/shape-file.md
       - Fabric library file: formats/fabric-library.md
+      - Build pack: formats/build-pack.md
   - ADR:
       - ADR-0001: adr/ADR-0001-stack-choice.md
       - ADR-0002: adr/ADR-0002-gpl-3-licensing.md
@@ -59,6 +60,7 @@ nav:
       - ADR-0013: adr/ADR-0013-workflow-modes-layout.md
       - ADR-0014: adr/ADR-0014-gore-loft.md
       - ADR-0015: adr/ADR-0015-special-shape-primitives.md
+      - ADR-0016: adr/ADR-0016-build-pack-export.md
 theme:
   name: material
 markdown_extensions:
