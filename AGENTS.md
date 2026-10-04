@@ -50,7 +50,7 @@ Create a planned directory only when the first code for it lands.
 
 ## 4. Environment setup
     python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-    pip install -e ".[dev,docs,gui]"
+    pip install -e ".[dev,docs,gui,fast]"
     pre-commit install
     # Linux/containers, all of the above plus system libraries, CalculiX and Xvfb:
     bash scripts/install_env.sh

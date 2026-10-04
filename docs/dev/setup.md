@@ -1,14 +1,14 @@
 # Developer setup
 
 On Linux (or in a container) `bash scripts/install_env.sh` installs the system libraries,
-CalculiX and Xvfb, creates `.venv` with the `dev,docs,gui` extras and checks the result;
+CalculiX and Xvfb, creates `.venv` with the `dev,docs,gui,fast` extras and checks the result;
 see [Installation](../user/installation.md). By hand:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\\Scripts\\activate
 python -m pip install --upgrade pip
-python -m pip install -e ".[dev,docs,gui]"
+python -m pip install -e ".[dev,docs,gui,fast]"
 pre-commit install
 python scripts/verify.py
 ```
@@ -25,7 +25,7 @@ sudo apt-get install -y libglu1-mesa libxcursor1 libxft2 libxinerama1
 ## Desktop application
 
 ```bash
-python -m pip install -e ".[dev,docs,gui]"
+python -m pip install -e ".[dev,docs,gui,fast]"
 envelopelab                   # the application (app/envelopelab_app)
 ```
 

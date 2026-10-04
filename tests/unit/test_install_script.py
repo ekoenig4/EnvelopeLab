@@ -60,7 +60,7 @@ def test_dry_run_prints_the_install_commands() -> None:
     qt = " ".join(script_lists()["APT_QT"])
     assert f"apt-get install -y --no-install-recommends {qt}" in out
     assert "calculix-ccx" in out and "xvfb" in out
-    assert "-m pip install -e .[dev,docs,gui]" in out
+    assert "-m pip install -e .[dev,docs,gui,fast]" in out
     minimal = subprocess.run(
         ["bash", str(SCRIPT), "--dry-run", "--no-system", "--extras", "gui", "--venv", "none"],
         capture_output=True,

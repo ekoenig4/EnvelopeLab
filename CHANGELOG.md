@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Faster preview solves (ADR-0019): the solver's element kernel (membrane strain,
+  tension-field stress, internal and pressure forces, nodal sums) runs as one compiled
+  loop when the optional `fast` extra (Numba) is installed: 3-4x faster (fixture envelope
+  at 1600 mm 10.2 s to 3.3 s, a dome sub-model 3.7 s to 0.9 s). Without it, precomputed
+  operators make it 1.1-1.4x faster. Results change only by round-off (largest node
+  difference 0.34 µm, iteration counts within a few percent); no benchmark moved. The
+  application stays responsive while a solve runs.
 - Smoother editing in the desktop application: every panel redraws at most once per
   edit, panels in other workflow modes wait until they are shown, the meridian spline and
   the panel rows are computed once per edit, and rigging lines are drawn as one 3D actor

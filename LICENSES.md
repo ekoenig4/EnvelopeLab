@@ -13,6 +13,8 @@
 | Gmsh (Python API and library) | panel triangulation (`envelopelab.assembly.mesh`) | GPL-2.0-or-later (with linking exceptions) |
 | PyYAML | build-pack YAML mapping files | MIT |
 | types-PyYAML (dev) | type stubs for mypy | Apache-2.0 |
+| Numba (optional extra `fast`; dev) | compiled element kernel of the preview solver (`envelopelab.solvers.kernels`), see ADR-0019; the NumPy path is used without it | BSD-2-Clause |
+| llvmlite (via Numba) | LLVM code generation for Numba | BSD-2-Clause |
 | Open3D (optional extra `registration`) | point-to-plane ICP registration of reference meshes (`envelopelab.io.reference_mesh`); a SciPy ICP is used when it is not installed | MIT |
 | PySide6 and shiboken6 (optional extra `gui`) | desktop application (`app/envelopelab_app`), see ADR-0007 | LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only |
 | PyVista (optional extra `gui`) | 3D view | MIT |

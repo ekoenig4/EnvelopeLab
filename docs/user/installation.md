@@ -20,7 +20,7 @@ The script
    (Arch) or `zypper` (openSUSE), as root or with `sudo`;
 2. installs CalculiX (`ccx`) and Xvfb (a virtual display for headless machines) where the
    distribution packages them;
-3. creates the virtualenv `.venv` and runs `pip install -e ".[dev,docs,gui]"`;
+3. creates the virtualenv `.venv` and runs `pip install -e ".[dev,docs,gui,fast]"`;
 4. checks that the library imports, reports whether `ccx` was found, and starts the main
    window headless to prove Qt works.
 
@@ -30,6 +30,7 @@ not be installed. Useful options (`--help` lists all):
 | Option | Effect |
 |---|---|
 | `--extras gui` | only the application (no test and docs tools) |
+| `--extras gui,fast` | the application with the compiled solver kernel (3-4x faster previews) |
 | `--no-system` | skip system packages (no root needed; libraries already installed) |
 | `--system-only` | only system packages (e.g. a container image layer) |
 | `--no-calculix`, `--no-xvfb` | leave out CalculiX or Xvfb |

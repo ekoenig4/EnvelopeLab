@@ -63,6 +63,7 @@ nav:
       - ADR-0016: adr/ADR-0016-build-pack-export.md
       - ADR-0017: adr/ADR-0017-blender-mesh-exchange.md
       - ADR-0018: adr/ADR-0018-freeform-mesh-shapes.md
+      - ADR-0019: adr/ADR-0019-numba-solver-kernel.md
 theme:
   name: material
 markdown_extensions:

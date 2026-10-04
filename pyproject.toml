@@ -28,6 +28,8 @@ dev = [
   "pytest-qt>=4.4",
   "ruff>=0.6",
   "types-PyYAML>=6.0",
+  # The compiled solver kernel is tested against the NumPy one (tests/unit/test_solver_kernels.py).
+  "numba>=0.60",
 ]
 # Desktop application (app/envelopelab_app). See ADR-0007.
 gui = [
@@ -38,6 +40,11 @@ gui = [
 docs = [
   "mkdocs>=1.6",
   "mkdocs-material>=9.5",
+]
+# Optional: compiled element kernel of the preview solver, 3-4x faster solves; results are
+# the same as without it (NumPy path). See ADR-0019.
+fast = [
+  "numba>=0.60",
 ]
 # Optional: Open3D point-to-plane ICP for reference-mesh registration (a SciPy ICP is used
 # without it). See ADR-0006.

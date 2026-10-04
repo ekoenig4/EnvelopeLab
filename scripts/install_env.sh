@@ -2,7 +2,7 @@
 # Set up an EnvelopeLab environment: system libraries, CalculiX, a virtualenv and the
 # Python package, then check that the library and the desktop application start.
 #
-#   bash scripts/install_env.sh              # everything (dev, docs and gui extras)
+#   bash scripts/install_env.sh              # everything (dev, docs, gui and fast extras)
 #   bash scripts/install_env.sh --help       # options
 #
 # Works as root (containers) or with sudo. System packages: apt (Debian, Ubuntu; tested),
@@ -42,7 +42,7 @@ ZYPPER_XVFB="xvfb-run xauth"
 ZYPPER_REGISTRATION="libusb-1_0-0"
 
 # --- options -------------------------------------------------------------------------
-EXTRAS="dev,docs,gui"
+EXTRAS="dev,docs,gui,fast"
 VENV=".venv"
 PYTHON="${PYTHON:-python3}"
 PM=""
@@ -58,7 +58,7 @@ usage() {
     cat <<'EOF'
 Usage: bash scripts/install_env.sh [options]
 
-  --extras LIST          pip extras to install (default: dev,docs,gui)
+  --extras LIST          pip extras to install (default: dev,docs,gui,fast)
   --venv DIR             virtualenv directory (default: .venv; "none" installs into
                          the current Python environment)
   --python EXE           Python >= 3.11 used to create the virtualenv (default: python3)
