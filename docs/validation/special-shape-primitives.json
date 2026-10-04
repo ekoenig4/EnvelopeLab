@@ -1,0 +1,54 @@
+[
+  {
+    "skin_rest": "cut pattern",
+    "mesh_size_m": 0.3,
+    "nodes": 471,
+    "status": "converged",
+    "converged": true,
+    "projected_height_m": 1.2040881729081294,
+    "designed_height_m": 1.1999999916752064,
+    "area_distortion": 0.008061829586511804,
+    "skin_wrinkled_fraction": 0.6175029682515801,
+    "lowest_fos": 90.34125137085815,
+    "chamber_pressure_pa": 17.555194280020523
+  },
+  {
+    "skin_rest": "cut pattern",
+    "mesh_size_m": 0.2,
+    "nodes": 853,
+    "status": "converged",
+    "converged": true,
+    "projected_height_m": 1.2088045694524592,
+    "designed_height_m": 1.1999999916752064,
+    "area_distortion": 0.008061829586511804,
+    "skin_wrinkled_fraction": 0.7276039899678803,
+    "lowest_fos": 81.0725147391571,
+    "chamber_pressure_pa": 17.555194280020523
+  },
+  {
+    "skin_rest": "designed shape",
+    "mesh_size_m": 0.2,
+    "nodes": 853,
+    "status": "converged",
+    "converged": true,
+    "projected_height_m": 1.2018990599289598,
+    "designed_height_m": 1.1999999916752064,
+    "area_distortion": 0.008061829586511804,
+    "skin_wrinkled_fraction": 0.0,
+    "lowest_fos": 80.33276061266383,
+    "chamber_pressure_pa": 17.555194280020523
+  },
+  {
+    "skin_rest": "cut pattern",
+    "mesh_size_m": 0.15,
+    "nodes": 1435,
+    "status": "converged",
+    "converged": true,
+    "projected_height_m": 1.2063765366716126,
+    "designed_height_m": 1.1999999916752064,
+    "area_distortion": 0.008061829586511804,
+    "skin_wrinkled_fraction": 0.6127732949868164,
+    "lowest_fos": 119.3111615210068,
+    "chamber_pressure_pa": 17.55519428178537
+  }
+]

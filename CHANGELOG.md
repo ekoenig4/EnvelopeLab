@@ -3,6 +3,18 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Special-shape primitives (ADR-0015, `envelopelab.features.primitives`): place a dome
+  (blister, lobe, ear) or a tube (horn, nose, mast, leaned or not) on a standard-gore
+  design by gore, tape position and lean. EnvelopeLab derives the footprint, its run
+  across every envelope panel in that panel's pattern coordinates, numbered match marks
+  on the envelope and on the skin, and the skin's cutting pattern: exact developments
+  for tube panels, and classic gores laid out with true-length seams for domes. It also
+  checks rim length, seam pairs and flattening distortion. `primitive_appendage` builds a
+  sub-model whose skin rests in the cut pieces (new builder skin mode `designed`, on the
+  true envelope surface), so the preview solver and CalculiX show how the sewn shape
+  holds under pressure. Python API only for now (no app, design file or DXF export yet).
+  New generated page `validation/special-shape-primitives.md`. No existing numerical
+  result changes.
 - Gore loft (ADR-0014): the bulge of each gore between its load tapes is now a design
   input, the lobe-radius ratio k = ρ/r along the gore (stations as fractions of the tape
   length, interpolated). Set it in the standard-gore editor's **Gore loft** table, as one

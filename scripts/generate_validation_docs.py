@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -21,6 +22,7 @@ RIGGING = ROOT / "docs" / "validation" / "rigging-benchmarks.md"
 CALCULIX = ROOT / "docs" / "validation" / "preview-vs-calculix"  # .json, .md, .svg
 SPECIAL = ROOT / "docs" / "validation" / "special-shape-fixtures"  # .json, .md
 SHAPES = ROOT / "docs" / "validation" / "shape-families.md"
+PRIMITIVES = ROOT / "docs" / "validation" / "special-shape-primitives"  # .json, .md
 ENVELOPE_FIXTURE = ROOT / "tests" / "fixtures" / "spherical_envelope" / "build-pack.yaml"
 # Regression fixture of the special-shape page: which features to run, with generic
 # assumed materials for its material zones and tapes, and the known limitations.
@@ -40,11 +42,12 @@ SPECIAL_FIXTURE_NOTES = [
 
 def main(argv: list[str] | None = None) -> None:
     """Regenerate all pages, or only those named (``analytic``, ``fixtures``, ``preview``,
-    ``shapes``, ``rigging``, ``calculix``, ``special``).
+    ``shapes``, ``rigging``, ``calculix``, ``special``, ``primitives``).
 
-    ``calculix`` runs the CalculiX verification study (needs ``ccx``, several minutes) and
+    ``calculix`` runs the CalculiX verification study (needs ``ccx``, several minutes),
     ``special`` the special-shape feature benchmarks (CalculiX rows when ``ccx`` is
-    installed, a few minutes); both are regenerated only when named.
+    installed, a few minutes) and ``primitives`` the special-shape primitive benchmarks
+    and their preview-solver study (a few minutes); they are regenerated only when named.
     """
     pages = set(argv if argv is not None else sys.argv[1:]) or {
         "analytic",
@@ -122,6 +125,19 @@ def main(argv: list[str] | None = None) -> None:
         checks = special_shapes.blister_checks(sdata.blister)
         checks += special_shapes.load_transfer_checks(sdata.load_transfer)
         failed += [name for name, ok, _ in checks if not ok]
+    if "primitives" in pages:
+        from envelopelab.validation import primitives
+
+        geometry = primitives.geometry_benchmarks()
+        study = primitives.solve_study()
+        PRIMITIVES.with_suffix(".json").write_text(
+            json.dumps(study, indent=2) + "\n", encoding="utf-8"
+        )
+        PRIMITIVES.with_suffix(".md").write_text(
+            primitives.render_markdown(geometry, study), encoding="utf-8"
+        )
+        failed += [r.name for r in geometry if not r.passed]
+        failed += [f"primitive study {r['mesh_size_m']} m" for r in study if not r["converged"]]
     if failed:
         raise SystemExit(f"validation failed: {', '.join(failed)}")
 

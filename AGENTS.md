@@ -30,8 +30,9 @@ never hidden. The builder is responsible for airworthiness.
                        (now: atmosphere, geometry, mass_estimate, design, materials,
                        commands, validation, io, assembly, solvers (preview
                        dynamic-relaxation solver), features (special-shape
-                       appendages), report (Reality Check), project (sessions,
-                       dependency graph, project files), rigging (parachute, red
+                       appendages and parametric primitives), report (Reality
+                       Check), project (sessions, dependency graph, project
+                       files), rigging (parachute, red
                        line, flying wires, turning vents); planned: export)
     tests/             unit/, property/, benchmarks/, regression/, fixtures/, gui/
     docs/              MkDocs site: user/, theory/, validation/, dev/, formats/, adr/
