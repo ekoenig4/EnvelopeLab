@@ -61,6 +61,7 @@ nav:
       - ADR-0014: adr/ADR-0014-gore-loft.md
       - ADR-0015: adr/ADR-0015-special-shape-primitives.md
       - ADR-0016: adr/ADR-0016-build-pack-export.md
+      - ADR-0017: adr/ADR-0017-blender-mesh-exchange.md
 theme:
   name: material
 markdown_extensions:

@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Blender mesh exchange (ADR-0017, `envelopelab.io.blender`, `envelopelab.features.scene`):
+  export the envelope, each special shape as designed and each solved skin as one OBJ
+  scene with named objects, written Y up so Blender's default OBJ import shows it upright
+  in metres (an unconverged solve is named `..._UNCONVERGED`). STL export, and reading
+  OBJ, STL and PLY shapes back with Blender's default axes.
 - Build-pack export (ADR-0016, `envelopelab.export`): cutting patterns of the envelope
   rows and of every special shape's pieces, plus marking sheets for the envelope panels
   each shape crosses (footprint line, numbered match marks, feed hole). One DXF per

@@ -194,6 +194,26 @@ must measure what its label says (for example 500 mm with ticks every 100 mm). I
 doesn't, the sheet was scaled when it was printed. The layers and the index are described in
 [Build pack](../formats/build-pack.md).
 
+## 5. Look at it in Blender
+
+```python
+from envelopelab.features.scene import export_scene
+
+export_scene(
+    "balloon.obj", surface,
+    designs=[d],                    # shapes as designed
+    solved=[(d, am, result)],       # and as simulated (from step 3)
+)
+```
+
+In Blender use **File ▸ Import ▸ Wavefront (.obj)** with the default settings. The file is
+written with Y up, which is what Blender's importer expects, so the balloon stands
+upright, in metres. Each part is a separate object: `envelope`, `<name>_designed` and
+`<name>_simulated`. A simulation that did not converge is named
+`<name>_simulated_UNCONVERGED`: it is not a prediction. For STL use
+`envelopelab.io.blender.write_stl_object`; STL files are written Z up, Blender's STL
+default.
+
 ## Limitations
 
 * Revolved shapes are symmetric about their axis. Shapes that are not (ears, curved
