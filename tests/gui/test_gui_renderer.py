@@ -54,3 +54,17 @@ def test_renderer_draws_layers_and_edits_the_profile_with_the_spline_widget(
     w.view3d.plotter.screenshot(str(image))
     assert image.stat().st_size > 1000
     w.close()
+
+
+def test_designed_shapes_are_drawn_without_edges(qtbot: QtBot, settings: QSettings) -> None:
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    assert w.open_project(GORE_PROJECT) is not None and w.view3d.plotter is not None
+    w.shapes.add_shape("dome")
+    assert w.controller.shapes.wait(120_000)
+    actor = w.view3d.plotter.actors["shape:Dome"]
+    # The designed skin is a dense display mesh (about 30 000 triangles): with its edges
+    # drawn it renders as a black blob instead of in the layer colour.
+    assert not actor.GetProperty().GetEdgeVisibility()
+    w.close()

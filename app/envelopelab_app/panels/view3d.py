@@ -63,6 +63,9 @@ RIGGING_COLORS = {
     "vertical_seams": "#1a1a1a",
     "horizontal_seams": "#4d4d4d",
 }
+#: Layers drawn without mesh edges: display meshes (the design surface and the designed
+#: shapes, whose dense grids would render as solid black with edges), not solver meshes.
+SMOOTH_KINDS = ("design", "shape")
 #: Line widths of polyline kinds (pixels); default 2.
 LINE_WIDTHS = {"red_line": 4, "vertical_seams": 3, "horizontal_seams": 2}
 #: Brightness of every second gore, so that neighbouring gores are told apart.
@@ -483,7 +486,7 @@ class View3DPanel(QWidget):
                     color=layer.color,
                     style=style,
                     opacity=opacity,
-                    show_edges=layer.kind != "design",
+                    show_edges=layer.kind not in SMOOTH_KINDS,
                     name=layer.key,
                 )
             if layer.tapes:

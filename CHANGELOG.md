@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Special shapes in the 3D view are drawn in their layer colour; they were drawn with
+  their dense mesh edges and looked like black blobs.
 - Special shapes in the desktop application: a new **Special shapes** mode adds domes,
   tubes, revolved profiles and imported Blender meshes to a standard envelope, edits
   them with undo, shows their pattern checks, cut pieces and attachment lines, simulates
