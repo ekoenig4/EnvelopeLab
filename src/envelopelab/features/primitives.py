@@ -1,6 +1,7 @@
 r"""Parametric special-shape primitives on a standard-gore envelope.
 
-A primitive (a dome or a tube) is placed on the envelope designed by the gore editor.
+A primitive (a dome, a tube or a revolved profile) is placed on the envelope designed by
+the gore editor.
 This module derives everything a builder needs to make it from that placement alone:
 
 * the **footprint**: the line where the primitive's skin meets the envelope, and its
@@ -53,10 +54,14 @@ arc length from the base circle (:math:`\zeta = 0`) to the tip. Around the axis,
   :math:`\rho = a\cos\omega,\ \zeta = h\sin\omega`; a blister, lobe or ear.
 * **Tube**: a straight frustum from base radius :math:`r_b` to tip radius :math:`r_t`
   over the axial length :math:`L`, closed by a flat tip disc; a horn, nose or mast.
+* **Revolved**: any meridian given as points (spline or straight segments), closed by an
+  apex or a flat tip disc; a nose, bulb, onion, ball or flared horn. Its gores are
+  flattened like a dome's.
 
 Below the base circle each skin meridian is continued along its base tangent (a dome's
-wall drops straight down the axis, a tube's generator continues) until it meets the
-envelope; the footprint point on meridian :math:`\phi` is the last crossing of
+wall drops straight down the axis, a tube's generator continues; a profile that flares
+outward at its base drops straight down the axis too) until it meets the envelope; the
+footprint point on meridian :math:`\phi` is the last crossing of
 :math:`\mathbf{S}(\cdot, \phi)` from inside to outside the envelope (signed distance to
 the meridian curve, bisection to :data:`ROOT_TOLERANCE`). The skin therefore always
 reaches the envelope, also when a leaned base circle dips below it.
@@ -136,7 +141,7 @@ if TYPE_CHECKING:
     from envelopelab.design.model import DesignDocument
     from envelopelab.project.model import PatternSet
 
-PrimitiveKind = Literal["dome", "tube"]
+PrimitiveKind = Literal["dome", "tube", "revolved"]
 CheckSeverity = Literal["info", "warning", "error"]
 
 ROOT_TOLERANCE = 1e-7
@@ -412,6 +417,21 @@ class Dome:
         """Number of skin pieces round the axis."""
         return self.gores
 
+    @property
+    def closed_tip(self) -> bool:
+        """False: the gores meet in a point at the apex."""
+        return False
+
+    @property
+    def tip_radius(self) -> float:
+        """Radius of the tip circle, m (0: an apex)."""
+        return 0.0
+
+    @property
+    def tip_height(self) -> float:
+        """Height of the tip above the base circle along the axis, m."""
+        return self.height
+
     def meridian(self, count: int = 2001) -> tuple[FloatArray, FloatArray]:
         """Dense skin meridian :math:`(\\rho, \\zeta)` from the base circle to the tip, m."""
         w = np.linspace(0.0, 0.5 * math.pi, count)
@@ -467,6 +487,11 @@ class Tube:
         """True when a flat disc closes the tip."""
         return self.tip_radius > 0.0
 
+    @property
+    def tip_height(self) -> float:
+        """Height of the tip above the base circle along the axis, m."""
+        return self.length
+
     def meridian(self, count: int = 2001) -> tuple[FloatArray, FloatArray]:
         """Skin meridian from the base circle to the tip, m (a straight generator)."""
         f = np.linspace(0.0, 1.0, count)
@@ -486,7 +511,91 @@ class Tube:
             raise PrimitiveError(f"{self.name}: a tube needs at least one panel")
 
 
-Primitive = Dome | Tube
+@dataclass(frozen=True)
+class Revolved:
+    r"""Any profile revolved about the axis: nose, bulb, onion, ball, flared horn.
+
+    Attributes
+    ----------
+    name : str
+        Feature name.
+    placement : Placement
+        Base point and lean.
+    profile : tuple of (float, float)
+        Meridian points :math:`(\rho, \zeta)` from the base circle (:math:`\zeta = 0`,
+        :math:`\rho > 0`) to the tip, m: distance from the axis and height along it. The
+        last point on the axis (:math:`\rho = 0`) closes the shape in an apex; otherwise
+        a flat disc of the last radius closes it.
+    gores : int
+        Number of skin gores M (>= 3).
+    smooth : bool
+        Interpolate the points with a cubic spline (otherwise straight segments).
+    marks_per_piece : int
+        Match marks per gore on the rim (>= 1).
+    """
+
+    name: str
+    placement: Placement
+    profile: tuple[tuple[float, float], ...]
+    gores: int = 12
+    smooth: bool = True
+    marks_per_piece: int = 2
+
+    kind: PrimitiveKind = field(default="revolved", init=False)
+
+    @property
+    def pieces(self) -> int:
+        """Number of skin pieces round the axis (a tip disc is extra)."""
+        return self.gores
+
+    @property
+    def tip_radius(self) -> float:
+        """Radius of the tip circle, m (0: an apex)."""
+        return float(self.profile[-1][0])
+
+    @property
+    def closed_tip(self) -> bool:
+        """True when a flat disc closes the tip."""
+        return self.tip_radius > 0.0
+
+    @property
+    def tip_height(self) -> float:
+        """Height of the tip above the base circle along the axis, m."""
+        return float(self.profile[-1][1])
+
+    def meridian(self, count: int = 2001) -> tuple[FloatArray, FloatArray]:
+        """Dense skin meridian from the base circle to the tip, m."""
+        pts = np.asarray(self.profile, dtype=np.float64)
+        chord = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))])
+        t = np.linspace(0.0, chord[-1], count)
+        if self.smooth and len(pts) > 2:
+            from scipy.interpolate import CubicSpline
+
+            rho = CubicSpline(chord, pts[:, 0])(t)
+            zeta = CubicSpline(chord, pts[:, 1])(t)
+            return np.clip(rho, 0.0, None), zeta
+        return np.interp(t, chord, pts[:, 0]), np.interp(t, chord, pts[:, 1])
+
+    def validate(self) -> None:
+        """Raise :class:`PrimitiveError` for out-of-range values."""
+        _check_common(self.name, self.placement, self.marks_per_piece)
+        pts = np.asarray(self.profile, dtype=np.float64)
+        if pts.ndim != 2 or pts.shape[1] != 2 or len(pts) < 2:
+            raise PrimitiveError(f"{self.name}: a profile needs at least two (rho, zeta) points")
+        if pts[0, 1] != 0.0 or pts[0, 0] <= 0.0:
+            raise PrimitiveError(f"{self.name}: the profile must start at zeta = 0 with rho > 0")
+        if np.any(pts[:-1, 0] <= 0.0) or pts[-1, 0] < 0.0:
+            raise PrimitiveError(f"{self.name}: only the last profile point may lie on the axis")
+        if np.any(np.linalg.norm(np.diff(pts, axis=0), axis=1) <= 0.0):
+            raise PrimitiveError(f"{self.name}: profile points must be distinct")
+        if self.gores < 3:
+            raise PrimitiveError(f"{self.name}: a revolved shape needs at least 3 gores")
+        rho, _ = self.meridian()
+        if np.any(rho[:-1] <= 0.0):
+            raise PrimitiveError(f"{self.name}: the smoothed profile crosses the axis")
+
+
+Primitive = Dome | Tube | Revolved
 
 
 def _check_common(name: str, placement: Placement, marks: int) -> None:
@@ -649,7 +758,7 @@ class PrimitiveDesign:
 
     Attributes
     ----------
-    primitive : Dome or Tube
+    primitive : Dome, Tube or Revolved
         Input.
     surface : EnvelopeSurface
         Host envelope.
@@ -802,7 +911,10 @@ class _Skin:
         self.rho_m, self.zeta_m, self.sigma = rho, zeta, sigma
         self.total = float(sigma[-1])
         tangent = np.array([rho[1] - rho[0], zeta[1] - zeta[0]])
-        self.base_tangent = tangent / np.linalg.norm(tangent)
+        tangent /= np.linalg.norm(tangent)
+        # A profile flaring outward at its base would run into the axis if continued
+        # backwards; its wall drops straight down the axis instead.
+        self.base_tangent = tangent if tangent[0] <= 0.0 else np.array([0.0, 1.0])
         self.phi = np.linspace(0.0, 2.0 * math.pi, samples, endpoint=False)
         self.u0 = self._footprint(self.phi)
 
@@ -986,13 +1098,12 @@ class _ConePiece(_Piece):
 
     def __init__(self, skin: _Skin, phi_a: float, phi_b: float) -> None:
         super().__init__(skin, phi_a, phi_b)
-        tube = skin.primitive
-        assert isinstance(tube, Tube)
+        r_b, r_t = float(skin.rho_m[0]), float(skin.rho_m[-1])
         slant = skin.total
-        self.sin_g = (tube.base_radius - tube.tip_radius) / slant
+        self.sin_g = (r_b - r_t) / slant
         self.cyl = self.sin_g < 1e-9
-        self.d_base = 0.0 if self.cyl else tube.base_radius / self.sin_g
-        self.radius = tube.base_radius
+        self.d_base = 0.0 if self.cyl else r_b / self.sin_g
+        self.radius = r_b
         self.shift = 0.0
         rim = self.flat(np.zeros(181), np.linspace(phi_a, phi_b, 181))
         self.shift = float(rim[:, 1].min())
@@ -1048,10 +1159,20 @@ def _seams(primitive: Primitive) -> FloatArray:
     return out
 
 
+def _developable(primitive: Primitive) -> bool:
+    """True for a straight frustum (a tube, or a revolved profile of one segment)."""
+    if isinstance(primitive, Tube):
+        return True
+    if isinstance(primitive, Revolved) and len(primitive.profile) == 2:
+        r_b, r_t = primitive.profile[0][0], primitive.profile[1][0]
+        return r_b >= r_t
+    return False
+
+
 def _pieces(skin: _Skin, primitive: Primitive) -> list[_Piece]:
     seams = _seams(primitive)
     pairs = list(zip(seams[:-1], seams[1:], strict=True))
-    if isinstance(primitive, Tube):
+    if _developable(primitive):
         return [_ConePiece(skin, float(a), float(b)) for a, b in pairs]
     gores = [_GorePiece(skin, float(a), float(b)) for a, b in pairs]
     # Both sides of every skin seam are laid at the seam's true 3D length.
@@ -1061,7 +1182,7 @@ def _pieces(skin: _Skin, primitive: Primitive) -> list[_Piece]:
 
 
 def _piece_label(primitive: Primitive, k: int) -> str:
-    return f"{primitive.name}-{'G' if primitive.kind == 'dome' else 'P'}{k + 1}"
+    return f"{primitive.name}-{'P' if primitive.kind == 'tube' else 'G'}{k + 1}"
 
 
 def _outline(piece: _Piece, n: int = 97) -> tuple[FloatArray, dict[str, FloatArray]]:
@@ -1177,7 +1298,7 @@ def design_primitive(
 
     Parameters
     ----------
-    primitive : Dome or Tube
+    primitive : Dome, Tube or Revolved
         Feature definition, m and deg.
     surface : EnvelopeSurface
         Host envelope (:meth:`EnvelopeSurface.from_design`).
@@ -1229,7 +1350,7 @@ def design_primitive(
                 surface_area=_surface_area(skin, piece),
             )
         )
-    if isinstance(primitive, Tube) and primitive.closed_tip:
+    if primitive.closed_tip:
         ang = np.linspace(0.0, 2.0 * math.pi, 192, endpoint=False)
         disc = primitive.tip_radius * np.column_stack([np.cos(ang), np.sin(ang)])
         cut.append(
@@ -1363,8 +1484,8 @@ def _checks(design: PrimitiveDesign, pieces: list[_Piece], tol: float) -> list[D
         + (
             "(flattening a doubly curved gore lengthens its seams, so the sewn dome is "
             "fuller than designed; more gores reduce it, the simulation predicts it)"
-            if p.kind == "dome"
-            else "(tube panels are exact developments)"
+            if not _developable(p)
+            else "(frustum panels are exact developments)"
         ),
     )
     distortion = max(
@@ -1651,10 +1772,10 @@ class _SkinFactory:
             phi_rel[k] = j * width
         seam_set = set(seam_node)
 
-        closed = isinstance(prim, Tube) and prim.closed_tip
+        closed = prim.closed_tip
         per = 0
         tip_phi: FloatArray = np.zeros(0)
-        if isinstance(prim, Tube) and closed:
+        if closed:
             per = max(1, int(math.ceil(prim.tip_radius * width / size)))
             tip_phi = seams[0] + width * np.arange(m * per) / per
         seam_t = [self._seam_ts(float(seams[j]), size) for j in range(m)]
@@ -1734,7 +1855,7 @@ class _SkinFactory:
             chain = [keys[e[0]] for e in [rim[-1], *right, top[0]]]
             if m > 1 or k == 0:
                 seam_edges[f"{prim.name}:seam {j_b + 1}"] = np.column_stack([chain[:-1], chain[1:]])
-        if isinstance(prim, Tube) and closed:
+        if closed:
             ring = prim.tip_radius * np.column_stack([np.cos(tip_phi), np.sin(tip_phi)])
             xy, tri = _mesh_disc(ring, size)
             _, hit = cKDTree(xy).query(ring)
@@ -1742,7 +1863,7 @@ class _SkinFactory:
             for i, h in enumerate(hit):
                 local[h] = node(("tip", i), 1.0, float(tip_phi[i]))
             free = np.flatnonzero(local < 0)
-            centre = design.base_point + prim.length * design.axis
+            centre = design.base_point + prim.tip_height * design.axis
             local[free] = len(positions) + np.arange(len(free))
             positions.extend(
                 centre + np.outer(xy[free, 0], design.b1) + np.outer(xy[free, 1], design.b2)

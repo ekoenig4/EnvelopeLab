@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Special-shape primitives: a third shape, `Revolved`, spins any profile you give as
+  points (spline or straight segments) about the feature's axis: noses, bulbs, onions,
+  balls, flared horns. It closes in an apex or a flat tip disc, has the same attachment
+  lines, match marks, cutting pattern, checks and sub-model as the dome and the tube, and
+  a single straight segment is developed exactly. A profile that flares outward at its
+  base now drops straight down the axis to the envelope. New rows in
+  `validation/special-shape-primitives.md`. No existing numerical result changes.
 - Special-shape primitives (ADR-0015, `envelopelab.features.primitives`): place a dome
   (blister, lobe, ear) or a tube (horn, nose, mast, leaned or not) on a standard-gore
   design by gore, tape position and lean. EnvelopeLab derives the footprint, its run

@@ -1,7 +1,8 @@
 # Adding special shapes to a standard envelope
 
-Start from a standard-gore design, add domes (blisters, lobes, ears) and tubes (horns,
-noses, masts) on top of it, and EnvelopeLab works out:
+Start from a standard-gore design, add domes (blisters, lobes, ears), tubes (horns,
+masts) and revolved shapes of any profile (noses, bulbs, onions, balls) on top of it, and
+EnvelopeLab works out:
 
 * where each shape meets the envelope (the **footprint**), as a line to mark on every
   envelope panel it crosses, in that panel's own pattern coordinates;
@@ -59,6 +60,25 @@ horn = Tube(
 )
 d = design_primitive(ear, surface, seam_allowance=0.0125, feed_hole_radius=0.3)
 ```
+
+**Any profile.** A `Revolved` shape spins a profile you give as `(rho, zeta)` points
+about its axis. `rho` is the distance from the axis and `zeta` the height above the base
+circle, both in metres, from the base circle (`zeta` = 0) to the tip. End on the axis
+(`rho` = 0) for a point, or anywhere else for a flat tip disc:
+
+```python
+from envelopelab.features.primitives import Revolved
+
+onion = Revolved(
+    "onion",
+    Placement(gore=9, tape_position=11.0),
+    profile=((0.4, 0.0), (0.9, 0.5), (0.8, 1.0), (0.3, 1.5), (0.0, 1.9)),
+    gores=12,
+)
+```
+
+The points are joined by a smooth curve (`smooth=False` for straight segments). A single
+straight segment is a frustum and is unrolled exactly like a tube.
 
 **Placement.** Gores are numbered from 1. `across` is the fraction of the gore width from
 its centreline (−0.5 and +0.5 are the load tapes either side). `tape_position` is measured
@@ -144,8 +164,8 @@ or run through the [Reality Check report](reality-check-report.md) workflow.
 
 ## Limitations
 
-* Domes are half spheroids and tubes are straight frustums; other shapes are not yet
-  available.
+* Revolved shapes are symmetric about their axis. Shapes that are not (ears, curved
+  horns, faces) need the mesh import, which is planned next.
 * The envelope is the surface of revolution through the load tapes. The lobe bulge
   between tapes is not included when placing the footprint, and marks across a lofted
   gore are placed in proportion to its flat width.

@@ -209,3 +209,54 @@ def test_designed_skin_rests_in_its_cut_pieces_and_is_sewn_to_the_footprint() ->
     assert np.abs(spec.host.height_above(model.positions[am.rim_nodes])).max() < 1e-6  # type: ignore[union-attr]
     assert am.feed is not None
     assert spec.intended["projected_height_m"] == pytest.approx(d.designed_height)
+
+
+def test_revolved_profiles_reproduce_dome_and_tube() -> None:
+    from envelopelab.features.primitives import Revolved
+
+    w = np.linspace(0.0, 0.5 * math.pi, 41)
+    arc = tuple((float(math.cos(a)), float(math.sin(a))) for a in w[:-1]) + ((0.0, 1.0),)
+    dome = design_primitive(Dome("d", Placement(2, EQUATOR), 1.0, 1.0, gores=12), SPHERE)
+    rev = design_primitive(Revolved("d", Placement(2, EQUATOR), arc, gores=12), SPHERE)
+    assert rev.footprint_length == pytest.approx(dome.footprint_length, rel=1e-4)
+    assert rev.designed_height == pytest.approx(dome.designed_height, abs=1e-3)
+    assert [p.label for p in rev.pieces] == [p.label for p in dome.pieces]
+    for a, b in zip(rev.pieces, dome.pieces, strict=True):
+        assert a.flat_area == pytest.approx(b.flat_area, rel=2e-3)
+    straight = ((0.6, 0.0), (0.2, 1.5))
+    tube = design_primitive(Tube("t", Placement(2, EQUATOR), 0.6, 0.2, 1.5), SPHERE)
+    rt = design_primitive(Revolved("t", Placement(2, EQUATOR), straight, 4), SPHERE)
+    assert rt.footprint_length == pytest.approx(tube.footprint_length, rel=1e-5)
+    assert rt.pieces[-1].label == "t-TIP"
+    assert rt.pieces[-1].flat_area == pytest.approx(math.pi * 0.04, rel=1e-3)
+    assert sum(p.flat_area for p in rt.pieces[:4]) == pytest.approx(
+        sum(p.flat_area for p in tube.pieces[:4]), rel=1e-6
+    )
+
+
+def test_a_profile_flaring_outward_drops_straight_to_the_envelope() -> None:
+    from envelopelab.features.primitives import Revolved
+
+    onion = ((0.4, 0.0), (0.9, 0.5), (0.8, 1.0), (0.3, 1.5), (0.0, 1.9))
+    d = design_primitive(Revolved("o", Placement(2, EQUATOR), onion), SPHERE)
+    delta = SPHERE_RADIUS - math.sqrt(SPHERE_RADIUS**2 - 0.16)
+    assert d.footprint_length == pytest.approx(2 * math.pi * 0.4, rel=1e-4)
+    assert -float(d._skin.u0.min()) == pytest.approx(delta, abs=1e-6)
+    assert all(c.severity != "error" for c in d.checks)
+
+
+@pytest.mark.parametrize(
+    "profile, message",
+    [
+        (((0.5, 0.1), (0.0, 1.0)), "start at zeta = 0"),
+        (((0.5, 0.0), (0.0, 0.5), (0.2, 1.0)), "only the last"),
+        (((0.5, 0.0),), "at least two"),
+    ],
+)
+def test_invalid_revolved_profiles_are_rejected(
+    profile: tuple[tuple[float, float], ...], message: str
+) -> None:
+    from envelopelab.features.primitives import Revolved
+
+    with pytest.raises(PrimitiveError, match=message):
+        design_primitive(Revolved("r", Placement(1, EQUATOR), profile), SPHERE)

@@ -36,6 +36,7 @@ from envelopelab.features.primitives import (
     Dome,
     EnvelopeSurface,
     Placement,
+    Revolved,
     RowBand,
     Tube,
     design_primitive,
@@ -205,6 +206,39 @@ def geometry_benchmarks() -> list[BenchmarkResult]:
                 GEOMETRY_TOLERANCE,
             ),
         ]
+
+    # A revolved quarter circle is the hemispherical dome; a revolved straight profile is
+    # the frustum and develops exactly.
+    w = np.linspace(0.0, 0.5 * math.pi, 41)
+    arc = tuple((float(math.cos(x)), float(math.sin(x))) for x in w[:-1]) + ((0.0, 1.0),)
+    rev = design_primitive(Revolved("rev", Placement(1, s_eq), arc, STUDY_GORES), surface)
+    tag = f"Revolved quarter circle a=1 m, {STUDY_GORES} gores"
+    out += [
+        BenchmarkResult(
+            f"{tag}: footprint length",
+            rev.footprint_length,
+            2 * math.pi,
+            "m",
+            "relative",
+            LENGTH_TOLERANCE,
+        ),
+        BenchmarkResult(
+            f"{tag}: designed height", rev.designed_height, 1.0, "m", "absolute", GEOMETRY_TOLERANCE
+        ),
+    ]
+    rf = design_primitive(
+        Revolved("revf", Placement(1, s_eq), ((r_b, 0.0), (r_t, length)), panels), surface
+    )
+    out.append(
+        BenchmarkResult(
+            f"Revolved straight profile {r_b:g}/{r_t:g} m: developed side edge",
+            _length(rf.pieces[0].edges["right"]),
+            slant + ext,
+            "m",
+            "absolute",
+            GEOMETRY_TOLERANCE,
+        )
+    )
 
     # Attachment marks map back onto the footprint (dome straddling a load tape and a
     # row seam).

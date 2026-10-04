@@ -52,10 +52,15 @@ the arc length from the base circle to the tip:
 with \( \mathbf{b}_1 \) the up-tape direction made normal to the axis and
 \( \mathbf{b}_2 = \mathbf{a}\times\mathbf{b}_1 \). A dome is a half spheroid
 \( \rho = a\cos\omega,\ \zeta = h\sin\omega \); a tube is a straight frustum from radius
-\(r_b\) to \(r_t\) over the axial length \(L\).
+\(r_b\) to \(r_t\) over the axial length \(L\). A *revolved* shape takes any meridian
+given as points \( (\rho_i, \zeta_i) \) from the base circle to the tip, joined by a cubic
+spline or by straight segments. It ends in an apex when its last point is on the axis and
+in a flat tip disc otherwise.
 
 **Footprint.** Below the base circle every skin meridian continues along its base
-tangent: a dome's wall drops straight down the axis, a tube's generator continues. The
+tangent: a dome's wall drops straight down the axis, a tube's generator continues. A
+profile that flares outward at its base (an onion or a ball) would run into the axis if
+continued backwards, so its wall drops straight down the axis instead. The
 footprint point on meridian \( \phi \) is the last crossing of that line from inside to
 outside the envelope. It is found by sampling the signed distance to the meridian curve
 and bisecting to \(10^{-7}\) m. So the skin always reaches the envelope, including where a
@@ -70,12 +75,16 @@ meridian runs from its footprint point (\(t = 0\)) to the tip (\(t = 1\)).
 
 ### Tube panels: exact developments
 
+This applies to tubes and to revolved profiles of a single straight segment.
+
 A cone of half-angle \( \gamma \), with \( \sin\gamma = (r_b - r_t)/\ell \), unrolls about
 its apex. The polar radius is the slant distance from the apex and the polar angle is
 \( \alpha = \phi\sin\gamma \); a cylinder unrolls to \( x = r_b\phi \) [Struik]. Every
 length and angle is kept, the footprint edge included.
 
 ### Dome gores: classic gores with true-length seams
+
+This applies to domes and to every other revolved profile.
 
 The centreline of the gore is laid straight with its true length \(y(t)\). Every parallel
 \(t\) = const is laid straight across it with its true arc length from the centreline,
