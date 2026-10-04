@@ -88,6 +88,7 @@ class MainWindow(QMainWindow):
         self.interactive = interactive
         self.instance_id = uuid.uuid4().hex
         self.controller = WorkspaceController(self.prefs)
+        self.controller.defer_hidden = interactive
         self.simulation = SimulationManager(self.controller)
         self.setWindowTitle("EnvelopeLab")
         self.resize(1500, 950)
@@ -99,7 +100,9 @@ class MainWindow(QMainWindow):
         self.validation = ValidationPanel(self.controller)
         self.runs = RunsPanel(self.controller, self.simulation)
         self.materials = MaterialsPanel(self.controller)
-        self.view3d = View3DPanel(self.controller, enable_renderer=use_3d)
+        self.view3d = View3DPanel(
+            self.controller, enable_renderer=use_3d, defer_renderer=interactive
+        )
         self.patterns = PatternPanel(self.controller)
         self.history = HistoryPanel(self.controller)
         self.rigging = RiggingPanel(self.controller)
@@ -175,6 +178,8 @@ class MainWindow(QMainWindow):
         self.restore_last_layout()
         if interactive:
             QTimer.singleShot(0, self.offer_recovery)
+            # The window is on screen before PyVista/OpenGL start (seconds).
+            QTimer.singleShot(50, self.view3d.load_renderer)
 
     # -- construction -------------------------------------------------------------------
 

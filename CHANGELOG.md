@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Smoother editing in the desktop application: every panel redraws at most once per
+  edit, panels in other workflow modes wait until they are shown, the meridian spline and
+  the panel rows are computed once per edit, and rigging lines are drawn as one 3D actor
+  per kind. With the 3D view on, an edit takes 25-35 ms instead of 160 ms, undo 20-25 ms
+  instead of 100 ms, a mode switch about 30 ms instead of 110 ms and opening a project
+  30-40 ms instead of 280 ms. The window appears before the 3D renderer has loaded.
 - Free-form special shapes from a mesh (ADR-0018, `FreeformShape`,
   `envelopelab.features.freeform`): import a closed shape modelled in Blender (OBJ, STL
   or PLY), place it on the envelope, and EnvelopeLab clips it at the envelope (the cut

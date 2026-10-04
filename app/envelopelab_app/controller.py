@@ -98,6 +98,31 @@ class WorkspaceController(QObject):
         self.selection = ""
         self._outputs: GoreOutputs | None = None
         self._outputs_error: str | None = None
+        #: Change number: bumped once per burst of signals, so a panel connected to
+        #: several of them refreshes once per change (``envelopelab_app.refresh``).
+        self.revision = 0
+        #: Hidden panels wait until they are shown before refreshing. On in the
+        #: interactive application; off for scripted windows that read hidden panels.
+        self.defer_hidden = False
+        self._derived: dict[str, tuple[int, Any]] = {}
+
+    def bump(self) -> None:
+        """Start a new change (call before emitting the signals that announce it)."""
+        self.revision += 1
+
+    def _cached(self, key: str, compute: Callable[[], T]) -> T:
+        """``compute()`` once per revision."""
+        hit = self._derived.get(key)
+        if hit is not None and hit[0] == self.revision:
+            return hit[1]  # type: ignore[no-any-return]
+        value = compute()
+        self._derived[key] = (self.revision, value)
+        return value
+
+    def notify_artifacts(self) -> None:
+        """Announce that built artifacts (patterns, models, runs) changed."""
+        self.bump()
+        self.artifactsChanged.emit()
 
     def _open_library(self) -> FabricLibraryRepository:
         path = self.prefs.resolved_material_library()
@@ -148,6 +173,7 @@ class WorkspaceController(QObject):
         if self.session is not None:
             # Results built from the old values become stale (fabric_properties group).
             self.session.refresh_fabrics()
+        self.bump()
         self._refresh_outputs()
         self.libraryChanged.emit()
         self.stateChanged.emit()
@@ -160,6 +186,7 @@ class WorkspaceController(QObject):
         """Show another session (None: no project open)."""
         if self.session is not None:
             self.session.remove_listener(self._on_event)
+        self.bump()
         self.session = session
         self.patterns_cache = None
         self.model_cache = None
@@ -178,6 +205,7 @@ class WorkspaceController(QObject):
         self.snapshotsChanged.emit()
 
     def _on_event(self, event: str) -> None:
+        self.bump()
         if event == EVENT_STATE:
             self._refresh_outputs()
             if self.prefs.auto_regenerate_patterns:
@@ -235,6 +263,7 @@ class WorkspaceController(QObject):
             kwargs.setdefault("keep_rows_fitted", self.prefs.keep_rows_fitted)
         result = self.attempt(func, self.session, *args, **kwargs)
         if name == "set_lock":
+            self.bump()
             self.stateChanged.emit()
         return result
 
@@ -253,6 +282,7 @@ class WorkspaceController(QObject):
     def select(self, target: str) -> None:
         """Select a design element (e.g. ``row:B``, ``operating``, ``point:2``)."""
         self.selection = target
+        self.bump()
         self.selectionChanged.emit(target)
 
     # -- derived data -------------------------------------------------------------------
@@ -299,12 +329,35 @@ class WorkspaceController(QObject):
         """Staleness of every artifact."""
         return {a.name: self.artifact_status(a.name) for a in ARTIFACTS}
 
+    def rows(self) -> list[PanelRow]:
+        """Panel rows of the current gore design, computed once per change.
+
+        Raises
+        ------
+        ValueError
+            When the rows cannot be generated (the message says why).
+        """
+        session = self.session
+        if session is None or session.design.gores is None:
+            return []
+
+        def compute() -> tuple[list[PanelRow] | None, str]:
+            try:
+                return panel_rows(session.design, session.patterns), ""
+            except ValueError as exc:
+                return None, str(exc)
+
+        rows, error = self._cached("rows", compute)
+        if rows is None:
+            raise ValueError(error)
+        return rows
+
     def regenerate_patterns(self, emit: bool = True) -> bool:
         """Generate the flat patterns from the current design; False when it cannot."""
         if self.session is None or self.session.design.gores is None:
             return False
         try:
-            rows = panel_rows(self.session.design, self.session.patterns)
+            rows = self.rows()
         except ValueError as exc:
             if emit:
                 self.editRejected.emit(f"patterns not generated: {exc}")
@@ -313,7 +366,7 @@ class WorkspaceController(QObject):
         self.patterns_cache = PatternCache(rows, fingerprint)
         self.session.tracker.mark_built("patterns", fingerprint)
         if emit:
-            self.artifactsChanged.emit()
+            self.notify_artifacts()
         return True
 
     def store_model(self, built: BuiltModel, fingerprints: dict[str, str]) -> None:
@@ -323,7 +376,7 @@ class WorkspaceController(QObject):
         self.model_cache = ModelCache(built, fingerprints["rest_mesh"])
         self.session.tracker.mark_built("assembly", fingerprints["assembly"])
         self.session.tracker.mark_built("rest_mesh", fingerprints["rest_mesh"])
-        self.artifactsChanged.emit()
+        self.notify_artifacts()
 
     def run_status(self, record: RunRecord) -> ArtifactStatus:
         """``current`` or ``stale`` for a run."""
@@ -332,7 +385,10 @@ class WorkspaceController(QObject):
         return self.session.run_status(record)
 
     def findings(self) -> list[DesignFinding]:
-        """Everything the Validation panel shows, errors first."""
+        """Everything the Validation panel shows, errors first (once per change)."""
+        return list(self._cached("findings", self._findings))
+
+    def _findings(self) -> list[DesignFinding]:
         if self.session is None:
             return []
         s = self.session
@@ -341,7 +397,7 @@ class WorkspaceController(QObject):
             out += [f for f in self._outputs.findings if f.code != "rows"]
         if s.design.gores is not None:
             try:
-                rows = panel_rows(s.design, s.patterns)
+                rows = self.rows()
             except ValueError:
                 rows = []
             if rows:

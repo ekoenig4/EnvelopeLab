@@ -38,6 +38,7 @@ from envelopelab.project.gore_design import (
 )
 from envelopelab.project.model import SOLVER_LABELS, RunRecord
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.refresh import Refresher
 
 #: Layer colours (one per source, never shared).
 LAYER_COLORS = {
@@ -117,6 +118,22 @@ class Layer:
         return "#c7c7c7" if self.stale else LAYER_COLORS[self.kind]
 
 
+def _merged_lines(polylines: list[Any]) -> Any:
+    """All polylines of one kind as a single PyVista line mesh (None when empty)."""
+    import pyvista as pv
+
+    parts = [np.asarray(line, dtype=float) for line in polylines if len(line) >= 2]
+    if not parts:
+        return None
+    points = np.vstack(parts)
+    cells = []
+    start = 0
+    for part in parts:
+        cells.append(np.concatenate([[len(part)], np.arange(start, start + len(part))]))
+        start += len(part)
+    return pv.PolyData(points, lines=np.concatenate(cells))
+
+
 def pyvista_available() -> bool:
     """PyVista and pyvistaqt can be imported and a 3D view is allowed."""
     if os.environ.get("ENVELOPELAB_NO_3D"):
@@ -132,7 +149,12 @@ def pyvista_available() -> bool:
 class View3DPanel(QWidget):
     """The 3D view panel (see module docstring)."""
 
-    def __init__(self, controller: WorkspaceController, enable_renderer: bool = True) -> None:
+    def __init__(
+        self,
+        controller: WorkspaceController,
+        enable_renderer: bool = True,
+        defer_renderer: bool = False,
+    ) -> None:
         super().__init__()
         self.controller = controller
         self.layers: dict[str, Layer] = {}
@@ -158,8 +180,15 @@ class View3DPanel(QWidget):
         side_layout.addWidget(self.layer_list)
         side_layout.addWidget(self.info)
         splitter = QSplitter()
+        self.splitter = splitter
         self.renderer_widget: QWidget
-        if enable_renderer and pyvista_available():
+        self._renderer_pending = enable_renderer and defer_renderer
+        if self._renderer_pending:
+            # Importing PyVista and starting OpenGL takes seconds; the window shows first
+            # and the main window calls load_renderer() from its event loop.
+            self.renderer_widget = QLabel("Loading the 3D view…")
+            self.renderer_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        elif enable_renderer and pyvista_available():
             from pyvistaqt import QtInteractor
 
             interactor = QtInteractor(self)
@@ -178,15 +207,45 @@ class View3DPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.addLayout(controls)
         layout.addWidget(splitter)
-        for signal in (
-            controller.stateChanged,
-            controller.runsChanged,
-            controller.artifactsChanged,
-            controller.sessionChanged,
-        ):
-            signal.connect(self.refresh)
+        self.refresher = Refresher(
+            self,
+            self.refresh,
+            lambda: controller.revision,
+            (
+                controller.stateChanged,
+                controller.runsChanged,
+                controller.artifactsChanged,
+                controller.sessionChanged,
+            ),
+            defer_hidden=lambda: controller.defer_hidden,
+        )
         self._reference_path: str | None = None
         self.refresh()
+
+    def load_renderer(self) -> bool:
+        """Start the deferred 3D renderer (see ``defer_renderer``); True when it runs."""
+        if not self._renderer_pending:
+            return self.plotter is not None
+        self._renderer_pending = False
+        if not pyvista_available():
+            label = self.renderer_widget
+            assert isinstance(label, QLabel)
+            label.setText(
+                "3D rendering is not available (PyVista/OpenGL missing or disabled in the "
+                "preferences). The layer list still shows every result and its source."
+            )
+            label.setWordWrap(True)
+            return False
+        from pyvistaqt import QtInteractor
+
+        interactor = QtInteractor(self)
+        old = self.renderer_widget
+        self.splitter.replaceWidget(0, interactor)
+        old.deleteLater()
+        self.plotter = interactor
+        self.renderer_widget = interactor
+        self.redraw()
+        return True
 
     # -- layers -------------------------------------------------------------------------
 
@@ -349,12 +408,16 @@ class View3DPanel(QWidget):
         for layer in self.layers.values():
             if layer.visible and layer.polylines:
                 for kind, polylines in layer.polylines.items():
-                    for line in polylines:
-                        plotter.add_mesh(
-                            pv.lines_from_points(np.asarray(line, dtype=float)),
-                            color=RIGGING_COLORS.get(kind, layer.color),
-                            line_width=LINE_WIDTHS.get(kind, 2),
-                        )
+                    merged = _merged_lines(polylines)
+                    if merged is None:
+                        continue
+                    # One actor per kind of line: far cheaper to build and to render
+                    # than one actor per polyline.
+                    plotter.add_mesh(
+                        merged,
+                        color=RIGGING_COLORS.get(kind, layer.color),
+                        line_width=LINE_WIDTHS.get(kind, 2),
+                    )
                 if len(layer.faces) == 0:
                     legend.append([layer.label, layer.color])
             if not layer.visible or len(layer.faces) == 0:

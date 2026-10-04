@@ -55,6 +55,7 @@ from envelopelab.project.gore_design import (
 )
 from envelopelab.project.model import RowPattern
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.refresh import Refresher
 
 GAP = 0.4  # m between rows in the layout
 ZONE_FALLBACK = "#d9e7f5"
@@ -269,10 +270,18 @@ class PatternPanel(QWidget):
         layout.addWidget(self.banner)
         layout.addWidget(splitter)
 
-        controller.stateChanged.connect(self.refresh)
-        controller.artifactsChanged.connect(self.refresh)
-        controller.sessionChanged.connect(self.refresh)
-        controller.selectionChanged.connect(lambda _t: self.refresh())
+        self.refresher = Refresher(
+            self,
+            self.refresh,
+            lambda: controller.revision,
+            (
+                controller.stateChanged,
+                controller.artifactsChanged,
+                controller.sessionChanged,
+                controller.selectionChanged,
+            ),
+            defer_hidden=lambda: controller.defer_hidden,
+        )
         self.refresh()
 
     # -- data ---------------------------------------------------------------------------
