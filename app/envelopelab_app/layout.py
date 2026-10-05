@@ -27,6 +27,7 @@ MODES: tuple[tuple[str, str], ...] = (
     ("shape", "Shape"),
     ("patterns", "Patterns"),
     ("rigging", "Rigging"),
+    ("shapes", "Special shapes"),
     ("simulate", "3D / Simulation"),
     ("history", "History"),
 )
@@ -42,6 +43,7 @@ DEFAULT_SIZES: dict[str, tuple[int, ...]] = {
     "patternsModeSplitter": (850, 350),  # pattern view beside materials
     "patternPanelSplitter": (700, 250),  # pattern drawing above its row form
     "simulateSplitter": (620, 220),  # 3D view above the runs table
+    "shapesSplitter": (520, 560),  # shape list and parameters beside checks and pieces
 }
 
 

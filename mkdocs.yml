@@ -12,6 +12,7 @@ nav:
       - Importing patterns: user/importing-patterns.md
       - Simulation preview: user/simulation-preview.md
       - Reality Check report: user/reality-check-report.md
+      - Special shapes on a standard envelope: user/special-shape-primitives.md
       - Parachute and rigging: user/rigging.md
   - Developer:
       - Setup: dev/setup.md
@@ -23,6 +24,7 @@ nav:
       - Dynamic-relaxation solver: theory/dynamic-relaxation.md
       - CalculiX verification solver: theory/verification-solver.md
       - Appendage pressure and load paths: theory/appendage-pressure-and-load-paths.md
+      - Special-shape primitives: theory/special-shape-primitives.md
       - Design editing and staleness: theory/design-editing.md
       - Shape families: theory/shape-families.md
       - Parachute and rigging: theory/rigging.md
@@ -32,6 +34,7 @@ nav:
       - Preview solver benchmarks: validation/preview-solver-benchmarks.md
       - Preview vs CalculiX: validation/preview-vs-calculix.md
       - Special-shape fixtures: validation/special-shape-fixtures.md
+      - Special-shape primitives: validation/special-shape-primitives.md
       - Shape-family benchmarks: validation/shape-families.md
       - Rigging benchmarks: validation/rigging-benchmarks.md
   - Formats:
@@ -40,6 +43,7 @@ nav:
       - Project file: formats/project-file.md
       - Shape file: formats/shape-file.md
       - Fabric library file: formats/fabric-library.md
+      - Build pack: formats/build-pack.md
   - ADR:
       - ADR-0001: adr/ADR-0001-stack-choice.md
       - ADR-0002: adr/ADR-0002-gpl-3-licensing.md
@@ -55,6 +59,12 @@ nav:
       - ADR-0012: adr/ADR-0012-shape-files.md
       - ADR-0013: adr/ADR-0013-workflow-modes-layout.md
       - ADR-0014: adr/ADR-0014-gore-loft.md
+      - ADR-0015: adr/ADR-0015-special-shape-primitives.md
+      - ADR-0016: adr/ADR-0016-build-pack-export.md
+      - ADR-0017: adr/ADR-0017-blender-mesh-exchange.md
+      - ADR-0018: adr/ADR-0018-freeform-mesh-shapes.md
+      - ADR-0019: adr/ADR-0019-numba-solver-kernel.md
+      - ADR-0020: adr/ADR-0020-special-shapes-in-projects.md
 theme:
   name: material
 markdown_extensions:

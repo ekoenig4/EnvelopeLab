@@ -2,8 +2,9 @@
 
 The controller owns the open session, turns session events into Qt signals, keeps the
 derived data the panels show (live gore outputs, the last generated patterns, the last
-built solver model) and reports refused edits. It contains no engineering math: every
-number comes from :mod:`envelopelab`.
+built solver model, the placed special shapes, computed in a worker thread by
+:class:`~envelopelab_app.shapes_service.ShapeService`) and reports refused edits. It
+contains no engineering math: every number comes from :mod:`envelopelab`.
 """
 
 from __future__ import annotations
@@ -16,6 +17,8 @@ from typing import Any, TypeVar
 from PySide6.QtCore import QObject, Signal
 
 from envelopelab.design.model import DesignDocument
+from envelopelab.features.metrics import REQUIRED_FOS
+from envelopelab.features.primitives import EnvelopeSurface
 from envelopelab.geometry.gore import PanelRow
 from envelopelab.materials.repository import (
     Fabric,
@@ -26,7 +29,7 @@ from envelopelab.materials.repository import (
     open_user_library,
 )
 from envelopelab.project import edits
-from envelopelab.project.dependencies import ARTIFACTS, ArtifactStatus
+from envelopelab.project.dependencies import ARTIFACTS, ArtifactStatus, canonical_hash
 from envelopelab.project.gore_design import (
     DesignFinding,
     GoreOutputs,
@@ -46,9 +49,14 @@ from envelopelab.project.session import (
     EVENT_STATE,
     ProjectSession,
 )
+from envelopelab.project.shapes import envelope_surface
 from envelopelab.project.simulation import BuiltModel
 from envelopelab.rigging import RiggingOutputs, rigging_polylines
 from envelopelab_app.settings import Preferences
+from envelopelab_app.shapes_service import ShapeService, ShapeSimulator
+
+#: Input groups of the envelope a special shape reads (its key, see ``shape_host_hash``).
+SHAPE_HOST_GROUPS = ("geometry", "row_zones", "materials")
 
 T = TypeVar("T")
 
@@ -82,6 +90,7 @@ class WorkspaceController(QObject):
     selectionChanged = Signal(str)  # noqa: N815
     editRejected = Signal(str)  # noqa: N815
     libraryChanged = Signal()  # noqa: N815
+    shapesChanged = Signal()  # noqa: N815 (placed shapes or shape simulations changed)
     message = Signal(str)
 
     def __init__(self, prefs: Preferences, fabrics: FabricLibraryRepository | None = None) -> None:
@@ -98,6 +107,34 @@ class WorkspaceController(QObject):
         self.selection = ""
         self._outputs: GoreOutputs | None = None
         self._outputs_error: str | None = None
+        #: Change number: bumped once per burst of signals, so a panel connected to
+        #: several of them refreshes once per change (``envelopelab_app.refresh``).
+        self.revision = 0
+        #: Hidden panels wait until they are shown before refreshing. On in the
+        #: interactive application; off for scripted windows that read hidden panels.
+        self.defer_hidden = False
+        self._derived: dict[str, tuple[int, Any]] = {}
+        self.shapes = ShapeService()
+        self.shapes.updated.connect(self._shapes_updated)
+        self.shape_simulator = ShapeSimulator(self.shapes)
+
+    def bump(self) -> None:
+        """Start a new change (call before emitting the signals that announce it)."""
+        self.revision += 1
+
+    def _cached(self, key: str, compute: Callable[[], T]) -> T:
+        """``compute()`` once per revision."""
+        hit = self._derived.get(key)
+        if hit is not None and hit[0] == self.revision:
+            return hit[1]  # type: ignore[no-any-return]
+        value = compute()
+        self._derived[key] = (self.revision, value)
+        return value
+
+    def notify_artifacts(self) -> None:
+        """Announce that built artifacts (patterns, models, runs) changed."""
+        self.bump()
+        self.artifactsChanged.emit()
 
     def _open_library(self) -> FabricLibraryRepository:
         path = self.prefs.resolved_material_library()
@@ -148,6 +185,7 @@ class WorkspaceController(QObject):
         if self.session is not None:
             # Results built from the old values become stale (fabric_properties group).
             self.session.refresh_fabrics()
+        self.bump()
         self._refresh_outputs()
         self.libraryChanged.emit()
         self.stateChanged.emit()
@@ -160,12 +198,15 @@ class WorkspaceController(QObject):
         """Show another session (None: no project open)."""
         if self.session is not None:
             self.session.remove_listener(self._on_event)
+        self.bump()
         self.session = session
         self.patterns_cache = None
         self.model_cache = None
+        self.shapes.reset()
         if session is not None:
             session.set_fabric_lookup(self.fabric_lookup)
         self._refresh_outputs()
+        self.sync_shapes()
         if session is not None:
             session.add_listener(self._on_event)
             if self.prefs.auto_regenerate_patterns:
@@ -178,14 +219,17 @@ class WorkspaceController(QObject):
         self.snapshotsChanged.emit()
 
     def _on_event(self, event: str) -> None:
+        self.bump()
         if event == EVENT_STATE:
             self._refresh_outputs()
+            self.sync_shapes()
             if self.prefs.auto_regenerate_patterns:
                 self.regenerate_patterns(emit=False)
             self.stateChanged.emit()
             self.artifactsChanged.emit()
             self.fileChanged.emit()
         elif event == EVENT_ARTIFACTS:
+            self.sync_shapes()
             self.artifactsChanged.emit()
         elif event == EVENT_RUNS:
             self.runsChanged.emit()
@@ -235,6 +279,7 @@ class WorkspaceController(QObject):
             kwargs.setdefault("keep_rows_fitted", self.prefs.keep_rows_fitted)
         result = self.attempt(func, self.session, *args, **kwargs)
         if name == "set_lock":
+            self.bump()
             self.stateChanged.emit()
         return result
 
@@ -253,7 +298,120 @@ class WorkspaceController(QObject):
     def select(self, target: str) -> None:
         """Select a design element (e.g. ``row:B``, ``operating``, ``point:2``)."""
         self.selection = target
+        self.bump()
         self.selectionChanged.emit(target)
+
+    # -- special shapes -----------------------------------------------------------------
+
+    def shape_host_hash(self) -> str:
+        """Hash of the envelope inputs the special shapes are placed from."""
+        if self.session is None:
+            return ""
+        hashes = self.session.group_hashes()
+        return canonical_hash({g: hashes[g] for g in SHAPE_HOST_GROUPS})
+
+    def envelope_surface(self) -> EnvelopeSurface | None:
+        """Surface the special shapes are placed on (None: no gore design or not buildable),
+        built once per change."""
+        s = self.session
+        if s is None or s.design.gores is None:
+            return None
+
+        def build() -> EnvelopeSurface | None:
+            try:
+                return envelope_surface(s.design, s.patterns)
+            except ValueError:  # includes PrimitiveError
+                return None
+
+        return self._cached("envelope_surface", build)
+
+    def sync_shapes(self) -> None:
+        """Start placing the shapes whose specification or envelope changed (worker)."""
+        s = self.session
+        if s is None:
+            self.shapes.sync(None, None, [], "")
+            return
+        self.shapes.sync(
+            s.design,
+            s.patterns,
+            list(s.state.shapes),
+            self.shape_host_hash(),
+            s.fingerprints()["simulation"],
+        )
+
+    def _shapes_updated(self) -> None:
+        s = self.session
+        if s is not None and not s.state.shapes:
+            s.tracker.forget("shapes")  # nothing to build, so never stale
+        elif s is not None and not self.shapes.pending:
+            s.tracker.mark_built("shapes", s.fingerprints()["shapes"])
+        self.bump()
+        self.shapesChanged.emit()
+
+    def shape_findings(self) -> list[DesignFinding]:
+        """Findings of the special shapes: placement errors, pattern checks, simulations."""
+        s = self.session
+        if s is None:
+            return []
+        out: list[DesignFinding] = []
+        for spec in s.state.shapes:
+            target = f"shape:{spec.name}"
+            label = f"shape {spec.name}"
+            result = self.shapes.result(spec.name)
+            if result is None:
+                out.append(DesignFinding("shape_pending", "info", f"{label}: being placed", target))
+            elif result.design is None:
+                out.append(
+                    DesignFinding(
+                        "shape_error", "error", f"{label} cannot be placed: {result.error}", target
+                    )
+                )
+            else:
+                for check in result.design.checks:
+                    if check.severity != "info":
+                        out.append(
+                            DesignFinding(
+                                f"shape_{check.name}",
+                                check.severity,
+                                f"{label}: {check.message}",
+                                target,
+                            )
+                        )
+            sim = self.shapes.simulations.get(spec.name)
+            if sim is None:
+                continue
+            if self.shapes.simulation_status(spec.name) == "stale":
+                out.append(
+                    DesignFinding(
+                        "shape_simulation_stale",
+                        "warning",
+                        f"{label}: simulation is STALE: the shape or the envelope changed",
+                        target,
+                    )
+                )
+            m = sim.metrics
+            if not m.converged:
+                out.append(
+                    DesignFinding(
+                        "shape_not_converged",
+                        "error",
+                        f"{label}: simulation did NOT converge ({m.status}); its results are "
+                        "not final",
+                        target,
+                    )
+                )
+            for region, fos in sorted(m.fos.items()):
+                if fos < REQUIRED_FOS:
+                    out.append(
+                        DesignFinding(
+                            "shape_fos",
+                            "error",
+                            f"{label}: factor of safety of {region} is {fos:.2f}, below the "
+                            f"required {REQUIRED_FOS:g}",
+                            target,
+                        )
+                    )
+        return out
 
     # -- derived data -------------------------------------------------------------------
 
@@ -299,12 +457,35 @@ class WorkspaceController(QObject):
         """Staleness of every artifact."""
         return {a.name: self.artifact_status(a.name) for a in ARTIFACTS}
 
+    def rows(self) -> list[PanelRow]:
+        """Panel rows of the current gore design, computed once per change.
+
+        Raises
+        ------
+        ValueError
+            When the rows cannot be generated (the message says why).
+        """
+        session = self.session
+        if session is None or session.design.gores is None:
+            return []
+
+        def compute() -> tuple[list[PanelRow] | None, str]:
+            try:
+                return panel_rows(session.design, session.patterns), ""
+            except ValueError as exc:
+                return None, str(exc)
+
+        rows, error = self._cached("rows", compute)
+        if rows is None:
+            raise ValueError(error)
+        return rows
+
     def regenerate_patterns(self, emit: bool = True) -> bool:
         """Generate the flat patterns from the current design; False when it cannot."""
         if self.session is None or self.session.design.gores is None:
             return False
         try:
-            rows = panel_rows(self.session.design, self.session.patterns)
+            rows = self.rows()
         except ValueError as exc:
             if emit:
                 self.editRejected.emit(f"patterns not generated: {exc}")
@@ -313,7 +494,7 @@ class WorkspaceController(QObject):
         self.patterns_cache = PatternCache(rows, fingerprint)
         self.session.tracker.mark_built("patterns", fingerprint)
         if emit:
-            self.artifactsChanged.emit()
+            self.notify_artifacts()
         return True
 
     def store_model(self, built: BuiltModel, fingerprints: dict[str, str]) -> None:
@@ -323,7 +504,7 @@ class WorkspaceController(QObject):
         self.model_cache = ModelCache(built, fingerprints["rest_mesh"])
         self.session.tracker.mark_built("assembly", fingerprints["assembly"])
         self.session.tracker.mark_built("rest_mesh", fingerprints["rest_mesh"])
-        self.artifactsChanged.emit()
+        self.notify_artifacts()
 
     def run_status(self, record: RunRecord) -> ArtifactStatus:
         """``current`` or ``stale`` for a run."""
@@ -332,7 +513,10 @@ class WorkspaceController(QObject):
         return self.session.run_status(record)
 
     def findings(self) -> list[DesignFinding]:
-        """Everything the Validation panel shows, errors first."""
+        """Everything the Validation panel shows, errors first (once per change)."""
+        return list(self._cached("findings", self._findings))
+
+    def _findings(self) -> list[DesignFinding]:
         if self.session is None:
             return []
         s = self.session
@@ -341,7 +525,7 @@ class WorkspaceController(QObject):
             out += [f for f in self._outputs.findings if f.code != "rows"]
         if s.design.gores is not None:
             try:
-                rows = panel_rows(s.design, s.patterns)
+                rows = self.rows()
             except ValueError:
                 rows = []
             if rows:
@@ -410,5 +594,6 @@ class WorkspaceController(QObject):
                             f.code, "error", f"{label}: {f.message}", f"run:{record.run_id}"
                         )
                     )
+        out += self.shape_findings()
         order = {"error": 0, "warning": 1, "info": 2}
         return sorted(out, key=lambda f: order[f.severity])

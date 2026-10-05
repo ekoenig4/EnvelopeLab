@@ -48,6 +48,9 @@ def window(qtbot: QtBot, settings: QSettings) -> Iterator[MainWindow]:
     yield w
     w.simulation.cancel()
     w.simulation.wait(60_000)
+    w.controller.shape_simulator.cancel()
+    w.controller.shape_simulator.wait(60_000)
+    w.controller.shapes.wait(60_000)
 
 
 @pytest.fixture

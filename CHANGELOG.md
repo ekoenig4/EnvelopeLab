@@ -3,6 +3,88 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Special shapes: new *attachment ease* check. The skin rim is sewn to the footprint
+  line marked on the flat envelope panels, which differs from the rim because the flat
+  gores carry the lobe bulge; the difference is now measured between every pair of
+  match marks and is an error above 3 mm (a 0.5 m dome low on the 8-gore fixture eases
+  4.7 mm into one interval; default-size shapes under 1 mm). No pattern changes.
+- Build packs list each shape's rim and its marked footprint lines as a sewn pair with
+  the planned ease (`ease_mm`), and the output QA checks the files against it.
+- Drag special shapes in the 3D view: with **Drag special shapes** on (or **Drag in 3D
+  view…** in the Special shapes panel), press on a shape and drag it over the envelope; a
+  ring previews where its base will sit, and releasing moves it (gore, tape position and
+  position across the gore; lean kept) as one undo step.
+- Special shapes in the 3D view are drawn in their layer colour; they were drawn with
+  their dense mesh edges and looked like black blobs.
+- Special shapes in the desktop application: a new **Special shapes** mode adds domes,
+  tubes, revolved profiles and imported Blender meshes to a standard envelope, edits
+  them with undo, shows their pattern checks, cut pieces and attachment lines, simulates
+  them with the preview solver, and exports the build pack and a Blender scene. Shapes
+  are placed in a background thread, so editing never waits for them. Unplaceable
+  shapes, failed checks, unconverged, failing or stale shape simulations are listed in
+  Validation / Warnings. The 3D / Simulation and History shortcuts move to Ctrl+5 and
+  Ctrl+6.
+- Project files are now format version 2 (ADR-0020): they store the special shapes.
+  Version 1 files open unchanged (no shapes); older releases cannot open version 2 files.
+- Placing a special shape is 2-2.5x faster (the footprint search samples 241 instead of
+  801 points before bisecting); footprints and cut outlines change by less than 0.5 µm.
+  On the special-shape validation page the dome study's inflated heights move by at
+  most 3.6 µm and its lowest factor of safety by at most 0.24 % (90.34 to 90.56); every
+  check still passes.
+- Faster preview solves (ADR-0019): the solver's element kernel (membrane strain,
+  tension-field stress, internal and pressure forces, nodal sums) runs as one compiled
+  loop when the optional `fast` extra (Numba) is installed: 3-4x faster (fixture envelope
+  at 1600 mm 10.2 s to 3.3 s, a dome sub-model 3.7 s to 0.9 s). Without it, precomputed
+  operators make it 1.1-1.4x faster. Results change only by round-off (largest node
+  difference 0.34 µm, iteration counts within a few percent); no benchmark moved. The
+  application stays responsive while a solve runs.
+- Smoother editing in the desktop application: every panel redraws at most once per
+  edit, panels in other workflow modes wait until they are shown, the meridian spline and
+  the panel rows are computed once per edit, and rigging lines are drawn as one 3D actor
+  per kind. With the 3D view on, an edit takes 25-35 ms instead of 160 ms, undo 20-25 ms
+  instead of 100 ms, a mode switch about 30 ms instead of 110 ms and opening a project
+  30-40 ms instead of 280 ms. The window appears before the 3D renderer has loaded.
+- Free-form special shapes from a mesh (ADR-0018, `FreeformShape`,
+  `envelopelab.features.freeform`): import a closed shape modelled in Blender (OBJ, STL
+  or PLY), place it on the envelope, and EnvelopeLab clips it at the envelope (the cut
+  edge is the footprint), cuts it into panels along half-planes through its axis and
+  flattens each panel. Footprint and seam edges keep their exact lengths and the
+  interior strain is reported. The same attachment lines, match marks, build-pack
+  export, Blender scene and as-cut sub-model as the other shapes. New rows in
+  `validation/special-shape-primitives.md`. No existing numerical result changes.
+- Blender mesh exchange (ADR-0017, `envelopelab.io.blender`, `envelopelab.features.scene`):
+  export the envelope, each special shape as designed and each solved skin as one OBJ
+  scene with named objects, written Y up so Blender's default OBJ import shows it upright
+  in metres (an unconverged solve is named `..._UNCONVERGED`). STL export, and reading
+  OBJ, STL and PLY shapes back with Blender's default axes.
+- Build-pack export (ADR-0016, `envelopelab.export`): cutting patterns of the envelope
+  rows and of every special shape's pieces, plus marking sheets for the envelope panels
+  each shape crosses (footprint line, numbered match marks, feed hole). One DXF per
+  sheet in mm, one `pattern.pdf` at 1:1 on roll-width pages (60 in by default; wide
+  sheets are split into strips), and `index.json` with pieces, cut counts, fabrics,
+  finished sizes and sewn edge pairs. Generated calibration lines and headers. The output
+  QA of AGENTS.md §6.6 (`envelopelab.export.qa.check_pack`) now runs in
+  `scripts/verify.py`. The Reality Check PDF writes its page size with two decimals; its
+  content is unchanged.
+- Special-shape primitives: a third shape, `Revolved`, spins any profile you give as
+  points (spline or straight segments) about the feature's axis: noses, bulbs, onions,
+  balls, flared horns. It closes in an apex or a flat tip disc, has the same attachment
+  lines, match marks, cutting pattern, checks and sub-model as the dome and the tube, and
+  a single straight segment is developed exactly. A profile that flares outward at its
+  base now drops straight down the axis to the envelope. New rows in
+  `validation/special-shape-primitives.md`. No existing numerical result changes.
+- Special-shape primitives (ADR-0015, `envelopelab.features.primitives`): place a dome
+  (blister, lobe, ear) or a tube (horn, nose, mast, leaned or not) on a standard-gore
+  design by gore, tape position and lean. EnvelopeLab derives the footprint, its run
+  across every envelope panel in that panel's pattern coordinates, numbered match marks
+  on the envelope and on the skin, and the skin's cutting pattern: exact developments
+  for tube panels, and classic gores laid out with true-length seams for domes. It also
+  checks rim length, seam pairs and flattening distortion. `primitive_appendage` builds a
+  sub-model whose skin rests in the cut pieces (new builder skin mode `designed`, on the
+  true envelope surface), so the preview solver and CalculiX show how the sewn shape
+  holds under pressure. Python API only for now (no app or design file yet).
+  New generated page `validation/special-shape-primitives.md`. No existing numerical
+  result changes.
 - Gore loft (ADR-0014): the bulge of each gore between its load tapes is now a design
   input, the lobe-radius ratio k = ρ/r along the gore (stations as fractions of the tape
   length, interpolated). Set it in the standard-gore editor's **Gore loft** table, as one

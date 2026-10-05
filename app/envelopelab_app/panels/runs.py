@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 from envelopelab.project.model import RunRecord
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.panels.view3d import LAYER_COLORS
+from envelopelab_app.refresh import Refresher
 from envelopelab_app.simulation import CALCULIX, PREVIEW, SimulationManager
 
 COLUMNS = (
@@ -96,8 +97,13 @@ class RunsPanel(QWidget):
         manager.finished.connect(self._finished)
         manager.failed.connect(self._failed)
         manager.idle.connect(self.update_actions)
-        for signal in (controller.runsChanged, controller.stateChanged, controller.sessionChanged):
-            signal.connect(self.refresh)
+        self.refresher = Refresher(
+            self,
+            self.refresh,
+            lambda: controller.revision,
+            (controller.runsChanged, controller.stateChanged, controller.sessionChanged),
+            defer_hidden=lambda: controller.defer_hidden,
+        )
         self.update_actions()
         self.refresh()
 

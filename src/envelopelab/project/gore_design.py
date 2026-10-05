@@ -65,6 +65,7 @@ References
 from __future__ import annotations
 
 import math
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
@@ -154,9 +155,32 @@ def control_arrays(design: DesignDocument) -> tuple[FloatArray, FloatArray]:
     )
 
 
+_PROFILE_CACHE: OrderedDict[bytes, MeridianProfile] = OrderedDict()
+_PROFILE_CACHE_SIZE = 64
+
+
 def profile_from_arrays(r: FloatArray, z: FloatArray) -> MeridianProfile:
-    """Densely sampled spline profile through control points (m)."""
-    return MeridianProfile.from_control_points(r, z, samples=PROFILE_SAMPLES)
+    """Densely sampled spline profile through control points (m).
+
+    The profile is a pure function of the control points, and every live output of the
+    editor asks for it, so the most recent profiles are memoized by their control-point
+    values. Cached arrays are read-only: a caller that tried to change one in place would
+    fail loudly instead of corrupting the cache.
+    """
+    r_arr = np.ascontiguousarray(r, dtype=np.float64)
+    z_arr = np.ascontiguousarray(z, dtype=np.float64)
+    key = r_arr.tobytes() + b"|" + z_arr.tobytes()
+    hit = _PROFILE_CACHE.get(key)
+    if hit is not None:
+        _PROFILE_CACHE.move_to_end(key)
+        return hit
+    profile = MeridianProfile.from_control_points(r_arr, z_arr, samples=PROFILE_SAMPLES)
+    for arr in (profile.s, profile.r, profile.z):
+        arr.setflags(write=False)
+    _PROFILE_CACHE[key] = profile
+    if len(_PROFILE_CACHE) > _PROFILE_CACHE_SIZE:
+        _PROFILE_CACHE.popitem(last=False)
+    return profile
 
 
 def design_profile(design: DesignDocument) -> MeridianProfile:

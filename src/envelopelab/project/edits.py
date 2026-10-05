@@ -30,6 +30,7 @@ from envelopelab.project.gore_design import (
 )
 from envelopelab.project.model import ConstraintLocks, ManualOutline, utc_now
 from envelopelab.project.session import ProjectSession
+from envelopelab.project.shapes import ShapeSpec
 
 LOCKABLE = ("height", "volume", "max_diameter", "gore_count")
 
@@ -407,3 +408,100 @@ def outline_within_tolerance(
     """Two outlines with the same vertices within the geometry tolerance (1 mm)."""
     pa, pb = np.asarray(a), np.asarray(b)
     return pa.shape == pb.shape and bool(np.all(np.hypot(*(pa - pb).T) <= LENGTH_TOLERANCE))
+
+
+# -- special shapes ---------------------------------------------------------------------
+
+
+def unique_shape_name(session: ProjectSession, base: str) -> str:
+    """``base``, or ``base 2``, ``base 3``, ... when the name is taken."""
+    taken = {s.name for s in session.state.shapes}
+    if base not in taken:
+        return base
+    k = 2
+    while f"{base} {k}" in taken:
+        k += 1
+    return f"{base} {k}"
+
+
+def add_shape(session: ProjectSession, spec: ShapeSpec) -> bool:
+    """Add a special shape (lengths in m, angles in degrees).
+
+    Raises
+    ------
+    ValueError
+        When a shape of that name exists.
+    """
+    data = spec.model_dump(mode="json")
+
+    def mutate(shapes: list[dict[str, Any]]) -> None:
+        if any(s["name"] == spec.name for s in shapes):
+            raise ValueError(f"a special shape named {spec.name!r} exists")
+        shapes.append(data)
+
+    return session.edit_shapes(f"Add {spec.kind} shape {spec.name}", mutate)
+
+
+def update_shape(session: ProjectSession, name: str, values: dict[str, Any]) -> bool:
+    """Change fields of shape ``name`` (JSON values: m, deg; ``placement`` merges).
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit.
+    name : str
+        Shape to change.
+    values : dict
+        New field values; ``placement`` may hold only the placement fields that change.
+
+    Raises
+    ------
+    KeyError
+        For an unknown shape.
+    ValueError
+        For invalid values or a name that is taken (nothing is changed).
+    """
+
+    def mutate(shapes: list[dict[str, Any]]) -> None:
+        shape = next((s for s in shapes if s["name"] == name), None)
+        if shape is None:
+            raise KeyError(f"no special shape {name!r}")
+        for key, value in values.items():
+            if key == "placement":
+                shape["placement"].update(value)
+            elif key == "kind":
+                raise ValueError("the kind of a shape cannot be changed")
+            else:
+                shape[key] = value
+
+    return session.edit_shapes(f"Edit shape {values.get('name', name)}", mutate)
+
+
+def remove_shape(session: ProjectSession, name: str) -> bool:
+    """Remove shape ``name`` (``KeyError`` if unknown)."""
+
+    def mutate(shapes: list[dict[str, Any]]) -> None:
+        index = next((i for i, s in enumerate(shapes) if s["name"] == name), None)
+        if index is None:
+            raise KeyError(f"no special shape {name!r}")
+        del shapes[index]
+
+    return session.edit_shapes(f"Remove shape {name}", mutate)
+
+
+def duplicate_shape(session: ProjectSession, name: str) -> str:
+    """Copy shape ``name`` under a free name one gore further round; returns the new name."""
+    spec = next((s for s in session.state.shapes if s.name == name), None)
+    if spec is None:
+        raise KeyError(f"no special shape {name!r}")
+    new = unique_shape_name(session, f"{name} copy")
+    data = spec.model_dump(mode="json")
+    data["name"] = new
+    count = session.design.gores.count if session.design.gores is not None else 1
+    data["placement"]["gore"] = data["placement"]["gore"] % count + 1
+
+    def mutate(shapes: list[dict[str, Any]]) -> None:
+        shapes.append(data)
+
+    session.edit_shapes(f"Duplicate shape {name}", mutate)
+    return new

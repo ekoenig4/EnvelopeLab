@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QFrame, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from envelopelab.project.dependencies import INPUT_GROUPS, artifact_inputs
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.refresh import Refresher
 
 UNSAVED_MARK = "●"  # black circle
 
@@ -79,14 +80,20 @@ class Panel(QFrame):
             layout.addWidget(area)
         else:
             layout.addWidget(widget)
-        for signal in (
-            controller.stateChanged,
-            controller.fileChanged,
-            controller.artifactsChanged,
-            controller.runsChanged,
-            controller.sessionChanged,
-        ):
-            signal.connect(self.update_indicator)
+        # The mode tabs repeat the indicators, so they update while hidden too.
+        self.indicator = Refresher(
+            self,
+            self.update_indicator,
+            lambda: controller.revision,
+            (
+                controller.stateChanged,
+                controller.fileChanged,
+                controller.artifactsChanged,
+                controller.runsChanged,
+                controller.sessionChanged,
+            ),
+            defer_hidden=False,
+        )
         self.update_indicator()
 
     def unsaved(self) -> bool:
