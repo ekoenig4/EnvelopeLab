@@ -10,8 +10,9 @@
 * every PDF page is as wide as the roll;
 * every sheet header (piece, cut count, fabric, finished size) matches the index, and the
   finished size matches the ``SEW`` outline drawn in the DXF;
-* every sewn edge pair has the same length within its tolerance (default 3 mm),
-  measured from the ``EDGE_*`` polylines.
+* every sewn edge pair differs by its planned ease (``ease_mm``, 0 for edges cut to the
+  same length) within its tolerance (default 3 mm), measured from the ``EDGE_*``
+  polylines and, for a shape's footprint lines, the ``ATTACH`` polylines.
 
 The index entries are the design data of the export; a pack is consistent when the
 drawn geometry agrees with them.
@@ -67,6 +68,7 @@ def _read_dxf(path: Path) -> dict[str, Any]:
         "cal_text": [],
         "label": [],
     }
+    attach = 0
     for e in msp:
         layer = e.dxf.layer
         kind = e.dxftype()
@@ -78,6 +80,10 @@ def _read_dxf(path: Path) -> dict[str, Any]:
                 out["sew"] = np.asarray(pts)
             elif layer.startswith("EDGE_"):
                 out["edges"][layer[5:].lower()] = pts
+            elif layer == "ATTACH":
+                # Footprint lines are sewn edges too, named in drawing order.
+                attach += 1
+                out["edges"][f"attach{attach}"] = pts
         elif kind == "LINE" and layer == "CAL":
             s, t = e.dxf.start, e.dxf.end
             out["cal_lines"].append(((s.x, s.y), (t.x, t.y)))
@@ -215,10 +221,14 @@ def check_pack(out_dir: str | Path) -> list[QAFinding]:
                 total += _polyline_length(edge)
             sides.append(total)
         a, b = sides
-        if np.isfinite(a) and np.isfinite(b) and abs(a - b) > pair["tolerance_mm"]:
+        ease = float(pair.get("ease_mm", 0.0))
+        if np.isfinite(a) and np.isfinite(b) and abs(a - b - ease) > pair["tolerance_mm"]:
             names = " + ".join(f"{r['file']}:{r['edge']}" for r in pair["a"])
             other = " + ".join(f"{r['file']}:{r['edge']}" for r in pair["b"])
-            findings.append(QAFinding(names, "seam", f"{a:.1f} mm against {other} {b:.1f} mm"))
+            planned = f" (planned ease {ease:+.1f} mm)" if ease else ""
+            findings.append(
+                QAFinding(names, "seam", f"{a:.1f} mm against {other} {b:.1f} mm{planned}")
+            )
 
     pdf = root / index["pdf"]
     if pdf.is_file():

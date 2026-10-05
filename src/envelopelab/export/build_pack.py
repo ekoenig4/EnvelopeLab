@@ -121,10 +121,21 @@ class Sheet:
 
 @dataclass(frozen=True)
 class SeamPair:
-    """Two groups of finished edges sewn together (lengths summed per side)."""
+    """Two groups of finished edges sewn together (lengths summed per side).
+
+    Attributes
+    ----------
+    a, b : tuple of (sheet name, edge name)
+        Edges of each side. ``attach<k>`` names the k-th footprint line drawn on a
+        marking sheet (layer ``ATTACH``).
+    ease : float
+        Intended length of side ``a`` minus side ``b``, m, worked in between match marks
+        (0 for edges cut to the same length). The QA checks the files against it.
+    """
 
     a: tuple[tuple[str, str], ...]
     b: tuple[tuple[str, str], ...]
+    ease: float = 0.0
 
 
 def calibration(width: float) -> tuple[float, float]:
@@ -244,7 +255,7 @@ def primitive_sheets(
         cut = offset_polygon(finished, seam_allowance) if seam_allowance else finished.copy()
         out.append(
             Sheet(
-                name=f"{name}-mark-G{gore}-{row}",
+                name=_marking_name(design, gore, row),
                 piece=f"gore {gore} row {row}",
                 kind="marking",
                 cut_count=0,
@@ -269,7 +280,14 @@ def primitive_sheets(
 
 
 def primitive_seam_pairs(design: PrimitiveDesign) -> list[SeamPair]:
-    """Edges of a primitive's skin that are sewn together."""
+    """Edges of a primitive sewn together: skin seams, tip, and the rim to the envelope.
+
+    The rim is sewn to the footprint lines marked on the envelope panels (the marking
+    sheets of :func:`primitive_sheets`). Those lines are on the flat panels, so they
+    differ from the rim by the attachment ease of the design
+    (:attr:`~envelopelab.features.primitives.PrimitiveDesign.mark_ease`, checked per
+    match-mark interval); the pair carries that total as its ``ease``.
+    """
     pieces = [p for p in design.pieces if p.rim is not None]
     m = len(pieces)
     pairs = [
@@ -279,7 +297,23 @@ def primitive_seam_pairs(design: PrimitiveDesign) -> list[SeamPair]:
     tip = [p for p in design.pieces if p.rim is None]
     if tip:
         pairs.append(SeamPair(tuple((p.label, "top") for p in pieces), ((tip[0].label, "top"),)))
+    lines: list[tuple[str, str]] = []
+    for gore, row in sorted({(a.gore, a.row) for a in design.attachment}):
+        runs = [a for a in design.attachment if (a.gore, a.row) == (gore, row)]
+        sheet = _marking_name(design, gore, row)
+        lines += [(sheet, f"attach{k + 1}") for k in range(len(runs))]
+    rim = sum(_length(p.rim) for p in pieces if p.rim is not None)
+    marked = sum(a.length for a in design.attachment)
+    pairs.append(SeamPair(tuple((p.label, "rim") for p in pieces), tuple(lines), rim - marked))
     return pairs
+
+
+def _marking_name(design: PrimitiveDesign, gore: int, row: str) -> str:
+    return f"{design.primitive.name}-mark-G{gore}-{row}"
+
+
+def _length(points: FloatArray) -> float:
+    return float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
 
 
 def envelope_seam_pairs(sheets: Sequence[Sheet]) -> list[SeamPair]:
@@ -531,6 +565,7 @@ def write_pack(
                 "a": [{"file": f"{n}.dxf", "edge": e} for n, e in pair.a],
                 "b": [{"file": f"{n}.dxf", "edge": e} for n, e in pair.b],
                 "tolerance_mm": SEWN_EDGE_TOLERANCE * MM,
+                "ease_mm": round(pair.ease * MM, 3),
             }
             for pair in seam_pairs
         ],

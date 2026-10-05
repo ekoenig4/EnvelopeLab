@@ -24,7 +24,7 @@ towards the tip for skin pieces).
 | `SEW` | Finished (sewn-line) outline |
 | `EDGE_<NAME>` | Each finished edge on its own: `RIM`, `LEFT`, `RIGHT`, `TOP` (skin), `LEFT`, `RIGHT`, `BOTTOM`, `TOP` (envelope panels) |
 | `MARKS` | Match marks (crosses) and their numbers |
-| `ATTACH` | Footprint line of a shape (marking sheets) |
+| `ATTACH` | Footprint line of a shape (marking sheets); in seam pairs the k-th line of a sheet is edge `attach<k>` |
 | `HOLE` | Feed hole (marking sheets) |
 | `GRAIN` | Warp direction arrow |
 | `LABEL` | Header: `piece \| kind \| cut N \| fabric F \| finished W x H mm`, and a note |
@@ -51,14 +51,20 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
   "seam_pairs": [
     {"a": [{"file": "ear-G1.dxf", "edge": "right"}],
      "b": [{"file": "ear-G2.dxf", "edge": "left"}],
-     "tolerance_mm": 3.0}
+     "tolerance_mm": 3.0, "ease_mm": 0.0},
+    {"a": [{"file": "ear-G1.dxf", "edge": "rim"}, "…"],
+     "b": [{"file": "ear-mark-G3-D.dxf", "edge": "attach1"}],
+     "tolerance_mm": 3.0, "ease_mm": -5.677}
   ]
 }
 ```
 
 `kind` is `envelope panel`, `skin piece` or `marking` (cut count 0). A seam pair lists the
 finished edges sewn together, with lengths summed on each side (all of a tube's panel
-tops against its tip disc, for example).
+tops against its tip disc, for example). `ease_mm` is the planned length of side `a`
+minus side `b`: 0 for edges cut to the same length, and for a shape's rim against the
+footprint lines on its marking sheets the attachment ease worked in between match
+marks (checked per mark interval when the shape is designed).
 
 ## Output QA
 
@@ -66,5 +72,6 @@ tops against its tip disc, for example).
 the index and the directory list the same files; every DXF is in mm; every calibration
 line, in every DXF and on every PDF page, measures what its label says; every PDF page is
 as wide as the roll; every header matches the index and the drawn `SEW` outline; and
-every sewn edge pair matches within its tolerance. `scripts/check_build_pack.py` exports
-a generic sample pack and checks it; `scripts/verify.py` runs it.
+every sewn edge pair differs by its planned ease within its tolerance.
+`scripts/check_build_pack.py` exports a generic sample pack and checks it;
+`scripts/verify.py` runs it.

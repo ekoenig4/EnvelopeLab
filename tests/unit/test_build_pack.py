@@ -7,6 +7,7 @@ import math
 import shutil
 from pathlib import Path
 
+import numpy as np
 import pytest
 from ezdxf.entities.lwpolyline import LWPolyline
 from ezdxf.filemanagement import readfile
@@ -64,8 +65,9 @@ def test_exported_pack_passes_the_output_qa(pack: Path) -> None:
     assert ear["fabric"] == "ripstop red"
     piece = SHAPES[0].pieces[0]
     assert ear["finished_width_mm"] == pytest.approx(piece.size[0] * 1000, abs=1e-3)
-    # Every skin seam, the tip seam and every envelope seam is listed as a sewn pair.
-    assert len(index["seam_pairs"]) == 16 + 4 + 1 + 6 + 5
+    # Every skin seam, the tip seam, every envelope seam and each shape's rim to its
+    # marked footprint lines is listed as a sewn pair.
+    assert len(index["seam_pairs"]) == 16 + 4 + 1 + 6 + 5 + 2
     assert index["roll_width_mm"] == pytest.approx(60 * 25.4)
 
 
@@ -144,3 +146,33 @@ def test_sheet_names_must_be_unique(tmp_path: Path) -> None:
     sheets = primitive_sheets(SHAPES[1])
     with pytest.raises(BuildPackError):
         write_pack(sheets + sheets[:1], tmp_path)
+
+
+def test_rim_is_paired_with_the_marked_lines_and_their_ease(pack: Path) -> None:
+    index = json.loads((pack / "index.json").read_text(encoding="utf-8"))
+    rims = [p for p in index["seam_pairs"] if p["a"][0]["edge"] == "rim"]
+    assert len(rims) == 2
+    ear = next(p for p in rims if p["a"][0]["file"].startswith("ear-"))
+    assert len(ear["a"]) == 16
+    assert {r["file"] for r in ear["b"]} == {"ear-mark-G3-D.dxf", "ear-mark-G4-D.dxf"}
+    assert all(r["edge"].startswith("attach") for r in ear["b"])
+    design = SHAPES[0]
+    rim = sum(
+        float(np.linalg.norm(np.diff(c.rim, axis=0), axis=1).sum())
+        for c in design.pieces
+        if c.rim is not None
+    )
+    marked = sum(a.length for a in design.attachment)
+    assert ear["ease_mm"] == pytest.approx((rim - marked) * 1000, abs=1e-3)
+
+
+def test_qa_catches_a_moved_footprint_line(pack: Path, tmp_path: Path) -> None:
+    p = _copy(pack, tmp_path)
+    doc = readfile(p / "ear-mark-G3-D.dxf")
+    for e in doc.modelspace():
+        if e.dxf.layer == "ATTACH" and isinstance(e, LWPolyline):
+            e.set_points([(x * 1.02, y * 1.02) for x, y, *_ in e.get_points()])
+    doc.saveas(p / "ear-mark-G3-D.dxf")
+    findings = [f for f in check_pack(p) if f.check == "seam"]
+    assert len(findings) == 1 and "ear-G1.dxf:rim" in findings[0].file
+    assert "planned ease" in findings[0].message

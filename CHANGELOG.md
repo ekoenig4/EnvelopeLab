@@ -8,6 +8,8 @@ All notable changes to this project will be documented in this file.
   gores carry the lobe bulge; the difference is now measured between every pair of
   match marks and is an error above 3 mm (a 0.5 m dome low on the 8-gore fixture eases
   4.7 mm into one interval; default-size shapes under 1 mm). No pattern changes.
+- Build packs list each shape's rim and its marked footprint lines as a sewn pair with
+  the planned ease (`ease_mm`), and the output QA checks the files against it.
 - Drag special shapes in the 3D view: with **Drag special shapes** on (or **Drag in 3D
   view…** in the Special shapes panel), press on a shape and drag it over the envelope; a
   ring previews where its base will sit, and releasing moves it (gore, tape position and
