@@ -217,3 +217,27 @@ def test_base_radius_of_every_kind(session: ProjectSession) -> None:
         "Blob", mesh.vertices, mesh.triangles, ShapePlacement(gore=1, tape_position=4)
     )
     assert base_radius(blob) == pytest.approx(0.3, rel=1e-9)
+
+
+def test_attachment_ease_is_checked_per_mark_interval(session: ProjectSession) -> None:
+    """On the 8-gore fixture the flat panels carry the lobe width, so a large dome low on
+    the envelope differs from its marked line by more than 3 mm between marks."""
+    surface = envelope_surface(session.design, session.patterns)
+    small = shape_design(_dome(session), surface)
+    ease = next(c for c in small.checks if c.name == "attachment ease")
+    assert ease.severity == "info" and ease.value < 1e-3
+    big = _dome(session).model_copy(
+        update={
+            "base_radius": 0.5,
+            "height": 0.5,
+            "placement": ShapePlacement(gore=1, tape_position=2.0),
+        }
+    )
+    placed = shape_design(big, surface)
+    check = next(c for c in placed.checks if c.name == "attachment ease")
+    assert check.severity == "error" and check.value > 3e-3
+    assert "eased over 32 mark intervals" in check.message
+    # More match marks spread the same ease over shorter intervals.
+    finer = shape_design(big.model_copy(update={"marks_per_piece": 4}), surface)
+    assert float(np.abs(finer.mark_ease).max()) < 0.6 * check.value
+    assert float(finer.mark_ease.sum()) == pytest.approx(float(placed.mark_ease.sum()), abs=3e-4)

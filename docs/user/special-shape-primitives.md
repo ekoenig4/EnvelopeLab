@@ -194,6 +194,12 @@ partner on a skin piece's rim edge (`piece`, `piece_xy`).
   sides of every skin seam must be the same length (within 3 mm). Tube panels are exact
   developments, and dome gores are laid out so both sides of each seam have the seam's
   true length.
+* *attachment ease*: the skin's rim is sewn to the line marked on the **flat** envelope
+  panels, which is a little longer or shorter than the rim (the flat gore includes the
+  bulge of the lobe). The difference is worked in between match marks; the check gives
+  the largest difference between two neighbouring marks and the total. Above 3 mm it is
+  an error: add match marks (*marks per piece*), use more envelope gores, or a smaller
+  shape. Small shapes on most envelopes ease well under 1 mm.
 * *area distortion*: a dome's gores cannot be flattened without changing their area.
   Above 1 % the check warns. Use more gores: the distortion drops about four times when
   you double them (3.7 % at 8, 0.9 % at 16, 0.2 % at 32 gores for a hemisphere).

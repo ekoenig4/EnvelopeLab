@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Special shapes: new *attachment ease* check. The skin rim is sewn to the footprint
+  line marked on the flat envelope panels, which differs from the rim because the flat
+  gores carry the lobe bulge; the difference is now measured between every pair of
+  match marks and is an error above 3 mm (a 0.5 m dome low on the 8-gore fixture eases
+  4.7 mm into one interval; default-size shapes under 1 mm). No pattern changes.
 - Drag special shapes in the 3D view: with **Drag special shapes** on (or **Drag in 3D
   view…** in the Special shapes panel), press on a shape and drag it over the envelope; a
   ring previews where its base will sit, and releasing moves it (gore, tape position and

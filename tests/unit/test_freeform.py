@@ -126,3 +126,13 @@ def test_freeform_shape_inflates_to_its_designed_height() -> None:
     assert result.converged
     m = appendage_metrics(am, result)
     assert m.projected_height == pytest.approx(d.designed_height, rel=0.01)
+
+
+def test_freeform_attachment_ease_adds_up_to_rim_minus_marked_line() -> None:
+    d = design_primitive(FreeformShape("blob", Placement(2, EQUATOR), BLOB, 8), SPHERE)
+    rims = [c.rim for c in d.pieces if c.rim is not None]
+    rim = sum(float(np.linalg.norm(np.diff(r, axis=0), axis=1).sum()) for r in rims)
+    marked = sum(a.length for a in d.attachment)
+    assert len(d.mark_ease) == 16
+    assert float(d.mark_ease.sum()) == pytest.approx(rim - marked, abs=5e-4)
+    assert _checks(d)["attachment ease"] == pytest.approx(float(np.abs(d.mark_ease).max()))

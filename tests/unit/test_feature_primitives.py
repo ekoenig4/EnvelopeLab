@@ -11,6 +11,7 @@ import pytest
 from envelopelab.atmosphere import celsius_to_kelvin
 from envelopelab.features.builder import build_appendage
 from envelopelab.features.primitives import (
+    DEFAULT_TOLERANCE,
     Dome,
     EnvelopeSurface,
     Placement,
@@ -274,3 +275,24 @@ def test_coarse_footprint_grid_gives_the_same_pattern(monkeypatch: pytest.Monkey
     for a, b in zip(coarse.pieces, fine.pieces, strict=True):
         assert np.abs(a.cut - b.cut).max() < 1e-6
     assert np.abs(coarse.footprint_points - fine.footprint_points).max() < 1e-6
+
+
+@pytest.mark.parametrize(
+    "primitive",
+    [
+        Dome("d", Placement(1, EQUATOR), 1.0, 1.2, gores=16),
+        Tube("t", Placement(5, EQUATOR, lean_deg=20.0), 0.8, 0.3, 2.0),
+    ],
+    ids=["dome", "tube"],
+)
+def test_attachment_ease_adds_up_to_rim_minus_marked_line(primitive: Dome | Tube) -> None:
+    d = design_primitive(primitive, SPHERE)
+    rim = sum(_length(c.rim) for c in d.pieces if c.rim is not None)
+    marked = sum(a.length for a in d.attachment)
+    assert len(d.mark_ease) == len(d.marks)
+    # Integrated per mark interval from the same geometry as the drawn lines.
+    assert float(d.mark_ease.sum()) == pytest.approx(rim - marked, abs=2e-4)
+    check = next(c for c in d.checks if c.name == "attachment ease")
+    assert check.value == pytest.approx(float(np.abs(d.mark_ease).max()))
+    assert check.severity == ("info" if check.value <= DEFAULT_TOLERANCE else "error")
+    assert d.as_dict()["mark_ease_m"] == pytest.approx(d.mark_ease.tolist())

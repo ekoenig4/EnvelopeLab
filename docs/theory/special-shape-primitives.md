@@ -113,10 +113,39 @@ gores (see [Special-shape primitives](../validation/special-shape-primitives.md)
 |---|---|---|
 | footprint between mouth and crown | tape clearance, m | > 0 |
 | rim length | sum of rim edges − footprint length, m | 3 mm (assumed, AGENTS.md sewn edges) |
+| attachment ease | largest \(|e_j|\): rim minus marked line between two match marks, m | 3 mm (assumed, AGENTS.md sewn edges) |
 | skin seam match | largest length difference of the two sides of a seam, m | 3 mm (assumed) |
 | seam flattening | largest relative difference of a flat seam edge from its 3D seam | 2 % (assumed) |
 | area distortion | largest relative difference of a piece's flat and designed area | 1 % (assumed) |
 | feed hole inside footprint | — | inside |
+
+### Attachment ease
+
+The rim is sewn to the footprint line marked on the **flat** envelope panels, not to
+the designed surface. A panel's pattern coordinates are
+\(x = 2\,a\,w(s)\), \(y = s - s_\text{row}\) (fraction \(a\) of the flat gore
+width \(2w(s)\) from the centreline, tape position \(s\)), and the flat gore is wider
+than the hoop arc \(r\,\Delta\theta\) of the load-tape surface because it carries the
+lobe's bulge. So the marked line differs from the rim by an *ease* that the builder
+works in between match marks. Both sides are measured per mark interval \(j\) by
+integrating along the footprint, \(\phi\) round the shape's axis:
+
+\[
+e_j = \int_{\phi_j}^{\phi_{j+1}} \left|\frac{d\mathbf{r}}{d\phi}\right| d\phi
+    - \int_{\phi_j}^{\phi_{j+1}} \left|\frac{d\mathbf{h}}{d\phi}\right| d\phi
+\]
+
+with \(\mathbf{r}\) the rim on its flat skin piece and \(\mathbf{h}\) the footprint in
+its panel's pattern coordinates (48 steps per interval plus the vertices of a free-form
+rim; a step crossing a piece or panel boundary uses its 3D length). The sum of
+\(e_j\) equals the rim length minus the drawn lines' length to about 0.1 mm.
+
+The ease is largest where the gores are few and strongly lobed and the shape is large:
+on an 8-gore envelope a 0.5 m radius dome low on the envelope eases 4.7 mm into one
+10 cm mark interval (−9 mm in total), above the 3 mm limit, while a 0.18 m dome eases
+under 1 mm. More match marks per piece shorten the intervals and reduce \(|e_j|\). The
+build pack lists the rim and the marked lines as a sewn pair with the total ease, so
+the output QA checks the files against it.
 
 ## Free-form shapes from a mesh
 
