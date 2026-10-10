@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- `scripts/install_env.sh` now installs the OpenMP runtime the Gmsh wheel needs
+  (`libgomp1` on Debian/Ubuntu) and checks that Gmsh loads. Fixes "build pack import
+  failed: libgomp.so.1: cannot open shared object file" on minimal installs such as WSL
+  Ubuntu 24.04.
 - Gore loft (ADR-0014): the bulge of each gore between its load tapes is now a design
   input, the lobe-radius ratio k = ρ/r along the gore (stations as fractions of the tape
   length, interpolated). Set it in the standard-gore editor's **Gore loft** table, as one

@@ -67,14 +67,14 @@ Windows and macOS need no extra libraries. On Linux install:
 | Needed by | Debian / Ubuntu (`apt install`) |
 |---|---|
 | Python venv | `python3 python3-venv python3-pip` |
-| Gmsh (meshing) | `libglu1-mesa libxcursor1 libxft2 libxinerama1` |
+| Gmsh (meshing) | `libglu1-mesa libxcursor1 libxft2 libxinerama1 libgomp1` |
 | Qt / VTK (the application) | `libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libfontconfig1 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0` |
 | CalculiX (optional) | `calculix-ccx` |
 | Headless display (optional) | `xvfb xauth` |
 
 | Needed by | Fedora (`dnf install`) | Arch (`pacman -S`) | openSUSE (`zypper install`) |
 |---|---|---|---|
-| Gmsh | `mesa-libGLU libXcursor libXft libXinerama` | `glu libxcursor libxft libxinerama` | `libGLU1 libXcursor1 libXft2 libXinerama1` |
+| Gmsh | `mesa-libGLU libXcursor libXft libXinerama libgomp` | `glu libxcursor libxft libxinerama gcc-libs` | `libGLU1 libXcursor1 libXft2 libXinerama1 libgomp1` |
 | Qt / VTK | `mesa-libEGL mesa-libGL libxkbcommon libxkbcommon-x11 fontconfig dbus-libs xcb-util-cursor xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil` | `libglvnd mesa libxkbcommon libxkbcommon-x11 fontconfig dbus xcb-util-cursor xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil` | `libEGL1 libGL1 libxkbcommon0 libxkbcommon-x11-0 fontconfig libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0` |
 | CalculiX | `calculix-ccx` | AUR `calculix` | see [CalculiX installation](../dev/calculix-installation.md) |
 | Headless display | `xorg-x11-server-Xvfb xorg-x11-xauth` | `xorg-server-xvfb xorg-xauth` | `xvfb-run xauth` |
