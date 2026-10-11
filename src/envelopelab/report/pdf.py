@@ -38,11 +38,17 @@ class PdfCanvas:
     def __init__(self, size: tuple[float, float] = A4_LANDSCAPE) -> None:
         self.width, self.height = size
         self.pages: list[list[str]] = []
+        self.sizes: list[tuple[float, float]] = []
         self.new_page()
 
-    def new_page(self) -> None:
-        """Start a new page."""
+    def new_page(self, size: tuple[float, float] | None = None) -> None:
+        """Start a new page, of ``size`` (points) or the document's default size."""
         self.pages.append([])
+        self.sizes.append(size or (self.width, self.height))
+
+    def comment(self, text: str) -> None:
+        """Add a comment line to the page's content stream (ignored by viewers)."""
+        self._ops.append(f"%{text}")
 
     @property
     def _ops(self) -> list[str]:
@@ -125,7 +131,7 @@ class PdfCanvas:
         )
         pages_id = len(objects) + 1 + 2 * len(self.pages)
         page_ids = []
-        for ops in self.pages:
+        for ops, (width, height) in zip(self.pages, self.sizes, strict=True):
             stream = zlib.compress("\n".join(ops).encode("latin-1", errors="replace"))
             content = add(
                 f"<< /Length {len(stream)} /Filter /FlateDecode >>\nstream\n".encode()
@@ -135,8 +141,8 @@ class PdfCanvas:
             page_ids.append(
                 add(
                     (
-                        f"<< /Type /Page /Parent {pages_id} 0 R /MediaBox [0 0 {self.width:.0f} "
-                        f"{self.height:.0f}] /Resources << /Font << /F1 {font1} 0 R "
+                        f"<< /Type /Page /Parent {pages_id} 0 R /MediaBox [0 0 {width:.2f} "
+                        f"{height:.2f}] /Resources << /Font << /F1 {font1} 0 R "
                         f"/F2 {font2} 0 R >> "
                         f">> /Contents {content} 0 R >>"
                     ).encode()

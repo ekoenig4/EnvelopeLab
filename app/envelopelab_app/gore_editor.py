@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
 from envelopelab.geometry.gore import loft_extra_width
 from envelopelab.project.gore_design import control_arrays, profile_from_arrays, row_zone
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.refresh import Refresher
 
 HANDLE_RADIUS = 6.0  # px
 
@@ -315,8 +316,13 @@ class GoreEditor(QWidget):
         layout.addWidget(self.header)
         layout.addWidget(splitter, 1)
 
-        controller.stateChanged.connect(self.refresh)
-        controller.sessionChanged.connect(self.refresh)
+        self.refresher = Refresher(
+            self,
+            self.refresh,
+            lambda: controller.revision,
+            (controller.stateChanged, controller.sessionChanged),
+            defer_hidden=lambda: controller.defer_hidden,
+        )
         controller.fileChanged.connect(self._update_header)
         self.refresh()
 

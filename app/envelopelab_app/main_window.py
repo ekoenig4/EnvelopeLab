@@ -48,6 +48,7 @@ from envelopelab_app.panels.patterns import PatternPanel
 from envelopelab_app.panels.properties import PropertiesPanel
 from envelopelab_app.panels.rigging import RiggingPanel
 from envelopelab_app.panels.runs import RunsPanel
+from envelopelab_app.panels.shapes import ShapesPanel
 from envelopelab_app.panels.validation import ValidationPanel
 from envelopelab_app.panels.view3d import View3DPanel
 from envelopelab_app.settings import (
@@ -88,6 +89,7 @@ class MainWindow(QMainWindow):
         self.interactive = interactive
         self.instance_id = uuid.uuid4().hex
         self.controller = WorkspaceController(self.prefs)
+        self.controller.defer_hidden = interactive
         self.simulation = SimulationManager(self.controller)
         self.setWindowTitle("EnvelopeLab")
         self.resize(1500, 950)
@@ -99,10 +101,13 @@ class MainWindow(QMainWindow):
         self.validation = ValidationPanel(self.controller)
         self.runs = RunsPanel(self.controller, self.simulation)
         self.materials = MaterialsPanel(self.controller)
-        self.view3d = View3DPanel(self.controller, enable_renderer=use_3d)
+        self.view3d = View3DPanel(
+            self.controller, enable_renderer=use_3d, defer_renderer=interactive
+        )
         self.patterns = PatternPanel(self.controller)
         self.history = HistoryPanel(self.controller)
         self.rigging = RiggingPanel(self.controller)
+        self.shapes = ShapesPanel(self.controller)
         pattern_scope = artifact_inputs("patterns")
         self.panels: dict[str, Panel] = {
             "tree": Panel("Design Tree", self.controller, self.design_tree),
@@ -142,12 +147,21 @@ class MainWindow(QMainWindow):
                 scope={"parachute", "rigging", "turning_vents", "scoop", "operating"},
                 scroll=True,
             ),
+            "shapes": Panel(
+                "Special Shapes",
+                self.controller,
+                self.shapes,
+                scope={"shapes"},
+                artifacts=("shapes",),
+            ),
         }
         self._build_workspace()
 
         self._build_status_bar()
         self._build_actions()
         self.controller.editRejected.connect(self._rejected)
+        self.controller.selectionChanged.connect(self._selection_mode)
+        self.shapes.dragRequested.connect(self.drag_shape_in_3d)
         self.controller.message.connect(lambda text: self.statusBar().showMessage(text, 8000))
         self.controller.fileChanged.connect(self._update_title)
         self.controller.stateChanged.connect(self._update_actions)
@@ -175,6 +189,8 @@ class MainWindow(QMainWindow):
         self.restore_last_layout()
         if interactive:
             QTimer.singleShot(0, self.offer_recovery)
+            # The window is on screen before PyVista/OpenGL start (seconds).
+            QTimer.singleShot(50, self.view3d.load_renderer)
 
     # -- construction -------------------------------------------------------------------
 
@@ -206,6 +222,7 @@ class MainWindow(QMainWindow):
                 self.panels["materials"],
             ),
             "rigging": self.panels["rigging"],
+            "shapes": self.panels["shapes"],
             "simulate": self._splitter(
                 "simulateSplitter", vertical, self.panels["view3d"], self.panels["runs"]
             ),
@@ -219,6 +236,7 @@ class MainWindow(QMainWindow):
             "patterns": "patterns",
             "materials": "patterns",
             "rigging": "rigging",
+            "shapes": "shapes",
             "view3d": "simulate",
             "runs": "simulate",
             "history": "history",
@@ -408,6 +426,20 @@ class MainWindow(QMainWindow):
 
     def _mode_slot(self, key: str) -> Callable[[], None]:
         return lambda: self.set_mode(key)
+
+    def drag_shape_in_3d(self, name: str) -> None:
+        """Show the 3D view with shape dragging on, ready to move shape ``name``."""
+        self.show_panel("view3d")
+        self.view3d.drag_shapes.setChecked(True)
+        self.view3d.info.setText(
+            f"Press on {name} (or any special shape) and drag it over the envelope; release "
+            "to place it. Edit > Undo moves it back."
+        )
+
+    def _selection_mode(self, target: str) -> None:
+        """Show the Special shapes mode when a shape is selected (tree, warnings)."""
+        if target == "shapes" or target.startswith("shape:"):
+            self.show_panel("shapes")
 
     def _mode_changed(self, index: int) -> None:
         self.mode_stack.setCurrentIndex(index)
@@ -798,6 +830,10 @@ class MainWindow(QMainWindow):
         if self.simulation.running:
             self.simulation.cancel()
             self.simulation.wait(30_000)
+        if self.controller.shape_simulator.running:
+            self.controller.shape_simulator.cancel()
+            self.controller.shape_simulator.wait(30_000)
+        self.controller.shapes.wait(30_000)
         discard(self.autosave_path())
         layout_state.store(self.settings, layout_state.LAST_SLOT, self.capture_layout())
         self.view3d.close_renderer()

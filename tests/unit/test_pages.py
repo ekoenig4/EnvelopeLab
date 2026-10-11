@@ -23,3 +23,11 @@ def test_real_changes_are_reported() -> None:
     assert page_differences(PAGE, PAGE.replace("1164", "1165"))  # integers exact
     assert page_differences(PAGE, PAGE.replace("yes", "**no**"))
     assert page_differences(PAGE, PAGE + "extra\n")
+
+
+def test_round_off_zeros_match_across_platforms() -> None:
+    # Observed on CI: a closed-form seam error of 6.66e-16 m locally, 8.88e-16 m on CI.
+    assert page_differences("| seam | 6.66134e-16 | m |", "| seam | 8.88178e-16 | m |") == []
+    assert page_differences("| seam | 0 | m |", "| seam | 7.21645e-14 | m |") == []
+    # A real error is still a difference.
+    assert page_differences("| seam | 6.66134e-16 | m |", "| seam | 2e-06 | m |") != []

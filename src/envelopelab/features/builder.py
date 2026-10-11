@@ -36,6 +36,12 @@ Skin
   footprint's.
 * ``spherical_cap``: a designed doubly curved skin (stress-free on a spherical cap of the
   given height over a circular footprint), for analytic blister benchmarks.
+* ``designed``: a skin sewn from several cut pieces, supplied by a factory that meshes
+  every piece in its own flat pattern coordinates round the footprint nodes
+  (:class:`DesignedSkin`; :mod:`envelopelab.features.primitives`). Each triangle rests
+  in the cut cloth, seams are shared mesh lines and the designed 3D shape is only the
+  starting position; the footprint is meshed at the nodes the factory's caller gave
+  (no resampling).
 
 Assumptions: the patch edge is fixed on the designed surface (submodel boundary; keep the
 margin at least half the footprint size); the host far-field state is uniform over the
@@ -52,7 +58,7 @@ References
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -89,7 +95,7 @@ from envelopelab.solvers.model import (
     SolverModel,
 )
 
-SkinMode = Literal["flat_pattern", "spherical_cap"]
+SkinMode = Literal["flat_pattern", "spherical_cap", "designed"]
 #: 3D area of the initial flat-pattern skin guess as a fraction of its rest area, -.
 INITIAL_SKIN_AREA = 0.97
 
@@ -284,6 +290,41 @@ class PressureSpec:
 
 
 @dataclass
+class DesignedSkin:
+    """A skin meshed from its cut pieces (``skin_mode="designed"``).
+
+    Attributes
+    ----------
+    positions : ndarray, shape (n, 3)
+        Starting node positions in the host frame, m (rim nodes are moved onto the host).
+    triangles : ndarray of int, shape (m, 3)
+        Triangles, oriented with their normal pointing away from the host.
+    rest_uv : ndarray, shape (m, 3, 2)
+        Corner coordinates of every triangle in its cut piece, m.
+    grain : ndarray, shape (m, 2)
+        Warp direction of every triangle in its rest coordinates.
+    rim_index : ndarray of int
+        Skin node of every footprint node, in the order the factory received them.
+    seams : dict of str to ndarray
+        Skin seams as edge lists (skin node pairs).
+    notes : list of str
+        Adjustments made while meshing.
+    """
+
+    positions: FloatArray
+    triangles: IntArray
+    rest_uv: FloatArray
+    grain: FloatArray
+    rim_index: IntArray
+    seams: dict[str, IntArray] = field(default_factory=dict)
+    notes: list[str] = field(default_factory=list)
+
+
+SkinFactory = Callable[[FloatArray, float], DesignedSkin]
+"""``factory(rim_chart, mesh_size)``: the skin round the footprint nodes (chart, m)."""
+
+
+@dataclass
 class AppendageSpec:
     """Everything needed to assemble one appendage sub-model (SI units).
 
@@ -295,8 +336,10 @@ class AppendageSpec:
         Footprint line in the host chart, m (closed, any orientation).
     skin_outline : ndarray, shape (q, 2), optional
         Finished rim of the flat skin pattern, m (``flat_pattern``).
-    skin_mode : {"flat_pattern", "spherical_cap"}
+    skin_mode : {"flat_pattern", "spherical_cap", "designed"}
         Skin rest geometry.
+    skin_mesh : callable, optional
+        Skin factory of a ``designed`` skin (:data:`SkinFactory`).
     cap_height : float, optional
         Designed dome height of a ``spherical_cap`` skin, m.
     match_points : int
@@ -337,6 +380,7 @@ class AppendageSpec:
     skin_outline: FloatArray | None = None
     skin_mode: SkinMode = "flat_pattern"
     cap_height: float | None = None
+    skin_mesh: SkinFactory | None = None
     match_points: int = 16
     ease_mode: EaseMode = "match_points"
     match_start: tuple[float, float] | None = None
@@ -915,7 +959,10 @@ def build_appendage(
             raise FeatureBuildError(f"{spec.name}: no material for zone {zone!r}")
     size = spec.mesh_size
     fp = orient_ccw(np.asarray(spec.footprint, dtype=np.float64))
-    fp = resample_loop(fp, size)
+    if spec.skin_mode != "designed":
+        fp = resample_loop(fp, size)
+    elif spec.skin_mesh is None:
+        raise FeatureBuildError(f"{spec.name}: a designed skin needs a skin factory")
     lo, hi = fp.min(axis=0), fp.max(axis=0)
     tol = 1e-6 * max(float((hi - lo).max()), 1.0)
     host = spec.host
@@ -971,7 +1018,13 @@ def build_appendage(
 
         # Skin pattern with rim points matched to the footprint nodes.
         ease: RimEase | None = None
-        if spec.skin_mode == "flat_pattern":
+        designed: DesignedSkin | None = None
+        if spec.skin_mode == "designed":
+            assert spec.skin_mesh is not None
+            designed = spec.skin_mesh(rim_xy, size)
+            notes += designed.notes
+            rim_pattern = rim_xy.copy()
+        elif spec.skin_mode == "flat_pattern":
             if spec.skin_outline is None:
                 raise FeatureBuildError(f"{spec.name}: flat_pattern skin needs an outline")
             skin = orient_ccw(np.asarray(spec.skin_outline, dtype=np.float64))
@@ -984,15 +1037,24 @@ def build_appendage(
             if spec.cap_height is None or spec.cap_height <= 0.0:
                 raise FeatureBuildError(f"{spec.name}: spherical_cap skin needs cap_height > 0")
             rim_pattern = rim_xy.copy()
-        xy_s, tri_s = _mesh_disc(rim_pattern, size)
+        if designed is None:
+            xy_s, tri_s = _mesh_disc(rim_pattern, size)
 
     n_h = len(xy_h)
-    # Match skin rim nodes to the prescribed rim points (one per footprint node).
-    tree = cKDTree(xy_s)
-    dist, skin_rim = tree.query(rim_pattern)
-    if np.any(dist > 1e-6 * max(l_fp, 1.0)) or len(np.unique(skin_rim)) != len(loop):
-        raise FeatureBuildError(f"{spec.name}: skin rim nodes do not match the footprint")
-    skin_map = np.full(len(xy_s), -1, dtype=np.int64)
+    if designed is not None:
+        tri_s = designed.triangles
+        n_s = len(designed.positions)
+        skin_rim = designed.rim_index
+        if len(skin_rim) != len(loop) or len(np.unique(skin_rim)) != len(loop):
+            raise FeatureBuildError(f"{spec.name}: skin rim nodes do not match the footprint")
+    else:
+        # Match skin rim nodes to the prescribed rim points (one per footprint node).
+        tree = cKDTree(xy_s)
+        dist, skin_rim = tree.query(rim_pattern)
+        if np.any(dist > 1e-6 * max(l_fp, 1.0)) or len(np.unique(skin_rim)) != len(loop):
+            raise FeatureBuildError(f"{spec.name}: skin rim nodes do not match the footprint")
+        n_s = len(xy_s)
+    skin_map = np.full(n_s, -1, dtype=np.int64)
     skin_map[skin_rim] = loop
     interior = np.flatnonzero(skin_map < 0)
     skin_map[interior] = n_h + np.arange(len(interior))
@@ -1002,7 +1064,7 @@ def build_appendage(
     # 3D positions: host from the chart, skin from a harmonic chart image lifted outward.
     chart = np.zeros((n, 2))
     chart[:n_h] = xy_h
-    skin_chart = _harmonic(len(xy_s), tri_s, skin_rim, rim_xy)
+    skin_chart = _harmonic(n_s, tri_s, skin_rim, rim_xy)
     chart[skin_map] = skin_chart
     if host is not None:
         base = host.map(chart)
@@ -1013,7 +1075,13 @@ def build_appendage(
     area_fp = abs(_signed(rim_xy))
     radius_eq = math.sqrt(area_fp / math.pi)
     positions = base.copy()
-    if spec.skin_mode == "spherical_cap":
+    if designed is not None:
+        # Designed shape, moved so its rim lies on the host footprint: the rim offset
+        # (true envelope against the fitted host) is spread harmonically over the skin.
+        offset = _harmonic(n_s, tri_s, skin_rim, base[loop] - designed.positions[skin_rim])
+        sk = np.flatnonzero(skin_map >= n_h)
+        positions[skin_map[sk]] = designed.positions[sk] + offset[sk]
+    elif spec.skin_mode == "spherical_cap":
         h = float(spec.cap_height)  # type: ignore[arg-type]
         rc = (radius_eq**2 + h**2) / (2.0 * h)
         centre = rim_xy.mean(axis=0)
@@ -1125,7 +1193,9 @@ def build_appendage(
         uv[:, :, 0] /= lam_u
         uv[:, :, 1] /= lam_v
         rest[:m_h] = uv
-    if spec.skin_mode == "flat_pattern":
+    if designed is not None:
+        rest[m_h:] = designed.rest_uv
+    elif spec.skin_mode == "flat_pattern":
         rest[m_h:] = xy_s[tri_s]
     else:
         from envelopelab.validation.meshes import facet_rest_coordinates
@@ -1149,7 +1219,7 @@ def build_appendage(
     )
     grain = np.zeros((len(tri_all), 2))
     grain[:m_h] = (1.0, 0.0) if abs(spec.host_grain[0]) >= abs(spec.host_grain[1]) else (0.0, 1.0)
-    grain[m_h:] = spec.skin_grain
+    grain[m_h:] = designed.grain if designed is not None else spec.skin_grain
 
     # Chambers.
     feed: FeedPressure | None = None
@@ -1203,6 +1273,8 @@ def build_appendage(
     # Tapes and seams.
     cables: list[CableSet] = []
     seams = [SeamLine(f"{spec.name}:rim", _loop_edges(loop))]
+    if designed is not None:
+        seams += [SeamLine(name, skin_map[e]) for name, e in designed.seams.items() if len(e)]
     host_subset = np.arange(m_h)
     host_tape_names: list[str] = []
     crossing_nodes: list[int] = []

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget
 from envelopelab.project.dependencies import ARTIFACTS
 from envelopelab.project.gore_design import row_zone
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.refresh import Refresher
 
 STATUS_COLORS = {"current": "#155724", "stale": "#b00020", "not built": "#6c757d"}
 
@@ -40,15 +41,21 @@ class DesignTreePanel(QWidget):
         self.tree.itemSelectionChanged.connect(self._selected)
         layout = QVBoxLayout(self)
         layout.addWidget(self.tree)
-        for signal in (
-            controller.stateChanged,
-            controller.artifactsChanged,
-            controller.runsChanged,
-            controller.snapshotsChanged,
-            controller.sessionChanged,
-            controller.fileChanged,
-        ):
-            signal.connect(self.refresh)
+        self.refresher = Refresher(
+            self,
+            self.refresh,
+            lambda: controller.revision,
+            (
+                controller.stateChanged,
+                controller.artifactsChanged,
+                controller.runsChanged,
+                controller.snapshotsChanged,
+                controller.sessionChanged,
+                controller.fileChanged,
+                controller.shapesChanged,
+            ),
+            defer_hidden=lambda: controller.defer_hidden,
+        )
         self.refresh()
 
     def _add(
@@ -108,6 +115,27 @@ class DesignTreePanel(QWidget):
             if target == "zones":
                 for zone, fabric in design.zones.items():
                     self._add(item, f"{zone}: {fabric}", "zones")
+        if session.state.shapes:
+            state = "● unsaved" if "shapes" in unsaved else ""
+            shapes = self._add(
+                root, f"Special shapes ({len(session.state.shapes)})", "shapes", state
+            )
+            for shape in session.state.shapes:
+                result = self.controller.shapes.result(shape.name)
+                text = (
+                    "being placed"
+                    if result is None
+                    else "CANNOT BE PLACED"
+                    if result.design is None
+                    else "placed"
+                    if result.design.ok
+                    else "CHECKS FAILED"
+                )
+                child = self._add(
+                    shapes, f"{shape.name} ({shape.kind})", f"shape:{shape.name}", text
+                )
+                if text.isupper():
+                    child.setForeground(1, QBrush(QColor(STATUS_COLORS["stale"])))
         artifacts = self._add(self.tree, "Derived artifacts", "artifacts")
         for spec in ARTIFACTS:
             status = self.controller.artifact_status(spec.name)

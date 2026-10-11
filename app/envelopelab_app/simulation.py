@@ -267,7 +267,7 @@ class SimulationManager(QObject):
         if session is not None:
             session.add_run(record, arrays)
             session.tracker.mark_built("simulation", record.input_fingerprint)
-            self.controller.artifactsChanged.emit()
+            self.controller.notify_artifacts()
         self.finished.emit(record)
 
     def _failed(self, message: str) -> None:

@@ -112,9 +112,17 @@ def _state_data(state: DesignState) -> tuple[dict[str, Any], dict[str, Any]]:
     )
 
 
-def _state_from(design: dict[str, Any], patterns: dict[str, Any]) -> DesignState:
+def _shapes_data(state: DesignState) -> list[dict[str, Any]]:
+    return [s.model_dump(mode="json") for s in state.shapes]
+
+
+def _state_from(
+    design: dict[str, Any], patterns: dict[str, Any], shapes: list[dict[str, Any]]
+) -> DesignState:
     doc = DesignDocument.model_validate(design)
-    return DesignState(design=doc, patterns=PatternSet.model_validate(patterns))
+    return DesignState.model_validate(
+        {"design": doc, "patterns": PatternSet.model_validate(patterns), "shapes": shapes}
+    )
 
 
 def _set_path(data: Any, path: Sequence[str | int], value: Any) -> None:
@@ -241,7 +249,8 @@ class ProjectSession:
 
     def _refresh_hashes(self) -> None:
         design, patterns = _state_data(self.project.state)
-        self._hashes = group_hashes(input_groups(design, patterns))
+        shapes = _shapes_data(self.project.state)
+        self._hashes = group_hashes(input_groups(design, patterns, shapes))
         # Library values are not part of the file, so they only enter the fingerprints,
         # never the saved/unsaved comparison of ``_hashes``.
         self._fingerprints = fingerprints({**self._hashes, **self._external_hashes()})
@@ -319,7 +328,8 @@ class ProjectSession:
         design_a, patterns_a = _state_data(state)
         if stamp:
             design_b["meta"]["modified"] = design_a["meta"]["modified"] = None
-        if design_b == design_a and patterns_b == patterns_a:
+        same_shapes = _shapes_data(before) == _shapes_data(state)
+        if design_b == design_a and patterns_b == patterns_a and same_shapes:
             return False
         after = state.model_copy(deep=True)
         if stamp:
@@ -335,6 +345,8 @@ class ProjectSession:
         provenance: tuple[str, str, str] | None = None,
     ) -> bool:
         """Edit JSON copies of the design and pattern data, validate and apply.
+
+        The special shapes are kept as they are (see :meth:`edit_shapes`).
 
         Parameters
         ----------
@@ -358,7 +370,34 @@ class ProjectSession:
         design, patterns = _state_data(self.project.state)
         design, patterns = copy.deepcopy(design), copy.deepcopy(patterns)
         mutate(design, patterns)
-        return self.apply_state(_state_from(design, patterns), description, provenance)
+        shapes = _shapes_data(self.project.state)
+        return self.apply_state(_state_from(design, patterns, shapes), description, provenance)
+
+    def edit_shapes(self, description: str, mutate: Callable[[list[dict[str, Any]]], None]) -> bool:
+        """Edit a JSON copy of the special shapes, validate and apply (one undo step).
+
+        Parameters
+        ----------
+        description : str
+            History text.
+        mutate : callable
+            ``mutate(shapes_data)`` changes the list of shape dictionaries in place
+            (lengths in m, angles in degrees).
+
+        Returns
+        -------
+        bool
+            Whether the state changed.
+
+        Raises
+        ------
+        ValueError
+            When the edited data is not a valid list of shapes (nothing is changed).
+        """
+        design, patterns = _state_data(self.project.state)
+        shapes = copy.deepcopy(_shapes_data(self.project.state))
+        mutate(shapes)
+        return self.apply_state(_state_from(design, patterns, shapes), description)
 
     def set_design_value(
         self, path: Sequence[str | int], value: Any, description: str | None = None

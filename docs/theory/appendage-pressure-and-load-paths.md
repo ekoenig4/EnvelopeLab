@@ -110,8 +110,10 @@ N_v = \frac{p R_2}{2}, \qquad N_u = p R_2\left(1 - \frac{R_2}{2R_1}\right) \ (\g
 \]
 
 **Skin.** Either the flat as-cut pattern (rim nodes placed by the match-point
-correspondence) or, for analytic benchmarks, a designed spherical cap whose rest shape is
-the cap itself. The initial guess is an equal-arc spherical cap scaled to start 3 % slack
+correspondence), a skin sewn from several cut pieces each meshed in its own flat
+coordinates (`designed`, used by the
+[special-shape primitives](special-shape-primitives.md)) or, for analytic benchmarks, a
+designed spherical cap whose rest shape is the cap itself. The initial guess is an equal-arc spherical cap scaled to start 3 % slack
 (an over-stretched start makes the explicit solver take huge first steps); it does not
 enter the equilibrium.
 

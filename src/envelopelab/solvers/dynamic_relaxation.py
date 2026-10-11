@@ -64,7 +64,9 @@ from typing import Any, Literal
 
 import numpy as np
 import numpy.typing as npt
+from scipy.sparse import csr_matrix
 
+from envelopelab.solvers.kernels import ElementForces, element_forces, pressure_corner_forces
 from envelopelab.solvers.membrane import (
     SLACK,
     TAUT,
@@ -75,11 +77,9 @@ from envelopelab.solvers.membrane import (
     deformation_gradient,
     element_stiffness_rowsum,
     green_strain,
-    internal_forces,
     rest_geometry,
-    tension_field,
 )
-from envelopelab.solvers.model import MAIN_CHAMBER, SolverModel, SolverSettings
+from envelopelab.solvers.model import AMBIENT, MAIN_CHAMBER, SolverModel, SolverSettings
 
 SolveStatus = Literal["converged", "max_iterations", "time_limit", "cancelled", "diverged"]
 Severity = Literal["info", "warning", "error"]
@@ -360,13 +360,25 @@ def _edge_loops(edges: IntArray) -> list[IntArray]:
     return [edges[roots == r] for r in np.unique(roots)]
 
 
-def _cap(x: FloatArray, edges: IntArray) -> tuple[FloatArray, FloatArray, FloatArray]:
+def _cross(a: FloatArray, b: FloatArray) -> FloatArray:
+    """Row-wise cross product of (k, 3) arrays (explicit: much faster than ``np.cross``)."""
+    out = np.empty_like(a)
+    out[:, 0] = a[:, 1] * b[:, 2] - a[:, 2] * b[:, 1]
+    out[:, 1] = a[:, 2] * b[:, 0] - a[:, 0] * b[:, 2]
+    out[:, 2] = a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]
+    return out
+
+
+def _cap(
+    x: FloatArray, edges: IntArray, nodes: IntArray | None = None
+) -> tuple[FloatArray, FloatArray, FloatArray]:
     """Fan cap over a boundary loop: centre, area normals (k, 3) and centroids (k, 3)."""
-    nodes = np.unique(edges)
+    if nodes is None:
+        nodes = np.unique(edges)
     centre = x[nodes].mean(axis=0)
     a = x[edges[:, 1]] - centre
     b = x[edges[:, 0]] - centre
-    normals = 0.5 * np.cross(a, b)
+    normals = 0.5 * _cross(a, b)
     centroids = (centre + x[edges[:, 0]] + x[edges[:, 1]]) / 3.0
     return centre, normals, centroids
 
@@ -512,6 +524,8 @@ class _System:
                 raise ValueError(f"closure {closure.name}: nodes are not on a boundary loop")
             self.closures.append((closure.name, edges))
         self.closure_codes = [model.chamber_index(c.chamber) for c in model.closures]
+        self.closure_nodes = [np.unique(edges) for _, edges in self.closures]
+        self._precompute_operators()
         self.volume_origin = self._volume_origin()
         # Gas regions (main envelope plus appendage chambers): each is bounded by the
         # triangles with that gas inside (as oriented) and those with it outside (flipped).
@@ -548,6 +562,46 @@ class _System:
         origin, *_ = np.linalg.lstsq(normals, offsets, rcond=None)
         return np.asarray(origin, dtype=np.float64)
 
+    def _precompute_operators(self) -> None:
+        """Fixed operators of the force evaluation (topology does not change).
+
+        Corner and cable-end forces are summed onto nodes by sparse matrices instead of
+        repeated ``bincount`` calls; the chamber pressure groups are found once.
+        """
+        m = len(self.tri)
+        self.scatter_tri = csr_matrix(
+            (np.ones(3 * m), (self.tri.ravel(), np.arange(3 * m))), shape=(self.n, 3 * m)
+        )
+        k = len(self.cable_edges)
+        self.scatter_cable = csr_matrix(
+            (np.ones(2 * k), (self.cable_edges.T.ravel(), np.arange(2 * k))), shape=(self.n, 2 * k)
+        )
+        self.weight_nodes = np.zeros((self.n, 3))
+        if self.self_weight:
+            self.weight_nodes = self.scatter_tri @ np.repeat(self.weight_tri / 3.0, 3, axis=0)
+            if k:
+                w = 0.5 * self.weight_cable
+                self.weight_nodes = self.weight_nodes + self.scatter_cable @ np.concatenate([w, w])
+        self.pressure_groups: list[tuple[float, int, IntArray]] | None = None
+        pairs = self.model.tri_chambers
+        if pairs is not None:
+            self.pressure_groups = []
+            for side, sign in ((0, 1.0), (1, -1.0)):
+                for code in np.unique(pairs[:, side]):
+                    if code == AMBIENT:
+                        continue
+                    rows = np.flatnonzero(pairs[:, side] == code)
+                    self.pressure_groups.append((sign, int(code), rows))
+
+    def triangle_pressure(self, z: FloatArray) -> FloatArray:
+        """Net corner pressure of every triangle, Pa (as ``SolverModel.triangle_pressure``)."""
+        if self.pressure_groups is None:
+            return self.model.conditions.pressure(z)
+        out = np.zeros_like(z, dtype=np.float64)
+        for sign, code, rows in self.pressure_groups:
+            out[rows] += sign * self.model.chamber_pressure(code, z[rows])
+        return out
+
     def _scatter(self, nodes: IntArray, values: FloatArray) -> FloatArray:
         out = np.zeros((self.n, 3))
         for k in range(3):
@@ -563,20 +617,22 @@ class _System:
 
     # ---------------------------------------------------------------------------------
 
-    def membrane(
-        self, x: FloatArray
-    ) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray, npt.NDArray[np.int8], FloatArray]:
-        xe = x[self.tri]
-        f = deformation_gradient(xe, self.rest.grad_n)
-        strain = green_strain(f)
-        stress, state, trial_minor = tension_field(
-            strain,
+    def elements(self, x: FloatArray) -> tuple[ElementForces, FloatArray]:
+        """Membrane and pressure forces of every triangle with their nodal sums, and the
+        corner pressures (Pa) (:func:`envelopelab.solvers.kernels.element_forces`)."""
+        p = self.triangle_pressure(x[self.tri, 2])
+        el = element_forces(
+            x,
+            self.tri,
+            self.rest,
             self.c,
             self.c_inv,
             self.settings.slack_stiffness_ratio,
             self.settings.tension_field,
+            p,
+            self.scatter_tri,
         )
-        return xe, f, strain, stress, state, trial_minor
+        return el, p
 
     def cables(self, x: FloatArray) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray]:
         e = self.cable_edges
@@ -587,16 +643,12 @@ class _System:
         unit = d / np.maximum(length, 1e-300)[:, None]
         return tension, strain, unit, length
 
-    def pressure_corners(self, xe: FloatArray) -> tuple[FloatArray, FloatArray]:
-        p = self.model.triangle_pressure(xe[:, :, 2])
-        normal = 0.5 * np.cross(xe[:, 1] - xe[:, 0], xe[:, 2] - xe[:, 0])
-        weights = (p + p.sum(axis=1, keepdims=True)) / 12.0  # (2 p_a + p_b + p_c) / 12
-        return weights[:, :, None] * normal[:, None, :], p
-
     def closure_forces(self, x: FloatArray) -> dict[str, FloatArray]:
         out: dict[str, FloatArray] = {}
-        for (name, edges), code in zip(self.closures, self.closure_codes, strict=True):
-            _, normals, centroids = _cap(x, edges)
+        for (name, edges), code, nodes in zip(
+            self.closures, self.closure_codes, self.closure_nodes, strict=True
+        ):
+            _, normals, centroids = _cap(x, edges, nodes)
             p = self.model.chamber_pressure(code, centroids[:, 2])
             total = (p[:, None] * normals).sum(axis=0)
             lengths = np.linalg.norm(x[edges[:, 1]] - x[edges[:, 0]], axis=1)
@@ -609,25 +661,23 @@ class _System:
 
     def forces(self, x: FloatArray) -> tuple[FloatArray, FloatArray, dict[str, Any]]:
         """Residual R = F_ext - F_int, external force vector, and intermediate data."""
-        xe, f, strain, stress, state, trial_minor = self.membrane(x)
-        f_int = internal_forces(f, stress, self.rest)
-        f_p, p_corner = self.pressure_corners(xe)
-        corner = f_p - f_int
-        ext_corner = f_p
-        if self.self_weight:
-            corner = corner + self.weight_tri[:, None, :] / 3.0
-            ext_corner = ext_corner + self.weight_tri[:, None, :] / 3.0
-        r = self._scatter(self.tri.ravel(), corner.reshape(-1, 3))
-        ext = self._scatter(self.tri.ravel(), ext_corner.reshape(-1, 3))
+        el, p_corner = self.elements(x)
+        xe, f, strain, stress, state, trial_minor = (
+            el.xe,
+            el.f,
+            el.strain,
+            el.stress,
+            el.state,
+            el.trial_minor,
+        )
+        f_p = el.f_p
+        # External loads (pressure, self weight) and residual R = F_ext - F_int.
+        ext = el.external + self.weight_nodes
+        r = el.residual + self.weight_nodes
         if len(self.cable_edges):
             tension, _, unit, _ = self.cables(x)
             pull = tension[:, None] * unit
-            cable_f = np.concatenate([pull, -pull])
-            if self.self_weight:
-                w = 0.5 * self.weight_cable
-                cable_f = cable_f + np.concatenate([w, w])
-                ext += self._scatter(self.cable_edges.T.ravel(), np.concatenate([w, w]))
-            r += self._scatter(self.cable_edges.T.ravel(), cable_f)
+            r += self.scatter_cable @ np.concatenate([pull, -pull])
         closures = self.closure_forces(x)
         for vec in closures.values():
             r += vec
@@ -793,7 +843,8 @@ class ModelEvaluator:
 
     def pressure_resultant(self, x: FloatArray) -> FloatArray:
         """Resultant of the membrane pressure load at ``x``, N, shape (3,)."""
-        f_p, _ = self._s.pressure_corners(x[self._s.tri])
+        xe = x[self._s.tri]
+        f_p = pressure_corner_forces(xe, self._s.triangle_pressure(xe[:, :, 2]))
         out: FloatArray = f_p.sum(axis=(0, 1))
         return out
 

@@ -8,8 +8,9 @@ the menu **View** lists the same modes with shortcuts:
 | **Shape** | Ctrl+1 | The gore editor: meridian profile, control points, panel rows, constraint locks and live outputs |
 | **Patterns** | Ctrl+2 | The 2D pattern view beside the **Materials** panel (fabric library and material zones) |
 | **Rigging** | Ctrl+3 | The **Rigging** panel: parachute, red line, flying wires, turning vents, scoop |
-| **3D / Simulation** | Ctrl+4 | The 3D view above the **Simulation Runs** table |
-| **History** | Ctrl+5 | Undo history, snapshots, versions and provenance |
+| **Special shapes** | Ctrl+4 | The **Special Shapes** panel: domes, tubes, revolved and mesh shapes on the envelope, their cutting patterns and simulations ([guide](special-shape-primitives.md#in-the-desktop-application)) |
+| **3D / Simulation** | Ctrl+5 | The 3D view above the **Simulation Runs** table |
+| **History** | Ctrl+6 | Undo history, snapshots, versions and provenance |
 
 Two areas stay visible in every mode:
 

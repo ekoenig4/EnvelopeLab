@@ -26,6 +26,15 @@ KEYS: tuple[tuple[str, str], ...] = (
         "Constraint locks of the gore editor (height m, volume m³, maximum diameter m, gore "
         "count).",
     ),
+    (
+        "`state.shapes`",
+        "Special shapes placed on the envelope (version 2): `kind` (`dome`, `tube`, "
+        "`revolved` or `mesh`), unique `name`, `placement` (gore from 1, tape position m, "
+        "fraction across the gore, lean and lean direction in degrees), the shape's sizes "
+        "(m) or revolved profile (m) or mesh vertices (m) and triangles, panel or gore "
+        "count, match marks per piece, feed-hole radius (m, optional), seam allowance (m) "
+        "and skin fabric id (optional). Version 1 files read as having no shapes.",
+    ),
     ("`snapshots`", "Named copies of `state` with their design content hash."),
     ("`versions`", "Committed design versions (`version_id`, `parent_id`, message, state)."),
     ("`provenance`", "Append-only log of flagged edits (manual overrides and their undo)."),

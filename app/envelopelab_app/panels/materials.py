@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 from envelopelab.materials.repository import Fabric
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.dialogs import FabricDialog, FabricDialogMode
+from envelopelab_app.refresh import Refresher
 
 LIBRARY_COLUMNS = (
     "id",
@@ -86,9 +87,13 @@ class MaterialsPanel(QWidget):
         layout.addWidget(QLabel("Material zones of this design"))
         layout.addWidget(self.zones)
         layout.addLayout(buttons)
-        controller.stateChanged.connect(self.refresh)
-        controller.sessionChanged.connect(self.refresh)
-        controller.libraryChanged.connect(self.refresh)
+        self.refresher = Refresher(
+            self,
+            self.refresh,
+            lambda: controller.revision,
+            (controller.stateChanged, controller.sessionChanged, controller.libraryChanged),
+            defer_hidden=lambda: controller.defer_hidden,
+        )
         self.refresh()
 
     def refresh(self) -> None:

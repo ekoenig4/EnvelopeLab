@@ -1,6 +1,6 @@
 """Project file: a design document with its pattern annotations, history and run records.
 
-An EnvelopeLab *project* (``*.elproj``, format ``envelopelab.project`` version 1) is a
+An EnvelopeLab *project* (``*.elproj``, format ``envelopelab.project`` version 2) is a
 JSON file that wraps one design document (unchanged, in the design schema) with
 
 * **pattern annotations** per panel row (printed label, grain direction, fabric zone,
@@ -12,7 +12,11 @@ JSON file that wraps one design document (unchanged, in the design schema) with
   mesh size, material sources, load case, design hash and the input fingerprint that
   decides whether the result is still current). Result arrays are kept next to the
   project in ``<name>.elproj.runs/<run_id>.npz``.
-* **constraint locks** of the standard-gore editor.
+* **constraint locks** of the standard-gore editor;
+* the **special shapes** placed on the envelope (domes, tubes, revolved and mesh shapes,
+  :mod:`envelopelab.project.shapes`), part of the design state since version 2.
+
+Version 1 files (no shapes) are read as version 2 files with no shapes (ADR-0020).
 
 All lengths are in m, angles in degrees (pattern annotations only; a boundary format
 for builders), temperatures in K and pressures in Pa.
@@ -26,12 +30,15 @@ from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from envelopelab.design.model import DesignDocument, load_design_document
+from envelopelab.project.shapes import ShapeSpec
 
 PROJECT_FORMAT: Literal["envelopelab.project"] = "envelopelab.project"
-PROJECT_FORMAT_VERSION: Literal[1] = 1
+PROJECT_FORMAT_VERSION: Literal[2] = 2
+#: Older versions :func:`load_project_text` still reads (see :func:`migrate_project_data`).
+READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2)
 PROJECT_SUFFIX = ".elproj"
 
 NotchEdge = Literal["left", "right", "bottom", "top"]
@@ -187,12 +194,21 @@ class ConstraintLocks(BaseModel):
 
 
 class DesignState(BaseModel):
-    """Everything that is edited: the design document and its pattern annotations."""
+    """Everything that is edited: the design document, its pattern annotations and the
+    special shapes placed on it."""
 
     model_config = ConfigDict(extra="forbid")
 
     design: DesignDocument
     patterns: PatternSet = Field(default_factory=PatternSet)
+    shapes: list[ShapeSpec] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _unique_shape_names(self) -> DesignState:
+        names = [s.name for s in self.shapes]
+        if len(set(names)) != len(names):
+            raise ValueError("special shape names must be unique")
+        return self
 
 
 class Snapshot(BaseModel):
@@ -325,12 +341,12 @@ class RunRecord(BaseModel):
 
 
 class Project(BaseModel):
-    """An EnvelopeLab project file (``envelopelab.project`` v1)."""
+    """An EnvelopeLab project file (``envelopelab.project`` v2)."""
 
     model_config = ConfigDict(extra="forbid")
 
     format: Literal["envelopelab.project"] = PROJECT_FORMAT
-    format_version: Literal[1] = PROJECT_FORMAT_VERSION
+    format_version: Literal[2] = PROJECT_FORMAT_VERSION
     state: DesignState
     locks: ConstraintLocks = Field(default_factory=ConstraintLocks)
     snapshots: list[Snapshot] = Field(default_factory=list)
@@ -344,13 +360,43 @@ def state_to_data(state: DesignState) -> dict[str, Any]:
     return {
         "design": state.design.with_updated_hash().model_dump(by_alias=True, mode="json"),
         "patterns": state.patterns.model_dump(mode="json"),
+        "shapes": [s.model_dump(mode="json") for s in state.shapes],
     }
 
 
 def state_from_data(data: dict[str, Any]) -> DesignState:
     """Design state from JSON data; the design content hash is checked."""
     design = load_design_document(json.dumps(data["design"]))
-    return DesignState(design=design, patterns=PatternSet.model_validate(data["patterns"]))
+    return DesignState.model_validate(
+        {
+            "design": design,
+            "patterns": PatternSet.model_validate(data["patterns"]),
+            "shapes": data.get("shapes", []),
+        }
+    )
+
+
+def migrate_project_data(raw: dict[str, Any]) -> dict[str, Any]:
+    """Bring project file data of any readable version to the current version.
+
+    Version 1 states have no ``shapes``; they read as states without special shapes.
+
+    Raises
+    ------
+    ValueError
+        For a version this release cannot read.
+    """
+    version = raw.get("format_version")
+    if version not in READABLE_FORMAT_VERSIONS:
+        raise ValueError(f"unsupported project format version {version!r}")
+    if version == 1:
+        states = [raw["state"]] + [
+            i["state"] for k in ("snapshots", "versions") for i in raw.get(k, [])
+        ]
+        for state in states:
+            state.setdefault("shapes", [])
+    raw["format_version"] = PROJECT_FORMAT_VERSION
+    return raw
 
 
 def _project_to_data(project: Project) -> dict[str, Any]:
@@ -375,12 +421,12 @@ def load_project_text(text: str) -> Project:
     ------
     ValueError
         For another format, an unsupported version or a design content-hash mismatch.
+        Older readable versions are migrated (:func:`migrate_project_data`).
     """
     raw = json.loads(text)
     if raw.get("format") != PROJECT_FORMAT:
         raise ValueError(f"not an EnvelopeLab project (format {raw.get('format')!r})")
-    if raw.get("format_version") != PROJECT_FORMAT_VERSION:
-        raise ValueError(f"unsupported project format version {raw.get('format_version')!r}")
+    raw = migrate_project_data(raw)
     raw["state"] = state_from_data(raw["state"])
     for key in ("snapshots", "versions"):
         for item in raw.get(key, []):

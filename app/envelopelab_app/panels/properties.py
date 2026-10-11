@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.refresh import Refresher
 
 #: Unit shown next to a field (SI values; boundary display only).
 UNITS = {
@@ -103,8 +104,13 @@ class PropertiesPanel(QWidget):
         layout.addWidget(self.scroll_area)
         self.editors: dict[tuple[str | int, ...], QLineEdit] = {}
         controller.selectionChanged.connect(self._selection)
-        controller.stateChanged.connect(self.refresh)
-        controller.sessionChanged.connect(self.refresh)
+        self.refresher = Refresher(
+            self,
+            self.refresh,
+            lambda: controller.revision,
+            (controller.stateChanged, controller.sessionChanged),
+            defer_hidden=lambda: controller.defer_hidden,
+        )
         self.refresh()
 
     def _selection(self, target: str) -> None:

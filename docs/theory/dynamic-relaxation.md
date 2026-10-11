@@ -144,6 +144,16 @@ uses \(v^{t+\frac12} = [(1 - c/2)v^{t-\frac12} + R/m]/(1 + c/2)\).
 earlier equilibrium (constrained nodes keep their prescribed positions), which is how the
 GUI updates the preview after a small design change.
 
+### Implementation of the element evaluation
+
+Each iteration evaluates every triangle's deformation gradient, strain, tension-field
+stress, internal corner forces and consistent pressure loads, and sums them onto the
+nodes (`envelopelab.solvers.kernels.element_forces`). With the optional `fast` extra
+(Numba, ADR-0019) this runs as one compiled loop. Otherwise the vectorized NumPy
+functions of `envelopelab.solvers.membrane` are used. The two give the same forces to
+round-off (relative 1e-12, `tests/unit/test_solver_kernels.py`), so the choice changes
+only run time.
+
 ## Convergence criteria
 
 | Status | Meaning |

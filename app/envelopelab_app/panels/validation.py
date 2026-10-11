@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QLabel, QListWidget, QListWidgetItem, QVBoxLayout,
 
 from envelopelab.project.gore_design import DesignFinding
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.refresh import Refresher
 
 SEVERITY_COLORS = {"error": "#b00020", "warning": "#8a6d3b", "info": "#31708f"}
 
@@ -27,13 +28,19 @@ class ValidationPanel(QWidget):
         layout.addWidget(self.summary)
         layout.addWidget(self.list)
         self.findings: list[DesignFinding] = []
-        for signal in (
-            controller.stateChanged,
-            controller.artifactsChanged,
-            controller.runsChanged,
-            controller.sessionChanged,
-        ):
-            signal.connect(self.refresh)
+        self.refresher = Refresher(
+            self,
+            self.refresh,
+            lambda: controller.revision,
+            (
+                controller.stateChanged,
+                controller.artifactsChanged,
+                controller.runsChanged,
+                controller.sessionChanged,
+                controller.shapesChanged,
+            ),
+            defer_hidden=lambda: controller.defer_hidden,
+        )
         self.refresh()
 
     def refresh(self) -> None:

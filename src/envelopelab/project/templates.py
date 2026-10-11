@@ -275,7 +275,7 @@ def state_from_template(template: Project, name: str) -> DesignState:
     data = state.design.model_dump(by_alias=True, mode="json")
     data["meta"] = meta
     design = DesignDocument.model_validate(data).with_updated_hash()
-    return DesignState(design=design, patterns=state.patterns)
+    return DesignState(design=design, patterns=state.patterns, shapes=state.shapes)
 
 
 MEASUREMENTS_NOT_IMPLEMENTED = (

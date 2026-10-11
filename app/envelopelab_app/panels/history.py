@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.refresh import Refresher
 
 
 class HistoryPanel(QWidget):
@@ -64,14 +65,19 @@ class HistoryPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.addWidget(QLabel("Click an entry to return to that state (undoable)."))
         layout.addWidget(tabs)
-        for signal in (
-            controller.stateChanged,
-            controller.snapshotsChanged,
-            controller.provenanceChanged,
-            controller.sessionChanged,
-            controller.fileChanged,
-        ):
-            signal.connect(self.refresh)
+        self.refresher = Refresher(
+            self,
+            self.refresh,
+            lambda: controller.revision,
+            (
+                controller.stateChanged,
+                controller.snapshotsChanged,
+                controller.provenanceChanged,
+                controller.sessionChanged,
+                controller.fileChanged,
+            ),
+            defer_hidden=lambda: controller.defer_hidden,
+        )
         self.refresh()
 
     def refresh(self) -> None:

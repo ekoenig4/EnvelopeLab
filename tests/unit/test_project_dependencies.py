@@ -42,6 +42,7 @@ def test_geometry_invalidates_every_geometric_artifact() -> None:
         "flattening",
         "nesting",
         "export",
+        "shapes",
     }
 
 

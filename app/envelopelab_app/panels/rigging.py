@@ -34,6 +34,7 @@ from envelopelab.rigging import (
     turning_vent_pair,
 )
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.refresh import Refresher
 
 FAIL_COLOR = "#b00020"
 
@@ -85,8 +86,13 @@ class RiggingPanel(QWidget):
         layout.addLayout(grid)
         layout.addWidget(self.summary)
         layout.addWidget(self.tree)
-        controller.stateChanged.connect(self.refresh)
-        controller.sessionChanged.connect(self.refresh)
+        self.refresher = Refresher(
+            self,
+            self.refresh,
+            lambda: controller.revision,
+            (controller.stateChanged, controller.sessionChanged),
+            defer_hidden=lambda: controller.defer_hidden,
+        )
         self.refresh()
 
     # -- edits --------------------------------------------------------------------------
