@@ -19,7 +19,7 @@ activate `.venv` before committing.
 On Linux the Gmsh wheel needs a few system libraries (ADR-0003):
 
 ```bash
-sudo apt-get install -y libglu1-mesa libxcursor1 libxft2 libxinerama1
+sudo apt-get install -y libglu1-mesa libxcursor1 libxft2 libxinerama1 libgomp1
 ```
 
 ## Desktop application
