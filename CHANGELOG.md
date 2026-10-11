@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- The `gui` extra excludes PySide6 6.12: that release drops a reference to `None` on
+  every Qt call that returns nothing, so on Python 3.11 the application (and the test
+  suite) aborted with "Fatal Python error: none_dealloc" after a while.
 - Special shapes: new *attachment ease* check. The skin rim is sewn to the footprint
   line marked on the flat envelope panels, which differs from the rim because the flat
   gores carry the lobe bulge; the difference is now measured between every pair of
