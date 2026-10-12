@@ -1,4 +1,8 @@
-"""New-design wizard tab: a design from a shape file, holding any three values."""
+"""New-design wizard tab: a design from a shape file, holding any three values.
+
+The design is the whole file (``ShapeFile.design``): rows, zones, gore construction,
+openings and rigging when the file gives them, the tab's row count and fabric otherwise.
+"""
 
 from __future__ import annotations
 
@@ -28,7 +32,6 @@ from envelopelab.project.shape_family import (
     HELD_COUNT,
     QUANTITIES,
     ShapeSolution,
-    shape_design,
     solve_shape,
     station_points,
 )
@@ -223,6 +226,19 @@ class ShapeFileTab(QWidget):
         )
         self.gores.setValue(sf.gore_count)
         self.allowance.setValue(sf.seam_allowance * 1000.0)
+        # A file with its own rows or zones fixes them; the choices here then do not apply.
+        self.rows.setEnabled(not sf.rows)
+        if sf.rows:
+            self.rows.setValue(len(sf.rows))
+            self.rows.setToolTip("Rows from the file: " + ", ".join(r.name for r in sf.rows))
+        else:
+            self.rows.setToolTip("")
+        self.fabric.setEnabled(not sf.zones)
+        self.fabric.setToolTip(
+            "Zones from the file: " + ", ".join(f"{z} = {f}" for z, f in sf.zones.items())
+            if sf.zones
+            else ""
+        )
         self._filling = True
         for row, name in enumerate(QUANTITIES):
             state = Qt.CheckState.Checked if name in sf.hold else Qt.CheckState.Unchecked
@@ -294,10 +310,9 @@ class ShapeFileTab(QWidget):
         assert self.solution is not None
         if not self.solution.converged:
             raise ValueError(self.status.text())
-        return shape_design(
-            self.name.text().strip() or self.shape_file.name,
-            self.shape_file.shape,
+        return self.shape_file.design(
             self.solution,
-            row_count=self.rows.value(),
+            name=self.name.text().strip() or self.shape_file.name,
             fabric_id=self.fabric.currentText() or "ripstop_nylon",
+            row_count=self.rows.value(),
         )

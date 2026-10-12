@@ -3,6 +3,21 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Shape files, format version 2 (ADR-0022): a shape file now describes a whole pattern
+  set, and **New design ▸ From shape file** builds all of it into the design.
+  - Version-1 files load unchanged.
+  - New optional sections:
+    - a profile known only from the mouth to the top opening (`profile.span: cut`);
+    - straight tape segments between stations (`interpolation: linear`);
+    - flat-chord gores with measured seam bows or a crest loft;
+    - named panel rows with zones;
+    - single-panel zones;
+    - the parachute seal overlap and crown ring;
+    - rigging (parachute, red line, flying wires, scoop, turning vents) merged over the
+      defaults;
+    - `extends`, a file built on another one.
+  - When a file gives its own rows and zones, the tab uses them instead of its row-count
+    and fabric choices.
 - Flat-chord gores (design schema version 4, ADR-0021). A new gore construction cuts
   every row as a flat tape-to-tape trapezoid with straight sides, and lofts the gore
   lengthwise: its horizontal seams bow outward as parabolas, given per row (measured) or

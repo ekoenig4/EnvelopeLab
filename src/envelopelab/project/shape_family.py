@@ -85,6 +85,7 @@ from envelopelab.geometry.gore import (
     GoreLoft,
     GoreWidthModel,
     MeridianProfile,
+    ProfileInterpolation,
     gore_half_widths,
     lofted_volume,
 )
@@ -92,6 +93,7 @@ from envelopelab.project.gore_design import PROFILE_SAMPLES, VOLUME_TOLERANCE, p
 
 FloatArray = np.ndarray
 Dimension = Literal["length", "volume", "fraction"]
+GoreConstruction = Literal["lobe", "flat_chord"]
 
 #: The continuous design variables, in solver order.
 VARIABLES: tuple[str, ...] = ("gore_length", "mouth_station", "top_station")
@@ -170,7 +172,15 @@ class NormalizedShape:
         Source tag of the table (``datasheet``, ``measured`` or ``assumed``).
     loft : GoreLoft, optional
         Lobe-radius ratio along the gore, stations as fractions of L; ``None`` for
-        small-bulge gores.
+        small-bulge gores (lobe construction only).
+    interpolation : {"spline", "linear"}
+        ``"spline"``: not-a-knot cubic spline :math:`r(s)` through the table, height by
+        quadrature. ``"linear"``: straight tape segments between the stations,
+        :math:`\\Delta z = \\sqrt{\\Delta s^2 - \\Delta r^2}` (a measured pattern with
+        straight panel sides between row corners).
+    construction : {"lobe", "flat_chord"}
+        Gore construction (``GoreSpec.construction``); a flat-chord gore has the flat
+        tape-to-tape chord width, so its volume is that of the flat-gore polygon.
     """
 
     s: FloatArray
@@ -178,8 +188,10 @@ class NormalizedShape:
     stations: Mapping[str, float] = field(default_factory=dict)
     source: str = "assumed"
     loft: GoreLoft | None = None
+    interpolation: ProfileInterpolation = "spline"
+    construction: GoreConstruction = "lobe"
     z: FloatArray = field(init=False, repr=False)
-    _spline_r: CubicSpline = field(init=False, repr=False)
+    _spline_r: CubicSpline | None = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         s = np.asarray(self.s, dtype=np.float64)
@@ -203,10 +215,23 @@ class NormalizedShape:
         for name, value in self.stations.items():
             if not 0.0 <= value <= 1.0:
                 raise ValueError(f"station {name!r} = {value:g} is outside 0..1")
-        spline_r = CubicSpline(s, r)
-        z = np.concatenate(
-            ([0.0], np.cumsum([_rise(spline_r, a, b) for a, b in zip(s[:-1], s[1:], strict=True)]))
-        )
+        if self.interpolation not in ("spline", "linear"):
+            raise ValueError(f"unknown profile interpolation {self.interpolation!r}")
+        if self.construction not in ("lobe", "flat_chord"):
+            raise ValueError(f"unknown gore construction {self.construction!r}")
+        if self.construction == "flat_chord" and self.loft is not None:
+            raise ValueError("a flat-chord gore has no lobe loft")
+        spline_r: CubicSpline | None = None
+        if self.interpolation == "linear":
+            z = np.concatenate(([0.0], np.cumsum(np.sqrt(np.clip(ds * ds - dr * dr, 0.0, None)))))
+        else:
+            spline_r = CubicSpline(s, r)
+            z = np.concatenate(
+                (
+                    [0.0],
+                    np.cumsum([_rise(spline_r, a, b) for a, b in zip(s[:-1], s[1:], strict=True)]),
+                )
+            )
         object.__setattr__(self, "s", s)
         object.__setattr__(self, "r", r)
         object.__setattr__(self, "z", z)
@@ -217,9 +242,19 @@ class NormalizedShape:
         if not -1e-9 <= station <= 1.0 + 1e-9:
             raise ValueError(f"station {station:g} is outside 0..1")
         station = min(max(station, 0.0), 1.0)
+        if self._spline_r is None:
+            return float(np.interp(station, self.s, self.r)), float(
+                np.interp(station, self.s, self.z)
+            )
         i = min(int(np.searchsorted(self.s, station, side="right")) - 1, self.s.size - 2)
         z = float(self.z[i]) + _rise(self._spline_r, float(self.s[i]), station)
         return max(float(self._spline_r(station)), 0.0), z
+
+    def width_model(self, gore_count: int, loft: GoreLoft | None = None) -> GoreWidthModel:
+        """Flat gore width model of ``gore_count`` gores (a design's ``loft``; m)."""
+        if self.construction == "flat_chord":
+            return GoreWidthModel(n_gores=gore_count, form="chord")
+        return GoreWidthModel.lofted(gore_count, loft)
 
     @property
     def equator_station(self) -> float:
@@ -229,7 +264,7 @@ class NormalizedShape:
     @property
     def volume_coefficient(self) -> float:
         r"""Closed-shape volume at :math:`L = 1`, dimensionless (:math:`V_n = c L^3`)."""
-        return profile_from_arrays(self.r, self.z).volume
+        return profile_from_arrays(self.r, self.z, self.interpolation).volume
 
     @property
     def chord_volume_coefficient(self) -> float:
@@ -270,10 +305,10 @@ class NormalizedShape:
 
         Equals :attr:`volume_coefficient` without a loft.
         """
-        if self.loft is None:
+        if self.loft is None and self.construction == "lobe":
             return self.volume_coefficient
-        profile = profile_from_arrays(self.r, self.z)
-        return lofted_volume(profile, GoreWidthModel.lofted(gore_count, self.loft))
+        profile = profile_from_arrays(self.r, self.z, self.interpolation)
+        return lofted_volume(profile, self.width_model(gore_count, self.loft))
 
     def resolve_station(self, value: float | str) -> float:
         """A station given as a number (fraction of L) or a station name."""
@@ -293,7 +328,8 @@ class NormalizedShape:
         """
         if not 0.0 <= lower < upper <= 1.0:
             raise ValueError("stations must satisfy 0 <= mouth < top <= 1")
-        gap = KNOT_GAP * float(np.min(np.diff(self.s)))
+        # A polyline keeps every corner; a spline drops knots too close to a cut.
+        gap = 0.0 if self.interpolation == "linear" else KNOT_GAP * float(np.min(np.diff(self.s)))
         inner = (self.s > lower + gap) & (self.s < upper - gap)
         r0, z0 = self.point(lower)
         r1, z1 = self.point(upper)
@@ -332,7 +368,7 @@ class ShapeParameters:
 def design_profile(shape: NormalizedShape, params: ShapeParameters) -> MeridianProfile:
     """Meridian profile of a design from the mouth to the top opening, m."""
     r, z = shape.control_points(params.mouth_station, params.top_station)
-    return profile_from_arrays(r * params.gore_length, z * params.gore_length)
+    return profile_from_arrays(r * params.gore_length, z * params.gore_length, shape.interpolation)
 
 
 def evaluate(shape: NormalizedShape, params: ShapeParameters) -> dict[str, float]:
@@ -355,11 +391,11 @@ def evaluate(shape: NormalizedShape, params: ShapeParameters) -> dict[str, float
     profile = design_profile(shape, params)
     length = params.gore_length
     loft = shape.design_loft(params.mouth_station, params.top_station)
-    if loft is None:
+    if loft is None and shape.construction == "lobe":
         volume = profile.volume
         half_width = math.pi * profile.max_width / 2.0 / params.gore_count
     else:
-        width_model = GoreWidthModel.lofted(params.gore_count, loft)
+        width_model = shape.width_model(params.gore_count, loft)
         volume = lofted_volume(profile, width_model)
         half_width = float(np.max(gore_half_widths(profile, width_model)[1]))
     return {

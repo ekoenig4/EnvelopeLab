@@ -79,7 +79,7 @@ def test_parse_shape_file_resolves_station_names_and_units() -> None:
     ("edit", "message"),
     [
         (lambda r: r.update(format="other"), "format must be"),
-        (lambda r: r.update(format_version=2), "format_version"),
+        (lambda r: r.update(format_version=3), "format_version"),
         (lambda r: r["profile"].update(source="guess"), "profile.source"),
         (lambda r: r["profile"].update(stations=[[0.0], [1.0, 0.0]]), r"\[s, r\]"),
         (lambda r: r["design"]["hold"].update(gore_length=20), "give a unit"),
