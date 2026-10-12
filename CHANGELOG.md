@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Example shape files `tests/fixtures/flat_chord_pattern/` (synthetic): a 16-gore,
+  10-row flat-chord pattern set and a special-shape file that `extends` it. The
+  shape-family validation page now also checks the flat-chord fixture's design.
 - Shape files can carry special shapes (`special_shapes`), placed by gore and row; a
   position `above` the bottom seam is measured up the panel centreline, as on the cut
   panel. **New design ▸ From shape file** puts them in the new project.

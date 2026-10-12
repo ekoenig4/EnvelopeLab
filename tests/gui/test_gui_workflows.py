@@ -357,6 +357,50 @@ def test_shape_file_wizard_holds_mouth_and_solves_the_rest(
     assert "NOT CONVERGED" in wizard.error.text()
 
 
+def test_shape_file_wizard_builds_the_whole_pattern_set(qtbot: QtBot, window: MainWindow) -> None:
+    wizard = NewDesignWizard(window.controller.fabrics, window)
+    qtbot.addWidget(wizard)
+    wizard.tabs.setCurrentWidget(wizard.shape_tab)
+    tab = wizard.shape_tab
+    assert tab.load(str(FIXTURES / "flat_chord_pattern" / "shape.yaml")), tab.status.text()
+    # A cut-span file holds its mouth and top stations itself; the tape length sets the size.
+    assert tab.held_names() == ["mouth_station", "top_station", "tape_length"]
+    # The file's 10 rows and zones are used, so the row count and fabric choices are off.
+    assert not tab.rows.isEnabled() and tab.rows.value() == 10
+    assert not tab.fabric.isEnabled()
+    wizard.create_design()
+    design = wizard.design
+    assert design is not None, wizard.error.text()
+    assert design.gores is not None
+    assert design.gores.construction == "flat_chord"
+    assert design.gores.panel_rows[0].letter == "SKIRT"
+    assert design.gores.panel_rows[0].zone == "mouth"
+    assert [v.seam for v in design.turning_vents] == [4, 12]
+    window.new_project(design)
+    assert window.gore_editor.isEnabled()
+    # Loading a version-1 file afterwards gives the choices back.
+    assert tab.load(str(FIXTURES / "smalley_90k" / "shape.yaml"))
+    assert tab.rows.isEnabled() and tab.fabric.isEnabled()
+
+
+def test_shape_file_wizard_brings_the_special_shapes(qtbot: QtBot, window: MainWindow) -> None:
+    wizard = NewDesignWizard(window.controller.fabrics, window)
+    qtbot.addWidget(wizard)
+    wizard.tabs.setCurrentWidget(wizard.shape_tab)
+    tab = wizard.shape_tab
+    assert tab.load(str(FIXTURES / "flat_chord_pattern" / "special.yaml")), tab.status.text()
+    wizard.create_design()
+    assert wizard.design is not None, wizard.error.text()
+    assert [s.name for s in wizard.shapes] == ["dome", "horn", "blister"]
+    session = window.new_project(wizard.design, wizard.shapes)
+    assert [s.name for s in session.project.state.shapes] == [s.name for s in wizard.shapes]
+    assert wizard.design.gores is not None and len(wizard.design.gores.panel_zones) == 2
+    # Another tab afterwards makes a design without the file's shapes.
+    wizard.tabs.setCurrentIndex(0)
+    wizard.create_design()
+    assert wizard.shapes == []
+
+
 def test_refused_edit_is_reported(gore_window: MainWindow) -> None:
     w = gore_window
     w.gore_editor.locks["gore_count"].setChecked(True)

@@ -36,6 +36,9 @@ are fractions (0.001 = 0.1 %).
 | smalley_90k: vent cut half gore | 0.481394 | 0.481614 | m | 0.00046 | 0.001 | pass |
 | smalley_90k: design document volume = solved envelope volume | 2581.25 | 2581.25 | m^3 | < 1e-06 | 1e-09 | pass |
 | smalley_90k: hold a 10 % larger mouth, solve L (converged=True) | - | - | m | < 1e-06 m | 1 mm | pass |
+| flat_chord_pattern: design solve converged (Brent's method: converged) | - | - | - | < 1e-06 - | 0 | pass |
+| flat_chord_pattern: design document volume = solved envelope volume | 2585.31 | 2585.31 | m^3 | < 1e-06 | 1e-09 | pass |
+| flat_chord_pattern: hold a 10 % larger mouth, solve L (converged=True) | - | - | m | < 1e-06 m | 1 mm | pass |
 
 The published volume coefficient is compared with a 0.3 % tolerance instead of
 the 0.1 % default: the source's integration is not documented, the polygon
@@ -44,3 +47,8 @@ and the design spline encloses about 0.1 % more than the polygon. Lengths
 computed from the held volume therefore differ from the spreadsheet by about a
 third of the coefficient difference (0.05 % for `smalley_90k`); hold
 `gore_length` instead to cut exactly the spreadsheet's gores.
+
+`flat_chord_pattern` is a synthetic flat-chord pattern set (no published
+values): its rows check that the file's design solves, that the design document
+(rows, measured seam bows and zones from the file) has the solved volume, and
+that it scales to another mouth.
