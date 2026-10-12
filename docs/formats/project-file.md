@@ -96,6 +96,31 @@ clean exit, and offered for recovery at the next start otherwise.
       "title": "ConstraintLocks",
       "type": "object"
     },
+    "CrestLoftSpec": {
+      "additionalProperties": false,
+      "description": "Lengthwise loft of a flat-chord gore (``envelopelab.geometry.gore.CrestLoft``).\n\nAttributes\n----------\nfraction : float\n    Crest offset over tape radius where the taper is 1, dimensionless (0.02 = 2 %).\ntaper : list of TaperPoint\n    Taper along the tape, interpolated linearly, held beyond the ends.",
+      "properties": {
+        "fraction": {
+          "minimum": 0,
+          "title": "Fraction",
+          "type": "number"
+        },
+        "taper": {
+          "items": {
+            "$ref": "#/$defs/TaperPoint"
+          },
+          "minItems": 1,
+          "title": "Taper",
+          "type": "array"
+        }
+      },
+      "required": [
+        "fraction",
+        "taper"
+      ],
+      "title": "CrestLoftSpec",
+      "type": "object"
+    },
     "DesignDocument": {
       "additionalProperties": false,
       "properties": {
@@ -153,7 +178,7 @@ clean exit, and offered for recovery at the next start otherwise.
           "type": "array"
         },
         "schema_version": {
-          "default": 3,
+          "default": 4,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -587,12 +612,32 @@ clean exit, and offered for recovery at the next start otherwise.
     },
     "GoreSpec": {
       "additionalProperties": false,
-      "description": "Standard-gore envelope: meridian, gores, panel rows and openings (m).\n\n``loft`` sets the lobe bulge of every gore (:class:`LoftPoint`), interpolated linearly\nbetween stations and constant beyond the first and last; ``None`` is the small-bulge\ngore (ratio 1 everywhere).",
+      "description": "Standard-gore envelope: meridian, gores, panel rows and openings (m).\n\n``construction`` says how a gore is cut:\n\n* ``\"lobe\"`` (default): the flat gore follows the width model, with a circular lobe\n  between tapes set by ``loft`` (:class:`LoftPoint`), interpolated linearly between\n  stations and constant beyond the first and last; ``None`` is the small-bulge gore\n  (ratio 1 everywhere). Horizontal seams are straight.\n* ``\"flat_chord\"``: every row is a flat tape-to-tape trapezoid with straight sides of\n  the row's tape length; the gore is lofted lengthwise by bowed horizontal seams, given\n  per row (``PanelRow.bow_bottom``/``bow_top``) or from ``crest_loft``\n  (``docs/theory/gore-geometry.md``). Panel-row heights are tape lengths.\n\n``profile_interpolation`` is ``\"spline\"`` (parametric cubic spline through the control\npoints) or ``\"linear\"`` (straight tape segments). ``panel_zones`` gives single panels\n(row and gores) their own material zone, e.g. an applique or a doubled panel.",
       "properties": {
+        "construction": {
+          "default": "lobe",
+          "enum": [
+            "lobe",
+            "flat_chord"
+          ],
+          "title": "Construction",
+          "type": "string"
+        },
         "count": {
           "minimum": 3,
           "title": "Count",
           "type": "integer"
+        },
+        "crest_loft": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CrestLoftSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "crown_ring": {
           "exclusiveMinimum": 0,
@@ -633,10 +678,26 @@ clean exit, and offered for recovery at the next start otherwise.
           "title": "Panel Rows",
           "type": "array"
         },
+        "panel_zones": {
+          "items": {
+            "$ref": "#/$defs/PanelZone"
+          },
+          "title": "Panel Zones",
+          "type": "array"
+        },
         "parachute_hole_diameter": {
           "exclusiveMinimum": 0,
           "title": "Parachute Hole Diameter",
           "type": "number"
+        },
+        "profile_interpolation": {
+          "default": "spline",
+          "enum": [
+            "spline",
+            "linear"
+          ],
+          "title": "Profile Interpolation",
+          "type": "string"
         },
         "seal_overlap": {
           "minimum": 0,
@@ -954,15 +1015,39 @@ clean exit, and offered for recovery at the next start otherwise.
     },
     "PanelRow": {
       "additionalProperties": false,
-      "description": "One horizontal panel row of every gore.\n\nAttributes\n----------\nletter : str\n    Row letter (mouth first).\nfinished_height : float\n    Finished height along the tape, m.\nzone : str, optional\n    Material zone (key of ``zones``), e.g. ``mouth`` for a Nomex row; a pattern\n    annotation of the row overrides it; default the first zone.",
+      "description": "One horizontal panel row of every gore.\n\nAttributes\n----------\nletter : str\n    Row letter (mouth first).\nfinished_height : float\n    Finished height along the tape, m.\nzone : str, optional\n    Material zone (key of ``zones``), e.g. ``mouth`` for a Nomex row; a pattern\n    annotation of the row overrides it; default the first zone.\nbow_bottom, bow_top : float, optional\n    Flat-chord gores only: measured outward bow of the bottom and top seam lines at\n    the centreline, m (a parabola through the corners). Given for every row or for\n    none; none means the crest loft (or straight seams) sets them.",
       "properties": {
+        "bow_bottom": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bow Bottom"
+        },
+        "bow_top": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bow Top"
+        },
         "finished_height": {
           "exclusiveMinimum": 0,
           "title": "Finished Height",
           "type": "number"
         },
         "letter": {
-          "maxLength": 4,
+          "maxLength": 8,
           "minLength": 1,
           "title": "Letter",
           "type": "string"
@@ -985,6 +1070,43 @@ clean exit, and offered for recovery at the next start otherwise.
         "finished_height"
       ],
       "title": "PanelRow",
+      "type": "object"
+    },
+    "PanelZone": {
+      "additionalProperties": false,
+      "description": "A material zone for single panels (one row, some gores): appliques, doublers.\n\nAttributes\n----------\nname : str\n    Name of the assignment (unique in the design).\nrow : str\n    Row letter.\ngores : list of int\n    Gore numbers, from 1.\nzone : str\n    Material zone (key of ``zones``) of those panels; it overrides the row's zone.",
+      "properties": {
+        "gores": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Gores",
+          "type": "array"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "row": {
+          "minLength": 1,
+          "title": "Row",
+          "type": "string"
+        },
+        "zone": {
+          "minLength": 1,
+          "title": "Zone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "row",
+        "gores",
+        "zone"
+      ],
+      "title": "PanelZone",
       "type": "object"
     },
     "ParachuteSpec": {
@@ -1933,6 +2055,29 @@ clean exit, and offered for recovery at the next start otherwise.
         "strength"
       ],
       "title": "TapeSpec",
+      "type": "object"
+    },
+    "TaperPoint": {
+      "additionalProperties": false,
+      "description": "One station of a crest-loft taper.\n\nAttributes\n----------\nstation : float\n    Fraction of the tape length from the mouth (0) to the top opening (1).\ntaper : float\n    Taper of the crest offset at the station, dimensionless (1: the full loft fraction).",
+      "properties": {
+        "station": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Station",
+          "type": "number"
+        },
+        "taper": {
+          "minimum": 0,
+          "title": "Taper",
+          "type": "number"
+        }
+      },
+      "required": [
+        "station",
+        "taper"
+      ],
+      "title": "TaperPoint",
       "type": "object"
     },
     "TubeShape": {

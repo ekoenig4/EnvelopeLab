@@ -77,11 +77,13 @@ from envelopelab.atmosphere import gas_density, gross_lift
 from envelopelab.design.model import DesignDocument
 from envelopelab.geometry.gore import (
     LENGTH_TOLERANCE,
+    CrestLoft,
     GoreLoft,
     GoreWidthModel,
     MeridianProfile,
     PanelRow,
     SeamAllowance,
+    flat_chord_rows,
     lofted_area,
     lofted_volume,
     split_rows,
@@ -159,8 +161,10 @@ _PROFILE_CACHE: OrderedDict[bytes, MeridianProfile] = OrderedDict()
 _PROFILE_CACHE_SIZE = 64
 
 
-def profile_from_arrays(r: FloatArray, z: FloatArray) -> MeridianProfile:
-    """Densely sampled spline profile through control points (m).
+def profile_from_arrays(
+    r: FloatArray, z: FloatArray, interpolation: Literal["spline", "linear"] = "spline"
+) -> MeridianProfile:
+    """Densely sampled profile through control points (m), spline or straight segments.
 
     The profile is a pure function of the control points, and every live output of the
     editor asks for it, so the most recent profiles are memoized by their control-point
@@ -169,12 +173,14 @@ def profile_from_arrays(r: FloatArray, z: FloatArray) -> MeridianProfile:
     """
     r_arr = np.ascontiguousarray(r, dtype=np.float64)
     z_arr = np.ascontiguousarray(z, dtype=np.float64)
-    key = r_arr.tobytes() + b"|" + z_arr.tobytes()
+    key = interpolation.encode() + b"|" + r_arr.tobytes() + b"|" + z_arr.tobytes()
     hit = _PROFILE_CACHE.get(key)
     if hit is not None:
         _PROFILE_CACHE.move_to_end(key)
         return hit
-    profile = MeridianProfile.from_control_points(r_arr, z_arr, samples=PROFILE_SAMPLES)
+    profile = MeridianProfile.from_control_points(
+        r_arr, z_arr, samples=PROFILE_SAMPLES, interpolation=interpolation
+    )
     for arr in (profile.s, profile.r, profile.z):
         arr.setflags(write=False)
     _PROFILE_CACHE[key] = profile
@@ -194,7 +200,8 @@ def design_profile(design: DesignDocument) -> MeridianProfile:
     r, z = control_arrays(design)
     if r.size < 2:
         raise ValueError("a profile needs at least two control points")
-    return profile_from_arrays(r, z)
+    assert design.gores is not None
+    return profile_from_arrays(r, z, design.gores.profile_interpolation)
 
 
 def design_loft(design: DesignDocument) -> GoreLoft | None:
@@ -207,10 +214,28 @@ def design_loft(design: DesignDocument) -> GoreLoft | None:
     )
 
 
+def design_crest_loft(design: DesignDocument) -> CrestLoft | None:
+    """Crest loft of a flat-chord gore design; None without one."""
+    if design.gores is None or design.gores.crest_loft is None:
+        return None
+    spec = design.gores.crest_loft
+    return CrestLoft(
+        fraction=spec.fraction,
+        stations=tuple(p.station for p in spec.taper),
+        taper=tuple(p.taper for p in spec.taper),
+    )
+
+
 def design_width_model(design: DesignDocument) -> GoreWidthModel:
-    """Flat gore width model of a gore design: gore count and loft."""
+    """Flat gore width model of a gore design: gore count and loft.
+
+    A flat-chord gore has the flat tape-to-tape chord width at every station (its loft is
+    lengthwise, in the seam bows), so its volume is that of the flat-gore polygon.
+    """
     if design.gores is None:
         raise ValueError("not a standard-gore design")
+    if design.gores.construction == "flat_chord":
+        return GoreWidthModel(n_gores=design.gores.count, form="chord")
     return GoreWidthModel.lofted(design.gores.count, design_loft(design))
 
 
@@ -242,6 +267,26 @@ def row_zone(design: DesignDocument, patterns: PatternSet, letter: str) -> str:
             if row.letter == letter and row.zone is not None:
                 return row.zone
     return next(iter(design.zones), "default")
+
+
+def panel_zone_counts(design: DesignDocument, letter: str) -> dict[str, int]:
+    """Number of a row's panels cut in another zone (``GoreSpec.panel_zones``), by zone."""
+    out: dict[str, int] = {}
+    if design.gores is None:
+        return out
+    for zone in design.gores.panel_zones:
+        if zone.row == letter:
+            out[zone.zone] = out.get(zone.zone, 0) + len(zone.gores)
+    return out
+
+
+def panel_zone(design: DesignDocument, patterns: PatternSet, letter: str, gore: int) -> str:
+    """Material zone of one panel: a panel zone covering it, else :func:`row_zone`."""
+    if design.gores is not None:
+        for zone in design.gores.panel_zones:
+            if zone.row == letter and gore in zone.gores:
+                return zone.zone
+    return row_zone(design, patterns, letter)
 
 
 def rows_coverage(design: DesignDocument, profile: MeridianProfile) -> tuple[float, float]:
@@ -313,6 +358,8 @@ def panel_rows(
     total, length = rows_coverage(design, profile)
     if abs(total - length) > LENGTH_TOLERANCE:
         raise ValueError(f"panel rows cover {total:.4f} m but the meridian is {length:.4f} m long")
+    if design.gores.construction == "flat_chord":
+        return _flat_chord_panel_rows(design, patterns, profile)
     width = design_width_model(design)
     rows: list[PanelRow] = []
     start = 0.0
@@ -327,6 +374,42 @@ def panel_rows(
             width,
             [height],
             labels=[spec.letter],
+            allowance=SeamAllowance(side=a, bottom=a, top=a),
+            start=start,
+            require_full_coverage=False,
+        )
+        start += height
+    return rows
+
+
+def _flat_chord_panel_rows(
+    design: DesignDocument, patterns: PatternSet, profile: MeridianProfile
+) -> list[PanelRow]:
+    """Panel rows of a flat-chord gore design (seam bows measured or from the crest loft)."""
+    assert design.gores is not None
+    specs = design.gores.panel_rows
+    heights = [spec.finished_height for spec in specs]
+    heights[-1] = profile.meridian_length - sum(heights[:-1])  # absorb the rounding
+    measured = all(s.bow_bottom is not None and s.bow_top is not None for s in specs)
+    bows = [(float(s.bow_bottom or 0.0), float(s.bow_top or 0.0)) for s in specs]
+    crest = design_crest_loft(design)
+    if crest is not None:
+        all_rows = flat_chord_rows(
+            profile, design.gores.count, heights, [s.letter for s in specs], crest=crest
+        )
+        bows = [(r.bottom_bow, r.top_bow) for r in all_rows]
+    elif not measured:
+        bows = [(0.0, 0.0)] * len(specs)
+    rows: list[PanelRow] = []
+    start = 0.0
+    for spec, height, bow in zip(specs, heights, bows, strict=True):
+        a = row_allowance(design, patterns, spec.letter)
+        rows += flat_chord_rows(
+            profile,
+            design.gores.count,
+            [height],
+            labels=[spec.letter],
+            bows=[bow],
             allowance=SeamAllowance(side=a, bottom=a, top=a),
             start=start,
             require_full_coverage=False,
@@ -462,6 +545,14 @@ def gore_outputs(
                 )
             )
             areal[z] = ASSUMED_AREAL_MASS
+        extra = [panel_zone_counts(design, r.label) for r in rows]
+        for z in {z for e in extra for z in e} - set(areal):
+            findings.append(
+                DesignFinding(
+                    "zone", "warning", f"zone {z!r} has no fabric; assumed areal mass", "zones"
+                )
+            )
+            areal[z] = ASSUMED_AREAL_MASS
         tape = ASSUMED_TAPE_LINEAR_MASS
         mass = estimate_mass(
             rows,
@@ -470,6 +561,7 @@ def gore_outputs(
             areal,
             TapeMasses(tape, tape, tape, tape),
             ASSUMED_THREAD,
+            panel_zones=extra,
         )
     from envelopelab.rigging import rigging_outputs
 
@@ -798,8 +890,8 @@ def generated_edges(row: PanelRow) -> dict[str, float]:
     return {
         "right": row.side_length,
         "left": row.side_length,
-        "top": row.top_width,
-        "bottom": row.bottom_width,
+        "top": row.top_seam_length,
+        "bottom": row.bottom_seam_length,
     }
 
 
@@ -1142,7 +1234,7 @@ def lobe_ring(radius: float, ratio: float, n_gores: int, per_gore: int) -> Float
     radius : float
         Tape radius r, m.
     ratio : float
-        Lobe-radius ratio k, dimensionless (>= sin(π/N)).
+        Lobe-radius ratio k, dimensionless (>= sin(π/N)); ``inf`` for a flat chord.
     n_gores : int
         Gores N.
     per_gore : int
@@ -1154,11 +1246,17 @@ def lobe_ring(radius: float, ratio: float, n_gores: int, per_gore: int) -> Float
         x, y, m, counter-clockwise from the tape at angle 0.
     """
     sin_n, cos_n = math.sin(math.pi / n_gores), math.cos(math.pi / n_gores)
-    theta = math.asin(min(sin_n / ratio, 1.0))
-    rho = ratio * radius
-    t = theta * (-1.0 + 2.0 * np.arange(per_gore) / per_gore)
-    a = radius * cos_n - rho * math.cos(theta) + rho * np.cos(t)
-    b = rho * np.sin(t)
+    u = -1.0 + 2.0 * np.arange(per_gore) / per_gore
+    if math.isinf(ratio):
+        # Flat chord (flat-chord gores): straight from tape to tape.
+        a = np.full(per_gore, radius * cos_n)
+        b = radius * sin_n * u
+    else:
+        theta = math.asin(min(sin_n / ratio, 1.0))
+        rho = ratio * radius
+        t = theta * u
+        a = radius * cos_n - rho * math.cos(theta) + rho * np.cos(t)
+        b = rho * np.sin(t)
     out = []
     for g in range(n_gores):
         phi = 2.0 * math.pi * (g + 0.5) / n_gores

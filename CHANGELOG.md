@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Flat-chord gores (design schema version 4, ADR-0021). A new gore construction cuts
+  every row as a flat tape-to-tape trapezoid with straight sides, and lofts the gore
+  lengthwise: its horizontal seams bow outward as parabolas, given per row (measured) or
+  from a crest loft (crest offset as a fraction of the radius with a taper).
+  - Profiles can use straight tape segments between control points.
+  - Single panels can get their own material zone (appliques, doublers).
+  - Row letters may have up to 8 characters.
+  - Version-3 designs open unchanged; their results are bit-identical.
+  - The design volume of a flat-chord gore is that of the flat-gore polygon.
 - The `gui` extra excludes PySide6 6.12: that release drops a reference to `None` on
   every Qt call that returns nothing, so on Python 3.11 the application (and the test
   suite) aborted with "Fatal Python error: none_dealloc" after a while.

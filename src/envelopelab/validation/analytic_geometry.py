@@ -24,9 +24,11 @@ from envelopelab.atmosphere import (
     pressure_gradient,
 )
 from envelopelab.geometry.gore import (
+    CrestLoft,
     GoreLoft,
     GoreWidthModel,
     MeridianProfile,
+    flat_chord_rows,
     lofted_area,
     lofted_volume,
     profile_from_gore_widths,
@@ -168,6 +170,64 @@ def _loft_benchmarks(sphere: MeridianProfile, radius: float) -> list[BenchmarkRe
     return out
 
 
+def _flat_chord_benchmarks() -> list[BenchmarkResult]:
+    r"""Flat-chord gores with a crest loft against closed forms.
+
+    * A crest offset :math:`\delta = \lambda r = \lambda R\cos\theta` on a spherical zone
+      of radius :math:`R` from latitude :math:`\theta_0` to :math:`\theta_1` lengthens the
+      crest by :math:`\int \delta\kappa\,ds = \int \delta\,d\theta =
+      \lambda R(\sin\theta_1 - \sin\theta_0)`, so the row bows add up to that excess.
+    * On a cylinder the tape does not turn: no excess, straight seams.
+    * A bowed row is the trapezoid plus two parabolic segments,
+      :math:`A = \tfrac{1}{2}(c_0 + c_1) h + \tfrac{2}{3}(c_0 b_0 + c_1 b_1)`, with
+      :math:`c` the corner widths, :math:`h` the corner height and :math:`b` the bows.
+    """
+    out: list[BenchmarkResult] = []
+    radius, n, fraction = 8.0, 24, 0.02
+    lower, upper = -math.radians(50.0), math.radians(70.0)
+    zone = _sphere(radius, lower, upper, samples=4001)
+    crest = CrestLoft(fraction)
+    rows = flat_chord_rows(zone, n, [zone.meridian_length / 8.0] * 8, crest=crest)
+    excess = sum(row.bottom_bow + row.top_bow for row in rows)
+    out.append(
+        BenchmarkResult(
+            "Sphere R=8 m zone -50..70 deg, crest 2 % of r: total crest excess",
+            excess,
+            fraction * radius * (math.sin(upper) - math.sin(lower)),
+            "m",
+            "relative",
+            1e-3,
+        )
+    )
+    cylinder = MeridianProfile.from_control_points([3.0, 3.0], [0.0, 10.0], samples=11)
+    straight = flat_chord_rows(cylinder, 12, [5.0, 5.0], crest=crest)
+    out.append(
+        BenchmarkResult(
+            "Cylinder R=3 m, 12 flat-chord gores, crest 2 %: seam bows",
+            max(abs(r.bottom_bow) + abs(r.top_bow) for r in straight),
+            0.0,
+            "m",
+            "absolute",
+            1e-9,
+        )
+    )
+    cone = MeridianProfile.from_control_points([1.0, 2.0], [0.0, 3.0], interpolation="linear")
+    b0, b1 = 0.010, 0.025
+    (row,) = flat_chord_rows(cone, 20, [cone.meridian_length], bows=[(b0, b1)])
+    c0, c1 = row.bottom_width, row.top_width
+    out.append(
+        BenchmarkResult(
+            "Cone row, 20 flat-chord gores, bows 10/25 mm: finished area",
+            row.finished_area,
+            0.5 * (c0 + c1) * row.corner_height + 2.0 / 3.0 * (c0 * b0 + c1 * b1),
+            "m^2",
+            "relative",
+            1e-3,
+        )
+    )
+    return out
+
+
 def run_benchmarks() -> list[BenchmarkResult]:
     """Run every analytic benchmark.
 
@@ -233,6 +293,7 @@ def run_benchmarks() -> list[BenchmarkResult]:
         )
     )
     results += _loft_benchmarks(sphere, radius)
+    results += _flat_chord_benchmarks()
     zone = _sphere(radius, -math.radians(60.0), math.radians(80.0))
     varying_loft = GoreLoft(stations=(0.0, 1.0), ratios=(1.5, 0.8))
     for label, width_model in (

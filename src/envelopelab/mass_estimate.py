@@ -139,6 +139,7 @@ def estimate_mass(
     zone_areal_mass: Mapping[str, MaterialProperty],
     tapes: TapeMasses,
     thread: ThreadSpec,
+    panel_zones: Sequence[Mapping[str, int]] | None = None,
 ) -> MassEstimate:
     """Estimate envelope fabric, tape and thread quantities and mass.
 
@@ -156,6 +157,9 @@ def estimate_mass(
         Tape linear masses, kg/m.
     thread : ThreadSpec
         Thread linear mass (kg/m), consumption ratio and stitch rows.
+    panel_zones : sequence of mapping of str to int, optional
+        Per row: number of that row's N panels cut in another zone (appliques,
+        doublers), by zone; the rest are in the row's zone.
 
     Returns
     -------
@@ -166,23 +170,42 @@ def estimate_mass(
         raise ValueError("no panel rows")
     if len(row_zones) != len(rows):
         raise ValueError("row_zones and rows differ in length")
-    missing = sorted(set(row_zones) - set(zone_areal_mass))
+    overrides = list(panel_zones) if panel_zones is not None else [{} for _ in rows]
+    if len(overrides) != len(rows):
+        raise ValueError("panel_zones and rows differ in length")
+    counts: list[dict[str, int]] = []
+    for row_zone, extra in zip(row_zones, overrides, strict=True):
+        moved = sum(extra.values())
+        if min(extra.values(), default=0) < 0 or moved > n_gores:
+            raise ValueError("panel zone counts must be between 0 and the gore count")
+        row_counts = {row_zone: n_gores - moved}
+        for zone, n in extra.items():
+            row_counts[zone] = row_counts.get(zone, 0) + n
+        counts.append(row_counts)
+    used_zones = list(dict.fromkeys(z for c in counts for z, n in c.items() if n > 0))
+    missing = sorted(set(used_zones) - set(zone_areal_mass))
     if missing:
         raise ValueError(f"no areal mass for zone(s): {', '.join(missing)}")
     zones: dict[str, ZoneEstimate] = {}
-    for zone in dict.fromkeys(row_zones):
-        members = [row for row, z in zip(rows, row_zones, strict=True) if z == zone]
-        finished = n_gores * sum(row.finished_area for row in members)
-        cut = n_gores * sum(row.cut_area for row in members)
+    for zone in used_zones:
+        share = [c.get(zone, 0) for c in counts]
+        if all(n in (0, n_gores) for n in share):
+            # Whole rows, summed as before panel zones existed (bit-identical results).
+            members = [row for row, n in zip(rows, share, strict=True) if n]
+            finished = n_gores * sum(row.finished_area for row in members)
+            cut = n_gores * sum(row.cut_area for row in members)
+        else:
+            finished = sum(n * row.finished_area for row, n in zip(rows, share, strict=True))
+            cut = sum(n * row.cut_area for row, n in zip(rows, share, strict=True))
         areal = zone_areal_mass[zone]
         zones[zone] = ZoneEstimate(finished, cut, cut * areal.value, areal)
     vertical_seam = n_gores * sum(row.side_length for row in rows)
-    horizontal_seam = n_gores * sum(row.top_width for row in rows[:-1])
+    horizontal_seam = n_gores * sum(row.top_seam_length for row in rows[:-1])
     tape_lengths = {
         "vertical": vertical_seam,
         "horizontal": horizontal_seam,
-        "rim": n_gores * rows[0].bottom_width,
-        "hole": n_gores * rows[-1].top_width,
+        "rim": n_gores * rows[0].bottom_seam_length,
+        "hole": n_gores * rows[-1].top_seam_length,
     }
     tape_props = {
         "vertical": tapes.vertical,

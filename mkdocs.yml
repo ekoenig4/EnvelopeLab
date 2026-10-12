@@ -65,6 +65,7 @@ nav:
       - ADR-0018: adr/ADR-0018-freeform-mesh-shapes.md
       - ADR-0019: adr/ADR-0019-numba-solver-kernel.md
       - ADR-0020: adr/ADR-0020-special-shapes-in-projects.md
+      - ADR-0021: adr/ADR-0021-flat-chord-gores.md
 theme:
   name: material
 markdown_extensions:

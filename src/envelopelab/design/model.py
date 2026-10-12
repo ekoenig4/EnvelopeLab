@@ -1,4 +1,4 @@
-"""Design document schema (``schema_version`` 3) and its migrations.
+"""Design document schema (``schema_version`` 4) and its migrations.
 
 A design document holds everything a builder decides: the envelope shape (standard gores
 or a special shape), materials, tapes, seams, features, operating conditions, the
@@ -10,7 +10,9 @@ carries a source tag (:class:`TaggedValue`).
 Version history: 0 (no ``meta``), 1 (rigging names only), 2 (parachute, red-line,
 flying-wire and turning-vent placement, row zones, crown and centre rings, scoop; see
 ``docs/adr/ADR-0010-rigging-schema-v2.md`` and ``ADR-0011``), 3 (gore loft, the lobe
-bulge of the fabric between load tapes; ``docs/adr/ADR-0014-gore-loft.md``).
+bulge of the fabric between load tapes; ``docs/adr/ADR-0014-gore-loft.md``), 4 (gore
+construction: flat-chord gores with seam bows or a crest loft, linear profiles, panel
+zones; ``docs/adr/ADR-0021-flat-chord-gores.md``).
 """
 
 from __future__ import annotations
@@ -23,7 +25,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 4
 
 SourceTagName = Literal["datasheet", "measured", "assumed"]
 
@@ -65,13 +67,19 @@ class PanelRow(BaseModel):
     zone : str, optional
         Material zone (key of ``zones``), e.g. ``mouth`` for a Nomex row; a pattern
         annotation of the row overrides it; default the first zone.
+    bow_bottom, bow_top : float, optional
+        Flat-chord gores only: measured outward bow of the bottom and top seam lines at
+        the centreline, m (a parabola through the corners). Given for every row or for
+        none; none means the crest loft (or straight seams) sets them.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    letter: str = Field(min_length=1, max_length=4)
+    letter: str = Field(min_length=1, max_length=8)
     finished_height: float = Field(gt=0)
     zone: str | None = None
+    bow_bottom: float | None = Field(default=None, allow_inf_nan=False)
+    bow_top: float | None = Field(default=None, allow_inf_nan=False)
 
 
 class LoftPoint(BaseModel):
@@ -94,12 +102,95 @@ class LoftPoint(BaseModel):
     ratio: float = Field(gt=0, allow_inf_nan=False)
 
 
+class TaperPoint(BaseModel):
+    """One station of a crest-loft taper.
+
+    Attributes
+    ----------
+    station : float
+        Fraction of the tape length from the mouth (0) to the top opening (1).
+    taper : float
+        Taper of the crest offset at the station, dimensionless (1: the full loft fraction).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    station: float = Field(ge=0, le=1)
+    taper: float = Field(ge=0, allow_inf_nan=False)
+
+
+class CrestLoftSpec(BaseModel):
+    """Lengthwise loft of a flat-chord gore (``envelopelab.geometry.gore.CrestLoft``).
+
+    Attributes
+    ----------
+    fraction : float
+        Crest offset over tape radius where the taper is 1, dimensionless (0.02 = 2 %).
+    taper : list of TaperPoint
+        Taper along the tape, interpolated linearly, held beyond the ends.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    fraction: float = Field(ge=0, allow_inf_nan=False)
+    taper: list[TaperPoint] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_stations(self) -> CrestLoftSpec:
+        stations = [p.station for p in self.taper]
+        if any(b <= a for a, b in zip(stations, stations[1:], strict=False)):
+            raise ValueError("crest-loft taper stations must be strictly increasing")
+        return self
+
+
+class PanelZone(BaseModel):
+    """A material zone for single panels (one row, some gores): appliques, doublers.
+
+    Attributes
+    ----------
+    name : str
+        Name of the assignment (unique in the design).
+    row : str
+        Row letter.
+    gores : list of int
+        Gore numbers, from 1.
+    zone : str
+        Material zone (key of ``zones``) of those panels; it overrides the row's zone.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    row: str = Field(min_length=1)
+    gores: list[int] = Field(min_length=1)
+    zone: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_gores(self) -> PanelZone:
+        if min(self.gores) < 1:
+            raise ValueError("gore numbers start at 1")
+        if len(set(self.gores)) != len(self.gores):
+            raise ValueError("gore numbers in a panel zone must be unique")
+        return self
+
+
 class GoreSpec(BaseModel):
     """Standard-gore envelope: meridian, gores, panel rows and openings (m).
 
-    ``loft`` sets the lobe bulge of every gore (:class:`LoftPoint`), interpolated linearly
-    between stations and constant beyond the first and last; ``None`` is the small-bulge
-    gore (ratio 1 everywhere).
+    ``construction`` says how a gore is cut:
+
+    * ``"lobe"`` (default): the flat gore follows the width model, with a circular lobe
+      between tapes set by ``loft`` (:class:`LoftPoint`), interpolated linearly between
+      stations and constant beyond the first and last; ``None`` is the small-bulge gore
+      (ratio 1 everywhere). Horizontal seams are straight.
+    * ``"flat_chord"``: every row is a flat tape-to-tape trapezoid with straight sides of
+      the row's tape length; the gore is lofted lengthwise by bowed horizontal seams, given
+      per row (``PanelRow.bow_bottom``/``bow_top``) or from ``crest_loft``
+      (``docs/theory/gore-geometry.md``). Panel-row heights are tape lengths.
+
+    ``profile_interpolation`` is ``"spline"`` (parametric cubic spline through the control
+    points) or ``"linear"`` (straight tape segments). ``panel_zones`` gives single panels
+    (row and gores) their own material zone, e.g. an applique or a doubled panel.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -112,6 +203,44 @@ class GoreSpec(BaseModel):
     parachute_hole_diameter: float = Field(gt=0)
     seal_overlap: float = Field(ge=0)
     loft: list[LoftPoint] | None = None
+    construction: Literal["lobe", "flat_chord"] = "lobe"
+    profile_interpolation: Literal["spline", "linear"] = "spline"
+    crest_loft: CrestLoftSpec | None = None
+    panel_zones: list[PanelZone] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_construction(self) -> GoreSpec:
+        bows = [r.bow_bottom is not None or r.bow_top is not None for r in self.panel_rows]
+        if self.construction == "lobe":
+            if self.crest_loft is not None or any(bows):
+                raise ValueError("seam bows and a crest loft need the flat_chord construction")
+            return self
+        if self.loft is not None:
+            raise ValueError("a flat_chord gore is lofted by crest_loft, not loft")
+        complete = [r.bow_bottom is not None and r.bow_top is not None for r in self.panel_rows]
+        if any(bows) and not all(complete):
+            raise ValueError("give both seam bows for every row, or for none")
+        if any(bows) and self.crest_loft is not None:
+            raise ValueError("give measured seam bows or a crest loft, not both")
+        return self
+
+    @model_validator(mode="after")
+    def validate_panel_zones(self) -> GoreSpec:
+        letters = {r.letter for r in self.panel_rows}
+        names = [z.name for z in self.panel_zones]
+        if len(set(names)) != len(names):
+            raise ValueError("panel zone names must be unique")
+        taken: set[tuple[str, int]] = set()
+        for zone in self.panel_zones:
+            if zone.row not in letters:
+                raise ValueError(f"panel zone {zone.name}: unknown row {zone.row!r}")
+            if any(g > self.count for g in zone.gores):
+                raise ValueError(f"panel zone {zone.name}: gore beyond {self.count}")
+            panels = {(zone.row, g) for g in zone.gores}
+            if panels & taken:
+                raise ValueError(f"panel zone {zone.name}: a panel already has a panel zone")
+            taken |= panels
+        return self
 
     @model_validator(mode="after")
     def validate_overlap(self) -> GoreSpec:
@@ -606,6 +735,14 @@ def _upgrade_v2_to_v3(raw: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_v3_to_v4(raw: dict[str, Any]) -> dict[str, Any]:
+    """Version 4 adds the gore construction; version-3 gores are lobe gores with a spline
+    profile, no seam bows and no panel zones (the defaults)."""
+    upgraded = dict(raw)
+    upgraded["schema_version"] = 4
+    return upgraded
+
+
 def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
     """Upgrade raw design data to :data:`CURRENT_SCHEMA_VERSION`, one version at a time."""
     version = int(raw.get("schema_version", 0))
@@ -617,6 +754,8 @@ def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
             upgraded = _upgrade_v1_to_v2(upgraded)
         elif version == 2:
             upgraded = _upgrade_v2_to_v3(upgraded)
+        elif version == 3:
+            upgraded = _upgrade_v3_to_v4(upgraded)
         else:
             raise ValueError(f"unsupported schema version: {version}")
         version += 1
