@@ -244,14 +244,15 @@ def primitive_sheets(
                 marks=marks,
             )
         )
+    from envelopelab.features.primitives import band_outline
+
     surface = design.surface
-    hole = design.feed_hole
-    for gore, row in sorted({(a.gore, a.row) for a in design.attachment}):
-        band = next(b for b in surface.rows if b.label == row)
-        s = np.linspace(band.s_bottom, band.s_top, 97)
-        half = surface.half_width(s)
-        right = np.column_stack([half, s - band.s_bottom])
-        finished = np.vstack([right, right[::-1] * np.array([-1.0, 1.0])])
+    holes = design.feed_holes
+    panels = {(a.gore, a.row) for a in design.attachment} | {(h.gore, h.row) for h in holes}
+    order = {b.label: i for i, b in enumerate(surface.rows)}
+    for gore, row in sorted(panels):
+        index = order[row]
+        finished = band_outline(surface, index)
         cut = offset_polygon(finished, seam_allowance) if seam_allowance else finished.copy()
         out.append(
             Sheet(
@@ -268,11 +269,11 @@ def primitive_sheets(
                     if (m.gore, m.row) == (gore, row)
                 ],
                 lines=[a.points for a in design.attachment if (a.gore, a.row) == (gore, row)],
-                holes=(
-                    [(hole.centre_xy[0], hole.centre_xy[1], hole.radius)]
-                    if hole is not None and (hole.gore, hole.row) == (gore, row)
-                    else []
-                ),
+                holes=[
+                    (hole.centre_xy[0], hole.centre_xy[1], hole.radius)
+                    for hole in holes
+                    if (hole.gore, hole.row) == (gore, row)
+                ],
                 note=f"mark {name} on this panel before assembly",
             )
         )

@@ -44,6 +44,7 @@ from envelopelab.project.model import (
     save_result_arrays,
     utc_now,
 )
+from envelopelab.project.shapes import ShapeSpec
 
 #: Session events passed to listeners.
 EVENT_STATE = "state"  # design state changed (edit, undo, redo)
@@ -180,10 +181,14 @@ class ProjectSession:
 
     @classmethod
     def new(
-        cls, design: DesignDocument, fabric_lookup: FabricLookup | None = None
+        cls,
+        design: DesignDocument,
+        fabric_lookup: FabricLookup | None = None,
+        shapes: Sequence[ShapeSpec] = (),
     ) -> ProjectSession:
-        """Session for a new, unsaved project around ``design``."""
-        return cls(Project(state=DesignState(design=design)), fabric_lookup=fabric_lookup)
+        """Session for a new, unsaved project around ``design`` (and its special shapes)."""
+        state = DesignState(design=design, shapes=list(shapes))
+        return cls(Project(state=state), fabric_lookup=fabric_lookup)
 
     @classmethod
     def open(cls, path: str | Path, fabric_lookup: FabricLookup | None = None) -> ProjectSession:

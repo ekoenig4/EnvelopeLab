@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Shape files can carry special shapes (`special_shapes`), placed by gore and row; a
+  position `above` the bottom seam is measured up the panel centreline, as on the cut
+  panel. **New design ▸ From shape file** puts them in the new project.
+- A special shape can have several feed holes anywhere inside its footprint
+  (`feed_holes`). Each is checked, cut in the sub-model and drawn on the build pack,
+  including on a panel that only has a hole.
+- Special shapes on flat-chord gores map to the cut panels exactly (straight sides, bowed
+  seams), on the marking sheets too. Lobe-gore results are unchanged.
 - Shape files, format version 2 (ADR-0022): a shape file now describes a whole pattern
   set, and **New design ▸ From shape file** builds all of it into the design.
   - Version-1 files load unchanged.

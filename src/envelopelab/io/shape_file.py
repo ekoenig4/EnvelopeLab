@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from pydantic import BaseModel
 
     from envelopelab.design.model import DesignDocument
+    from envelopelab.project.shapes import ShapeSpec
 
 FORMAT = "envelopelab.shape"
 FORMAT_VERSION = 2
@@ -554,6 +555,50 @@ class ShapeFile:
         document = with_default_rigging(self._apply_rigging(document))
         return document.with_updated_hash()
 
+    def shapes(self, design: DesignDocument) -> list[ShapeSpec]:
+        """The file's ``special_shapes`` placed on ``design`` (m, deg).
+
+        Placements and feed holes given by ``row`` (with ``at``, a fraction of the row's
+        tape length, or ``above``, a length up the panel centreline from its bottom seam)
+        are resolved on the design's rows, so they follow the rows of a scaled variant;
+        shape sizes do not scale. A ``zone`` is resolved to its fabric through the
+        design's zones.
+
+        Raises
+        ------
+        ShapeFileError
+            For an invalid shape (the message names ``special_shapes[i]`` and the key).
+        """
+        from pydantic import TypeAdapter, ValidationError
+
+        from envelopelab.project.gore_design import panel_rows
+        from envelopelab.project.model import PatternSet
+        from envelopelab.project.shapes import ShapeSpec
+
+        if design.gores is None:
+            raise ShapeFileError("special_shapes: need a standard-gore design")
+        if not self.special_shapes:
+            return []
+        bounds = {
+            r.label: (r.s_bottom, r.s_top, r.centre_height)
+            for r in panel_rows(design, PatternSet())
+        }
+        adapter: TypeAdapter[ShapeSpec] = TypeAdapter(ShapeSpec)
+        out: list[ShapeSpec] = []
+        names: set[str] = set()
+        for i, raw in enumerate(self.special_shapes):
+            where = f"special_shapes[{i}]"
+            data = _shape_data(raw, where, bounds, design.zones, self.path.parent)
+            try:
+                spec = adapter.validate_python(data)
+            except ValidationError as exc:
+                raise ShapeFileError(f"{where}: {exc}") from exc
+            if spec.name in names:
+                raise ShapeFileError(f"{where}: shape name {spec.name!r} is used twice")
+            names.add(spec.name)
+            out.append(spec)
+        return out
+
     def _rows(
         self, lower: float, upper: float, length: float
     ) -> tuple[list[float], list[str], list[str | None], list[tuple[float, float]] | None]:
@@ -651,6 +696,145 @@ class ShapeFile:
             return DesignDocument.model_validate(raw)
         except ValueError as exc:
             raise ShapeFileError(f"rigging: {exc}") from exc
+
+
+#: Lengths of a special shape (written with a unit, converted to m).
+SHAPE_LENGTHS = frozenset(
+    {"base_radius", "height", "tip_radius", "length", "feed_hole_radius", "seam_allowance"}
+)
+SHAPE_KEYS = frozenset(
+    {
+        "name",
+        "kind",
+        "placement",
+        "feed_hole_radius",
+        "feed_holes",
+        "seam_allowance",
+        "marks_per_piece",
+        "zone",
+        "fabric",
+        "base_radius",
+        "height",
+        "gores",
+        "tip_radius",
+        "length",
+        "panels",
+        "profile",
+        "smooth",
+        "mesh",
+    }
+)
+
+
+def _tape_position(
+    raw: Mapping[str, Any], bounds: Mapping[str, tuple[float, float, float]], where: str
+) -> float:
+    """Tape position (m) of a placement or feed hole: ``tape_position`` or ``row`` with
+    ``at`` (fraction of the row's tape length) or ``above`` (length along the panel
+    centreline above its bottom seam, as a builder measures it on the cut panel).
+
+    ``bounds`` gives each row's bottom and top tape positions and its centreline height
+    (m); on a flat-chord row the centreline is longer than the tape by the seam bows, and
+    a point that far up the centreline is that fraction of the row up the tape.
+    """
+    given = [k for k in ("tape_position", "row") if k in raw]
+    if len(given) != 1:
+        raise ShapeFileError(
+            f"{where}: give either 'row' (with 'at' or 'above') or 'tape_position'"
+        )
+    if "tape_position" in raw:
+        return parse_quantity(raw["tape_position"], "length", f"{where}.tape_position")
+    row = str(raw["row"])
+    if row not in bounds:
+        raise ShapeFileError(f"{where}.row: unknown row {row!r} (rows: {', '.join(bounds)})")
+    s0, s1, centre = bounds[row]
+    if ("at" in raw) == ("above" in raw):
+        raise ShapeFileError(f"{where}: with 'row' give either 'at' or 'above'")
+    if "at" in raw:
+        at = parse_quantity(raw["at"], "fraction", f"{where}.at")
+        if not 0.0 <= at <= 1.0:
+            raise ShapeFileError(f"{where}.at: a fraction of the row (0..1)")
+        return s0 + at * (s1 - s0)
+    above = parse_quantity(raw["above"], "length", f"{where}.above")
+    if not 0.0 <= above <= centre:
+        raise ShapeFileError(f"{where}.above: must lie within the row (0 to {centre:.3f} m)")
+    return s0 + above / centre * (s1 - s0)
+
+
+def _shape_data(
+    raw: Mapping[str, Any],
+    where: str,
+    bounds: Mapping[str, tuple[float, float, float]],
+    zones: Mapping[str, str],
+    base: Path,
+) -> dict[str, Any]:
+    """A ``special_shapes`` entry as the data of an ``envelopelab.project.shapes`` spec."""
+    from envelopelab.io.blender import read_shape_mesh
+
+    unknown = sorted(set(raw) - SHAPE_KEYS)
+    if unknown:
+        raise ShapeFileError(f"{where}: unknown key(s) {', '.join(unknown)}")
+    data: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key in SHAPE_LENGTHS:
+            data[key] = parse_quantity(value, "length", f"{where}.{key}")
+        elif key not in ("placement", "feed_holes", "zone", "profile", "mesh"):
+            data[key] = value
+    placement = raw.get("placement")
+    if not isinstance(placement, dict):
+        raise ShapeFileError(f"{where}.placement: a mapping with gore and row/tape_position")
+    pl = {k: v for k, v in placement.items() if k not in ("row", "at", "above", "tape_position")}
+    pl["tape_position"] = _tape_position(placement, bounds, f"{where}.placement")
+    data["placement"] = pl
+    holes = []
+    for j, hole in enumerate(raw.get("feed_holes") or []):
+        key = f"{where}.feed_holes[{j}]"
+        if not isinstance(hole, dict) or "gore" not in hole or "radius" not in hole:
+            raise ShapeFileError(f"{key}: {{gore, row, at|above, across, radius}}")
+        holes.append(
+            {
+                "gore": hole["gore"],
+                "tape_position": _tape_position(hole, bounds, key),
+                "across": hole.get("across", 0.0),
+                "radius": parse_quantity(hole["radius"], "length", f"{key}.radius"),
+            }
+        )
+    data["feed_holes"] = holes
+    if "zone" in raw:
+        if "fabric" in raw:
+            raise ShapeFileError(f"{where}: give 'zone' or 'fabric', not both")
+        zone = str(raw["zone"])
+        if zone not in zones:
+            raise ShapeFileError(f"{where}.zone: unknown zone {zone!r} (zones: {', '.join(zones)})")
+        data["fabric"] = zones[zone]
+    if "profile" in raw:
+        profile = raw["profile"]
+        if not isinstance(profile, dict) or "unit" not in profile or "points" not in profile:
+            raise ShapeFileError(f"{where}.profile: {{unit, points: [[rho, zeta], ...]}}")
+        unit = str(profile["unit"])
+        if unit not in LENGTH_UNITS:
+            raise ShapeFileError(f"{where}.profile.unit: one of {', '.join(LENGTH_UNITS)}")
+        factor = LENGTH_UNITS[unit]
+        try:
+            data["profile"] = [(float(a) * factor, float(b) * factor) for a, b in profile["points"]]
+        except (TypeError, ValueError) as exc:
+            raise ShapeFileError(f"{where}.profile.points: [rho, zeta] pairs") from exc
+    if "mesh" in raw:
+        mesh = raw["mesh"]
+        if not isinstance(mesh, dict) or "file" not in mesh:
+            raise ShapeFileError(f"{where}.mesh: {{file, up, scale}}")
+        path = base / str(mesh["file"])
+        up = mesh.get("up")
+        if up not in (None, "Y", "Z"):
+            raise ShapeFileError(f"{where}.mesh.up: 'Y' or 'Z'")
+        try:
+            ref = read_shape_mesh(path, float(mesh.get("scale", 1.0)), up)
+        except (OSError, ValueError) as exc:
+            raise ShapeFileError(f"{where}.mesh: cannot read {mesh['file']} ({exc})") from exc
+        data["vertices"] = [tuple(float(c) for c in v) for v in ref.vertices]
+        data["triangles"] = [tuple(int(k) for k in t) for t in ref.triangles]
+        data["source"] = str(mesh["file"])
+    return data
 
 
 def _require(raw: dict[str, Any], key: str, kind: type, where: str = "") -> Any:

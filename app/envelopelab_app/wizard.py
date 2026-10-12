@@ -25,6 +25,7 @@ from envelopelab.design.model import DesignDocument
 from envelopelab.geometry.gore import GoreLoft
 from envelopelab.materials.repository import FabricLibraryRepository
 from envelopelab.project.gore_design import standard_gore_design
+from envelopelab.project.shapes import ShapeSpec
 from envelopelab.project.templates import (
     MEASUREMENTS_NOT_IMPLEMENTED,
     special_design_from_mesh,
@@ -64,6 +65,8 @@ class NewDesignWizard(QDialog):
         self.settings = settings
         self.setWindowTitle("New design")
         self.design: DesignDocument | None = None
+        #: Special shapes of the new design (from a shape file's ``special_shapes``).
+        self.shapes: list[ShapeSpec] = []
         self.tabs = QTabWidget()
 
         gore = QWidget()
@@ -251,6 +254,7 @@ class NewDesignWizard(QDialog):
     def create_design(self) -> None:
         """Build the design from the current tab; errors are shown in the dialog."""
         current = self.tabs.currentWidget()
+        self.shapes = []
         try:
             if self.tabs.currentIndex() == 0:
                 w = self.target_width.value()
@@ -276,6 +280,7 @@ class NewDesignWizard(QDialog):
                 )
             elif current is self.shape_tab:
                 self.design = self.shape_tab.design()
+                self.shapes = self.shape_tab.shapes(self.design)
             elif current is not self.measure_tab:
                 self.design = special_design_from_mesh(
                     self.special_name.text().strip() or "Special shape",

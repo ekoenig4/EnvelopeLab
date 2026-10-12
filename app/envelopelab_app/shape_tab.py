@@ -35,6 +35,7 @@ from envelopelab.project.shape_family import (
     solve_shape,
     station_points,
 )
+from envelopelab.project.shapes import ShapeSpec
 
 #: Display units per unit system and dimension (factors come from ``envelopelab.io``).
 UNIT_SYSTEMS: dict[str, dict[str, str]] = {
@@ -316,3 +317,15 @@ class ShapeFileTab(QWidget):
             fabric_id=self.fabric.currentText() or "ripstop_nylon",
             row_count=self.rows.value(),
         )
+
+    def shapes(self, design: DesignDocument) -> list[ShapeSpec]:
+        """The file's special shapes placed on ``design`` (none without a file).
+
+        Raises
+        ------
+        ValueError
+            When a shape does not fit the design (the message names it).
+        """
+        if self.shape_file is None:
+            return []
+        return self.shape_file.shapes(design)

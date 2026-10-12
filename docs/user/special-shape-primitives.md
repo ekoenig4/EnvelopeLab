@@ -204,8 +204,11 @@ partner on a skin piece's rim edge (`piece`, `piece_xy`).
   Above 1 % the check warns. Use more gores: the distortion drops about four times when
   you double them (3.7 % at 8, 0.9 % at 16, 0.2 % at 32 gores for a hemisphere).
 * *host panels*: the gores and rows the footprint crosses. Mark it on all of them.
-* *feed hole inside footprint*: the hole cut in the envelope to inflate the shape must
-  lie inside the footprint.
+* *feed hole inside footprint*: every hole cut in the envelope to inflate the shape must
+  lie inside the footprint. Besides the hole under the base point, a shape can have extra
+  holes anywhere under it (`feed_holes`; in a shape file, placed by gore and row). The
+  build pack draws each on the panel it is cut in, and adds a marking sheet for a panel
+  that only has a hole.
 
 A shape is rejected if it does not fit: a base too large for the local envelope
 curvature, a lean that brings the skin back onto the envelope, or a footprint that would

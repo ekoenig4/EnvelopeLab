@@ -55,6 +55,29 @@ class ShapePlacement(BaseModel):
     lean_toward_deg: float = 0.0
 
 
+class FeedHole(BaseModel):
+    """A feed hole cut in the envelope inside a shape's footprint.
+
+    Attributes
+    ----------
+    gore : int
+        Gore number of the hole's centre, from 1.
+    tape_position : float
+        Tape arc length of the centre from the mouth, m.
+    across : float
+        Fraction of the gore width from its centreline, in [-0.5, 0.5].
+    radius : float
+        Finished radius, m.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    gore: int = Field(ge=1)
+    tape_position: float = Field(gt=0.0)
+    across: float = Field(default=0.0, ge=-0.5, le=0.5)
+    radius: float = Field(gt=0.0)
+
+
 class _ShapeBase(BaseModel):
     """Fields every shape has.
 
@@ -67,8 +90,11 @@ class _ShapeBase(BaseModel):
     marks_per_piece : int
         Match marks per skin piece.
     feed_hole_radius : float or None
-        Radius of the hole cut in the envelope to fill the shape, m (None: no hole; the
-        shape cannot then be simulated as a fed chamber).
+        Radius of the hole cut in the envelope under the base point to fill the shape, m
+        (None: no centred hole).
+    feed_holes : list of FeedHole
+        More feed holes anywhere inside the footprint. A shape without any feed hole
+        cannot be simulated as a fed chamber.
     seam_allowance : float
         Seam allowance round the skin pieces, m.
     fabric : str or None
@@ -81,6 +107,7 @@ class _ShapeBase(BaseModel):
     placement: ShapePlacement
     marks_per_piece: int = Field(default=2, ge=1, le=8)
     feed_hole_radius: float | None = Field(default=None, gt=0.0)
+    feed_holes: list[FeedHole] = Field(default_factory=list)
     seam_allowance: float = Field(default=0.0125, ge=0.0)
     fabric: str | None = None
 
@@ -184,6 +211,9 @@ def shape_design(spec: ShapeSpec, surface: EnvelopeSurface) -> PrimitiveDesign:
         surface,
         seam_allowance=spec.seam_allowance,
         feed_hole_radius=spec.feed_hole_radius,
+        feed_holes=[
+            (h.tape_position, surface.theta_at(h.gore, h.across), h.radius) for h in spec.feed_holes
+        ],
     )
 
 

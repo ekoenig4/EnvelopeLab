@@ -215,3 +215,49 @@ merged over the default vent. `null` removes a section.
 * `published` is never merged: it belongs to the file it is written in.
 
 Both files must have the same `format_version`. A missing base and a cycle are errors.
+
+### Special shapes
+
+`special_shapes` lists the shapes added to the envelope. They are the shapes of the
+**Special shapes** mode (`envelopelab.project.shapes`), written with units and placed
+by gore and row. **New design ▸ From shape file** puts them in the new project.
+
+```yaml
+special_shapes:
+  - name: horn
+    kind: tube                 # dome | tube | revolved | mesh
+    placement: {gore: 5, row: G, above: 600 mm, lean_deg: 30, lean_toward_deg: 90}
+    base_radius: 400 mm
+    tip_radius: 150 mm
+    length: 2 m
+    panels: 2
+    feed_hole_radius: 300 mm   # hole under the base point
+    zone: accent               # fabric of the skin, through `zones`
+    seam_allowance: 25 mm
+  - name: blister
+    kind: mesh
+    mesh: {file: shapes/blister.obj, up: Z}   # relative to this file
+    placement: {gore: 12, row: E, at: 0.5}
+    panels: 8
+    feed_holes:                # more holes anywhere inside the footprint
+      - {gore: 12, row: E, above: 400 mm, across: 0.2, radius: 200 mm}
+```
+
+Placement (and each feed hole) is given in one of three ways:
+* `row` with `at`, a fraction of the row's tape length;
+* `row` with `above`, a length up the panel's **centreline** from its bottom seam, the
+  way a builder measures on the cut panel (on a flat-chord row the centreline is longer
+  than the tape by the seam bows);
+* `tape_position`, the tape length from the mouth.
+
+Positions follow the rows of a scaled variant; the shape sizes do not scale.
+
+The other keys are those of the project's shape specification, in its units:
+* `base_radius`, `height`, `tip_radius`, `length`, `feed_hole_radius` and
+  `seam_allowance` are lengths with a unit;
+* `revolved` takes `profile: {unit, points: [[rho, zeta], ...]}`;
+* `mesh` takes `mesh: {file, up, scale}`, read with `envelopelab.io.blender.read_shape_mesh`
+  in the frame of a mesh shape: z out of the envelope, x up the tape.
+
+Use `zone` (resolved through `zones`) or `fabric` (a fabric id) for the skin. An error
+names the entry and key, for example `special_shapes[2].placement.row`.

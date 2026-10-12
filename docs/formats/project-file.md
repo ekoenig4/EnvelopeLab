@@ -423,6 +423,13 @@ clean exit, and offered for recovery at the next start otherwise.
           "default": null,
           "title": "Feed Hole Radius"
         },
+        "feed_holes": {
+          "items": {
+            "$ref": "#/$defs/FeedHole"
+          },
+          "title": "Feed Holes",
+          "type": "array"
+        },
         "gores": {
           "default": 16,
           "maximum": 64,
@@ -559,6 +566,41 @@ clean exit, and offered for recovery at the next start otherwise.
         "radius"
       ],
       "title": "FeatureLocation",
+      "type": "object"
+    },
+    "FeedHole": {
+      "additionalProperties": false,
+      "description": "A feed hole cut in the envelope inside a shape's footprint.\n\nAttributes\n----------\ngore : int\n    Gore number of the hole's centre, from 1.\ntape_position : float\n    Tape arc length of the centre from the mouth, m.\nacross : float\n    Fraction of the gore width from its centreline, in [-0.5, 0.5].\nradius : float\n    Finished radius, m.",
+      "properties": {
+        "across": {
+          "default": 0.0,
+          "maximum": 0.5,
+          "minimum": -0.5,
+          "title": "Across",
+          "type": "number"
+        },
+        "gore": {
+          "minimum": 1,
+          "title": "Gore",
+          "type": "integer"
+        },
+        "radius": {
+          "exclusiveMinimum": 0.0,
+          "title": "Radius",
+          "type": "number"
+        },
+        "tape_position": {
+          "exclusiveMinimum": 0.0,
+          "title": "Tape Position",
+          "type": "number"
+        }
+      },
+      "required": [
+        "gore",
+        "tape_position",
+        "radius"
+      ],
+      "title": "FeedHole",
       "type": "object"
     },
     "FlyingWireSpec": {
@@ -855,6 +897,13 @@ clean exit, and offered for recovery at the next start otherwise.
           ],
           "default": null,
           "title": "Feed Hole Radius"
+        },
+        "feed_holes": {
+          "items": {
+            "$ref": "#/$defs/FeedHole"
+          },
+          "title": "Feed Holes",
+          "type": "array"
         },
         "kind": {
           "const": "mesh",
@@ -1304,6 +1353,13 @@ clean exit, and offered for recovery at the next start otherwise.
           ],
           "default": null,
           "title": "Feed Hole Radius"
+        },
+        "feed_holes": {
+          "items": {
+            "$ref": "#/$defs/FeedHole"
+          },
+          "title": "Feed Holes",
+          "type": "array"
         },
         "gores": {
           "default": 12,
@@ -2113,6 +2169,13 @@ clean exit, and offered for recovery at the next start otherwise.
           ],
           "default": null,
           "title": "Feed Hole Radius"
+        },
+        "feed_holes": {
+          "items": {
+            "$ref": "#/$defs/FeedHole"
+          },
+          "title": "Feed Holes",
+          "type": "array"
         },
         "kind": {
           "const": "tube",

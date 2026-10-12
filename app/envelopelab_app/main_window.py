@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from PySide6.QtCore import QSettings, Qt, QTimer
@@ -35,6 +35,7 @@ from envelopelab.project.recovery import (
     write_autosave,
 )
 from envelopelab.project.session import ProjectSession
+from envelopelab.project.shapes import ShapeSpec
 from envelopelab_app import layout as layout_state
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.dialogs import PreferencesDialog
@@ -612,9 +613,11 @@ class MainWindow(QMainWindow):
         self.controller.set_session(session)
         self._update_title()
 
-    def new_project(self, design: DesignDocument) -> ProjectSession:
-        """Start an unsaved project around ``design``."""
-        session = ProjectSession.new(design)
+    def new_project(
+        self, design: DesignDocument, shapes: Sequence[ShapeSpec] = ()
+    ) -> ProjectSession:
+        """Start an unsaved project around ``design`` and its special shapes."""
+        session = ProjectSession.new(design, shapes=shapes)
         self.set_session(session)
         return session
 
@@ -737,7 +740,7 @@ class MainWindow(QMainWindow):
             return
         wizard = NewDesignWizard(self.controller.fabrics, self, self.settings)
         if wizard.exec() and wizard.design is not None:
-            self.new_project(wizard.design)
+            self.new_project(wizard.design, wizard.shapes)
             self.controller.regenerate_patterns()
 
     def new_from_template(self, path: str | Path, name: str) -> ProjectSession | None:
