@@ -179,8 +179,13 @@ def test_internal_temperature_marks_simulation_results_stale(gore_window: MainWi
     assert table_column(w, 1) == ["CURRENT"]
 
 
-def test_run_calculix_is_disabled_without_ccx(gore_window: MainWindow, tmp_path: Path) -> None:
+def test_run_calculix_is_disabled_without_ccx(
+    gore_window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     w = gore_window
+    # No ccx anywhere: a broken preference falls back to $ENVELOPELAB_CCX and PATH.
+    monkeypatch.delenv("ENVELOPELAB_CCX", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
     prefs = load_preferences(w.settings)
     prefs.ccx_path = str(tmp_path / "no-such-ccx")
     w.apply_preferences(prefs)
@@ -188,12 +193,14 @@ def test_run_calculix_is_disabled_without_ccx(gore_window: MainWindow, tmp_path:
     assert not w.calculix_action.isEnabled()
     assert not w.runs.run_calculix.isEnabled()
     assert w.preview_action.isEnabled() and w.runs.run_preview.isEnabled()
-    assert "not installed" in w.ccx_label.text()
+    assert "not found" in w.ccx_label.text()
     w.show_panel("runs")
     assert w.runs.calculix_label.isVisible()
     message = w.runs.calculix_label.text()
-    assert "not installed" in message and "calculix-installation.md" in message
-    assert "not installed" in w.runs.run_calculix.toolTip()
+    assert "not found" in message and "calculix-installation.md" in message
+    # The message says where it looked and why each place failed.
+    assert "no-such-ccx" in message and "does not exist" in message
+    assert "not found" in w.runs.run_calculix.toolTip()
     assert w.simulation.start(CALCULIX) is False
 
 

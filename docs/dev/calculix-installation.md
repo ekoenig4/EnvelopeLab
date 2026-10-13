@@ -44,7 +44,7 @@ rights are needed.
     * **On PATH:** add the folder to your user `PATH`. EnvelopeLab looks for `ccx.exe`,
       `ccx_static.exe` and `ccx_dynamic.exe` there.
 
-The status bar then shows *CalculiX 2.23* (instead of *CalculiX not installed*) and
+The status bar then shows *CalculiX 2.23* (instead of *CalculiX not found*) and
 **Run CalculiX** is enabled. **Simulation ▸ Detect CalculiX again** repeats the search.
 A change to `PATH` or `ENVELOPELAB_CCX` reaches EnvelopeLab only when it is started again.
 
@@ -88,7 +88,33 @@ EnvelopeLab looks, in order, at
 3. `ccx`, `ccx_2.23`, `ccx_2.22`, `ccx_2.21`, `ccx_2.20`, `ccx_static` or `ccx_dynamic` on
    `PATH` (with `.exe` on Windows).
 
-The executable is accepted when `<executable> -v` prints a version.
+The executable is accepted when `<executable> -v` prints a version. A path may be in
+quotes, use `%VARIABLES%` or `~`, or name the folder that holds the program. A path that
+does not work does not stop the search: the next place is tried.
+
+## When EnvelopeLab says CalculiX is not found
+
+The **Runs** panel (and the tooltip of *CalculiX not found* in the status bar) lists every
+place EnvelopeLab looked and why each failed. The same report from a command prompt, in
+the EnvelopeLab folder:
+
+```bat
+.venv\Scripts\python -m calculix_adapter
+.venv\Scripts\python -m calculix_adapter "C:\CalculiX\ccx_static.exe"
+```
+
+The second form also tries the given path first, as the app does with its preference.
+The command ends with exit code 0 when a working `ccx` is found.
+
+| Report says | Cause and fix |
+|---|---|
+| `does not exist (a relative path …)` | The setting is not a full path, e.g. `calculix/ccx/ccx.exe`. Use the full path starting with the drive, e.g. `C:\Program Files\CalculiX\ccx\ccx.exe`. |
+| `does not exist` | Typing error, or the file has another name: check it in Explorer and copy its path (Shift + right-click ▸ *Copy as path*). |
+| `ran but printed no version (exit code 3221225781: a DLL it needs is missing …)` | The program needs DLLs that are not beside it or on `PATH`. Use `ccx_static.exe`, or start EnvelopeLab with that folder on `PATH`. |
+| `ran but printed no version` (other) | The program is not CalculiX, or a version older than 2.x. Run it with `-v` yourself to see what it prints. |
+| `could not be started` | Blocked by Windows or antivirus, or not a program for this computer. Run it once by hand and allow it. |
+| `ENVELOPELAB_CCX` is not listed at all | The variable is not set for this program: check the spelling (`ENVELOPELAB_CCX`, with a **B**), and start EnvelopeLab again from a new window after `setx` or a change in *Environment Variables*. |
+| `no ccx program on PATH` | The folder on `PATH` must be the one that holds the program itself, and EnvelopeLab must be started after `PATH` was changed. |
 
 ```python
 from calculix_adapter import find_calculix

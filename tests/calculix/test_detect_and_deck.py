@@ -11,6 +11,7 @@ import pytest
 from calculix_adapter import (
     SETUP_MESSAGE,
     CalculixNotFoundError,
+    calculix_report,
     find_calculix,
     require_calculix,
     run_calculix,
@@ -27,6 +28,7 @@ def test_missing_ccx_gives_the_setup_message(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv(ENV_VAR, str(tmp_path / "no-such-ccx"))
+    monkeypatch.setenv("PATH", str(tmp_path))  # no ccx on PATH either
     assert find_calculix() is None
     with pytest.raises(CalculixNotFoundError) as info:
         require_calculix()
@@ -188,3 +190,54 @@ def test_explicit_executable_and_version(tmp_path: Path) -> None:
     fake.chmod(0o755)
     found = find_calculix(fake)
     assert found is not None and found.version == "2.99"
+
+
+def _fake_ccx(folder: Path, name: str = "ccx", output: str = "This is Version 2.22") -> Path:
+    folder.mkdir(parents=True, exist_ok=True)
+    fake = folder / name
+    fake.write_text(f"#!/bin/sh\necho '{output}'\n")
+    fake.chmod(0o755)
+    return fake
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses a POSIX shell script as a fake ccx")
+def test_a_broken_environment_variable_falls_back_to_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    good = _fake_ccx(tmp_path / "bin")
+    monkeypatch.setenv("PATH", str(tmp_path / "bin"))
+    monkeypatch.setenv(ENV_VAR, "calculix/ccx/ccx.exe")  # relative, does not exist
+    found = find_calculix()
+    assert found is not None and found.executable == good.resolve()
+    report = calculix_report()
+    assert "ENVELOPELAB_CCX" in report and "does not exist" in report
+    assert str(good.resolve()) in report
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses a POSIX shell script as a fake ccx")
+def test_quoted_paths_and_folders_are_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    good = _fake_ccx(tmp_path / "CalculiX" / "ccx")
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setenv(ENV_VAR, f'"{good}"')
+    found = find_calculix()
+    assert found is not None and found.executable == good.resolve()
+    monkeypatch.setenv(ENV_VAR, str(good.parent))
+    found = find_calculix()
+    assert found is not None and found.executable == good.resolve()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses a POSIX shell script as a fake ccx")
+def test_report_says_why_a_program_was_not_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    silent = tmp_path / "ccx"
+    silent.write_text("#!/bin/sh\necho 'usage: ccx jobname' >&2\nexit 3\n")
+    silent.chmod(0o755)
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.delenv(ENV_VAR, raising=False)
+    assert find_calculix(silent) is None
+    report = calculix_report(silent)
+    assert "exit code 3" in report and "usage: ccx jobname" in report
+    assert "PATH" in report

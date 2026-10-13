@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: a set `ENVELOPELAB_CCX` that did not work stopped the search for CalculiX, so a
+  working `ccx` on PATH was ignored, and nothing said why. EnvelopeLab now tries the
+  preference, `ENVELOPELAB_CCX` and PATH in turn. Quoted paths, `%VARIABLES%` and folders
+  are accepted. The Runs panel shows where it looked and why each place failed, and so
+  does `python -m calculix_adapter`.
 - CalculiX on Windows: step-by-step instructions (Windows zip from the CalculiX site, or
   conda-forge), a *Browse…* button for the CalculiX executable in Preferences, and
   detection of the Windows executable names `ccx_static.exe` and `ccx_dynamic.exe` (and
