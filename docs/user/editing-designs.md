@@ -24,7 +24,19 @@ in the undo history. Nothing is edited by hand in JSON.
 * **Panel rows**: finished height along the tape (m) and fabric zone per row; *Split row*,
   *Merge with next*, and *Fit rows to meridian*. With *Keep panel rows fitted*
   (Preferences, on by default) every profile edit rescales the rows in the same command.
-* **Gore loft**: how far each gore bulges between its two load tapes. Each row of the
+* **Gore construction**: *Gores cut as* chooses how the gores are cut.
+    * *Lobe (straight seams)* is the default. The gore is cut wider than the
+      tape-to-tape chord and bulges between the tapes, set by the gore loft below.
+    * *Flat chord (bowed seams)* cuts every row as a flat trapezoid between the tapes.
+      The gore is lofted lengthwise instead: its horizontal seams bow outward.
+
+  Switching resets the loft: lobe gores lose their seam bows, and flat-chord gores get a
+  default crest loft (2 % of the tape radius, tapered to zero at both ends). With
+  *Fixed volume* locked, the profile is corrected to keep the volume, because a flat-chord
+  gore holds less than a lobed one. *Profile between points* chooses a smooth *Spline* or
+  *Straight segments*, for a measured pattern whose panel sides are straight; the locks
+  and the row fit follow that choice.
+* **Gore loft** (lobe gores): how far each gore bulges between its two load tapes. Each row of the
   table is a *station* along the tape (0 at the mouth, 1 at the top opening) and its
   *lobe ratio* \(k = \rho/r\), the radius of the fabric lobe over the tape radius; the
   ratio is interpolated between stations and held beyond the first and last. *Extra
@@ -40,6 +52,22 @@ in the undo history. Nothing is edited by hand in JSON.
   follow the loft, and the simulation sews the lofted panels. With *Fixed volume* locked,
   a loft edit also corrects the profile to keep the volume. See
   [theory](../theory/gore-geometry.md#gore-loft-lobe-bulge-between-tapes-goreloft).
+* **Crest loft and seam bows** (flat-chord gores): the seams bow in one of three ways.
+    * *Crest loft*: the bows are computed from a *crest fraction*, the crest offset in %
+      of the tape radius, and a *taper* table of stations along the tape. Edit the
+      fraction and the table; *Add station* and *Remove station* work as for the gore
+      loft. The panel-row table shows the computed bows read-only, in mm.
+    * *Measured bows*: each row has its own bottom and top bow, typed in the panel-row
+      table in mm, positive outward. *Freeze as measured bows* turns the crest loft's
+      bows into measured ones, so you can adjust single seams; the panels do not change.
+      Editing a bow keeps every other row's bow.
+    * *Straight seams*: no bows. *Use crest loft* goes back to the default crest loft.
+
+  The status line gives how much the seam bows add to the gore centreline, over the
+  flat trapezoids. *Split
+  row* puts a straight seam inside a row with measured bows, and *Merge with next*
+  keeps the outer seams' bows. The design volume does not include the crest; see
+  [theory](../theory/gore-geometry.md#flat-chord-gores-and-the-crest-loft-flat_chord_rows-crestloft).
 * **Constraint locks**: *Fixed height*, *Fixed volume*, *Fixed maximum diameter* and
   *Fixed N* hold the value the quantity had when the lock was switched on. Profile edits
   are corrected to keep every locked value (lengths within 1 mm, volume within 0.1 %); an

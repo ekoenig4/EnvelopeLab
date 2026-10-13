@@ -476,6 +476,82 @@ def test_layer_list_without_renderer_names_every_source(gore_window: MainWindow)
     assert item is not None and item.checkState() == Qt.CheckState.Checked
 
 
+def test_flat_chord_construction_crest_loft_and_bows(gore_window: MainWindow) -> None:
+    w = gore_window
+    editor = w.gore_editor
+    session = w.controller.session
+    assert session is not None
+    original = session.design
+    assert editor.crest_box.isHidden() and not editor.lobe_box.isHidden()
+    assert editor.rows_table.isColumnHidden(3)
+    editor.construction.setCurrentIndex(editor.construction.findData("flat_chord"))
+    editor.construction.activated.emit(editor.construction.currentIndex())
+    gores = session.design.gores
+    assert gores is not None and gores.construction == "flat_chord"
+    assert editor.lobe_box.isHidden() and not editor.crest_box.isHidden()
+    assert editor.crest_table.rowCount() == 3 and editor.crest_fraction.value() == 2.0
+    assert "to the gore centreline" in editor.crest_status.text()
+    assert not editor.rows_table.isColumnHidden(3)
+    bow = editor.rows_table.item(2, 4)
+    assert bow is not None and not bow.flags() & Qt.ItemFlag.ItemIsEditable
+    # Fraction and taper edits.
+    editor.crest_fraction.setValue(3.0)
+    editor.crest_fraction.editingFinished.emit()
+    taper = editor.crest_table.item(1, 1)
+    assert taper is not None
+    taper.setText("0.8")
+    gores = session.design.gores
+    assert gores is not None and gores.crest_loft is not None
+    assert gores.crest_loft.fraction == pytest.approx(0.03)
+    assert gores.crest_loft.taper[1].taper == 0.8
+    editor._add_crest_station()
+    gores = session.design.gores
+    assert gores is not None and gores.crest_loft is not None
+    assert len(gores.crest_loft.taper) == 4
+    # Freeze, then edit one measured bow (mm).
+    editor.freeze_crest.click()
+    gores = session.design.gores
+    assert gores is not None and gores.crest_loft is None
+    assert gores.panel_rows[2].bow_top is not None
+    bow = editor.rows_table.item(2, 4)
+    assert bow is not None and bow.flags() & Qt.ItemFlag.ItemIsEditable
+    bow.setText("12.5")
+    gores = session.design.gores
+    assert gores is not None and gores.panel_rows[2].bow_top == pytest.approx(0.0125)
+    assert "Measured seam bows" in editor.crest_status.text()
+    editor.straight_seams.click()
+    gores = session.design.gores
+    assert gores is not None and all(r.bow_top is None for r in gores.panel_rows)
+    assert "Straight seams" in editor.crest_status.text()
+    editor.use_crest.click()
+    gores = session.design.gores
+    assert gores is not None and gores.crest_loft is not None
+    # Straight segments between control points.
+    editor.interpolation.setCurrentIndex(editor.interpolation.findData("linear"))
+    editor.interpolation.activated.emit(editor.interpolation.currentIndex())
+    gores = session.design.gores
+    assert gores is not None and gores.profile_interpolation == "linear"
+    while session.stack.can_undo:
+        session.undo()
+    assert session.design == original
+    assert editor.crest_box.isHidden()
+
+
+def test_wizard_makes_a_flat_chord_design(qtbot: QtBot, window: MainWindow) -> None:
+    wizard = NewDesignWizard(window.controller.fabrics, window)
+    qtbot.addWidget(wizard)
+    wizard.construction.setCurrentIndex(wizard.construction.findData("flat_chord"))
+    assert not wizard.loft_ratio.isEnabled()
+    wizard.interpolation.setCurrentIndex(wizard.interpolation.findData("linear"))
+    wizard.create_design()
+    design = wizard.design
+    assert design is not None, wizard.error.text()
+    assert design.gores is not None
+    assert design.gores.construction == "flat_chord"
+    assert design.gores.profile_interpolation == "linear"
+    assert design.gores.crest_loft is not None
+
+
 def test_gore_loft_table_edits_are_undoable(gore_window: MainWindow) -> None:
     w = gore_window
     editor = w.gore_editor

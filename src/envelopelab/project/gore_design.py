@@ -74,7 +74,7 @@ import numpy as np
 from scipy.optimize import brentq
 
 from envelopelab.atmosphere import gas_density, gross_lift
-from envelopelab.design.model import DesignDocument
+from envelopelab.design.model import CrestLoftSpec, DesignDocument, TaperPoint
 from envelopelab.geometry.gore import (
     LENGTH_TOLERANCE,
     CrestLoft,
@@ -110,6 +110,17 @@ Severity = Literal["info", "warning", "error"]
 
 #: Volume tolerance of the constraint locks, relative (AGENTS.md volume/area default).
 VOLUME_TOLERANCE = 1e-3
+#: Crest loft a design gets when it is switched to flat-chord gores (source: assumed). A
+#: 2 % crest offset, tapered from 0 at the mouth to full at mid-tape and 0 at the top
+#: opening; a starting point to edit, not a recommendation.
+DEFAULT_CREST_LOFT = CrestLoftSpec(
+    fraction=0.02,
+    taper=[
+        TaperPoint(station=0.0, taper=0.0),
+        TaperPoint(station=0.5, taper=1.0),
+        TaperPoint(station=1.0, taper=0.0),
+    ],
+)
 #: Profile sampling of the editor (chord-length error below 1e-6 relative).
 PROFILE_SAMPLES = 2001
 #: Generic tape linear mass, kg/m (25 mm polyester load tape; ``assumed``).
@@ -382,24 +393,49 @@ def panel_rows(
     return rows
 
 
+def _row_heights(design: DesignDocument, profile: MeridianProfile) -> list[float]:
+    assert design.gores is not None
+    heights = [spec.finished_height for spec in design.gores.panel_rows]
+    heights[-1] = profile.meridian_length - sum(heights[:-1])  # absorb the rounding
+    return heights
+
+
+def design_seam_bows(
+    design: DesignDocument, profile: MeridianProfile | None = None
+) -> list[tuple[float, float]]:
+    """Seam bows a flat-chord design cuts, per row (bottom, top), m, positive outward.
+
+    The measured bows of the rows, else the bows of the crest loft, else straight seams
+    (0). A lobe design has straight seams.
+    """
+    assert design.gores is not None
+    specs = design.gores.panel_rows
+    if design.gores.construction != "flat_chord":
+        return [(0.0, 0.0)] * len(specs)
+    crest = design_crest_loft(design)
+    if crest is not None:
+        profile = profile or design_profile(design)
+        all_rows = flat_chord_rows(
+            profile,
+            design.gores.count,
+            _row_heights(design, profile),
+            [s.letter for s in specs],
+            crest=crest,
+        )
+        return [(r.bottom_bow, r.top_bow) for r in all_rows]
+    if all(s.bow_bottom is not None and s.bow_top is not None for s in specs):
+        return [(float(s.bow_bottom or 0.0), float(s.bow_top or 0.0)) for s in specs]
+    return [(0.0, 0.0)] * len(specs)
+
+
 def _flat_chord_panel_rows(
     design: DesignDocument, patterns: PatternSet, profile: MeridianProfile
 ) -> list[PanelRow]:
     """Panel rows of a flat-chord gore design (seam bows measured or from the crest loft)."""
     assert design.gores is not None
     specs = design.gores.panel_rows
-    heights = [spec.finished_height for spec in specs]
-    heights[-1] = profile.meridian_length - sum(heights[:-1])  # absorb the rounding
-    measured = all(s.bow_bottom is not None and s.bow_top is not None for s in specs)
-    bows = [(float(s.bow_bottom or 0.0), float(s.bow_top or 0.0)) for s in specs]
-    crest = design_crest_loft(design)
-    if crest is not None:
-        all_rows = flat_chord_rows(
-            profile, design.gores.count, heights, [s.letter for s in specs], crest=crest
-        )
-        bows = [(r.bottom_bow, r.top_bow) for r in all_rows]
-    elif not measured:
-        bows = [(0.0, 0.0)] * len(specs)
+    heights = _row_heights(design, profile)
+    bows = design_seam_bows(design, profile)
     rows: list[PanelRow] = []
     start = 0.0
     for spec, height, bow in zip(specs, heights, bows, strict=True):
@@ -1024,6 +1060,7 @@ def wizard_control_points(
     top_diameter: float,
     count: int = 11,
     width_model: GoreWidthModel | None = None,
+    interpolation: Interpolation = "spline",
 ) -> tuple[FloatArray, FloatArray]:
     """Control points whose profile has the target volume, height and width.
 
@@ -1040,6 +1077,8 @@ def wizard_control_points(
     width_model : GoreWidthModel, optional
         Gore count and loft: the target is then the lofted volume; default the surface of
         revolution through the tapes.
+    interpolation : {"spline", "linear"}
+        How the design's profile runs between the control points.
 
     Returns
     -------
@@ -1058,10 +1097,10 @@ def wizard_control_points(
         r, z = superellipse_points(
             target_width, target_height, n, mouth_diameter, top_diameter, count
         )
-        return _hold_lengths(r, z, locks, "spline")
+        return _hold_lengths(r, z, locks, interpolation)
 
     def residual(n: float) -> float:
-        return _volume(*shape(n), width_model, "spline") - target_volume
+        return _volume(*shape(n), width_model, interpolation) - target_volume
 
     lo, hi = EXPONENT_RANGE
     f_lo, f_hi = residual(lo), residual(hi)
@@ -1093,6 +1132,8 @@ def standard_gore_design(
     mouth_fabric_id: str | None = None,
     mouth_row_height: float | None = None,
     loft: GoreLoft | None = None,
+    construction: Literal["lobe", "flat_chord"] = "lobe",
+    interpolation: Interpolation = "spline",
 ) -> DesignDocument:
     """New standard-gore design from target volume, height and width.
 
@@ -1128,6 +1169,11 @@ def standard_gore_design(
     loft : GoreLoft, optional
         Lobe-radius ratio along the gore (dimensionless); default none (small bulge). The
         target volume is the lofted volume.
+    construction : {"lobe", "flat_chord"}
+        Gore construction. Flat-chord gores get :data:`DEFAULT_CREST_LOFT` and no lobe loft;
+        the target volume is then the flat-chord polygon's.
+    interpolation : {"spline", "linear"}
+        Profile between control points: spline or straight tape segments.
 
     Returns
     -------
@@ -1135,6 +1181,14 @@ def standard_gore_design(
         Schema-valid design with its content hash.
     """
     from envelopelab.project.templates import new_design
+
+    if construction == "flat_chord" and loft is not None:
+        raise ValueError("a flat-chord gore is lofted by a crest loft, not a lobe loft")
+    width_model = (
+        GoreWidthModel(n_gores=gore_count, form="chord")
+        if construction == "flat_chord"
+        else GoreWidthModel.lofted(gore_count, loft)
+    )
 
     mouth = mouth_diameter if mouth_diameter is not None else 0.3 * target_width
     top = top_diameter if top_diameter is not None else 0.25 * target_width
@@ -1144,9 +1198,10 @@ def standard_gore_design(
         target_width,
         mouth,
         top,
-        width_model=GoreWidthModel.lofted(gore_count, loft),
+        width_model=width_model,
+        interpolation=interpolation,
     )
-    length = profile_from_arrays(r, z).meridian_length
+    length = profile_from_arrays(r, z, interpolation).meridian_length
     row_zones: list[str | None] | None = None
     if mouth_fabric_id is None:
         heights = equal_row_heights(length, row_count)
@@ -1162,7 +1217,7 @@ def standard_gore_design(
         heights = [mouth_row_height, *equal_row_heights(length - mouth_row_height, row_count)]
         heights[-1] = length - sum(heights[:-1])
         row_zones = ["mouth"] + [None] * row_count
-    return new_design(
+    document = new_design(
         name=name,
         points=list(zip(r.tolist(), z.tolist(), strict=True)),
         gore_count=gore_count,
@@ -1179,6 +1234,14 @@ def standard_gore_design(
         extra_zones=None if mouth_fabric_id is None else {"mouth": mouth_fabric_id},
         loft=loft,
     )
+    if construction == "lobe" and interpolation == "spline":
+        return document
+    data = document.model_dump(by_alias=True, mode="json")
+    data["gores"]["construction"] = construction
+    data["gores"]["profile_interpolation"] = interpolation
+    if construction == "flat_chord":
+        data["gores"]["crest_loft"] = DEFAULT_CREST_LOFT.model_dump(mode="json")
+    return DesignDocument.model_validate(data).with_updated_hash()
 
 
 def rows_zones_mapping(design: DesignDocument, patterns: PatternSet) -> Mapping[str, str]:

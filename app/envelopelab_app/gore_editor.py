@@ -1,5 +1,5 @@
-"""Standard-gore editor: profile canvas, control-point, panel-row and loft tables, locks,
-outputs."""
+"""Standard-gore editor: profile canvas, control-point, panel-row and loft tables, gore
+construction (lobe or flat chord, with its crest loft and seam bows), locks, outputs."""
 
 from __future__ import annotations
 
@@ -12,6 +12,8 @@ from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QComboBox,
+    QDoubleSpinBox,
     QFormLayout,
     QFrame,
     QGraphicsEllipseItem,
@@ -35,7 +37,13 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab.geometry.gore import loft_extra_width
-from envelopelab.project.gore_design import control_arrays, profile_from_arrays, row_zone
+from envelopelab.project.gore_design import (
+    DEFAULT_CREST_LOFT,
+    control_arrays,
+    design_seam_bows,
+    profile_from_arrays,
+    row_zone,
+)
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.refresh import Refresher
 
@@ -199,9 +207,20 @@ class GoreEditor(QWidget):
         del_point = QPushButton("Delete point")
         del_point.clicked.connect(self._delete_point)
 
-        self.rows_table = QTableWidget(0, 3)
-        self.rows_table.setHorizontalHeaderLabels(["row", "height (m)", "zone"])
+        self.rows_table = QTableWidget(0, 5)
+        self.rows_table.setHorizontalHeaderLabels(
+            ["row", "height (m)", "zone", "bow bottom (mm)", "bow top (mm)"]
+        )
+        self.rows_table.setToolTip(
+            "Flat-chord gores: seam bows, positive outward, at the middle of the panel's "
+            "bottom and top seams.\nMeasured bows are edited here; bows from a crest loft "
+            "are shown read-only (Freeze as measured bows to edit them)."
+        )
         self.rows_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        for col in (0, 3, 4):
+            self.rows_table.horizontalHeader().setSectionResizeMode(
+                col, QHeaderView.ResizeMode.ResizeToContents
+            )
         self.rows_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.rows_table.itemChanged.connect(self._row_edited)
         self.rows_table.itemSelectionChanged.connect(self._row_selected)
@@ -237,6 +256,86 @@ class GoreEditor(QWidget):
         del_loft.clicked.connect(self._remove_loft_station)
         clear_loft = QPushButton("Small bulge (no loft)")
         clear_loft.clicked.connect(lambda: self.controller.edit("set_loft", None))
+
+        self.construction = QComboBox()
+        self.construction.setObjectName("construction")
+        self.construction.addItem("Lobe (straight seams)", "lobe")
+        self.construction.addItem("Flat chord (bowed seams)", "flat_chord")
+        self.construction.setToolTip(
+            "Lobe: the gore is cut wider than the tape-to-tape chord and bulges between tapes "
+            "(gore loft).\nFlat chord: every row is a flat trapezoid between the tapes and "
+            "the gore is lofted lengthwise by bowed horizontal seams (crest loft)."
+        )
+        self.construction.activated.connect(self._construction_chosen)
+        self.interpolation = QComboBox()
+        self.interpolation.setObjectName("interpolation")
+        self.interpolation.addItem("Spline", "spline")
+        self.interpolation.addItem("Straight segments", "linear")
+        self.interpolation.setToolTip(
+            "How the profile runs between control points: a smooth spline, or straight tape "
+            "segments (panel sides of a measured pattern)."
+        )
+        self.interpolation.activated.connect(self._interpolation_chosen)
+        construction_box = QGroupBox("Gore construction")
+        construction_layout = QFormLayout(construction_box)
+        construction_layout.addRow("Gores cut as", self.construction)
+        construction_layout.addRow("Profile between points", self.interpolation)
+
+        self.crest_fraction = QDoubleSpinBox()
+        self.crest_fraction.setObjectName("crestFraction")
+        self.crest_fraction.setRange(0.0, 50.0)
+        self.crest_fraction.setDecimals(3)
+        self.crest_fraction.setSingleStep(0.1)
+        self.crest_fraction.setSuffix(" % of r")
+        self.crest_fraction.setToolTip(
+            "Crest offset over the tape radius where the taper is 1 (δ = fraction · taper · r)."
+        )
+        self.crest_fraction.editingFinished.connect(self._crest_fraction_edited)
+        self.crest_table = QTableWidget(0, 2)
+        self.crest_table.setObjectName("crestTable")
+        self.crest_table.setHorizontalHeaderLabels(["station (0–1)", "taper"])
+        self.crest_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.crest_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.crest_table.setToolTip(
+            "Taper of the crest offset along the tape (station: fraction of the tape length, "
+            "0 at the mouth, 1 at the top opening), interpolated linearly and held beyond the "
+            "first and last station."
+        )
+        self.crest_table.itemChanged.connect(self._crest_edited)
+        self.crest_status = QLabel()
+        self.crest_status.setObjectName("crestStatus")
+        self.crest_status.setWordWrap(True)
+        add_taper = QPushButton("Add station")
+        add_taper.clicked.connect(self._add_crest_station)
+        del_taper = QPushButton("Remove station")
+        del_taper.clicked.connect(self._remove_crest_station)
+        self.use_crest = QPushButton("Use crest loft")
+        self.use_crest.setToolTip("Replace the seam bows by the default crest loft, then edit it.")
+        self.use_crest.clicked.connect(self._use_crest)
+        self.freeze_crest = QPushButton("Freeze as measured bows")
+        self.freeze_crest.setToolTip(
+            "Write the bows of the crest loft into the rows, to edit single seams."
+        )
+        self.freeze_crest.clicked.connect(lambda: self.controller.edit("freeze_crest_bows"))
+        self.straight_seams = QPushButton("Straight seams")
+        self.straight_seams.setToolTip("Remove the crest loft and every seam bow.")
+        self.straight_seams.clicked.connect(lambda: self.controller.edit("set_crest_loft", None))
+        self.crest_box = QGroupBox("Crest loft (lengthwise loft, bowed seams)")
+        self.crest_box.setObjectName("crestBox")
+        crest_layout = QVBoxLayout(self.crest_box)
+        crest_layout.addWidget(self.crest_status)
+        crest_form = QFormLayout()
+        crest_form.addRow("Crest fraction", self.crest_fraction)
+        crest_layout.addLayout(crest_form)
+        crest_layout.addWidget(self.crest_table)
+        crest_buttons = QHBoxLayout()
+        for b in (add_taper, del_taper):
+            crest_buttons.addWidget(b)
+        crest_layout.addLayout(crest_buttons)
+        seam_buttons = QHBoxLayout()
+        for b in (self.use_crest, self.freeze_crest, self.straight_seams):
+            seam_buttons.addWidget(b)
+        crest_layout.addLayout(seam_buttons)
 
         self.gore_count = QSpinBox()
         self.gore_count.setRange(3, 200)
@@ -295,13 +394,18 @@ class GoreEditor(QWidget):
         for b in (split, merge, fit):
             row_buttons.addWidget(b)
         side_layout.addLayout(row_buttons)
-        side_layout.addWidget(QLabel("Gore loft (lobe bulge between tapes)"))
-        side_layout.addWidget(self.loft_status)
-        side_layout.addWidget(self.loft_table)
+        side_layout.addWidget(construction_box)
+        self.lobe_box = QGroupBox("Gore loft (lobe bulge between tapes)")
+        self.lobe_box.setObjectName("lobeBox")
+        lobe_layout = QVBoxLayout(self.lobe_box)
+        lobe_layout.addWidget(self.loft_status)
+        lobe_layout.addWidget(self.loft_table)
         loft_buttons = QHBoxLayout()
         for b in (add_loft, del_loft, clear_loft):
             loft_buttons.addWidget(b)
-        side_layout.addLayout(loft_buttons)
+        lobe_layout.addLayout(loft_buttons)
+        side_layout.addWidget(self.lobe_box)
+        side_layout.addWidget(self.crest_box)
         side_layout.addWidget(locks_box)
         side_layout.addWidget(outputs_box)
 
@@ -356,6 +460,8 @@ class GoreEditor(QWidget):
                 self.rows_table.setRowCount(0)
                 self.loft_table.setRowCount(0)
                 self.loft_status.setText("")
+                self.crest_table.setRowCount(0)
+                self.crest_status.setText("")
                 for label in self.outputs.values():
                     label.setText("-")
                 self.output_message.setText(
@@ -371,13 +477,33 @@ class GoreEditor(QWidget):
             session = self.controller.session
             assert session is not None
             rows = design.gores.panel_rows
+            flat = design.gores.construction == "flat_chord"
+            computed = flat and design.gores.crest_loft is not None
+            bows = design_seam_bows(design) if flat else []
             self.rows_table.setRowCount(len(rows))
             for i, row in enumerate(rows):
                 self.rows_table.setItem(i, 0, _item(row.letter, editable=False))
                 self.rows_table.setItem(i, 1, _item(f"{row.finished_height:.4f}"))
                 zone = row_zone(design, session.patterns, row.letter)
                 self.rows_table.setItem(i, 2, _item(zone))
+                for col, bow in (
+                    (3, bows[i][0] if flat else 0.0),
+                    (4, bows[i][1] if flat else 0.0),
+                ):
+                    self.rows_table.setItem(
+                        i, col, _item(f"{bow * 1e3:.2f}", editable=not computed)
+                    )
+            self.rows_table.setColumnHidden(3, not flat)
+            self.rows_table.setColumnHidden(4, not flat)
+            self.construction.setCurrentIndex(self.construction.findData(design.gores.construction))
+            self.interpolation.setCurrentIndex(
+                self.interpolation.findData(design.gores.profile_interpolation)
+            )
+            self.lobe_box.setVisible(not flat)
+            self.crest_box.setVisible(flat)
             self._show_loft()
+            if flat:
+                self._show_crest(bows)
             self.gore_count.setValue(design.gores.count)
             locks = session.project.locks
             for name, box in self.locks.items():
@@ -450,6 +576,119 @@ class GoreEditor(QWidget):
         points = self._loft_points()
         del points[rows[0].row()]
         self.controller.edit("set_loft", points or None)
+
+    def _show_crest(self, bows: list[tuple[float, float]]) -> None:
+        design = self.controller.design
+        assert design is not None and design.gores is not None
+        crest = design.gores.crest_loft
+        points = [] if crest is None else crest.taper
+        self.crest_table.setRowCount(len(points))
+        for i, point in enumerate(points):
+            self.crest_table.setItem(i, 0, _item(f"{point.station:.4f}"))
+            self.crest_table.setItem(i, 1, _item(f"{point.taper:.4f}"))
+        self.crest_fraction.setValue(0.0 if crest is None else crest.fraction * 100.0)
+        excess = sum(a + b for a, b in bows) * 1e3
+        measured = any(r.bow_bottom is not None for r in design.gores.panel_rows)
+        if crest is not None:
+            text = (
+                f"Seams from the crest loft: the seam bows add {excess:.1f} mm to the gore "
+                "centreline."
+            )
+        elif measured:
+            text = (
+                "Measured seam bows, edited in the panel-row table: they add "
+                f"{excess:.1f} mm to the gore centreline."
+            )
+        else:
+            text = "Straight seams: no crest loft and no seam bows."
+        self.crest_status.setText(text)
+        for widget in (self.crest_fraction, self.crest_table):
+            widget.setEnabled(crest is not None)
+        self.use_crest.setEnabled(crest is None)
+        self.freeze_crest.setEnabled(crest is not None)
+        self.straight_seams.setEnabled(crest is not None or measured)
+
+    def _crest_points(self) -> list[tuple[float, float]]:
+        design = self.controller.design
+        assert design is not None and design.gores is not None
+        crest = design.gores.crest_loft
+        return [] if crest is None else [(p.station, p.taper) for p in crest.taper]
+
+    def _crest_fraction(self) -> float:
+        design = self.controller.design
+        assert design is not None and design.gores is not None
+        crest = design.gores.crest_loft
+        return DEFAULT_CREST_LOFT.fraction if crest is None else crest.fraction
+
+    def _crest_fraction_edited(self) -> None:
+        design = self.controller.design
+        if self._updating or design is None or design.gores is None:
+            return
+        if design.gores.crest_loft is None:
+            return
+        value = self.crest_fraction.value() / 100.0
+        if not math.isclose(value, design.gores.crest_loft.fraction, rel_tol=0, abs_tol=1e-9):
+            if self.controller.edit("set_crest_loft", value, self._crest_points()) is None:
+                self.refresh()
+
+    def _crest_edited(self, item: QTableWidgetItem) -> None:
+        design = self.controller.design
+        if self._updating or design is None or design.gores is None:
+            return
+        try:
+            value = float(item.text())
+        except ValueError:
+            self.controller.editRejected.emit(f"not a number: {item.text()!r}")
+            self.refresh()
+            return
+        points = self._crest_points()
+        station, taper = points[item.row()]
+        points[item.row()] = (value, taper) if item.column() == 0 else (station, value)
+        if self.controller.edit("set_crest_loft", self._crest_fraction(), points) is None:
+            self.refresh()
+
+    def _add_crest_station(self) -> None:
+        points = self._crest_points()
+        if not points:
+            return
+        # Middle of the widest gap (ends included), with the interpolated taper, so the
+        # new station does not change the seams until it is edited.
+        stations = [p[0] for p in points]
+        bounds = sorted({0.0, *stations, 1.0})
+        gaps = [(b - a, a, b) for a, b in zip(bounds, bounds[1:], strict=False)]
+        _, a, b = max(gaps)
+        station = 0.5 * (a + b)
+        taper = float(np.interp(station, stations, [p[1] for p in points]))
+        self.controller.edit("set_crest_loft", self._crest_fraction(), [*points, (station, taper)])
+
+    def _remove_crest_station(self) -> None:
+        rows = self.crest_table.selectionModel().selectedRows()
+        points = self._crest_points()
+        if not rows or len(points) < 2:
+            if points:
+                self.controller.editRejected.emit("a crest loft needs at least one station")
+            return
+        del points[rows[0].row()]
+        self.controller.edit("set_crest_loft", self._crest_fraction(), points)
+
+    def _use_crest(self) -> None:
+        crest = DEFAULT_CREST_LOFT
+        self.controller.edit(
+            "set_crest_loft", crest.fraction, [(p.station, p.taper) for p in crest.taper]
+        )
+
+    def _construction_chosen(self, _index: int) -> None:
+        if self._updating:
+            return
+        if self.controller.edit("set_construction", self.construction.currentData()) is None:
+            self.refresh()
+
+    def _interpolation_chosen(self, _index: int) -> None:
+        if self._updating:
+            return
+        value = self.interpolation.currentData()
+        if self.controller.edit("set_profile_interpolation", value) is None:
+            self.refresh()
 
     def _show_outputs(self) -> None:
         out = self.controller.outputs
@@ -532,6 +771,17 @@ class GoreEditor(QWidget):
                 )
                 is None
             ):
+                self.refresh()
+        elif item.column() in (3, 4):
+            try:
+                value = float(item.text()) / 1e3
+            except ValueError:
+                self.controller.editRejected.emit(f"not a number: {item.text()!r}")
+                self.refresh()
+                return
+            bottom, top = design_seam_bows(design)[item.row()]
+            bottom, top = (value, top) if item.column() == 3 else (bottom, value)
+            if self.controller.edit("set_row_bows", item.row(), bottom, top) is None:
                 self.refresh()
         elif item.column() == 2:
             zone = item.text().strip() or None

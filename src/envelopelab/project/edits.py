@@ -16,10 +16,12 @@ import numpy as np
 from envelopelab.geometry.gore import LENGTH_TOLERANCE, GoreLoft, GoreWidthModel
 from envelopelab.project.dependencies import canonical_hash
 from envelopelab.project.gore_design import (
+    DEFAULT_CREST_LOFT,
     LockError,
     apply_locks,
     control_arrays,
     design_profile,
+    design_seam_bows,
     design_volume,
     design_width_model,
     editable_outline,
@@ -224,6 +226,176 @@ def set_loft(
     return session.edit("Remove gore loft" if loft is None else "Set gore loft", mutate)
 
 
+def set_construction(
+    session: ProjectSession,
+    construction: Literal["lobe", "flat_chord"],
+    keep_rows_fitted: bool = True,
+) -> bool:
+    """Cut the gores as lobes (straight seams) or flat chords (bowed seams).
+
+    Switching to flat chords removes the lobe loft and adds
+    :data:`~envelopelab.project.gore_design.DEFAULT_CREST_LOFT`; switching to lobes removes
+    the crest loft and any measured seam bows. The design volume changes with the width
+    model, so a locked volume is held by correcting the control points in the same command.
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit.
+    construction : {"lobe", "flat_chord"}
+        Gore construction (``GoreSpec.construction``).
+    keep_rows_fitted : bool
+        Rescale the panel rows when a volume lock moves the profile.
+
+    Returns
+    -------
+    bool
+        Whether the design changed.
+
+    Raises
+    ------
+    LockError
+        When the locked volume cannot be held with the new construction.
+    """
+    design = session.design
+    assert design.gores is not None
+    if construction not in ("lobe", "flat_chord"):
+        raise ValueError(f"unknown gore construction {construction!r}")
+    if design.gores.construction == construction:
+        return False
+    crest = DEFAULT_CREST_LOFT if construction == "flat_chord" else None
+    changed = design.gores.model_copy(
+        update={"construction": construction, "loft": None, "crest_loft": crest}
+    )
+    width_model = design_width_model(design.model_copy(update={"gores": changed}))
+    interpolation = design.gores.profile_interpolation
+    new_points: list[dict[str, float]] | None = None
+    heights: list[float] | None = None
+    if session.project.locks.volume is not None:
+        r0, z0 = control_arrays(design)
+        r, z = apply_locks(r0, z0, session.project.locks, width_model, interpolation)
+        new_points = [{"x": float(a), "y": float(b)} for a, b in zip(r, z, strict=True)]
+        if keep_rows_fitted:
+            heights = fit_row_heights(
+                [row.finished_height for row in design.gores.panel_rows],
+                profile_from_arrays(r, z, interpolation).meridian_length,
+            )
+
+    def mutate(data: dict[str, Any], _patterns: dict[str, Any]) -> None:
+        gores = _gores(data)
+        gores["construction"] = construction
+        gores["loft"] = None
+        gores["crest_loft"] = None if crest is None else crest.model_dump(mode="json")
+        for row in gores["panel_rows"]:
+            row["bow_bottom"] = row["bow_top"] = None
+        if new_points is not None:
+            gores["meridian_profile_control_points"] = new_points
+        if heights is not None:
+            for row, h in zip(gores["panel_rows"], heights, strict=True):
+                row["finished_height"] = h
+
+    label = "flat-chord gores" if construction == "flat_chord" else "lobe gores"
+    return session.edit(f"Construction: {label}", mutate)
+
+
+def set_crest_loft(
+    session: ProjectSession,
+    fraction: float | None,
+    taper: Sequence[tuple[float, float]] | None = None,
+) -> bool:
+    """Set the crest loft of a flat-chord design, or remove it (straight seams).
+
+    A crest loft and measured seam bows exclude each other, so the rows' measured bows are
+    removed in the same command. The design volume does not change: it is the flat-chord
+    polygon's, the crest is not added (ADR-0021).
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit.
+    fraction : float or None
+        Crest offset over the tape radius where the taper is 1, dimensionless
+        (0.02 = 2 %). ``None`` removes the crest loft and every seam bow.
+    taper : sequence of (float, float)
+        (station, taper): station a fraction of the tape length from the mouth (0) to the
+        top opening (1), taper dimensionless. Sorted by station; at least one.
+
+    Returns
+    -------
+    bool
+        Whether the design changed.
+
+    Raises
+    ------
+    ValueError
+        For a lobe design or an invalid crest loft (negative fraction, no taper, repeated
+        or out-of-range station); nothing is changed.
+    """
+    value: dict[str, Any] | None = None
+    if fraction is not None:
+        points = sorted((float(f), float(k)) for f, k in (taper or ()))
+        value = {
+            "fraction": float(fraction),
+            "taper": [{"station": f, "taper": k} for f, k in points],
+        }
+
+    def mutate(data: dict[str, Any], _patterns: dict[str, Any]) -> None:
+        gores = _gores(data)
+        gores["crest_loft"] = value
+        for row in gores["panel_rows"]:
+            row["bow_bottom"] = row["bow_top"] = None
+
+    return session.edit("Remove crest loft" if value is None else "Set crest loft", mutate)
+
+
+def _write_bows(session: ProjectSession, bows: Sequence[tuple[float, float]], label: str) -> bool:
+    def mutate(data: dict[str, Any], _patterns: dict[str, Any]) -> None:
+        gores = _gores(data)
+        gores["crest_loft"] = None
+        for row, (bottom, top) in zip(gores["panel_rows"], bows, strict=True):
+            row["bow_bottom"], row["bow_top"] = float(bottom), float(top)
+
+    return session.edit(label, mutate)
+
+
+def freeze_crest_bows(session: ProjectSession) -> bool:
+    """Replace the crest loft by the seam bows it gives, as measured bows of the rows.
+
+    The cut panels do not change; afterwards single seams can be edited
+    (:func:`set_row_bows`). Returns False when the design has no crest loft.
+    """
+    design = session.design
+    assert design.gores is not None
+    if design.gores.crest_loft is None:
+        return False
+    return _write_bows(session, design_seam_bows(design), "Freeze crest loft as seam bows")
+
+
+def set_row_bows(session: ProjectSession, index: int, bottom: float, top: float) -> bool:
+    """Set the measured seam bows of one row of a flat-chord design (m, positive outward).
+
+    Bows are given for every row or for none, so the other rows keep the bows the design
+    cuts now: their measured bows, the crest loft's (which is then removed), or 0.
+
+    Raises
+    ------
+    ValueError
+        For a lobe design, a row index out of range or a non-finite bow.
+    """
+    design = session.design
+    assert design.gores is not None
+    if design.gores.construction != "flat_chord":
+        raise ValueError("seam bows need the flat_chord construction")
+    if not (math.isfinite(bottom) and math.isfinite(top)):
+        raise ValueError("seam bows must be finite")
+    bows = design_seam_bows(design)
+    if not 0 <= index < len(bows):
+        raise IndexError(f"no row {index}")
+    bows[index] = (float(bottom), float(top))
+    letter = design.gores.panel_rows[index].letter
+    return _write_bows(session, bows, f"Seam bows of row {letter}")
+
+
 def set_profile_interpolation(
     session: ProjectSession,
     interpolation: Literal["spline", "linear"],
@@ -303,8 +475,8 @@ def fit_rows(session: ProjectSession) -> bool:
 
 
 def _next_letter(letters: Sequence[str]) -> str:
-    for i in range(26):
-        candidate = chr(ord("A") + i)
+    alphabet = [chr(ord("A") + i) for i in range(26)]
+    for candidate in [*alphabet, *(a + b for a in alphabet for b in alphabet)]:
         if candidate not in letters:
             return candidate
     raise ValueError("no free row letter")
@@ -318,13 +490,21 @@ def split_row(session: ProjectSession, index: int) -> bool:
 
     def mutate(design: dict[str, Any], _patterns: dict[str, Any]) -> None:
         data = _gores(design)["panel_rows"]
-        h = data[index]["finished_height"]
-        data[index]["finished_height"] = math.floor(h / 2 * 1e4) / 1e4
+        row = data[index]
+        h = row["finished_height"]
+        row["finished_height"] = math.floor(h / 2 * 1e4) / 1e4
         # The new upper row gets the first free letter; existing rows keep their letters
-        # so that their pattern annotations stay attached.
-        data.insert(
-            index + 1, {"letter": letter, "finished_height": h - data[index]["finished_height"]}
-        )
+        # so that their pattern annotations stay attached. It keeps the row's material.
+        upper: dict[str, Any] = {
+            "letter": letter,
+            "finished_height": h - row["finished_height"],
+            "zone": row.get("zone"),
+        }
+        if row.get("bow_top") is not None:
+            # Measured bows: the new seam inside the row is straight on both sides.
+            upper["bow_bottom"], upper["bow_top"] = 0.0, row["bow_top"]
+            row["bow_top"] = 0.0
+        data.insert(index + 1, upper)
 
     return session.edit(f"Split row {rows[index].letter}", mutate)
 
@@ -339,7 +519,10 @@ def merge_row_with_next(session: ProjectSession, index: int) -> bool:
     def mutate(design: dict[str, Any], patterns: dict[str, Any]) -> None:
         data = _gores(design)["panel_rows"]
         data[index]["finished_height"] += data[index + 1]["finished_height"]
-        removed = data.pop(index + 1)["letter"]
+        upper = data.pop(index + 1)
+        if upper.get("bow_top") is not None:
+            data[index]["bow_top"] = upper["bow_top"]  # the merged row ends at its seam
+        removed = upper["letter"]
         patterns["rows"].pop(removed, None)
 
     return session.edit(f"Merge rows {rows[index].letter} and {rows[index + 1].letter}", mutate)

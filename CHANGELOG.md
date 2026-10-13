@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- The gore editor edits flat-chord gores: construction (lobe or flat chord), profile
+  between points (spline or straight segments), the crest loft (fraction and taper
+  stations), measured seam bows per row in mm, *Freeze as measured bows*, *Use crest
+  loft* and *Straight seams*. The new-design wizard can start a flat-chord or
+  straight-segment design.
+- Fixed: splitting a row with measured seam bows was refused, and merging two such rows
+  kept the lower row's top bow instead of the upper row's. Split rows keep their zone,
+  and row letters go on past Z (AA, AB, …).
 - Fixed: editing a design whose profile has straight tape segments
   (`profile_interpolation: linear`) used a spline for the locks, the row refit and the
   editor's curve, so a locked volume was held on the wrong profile (6.2 % off for a
