@@ -4,6 +4,7 @@ outputs."""
 from __future__ import annotations
 
 import math
+from typing import Literal
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
@@ -91,6 +92,7 @@ class ProfileCanvas(QGraphicsView):
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setMinimumSize(320, 320)
         self.handles: list[ControlPointHandle] = []
+        self.interpolation: Literal["spline", "linear"] = "spline"
         self._curve = QGraphicsPathItem()
         self._curve.setPen(QPen(QColor("#1f77b4"), 0))
         self._mirror = QGraphicsPathItem()
@@ -102,8 +104,11 @@ class ProfileCanvas(QGraphicsView):
         for item in (self._axis, self._mirror, self._curve):
             self.scene().addItem(item)
 
-    def set_points(self, r: np.ndarray, z: np.ndarray) -> None:
-        """Show control points (m)."""
+    def set_points(
+        self, r: np.ndarray, z: np.ndarray, interpolation: Literal["spline", "linear"] = "spline"
+    ) -> None:
+        """Show control points (m), joined as the design joins them."""
+        self.interpolation = interpolation
         for handle in self.handles:
             self.scene().removeItem(handle)
         self.handles = [
@@ -144,7 +149,7 @@ class ProfileCanvas(QGraphicsView):
 
     def _draw(self, r: np.ndarray, z: np.ndarray) -> None:
         try:
-            profile = profile_from_arrays(r, z)
+            profile = profile_from_arrays(r, z, self.interpolation)
         except ValueError:
             return
         path, mirror = QPainterPath(), QPainterPath()
@@ -358,7 +363,7 @@ class GoreEditor(QWidget):
                 )
                 return
             r, z = control_arrays(design)
-            self.canvas.set_points(r, z)
+            self.canvas.set_points(r, z, design.gores.profile_interpolation)
             self.points_table.setRowCount(len(r))
             for i, (a, b) in enumerate(zip(r, z, strict=True)):
                 self.points_table.setItem(i, 0, _item(f"{a:.4f}"))

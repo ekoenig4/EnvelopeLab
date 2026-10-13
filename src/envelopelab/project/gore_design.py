@@ -705,16 +705,25 @@ def _fuller(r: FloatArray, z: FloatArray, k: float) -> tuple[FloatArray, FloatAr
     return r_max * np.power(np.clip(r / r_max, 0.0, 1.0), 1.0 / k), z
 
 
-def _volume(r: FloatArray, z: FloatArray, width_model: GoreWidthModel | None) -> float:
-    profile = profile_from_arrays(r, z)
+Interpolation = Literal["spline", "linear"]
+
+
+def _volume(
+    r: FloatArray, z: FloatArray, width_model: GoreWidthModel | None, interpolation: Interpolation
+) -> float:
+    profile = profile_from_arrays(r, z, interpolation)
     return profile.volume if width_model is None else lofted_volume(profile, width_model)
 
 
 def _hold(
-    r: FloatArray, z: FloatArray, target: float, which: Literal["height", "diameter"]
+    r: FloatArray,
+    z: FloatArray,
+    target: float,
+    which: Literal["height", "diameter"],
+    interpolation: Interpolation,
 ) -> tuple[FloatArray, FloatArray]:
     for _ in range(20):
-        profile = profile_from_arrays(r, z)
+        profile = profile_from_arrays(r, z, interpolation)
         value = profile.height if which == "height" else profile.max_width
         if value <= 0.0:
             raise LockError(f"the profile has no {which}; it cannot hold the lock")
@@ -726,14 +735,14 @@ def _hold(
 
 
 def _hold_lengths(
-    r: FloatArray, z: FloatArray, locks: ConstraintLocks
+    r: FloatArray, z: FloatArray, locks: ConstraintLocks, interpolation: Interpolation
 ) -> tuple[FloatArray, FloatArray]:
     for _ in range(10):
         if locks.height is not None:
-            r, z = _hold(r, z, locks.height, "height")
+            r, z = _hold(r, z, locks.height, "height", interpolation)
         if locks.max_diameter is not None:
-            r, z = _hold(r, z, locks.max_diameter, "diameter")
-        profile = profile_from_arrays(r, z)
+            r, z = _hold(r, z, locks.max_diameter, "diameter", interpolation)
+        profile = profile_from_arrays(r, z, interpolation)
         ok_h = locks.height is None or abs(profile.height - locks.height) <= LENGTH_TOLERANCE
         ok_d = (
             locks.max_diameter is None
@@ -749,6 +758,7 @@ def apply_locks(
     z: FloatArray,
     locks: ConstraintLocks,
     width_model: GoreWidthModel | None = None,
+    interpolation: Interpolation = "spline",
 ) -> tuple[FloatArray, FloatArray]:
     """Correct edited control points so every locked quantity keeps its value.
 
@@ -762,6 +772,9 @@ def apply_locks(
         Gore count and loft of the design: the locked volume is the lofted volume
         (:func:`~envelopelab.geometry.gore.lofted_volume`); default the surface of
         revolution through the tapes.
+    interpolation : {"spline", "linear"}
+        How the profile runs between control points (``GoreSpec.profile_interpolation``);
+        the locked lengths and volume are those of this profile.
 
     Returns
     -------
@@ -777,7 +790,7 @@ def apply_locks(
     z = np.asarray(z, dtype=np.float64).copy()
     if np.any(r < 0.0):
         raise LockError("control-point radii must be non-negative")
-    r, z = _hold_lengths(r, z, locks)
+    r, z = _hold_lengths(r, z, locks, interpolation)
     if locks.volume is None:
         return r, z
     target = locks.volume
@@ -789,8 +802,8 @@ def apply_locks(
         transform = _fuller
 
     def residual(k: float) -> float:
-        rr, zz = _hold_lengths(*transform(r, z, k), locks)
-        return _volume(rr, zz, width_model) / target - 1.0
+        rr, zz = _hold_lengths(*transform(r, z, k), locks, interpolation)
+        return _volume(rr, zz, width_model, interpolation) / target - 1.0
 
     lo, hi = 0.8, 1.25
     f_lo, f_hi = residual(lo), residual(hi)
@@ -802,8 +815,8 @@ def apply_locks(
     else:
         raise LockError(f"no profile with the locked volume {target:.2f} m^3 near this edit")
     k = float(brentq(residual, lo, hi, xtol=1e-10, rtol=1e-12))
-    r, z = _hold_lengths(*transform(r, z, k), locks)
-    volume = _volume(r, z, width_model)
+    r, z = _hold_lengths(*transform(r, z, k), locks, interpolation)
+    volume = _volume(r, z, width_model, interpolation)
     if abs(volume / target - 1.0) > VOLUME_TOLERANCE:
         raise LockError(f"volume lock missed: {volume:.2f} vs {target:.2f} m^3")
     return r, z
@@ -1045,10 +1058,10 @@ def wizard_control_points(
         r, z = superellipse_points(
             target_width, target_height, n, mouth_diameter, top_diameter, count
         )
-        return _hold_lengths(r, z, locks)
+        return _hold_lengths(r, z, locks, "spline")
 
     def residual(n: float) -> float:
-        return _volume(*shape(n), width_model) - target_volume
+        return _volume(*shape(n), width_model, "spline") - target_volume
 
     lo, hi = EXPONENT_RANGE
     f_lo, f_hi = residual(lo), residual(hi)

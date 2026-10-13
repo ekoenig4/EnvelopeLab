@@ -46,6 +46,11 @@ Iteration is needed because the spline through scaled points is not the scaled s
 chord parameterisation changes). After correction every lock is checked (lengths 1 mm,
 volume 0.1 %); an edit that cannot meet them raises `LockError` and changes nothing.
 
+Every quantity above is measured on the design's own profile: a spline, or straight tape
+segments for `profile_interpolation: linear`. Changing the interpolation is itself an edit
+(`set_profile_interpolation`): the locks are re-applied to the new profile and the rows
+refitted to its tape length in the same command.
+
 ## Wizard profile
 
 The new-design wizard uses a truncated superellipse of revolution

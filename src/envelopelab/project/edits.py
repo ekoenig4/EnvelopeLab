@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -79,8 +79,11 @@ def set_control_points(
     z = np.array([p[1] for p in points], dtype=np.float64)
     if not (np.all(np.isfinite(r)) and np.all(np.isfinite(z))):
         raise ValueError("control points must be finite")
-    r, z = apply_locks(r, z, session.project.locks, design_width_model(session.design))
-    profile = profile_from_arrays(r, z)
+    design = session.design
+    assert design.gores is not None
+    interpolation = design.gores.profile_interpolation
+    r, z = apply_locks(r, z, session.project.locks, design_width_model(design), interpolation)
+    profile = profile_from_arrays(r, z, interpolation)
 
     def mutate(design: dict[str, Any], _patterns: dict[str, Any]) -> None:
         gores = _gores(design)
@@ -199,13 +202,14 @@ def set_loft(
     heights: list[float] | None = None
     if session.project.locks.volume is not None:
         r0, z0 = control_arrays(design)
-        r, z = apply_locks(r0, z0, session.project.locks, width_model)
+        interpolation = design.gores.profile_interpolation
+        r, z = apply_locks(r0, z0, session.project.locks, width_model, interpolation)
         if not (np.array_equal(r, r0) and np.array_equal(z, z0)):
             new_points = [{"x": float(a), "y": float(b)} for a, b in zip(r, z, strict=True)]
             if keep_rows_fitted:
                 heights = fit_row_heights(
                     [row.finished_height for row in design.gores.panel_rows],
-                    profile_from_arrays(r, z).meridian_length,
+                    profile_from_arrays(r, z, interpolation).meridian_length,
                 )
 
     def mutate(data: dict[str, Any], _patterns: dict[str, Any]) -> None:
@@ -218,6 +222,63 @@ def set_loft(
                 row["finished_height"] = h
 
     return session.edit("Remove gore loft" if loft is None else "Set gore loft", mutate)
+
+
+def set_profile_interpolation(
+    session: ProjectSession,
+    interpolation: Literal["spline", "linear"],
+    keep_rows_fitted: bool = True,
+) -> bool:
+    """Choose how the profile runs between control points: a spline or straight segments.
+
+    The tape length, volume, height and widest diameter all depend on it, so the control
+    points are corrected for the locked quantities and the panel rows refitted in the same
+    command.
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit.
+    interpolation : {"spline", "linear"}
+        Parametric cubic spline or straight tape segments (``GoreSpec.profile_interpolation``).
+    keep_rows_fitted : bool
+        Rescale the panel rows to the new tape length.
+
+    Returns
+    -------
+    bool
+        Whether the design changed.
+
+    Raises
+    ------
+    LockError
+        When the locked quantities cannot be held with the new profile.
+    """
+    design = session.design
+    assert design.gores is not None
+    if interpolation not in ("spline", "linear"):
+        raise ValueError(f"unknown profile interpolation {interpolation!r}")
+    if design.gores.profile_interpolation == interpolation:
+        return False
+    r0, z0 = control_arrays(design)
+    r, z = apply_locks(r0, z0, session.project.locks, design_width_model(design), interpolation)
+    heights = fit_row_heights(
+        [row.finished_height for row in design.gores.panel_rows],
+        profile_from_arrays(r, z, interpolation).meridian_length,
+    )
+
+    def mutate(data: dict[str, Any], _patterns: dict[str, Any]) -> None:
+        gores = _gores(data)
+        gores["profile_interpolation"] = interpolation
+        gores["meridian_profile_control_points"] = [
+            {"x": float(a), "y": float(b)} for a, b in zip(r, z, strict=True)
+        ]
+        if keep_rows_fitted:
+            for row, h in zip(gores["panel_rows"], heights, strict=True):
+                row["finished_height"] = h
+
+    label = "straight segments" if interpolation == "linear" else "spline"
+    return session.edit(f"Profile between points: {label}", mutate)
 
 
 def set_row_heights(session: ProjectSession, heights: Sequence[float], description: str) -> bool:

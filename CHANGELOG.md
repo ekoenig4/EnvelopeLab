@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: editing a design whose profile has straight tape segments
+  (`profile_interpolation: linear`) used a spline for the locks, the row refit and the
+  editor's curve, so a locked volume was held on the wrong profile (6.2 % off for a
+  six-point test profile). Only linear-profile designs change. New edit
+  `set_profile_interpolation` switches a design between spline and straight segments.
 - Example shape files `tests/fixtures/flat_chord_pattern/` (synthetic): a 16-gore,
   10-row flat-chord pattern set and a special-shape file that `extends` it. The
   shape-family validation page now also checks the flat-chord fixture's design.
