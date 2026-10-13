@@ -38,6 +38,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -246,6 +248,13 @@ class PatternPanel(QWidget):
             feature_row.addWidget(w)
         form.addRow("Feature (radius)", feature_row)
 
+        self.marks = QListWidget()
+        self.marks.setObjectName("rowMarks")
+        self.marks.setMaximumHeight(110)
+        remove_mark = QPushButton("Remove selected mark")
+        remove_mark.clicked.connect(self._remove_mark)
+        form.addRow("Marks on this row", self.marks)
+        form.addRow(remove_mark)
         clear_ann = QPushButton("Clear notches, tapes and features")
         clear_ann.clicked.connect(self._clear_annotations)
         self.clear_override = QPushButton("Remove manual override")
@@ -605,8 +614,14 @@ class PatternPanel(QWidget):
         self.label_text.setText(ann.label_text or "")
         self.grain.setValue(ann.grain_angle_deg)
         self.zone.clear()
-        self.zone.addItems(list(design.zones))
-        self.zone.setCurrentText(row_zone(design, session.patterns, letter))
+        self.zone.addItem(f"(design default: {next(iter(design.zones), '-')})", None)
+        for zone in design.zones:
+            self.zone.addItem(zone, zone)
+        # The row's own zone (None: it uses the design's first zone).
+        own = ann.zone
+        if own is None and design.gores is not None:
+            own = next((r.zone for r in design.gores.panel_rows if r.letter == letter), None)
+        self.zone.setCurrentIndex(max(0, self.zone.findData(own)))
         self.default_allowance.setValue(default_allowance(design) * 1000)
         self.row_allowance.setValue(
             -1.0 if ann.seam_allowance is None else ann.seam_allowance * 1000
@@ -615,6 +630,22 @@ class PatternPanel(QWidget):
         for i, f in enumerate(design.features):
             self.feature.addItem(f"{i}: {f.type}", i)
         self.clear_override.setEnabled(ann.manual_outline is not None)
+        self.marks.clear()
+        entries = [
+            *(
+                ("notches", i, f"notch {n.edge} at {n.position:.2f}")
+                for i, n in enumerate(ann.notches)
+            ),
+            *(("tape_paths", i, f"tape path {p.name}") for i, p in enumerate(ann.tape_paths)),
+            *(
+                ("feature_locations", i, f"feature {f.feature}, radius {f.radius:g} m")
+                for i, f in enumerate(ann.feature_locations)
+            ),
+        ]
+        for kind, index, text in entries:
+            item = QListWidgetItem(text)
+            item.setData(Qt.ItemDataRole.UserRole, (kind, index))
+            self.marks.addItem(item)
         row = self.rows_by_letter().get(letter)
         if row is not None:
             self.tape_y.setMaximum(row.finished_height)
@@ -631,7 +662,9 @@ class PatternPanel(QWidget):
         self._row_edit({"grain_angle_deg": float(self.grain.value())}, "grain direction")
 
     def _zone_edited(self) -> None:
-        self._row_edit({"zone": self.zone.currentText() or None}, "fabric zone")
+        letter = self.selected_letter()
+        if letter is not None and not self._updating:
+            self.controller.edit("set_row_zone", letter, self.zone.currentData())
 
     def _default_allowance_edited(self) -> None:
         if not self._updating:
@@ -689,6 +722,24 @@ class PatternPanel(QWidget):
             }
         )
         self._row_edit({"feature_locations": feats}, "place feature")
+
+    def _remove_mark(self) -> None:
+        session = self.controller.session
+        letter = self.selected_letter()
+        item = self.marks.currentItem()
+        if session is None or letter is None or item is None:
+            return
+        self.remove_mark(*item.data(Qt.ItemDataRole.UserRole))
+
+    def remove_mark(self, kind: str, index: int) -> None:
+        """Remove one notch, tape path or feature location of the selected row."""
+        session = self.controller.session
+        letter = self.selected_letter()
+        if session is None or letter is None:
+            return
+        marks = [m.model_dump() for m in getattr(session.patterns.row(letter), kind)]
+        del marks[index]
+        self._row_edit({kind: marks}, f"remove {kind.replace('_', ' ')} entry")
 
     def _clear_annotations(self) -> None:
         self._row_edit({"notches": [], "tape_paths": [], "feature_locations": []}, "clear marks")

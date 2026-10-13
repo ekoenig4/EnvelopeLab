@@ -36,7 +36,10 @@ shapes**, or its tab).
    mouth in m, position across the gore, lean and lean direction in degrees), sizes in m,
    number of skin gores or panels, match marks per piece, seam allowance, an optional
    feed hole in the envelope, and the skin fabric (by default the fabric of the envelope
-   row the shape sits on). A revolved shape's profile is edited in its table (radius and
+   row the shape sits on). *More feed holes* lists extra holes inside the footprint (gore,
+   tape position from the mouth in m, position across the gore, radius in m). *Add feed
+   hole* puts one at the base point to edit; *Remove feed hole* deletes the selected
+   one. A revolved shape's profile is edited in its table (radius and
    height in m, base first, axis last). Every change is one undo step.
 3. The shape is placed in the background while you keep editing; the list says
    **being placed…** until it is done (usually under a second). The right-hand side then

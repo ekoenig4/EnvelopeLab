@@ -51,6 +51,10 @@ segments for `profile_interpolation: linear`. Changing the interpolation is itse
 (`set_profile_interpolation`): the locks are re-applied to the new profile and the rows
 refitted to its tape length in the same command.
 
+A typed lock target (`set_lock_target`) is the same correction with the new value in place
+of the held one: the control points are corrected for every lock at once, so the result
+meets the target and keeps the other locked quantities, or the edit is refused.
+
 ## Wizard profile
 
 The new-design wizard uses a truncated superellipse of revolution

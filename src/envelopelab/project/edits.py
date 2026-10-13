@@ -13,6 +13,7 @@ from typing import Any, Literal
 
 import numpy as np
 
+from envelopelab.design.model import DesignDocument
 from envelopelab.geometry.gore import LENGTH_TOLERANCE, GoreLoft, GoreWidthModel
 from envelopelab.project.dependencies import canonical_hash
 from envelopelab.project.gore_design import (
@@ -30,7 +31,7 @@ from envelopelab.project.gore_design import (
     panel_rows,
     profile_from_arrays,
 )
-from envelopelab.project.model import ConstraintLocks, ManualOutline, utc_now
+from envelopelab.project.model import ConstraintLocks, ManualOutline, PatternSet, utc_now
 from envelopelab.project.session import ProjectSession
 from envelopelab.project.shapes import ShapeSpec
 
@@ -526,6 +527,234 @@ def merge_row_with_next(session: ProjectSession, index: int) -> bool:
         patterns["rows"].pop(removed, None)
 
     return session.edit(f"Merge rows {rows[index].letter} and {rows[index + 1].letter}", mutate)
+
+
+# --------------------------------------------------------------------------------------
+# Zones, row zones and row names: every reference follows
+# --------------------------------------------------------------------------------------
+
+
+def zone_users(design: DesignDocument, patterns: PatternSet, zone: str) -> list[str]:
+    """What uses a material zone: rows, panel zones, the parachute and the scoop.
+
+    A row without a zone of its own uses the design's first zone, so that zone is used by
+    those rows too.
+    """
+    users: list[str] = []
+    first = next(iter(design.zones), None)
+    if design.gores is not None:
+        for row in design.gores.panel_rows:
+            annotation = patterns.row(row.letter).zone
+            own = annotation if annotation is not None else row.zone
+            if own == zone or (own is None and zone == first):
+                users.append(f"row {row.letter}")
+        users += [f"panel zone {z.name}" for z in design.gores.panel_zones if z.zone == zone]
+    if design.parachute is not None and design.parachute.zone == zone:
+        users.append("parachute")
+    if design.scoop is not None and design.scoop.zone == zone:
+        users.append("scoop")
+    return users
+
+
+def add_zone(session: ProjectSession, name: str, fabric_id: str) -> bool:
+    """Add a material zone (``fabric_id`` from the fabric library).
+
+    Raises
+    ------
+    ValueError
+        For an empty name or a name the design already has.
+    """
+    name = name.strip()
+    if not name:
+        raise ValueError("a zone needs a name")
+    if name in session.design.zones:
+        raise ValueError(f"zone {name!r} already exists")
+
+    def mutate(design: dict[str, Any], _patterns: dict[str, Any]) -> None:
+        design["zones"][name] = fabric_id
+
+    return session.edit(f"Add zone {name}", mutate)
+
+
+def remove_zone(session: ProjectSession, name: str) -> bool:
+    """Remove a material zone that nothing uses.
+
+    Raises
+    ------
+    ValueError
+        When the zone is used (the message names the users) or does not exist.
+    """
+    if name not in session.design.zones:
+        raise ValueError(f"no zone {name!r}")
+    users = zone_users(session.design, session.patterns, name)
+    if users:
+        raise ValueError(f"zone {name!r} is used by {', '.join(users)}")
+
+    def mutate(design: dict[str, Any], _patterns: dict[str, Any]) -> None:
+        design["zones"].pop(name)
+
+    return session.edit(f"Remove zone {name}", mutate)
+
+
+def rename_zone(session: ProjectSession, old: str, new: str) -> bool:
+    """Rename a material zone and every reference to it, keeping its place and fabric.
+
+    Raises
+    ------
+    ValueError
+        For an unknown zone, an empty name or a name the design already has.
+    """
+    new = new.strip()
+    if old not in session.design.zones:
+        raise ValueError(f"no zone {old!r}")
+    if not new:
+        raise ValueError("a zone needs a name")
+    if new == old:
+        return False
+    if new in session.design.zones:
+        raise ValueError(f"zone {new!r} already exists")
+
+    def mutate(design: dict[str, Any], patterns: dict[str, Any]) -> None:
+        design["zones"] = {(new if k == old else k): v for k, v in design["zones"].items()}
+        gores = design.get("gores") or {}
+        for item in [*(gores.get("panel_rows") or []), *(gores.get("panel_zones") or [])]:
+            if item.get("zone") == old:
+                item["zone"] = new
+        for section in ("parachute", "scoop"):
+            if (design.get(section) or {}).get("zone") == old:
+                design[section]["zone"] = new
+        for row in patterns.get("rows", {}).values():
+            if row.get("zone") == old:
+                row["zone"] = new
+
+    return session.edit(f"Rename zone {old} to {new}", mutate)
+
+
+def set_row_zone(session: ProjectSession, letter: str, zone: str | None) -> bool:
+    """Set a row's material zone (None: the design's first zone).
+
+    The zone is stored on the design row; a zone set on the row's pattern annotation by
+    an earlier version is removed in the same command, so the row's zone has one home.
+
+    Raises
+    ------
+    ValueError
+        For an unknown row or zone.
+    """
+    design = session.design
+    assert design.gores is not None
+    letters = [r.letter for r in design.gores.panel_rows]
+    if letter not in letters:
+        raise ValueError(f"no row {letter!r}")
+    if zone is not None and zone not in design.zones:
+        raise ValueError(f"no zone {zone!r}")
+    index = letters.index(letter)
+
+    def mutate(data: dict[str, Any], patterns: dict[str, Any]) -> None:
+        _gores(data)["panel_rows"][index]["zone"] = zone
+        annotation = patterns.get("rows", {}).get(letter)
+        if annotation is not None:
+            annotation["zone"] = None
+
+    return session.edit(f"Row {letter}: zone {zone or 'default'}", mutate)
+
+
+def rename_row(session: ProjectSession, old: str, new: str) -> bool:
+    """Rename a panel row and every reference to it (pattern annotations, panel zones,
+    turning vents).
+
+    Raises
+    ------
+    ValueError
+        For an unknown row, an invalid name (1-8 characters) or one another row has.
+    """
+    design = session.design
+    assert design.gores is not None
+    new = new.strip()
+    letters = [r.letter for r in design.gores.panel_rows]
+    if old not in letters:
+        raise ValueError(f"no row {old!r}")
+    if not 1 <= len(new) <= 8:
+        raise ValueError("a row name has 1 to 8 characters")
+    if new == old:
+        return False
+    if new in letters:
+        raise ValueError(f"row {new!r} already exists")
+
+    def mutate(data: dict[str, Any], patterns: dict[str, Any]) -> None:
+        gores = _gores(data)
+        gores["panel_rows"][letters.index(old)]["letter"] = new
+        for zone in gores.get("panel_zones") or []:
+            if zone["row"] == old:
+                zone["row"] = new
+        for vent in data.get("turning_vents") or []:
+            vent["rows"] = [new if r == old else r for r in vent["rows"]]
+        rows = patterns.get("rows", {})
+        if old in rows:
+            rows[new] = rows.pop(old)
+
+    return session.edit(f"Rename row {old} to {new}", mutate)
+
+
+def set_lock_target(session: ProjectSession, name: str, value: float) -> bool:
+    """Lock a quantity at a typed value and solve the design to it in one command.
+
+    The other locks keep their values: the control points are corrected for all of them
+    (:func:`~envelopelab.project.gore_design.apply_locks`) and the rows refitted. For the
+    gore count the design gets that count and the lock holds it.
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit.
+    name : {"height", "volume", "max_diameter", "gore_count"}
+        Quantity to lock.
+    value : float
+        Target: m (height, maximum diameter), m^3 (volume) or a count.
+
+    Returns
+    -------
+    bool
+        Whether the design changed.
+
+    Raises
+    ------
+    LockError
+        When the targets cannot all be met; nothing is changed.
+    """
+    if name not in LOCKABLE:
+        raise KeyError(name)
+    design = session.design
+    assert design.gores is not None
+    if name == "gore_count":
+        count = int(value)
+        session.project.locks = session.project.locks.model_copy(update={"gore_count": None})
+        changed = set_gore_count(session, count)
+        set_lock(session, "gore_count", True)
+        return changed
+    if not (math.isfinite(value) and value > 0.0):
+        raise ValueError(f"{name} must be a positive number")
+    locks = session.project.locks.model_copy(update={name: float(value)})
+    interpolation = design.gores.profile_interpolation
+    r0, z0 = control_arrays(design)
+    r, z = apply_locks(r0, z0, locks, design_width_model(design), interpolation)
+    heights = fit_row_heights(
+        [row.finished_height for row in design.gores.panel_rows],
+        profile_from_arrays(r, z, interpolation).meridian_length,
+    )
+
+    def mutate(data: dict[str, Any], _patterns: dict[str, Any]) -> None:
+        gores = _gores(data)
+        gores["meridian_profile_control_points"] = [
+            {"x": float(a), "y": float(b)} for a, b in zip(r, z, strict=True)
+        ]
+        for row, h in zip(gores["panel_rows"], heights, strict=True):
+            row["finished_height"] = h
+
+    changed = session.edit(f"Lock {name.replace('_', ' ')} at {value:g}", mutate)
+    session.project.locks = locks
+    session.mark_aux_dirty()
+    return changed
 
 
 def set_lock(session: ProjectSession, name: str, enabled: bool) -> ConstraintLocks:

@@ -709,6 +709,16 @@ def design_findings(design: DesignDocument, patterns: PatternSet) -> list[Design
                     "zone", "error", f"row {letter}: zone {row.zone!r} is not defined", letter
                 )
             )
+    for panels in g.panel_zones:
+        if panels.zone not in design.zones:
+            out.append(
+                DesignFinding(
+                    "zone",
+                    "error",
+                    f"panel zone {panels.name}: zone {panels.zone!r} is not defined",
+                    panels.row,
+                )
+            )
     letters = {row.letter for row in g.panel_rows}
     for letter in sorted(set(patterns.rows) - letters):
         out.append(

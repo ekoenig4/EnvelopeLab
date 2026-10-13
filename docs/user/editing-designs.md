@@ -21,9 +21,15 @@ in the undo history. Nothing is edited by hand in JSON.
   releasing the mouse makes one edit. Radii cannot become negative.
 * **Control-point table**: type exact radius and height values (m). *Insert point after*
   adds a point on the curve halfway to the next one; *Delete point* removes one.
-* **Panel rows**: finished height along the tape (m) and fabric zone per row; *Split row*,
-  *Merge with next*, and *Fit rows to meridian*. With *Keep panel rows fitted*
-  (Preferences, on by default) every profile edit rescales the rows in the same command.
+* **Panel rows**: name, finished height along the tape (m) and fabric zone per row;
+  *Split row*, *Merge with next*, and *Fit rows to meridian*. With *Keep panel rows
+  fitted* (Preferences, on by default) every profile edit rescales the rows in the same
+  command.
+    * Type over a row's name to rename it. Its pattern marks, panel zones and turning
+      vents follow.
+    * Clear a row's zone to use the design's first zone. The pattern view's *Fabric zone*
+      choice edits the same setting.
+
 * **Gore construction**: *Gores cut as* chooses how the gores are cut.
     * *Lobe (straight seams)* is the default. The gore is cut wider than the
       tape-to-tape chord and bulges between the tapes, set by the gore loft below.
@@ -72,7 +78,10 @@ in the undo history. Nothing is edited by hand in JSON.
   *Fixed N* hold the value the quantity had when the lock was switched on. Profile edits
   are corrected to keep every locked value (lengths within 1 mm, volume within 0.1 %); an
   edit that cannot is refused. With height, diameter *and* volume locked, the fullness of
-  the profile changes, which also moves the mouth radius. See
+  the profile changes, which also moves the mouth radius.
+  The field beside each lock shows the current value. Type a target there to lock the
+  quantity at that value: the profile is solved to it in one step, keeping the other
+  locks; a target that cannot be met is refused. See
   [theory](../theory/design-editing.md).
 
 ## Properties and materials
@@ -105,7 +114,10 @@ to the **Materials** panel. Every change is one undoable step. A value the desig
 refuses is reported and changes nothing.
 
 The **Materials** panel lists your fabric library with source
-tags and maps each material zone to a fabric. The library is shared by all your designs:
+tags and maps each material zone to a fabric. Type over a zone's name to rename it: every
+row, panel zone, parachute and scoop that uses it follows. *Add zone* refuses a name the
+design already has. *Remove zone* is refused while anything uses the zone, and the message
+says what does. The library is shared by all your designs:
 create fabrics there once (**New fabric…**, **Duplicate…**) and use them anywhere; see
 [Creating fabrics for all your designs](fabric-library.md).
 
@@ -128,7 +140,7 @@ and features; the parachute and scoop panels are read-only here (edit them in th
 Rigging panel and Properties).
 For the selected row you can set the label, grain direction, zone, seam allowance (for all
 rows or this row), add notches, tape paths across the panel and feature locations (drag a
-feature to move it).
+feature to move it). *Marks on this row* lists them; *Remove selected mark* deletes one.
 
 Patterns are drawn **as last generated**. When the design has changed since, a red
 **STALE** banner says so and the panels are greyed until you press **Regenerate patterns**

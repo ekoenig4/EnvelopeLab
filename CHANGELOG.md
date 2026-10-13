@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Every part of a design can be changed in the GUI. Zones can be renamed (every reference
+  follows), and *Add zone* and *Remove zone* refuse duplicates and zones in use. Rows can
+  be renamed in the gore editor, and a row's zone is set in one place (gore editor or
+  pattern view). Single notches, tape paths and feature locations can be removed. Extra
+  feed holes of special shapes are edited in a table. Locks take a typed target value. A
+  test fails when a new design field has no editor. Findings now report panel zones with
+  an undefined zone.
 - The Properties panel builds its editors from the design schema. Yes/no fields get a
   check box, fields with fixed choices a drop-down list, and optional values a *Clear*
   button. Optional sections (parachute rings, red line, flying wires, scoop) can be

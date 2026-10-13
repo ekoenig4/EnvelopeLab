@@ -72,6 +72,10 @@ class MaterialsPanel(QWidget):
         self.zones = QTableWidget(0, 2)
         self.zones.setHorizontalHeaderLabels(["zone", "fabric"])
         self.zones.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.zones.setToolTip("Type over a zone's name to rename it everywhere it is used.")
+        self.zones.itemChanged.connect(self._zone_renamed)
+        self._zone_names: list[str] = []
+        self._filling = False
         add = QPushButton("Add zone")
         add.clicked.connect(self._add_zone)
         remove = QPushButton("Remove zone")
@@ -124,6 +128,8 @@ class MaterialsPanel(QWidget):
             self.select_fabric(selected)
         design = self.controller.design
         zones = {} if design is None else dict(design.zones)
+        self._filling = True
+        self._zone_names = list(zones)
         self.zones.setRowCount(len(zones))
         ids = [f.fabric_id for f in fabrics]
         for i, (zone, fabric_id) in enumerate(zones.items()):
@@ -138,6 +144,7 @@ class MaterialsPanel(QWidget):
                 lambda _i, z=zone, c=combo: self._fabric_chosen(z, c.currentText())
             )
             self.zones.setCellWidget(i, 1, combo)
+        self._filling = False
         self._update_buttons()
 
     # -- library --------------------------------------------------------------------------
@@ -247,26 +254,27 @@ class MaterialsPanel(QWidget):
 
     def _add_zone(self) -> None:
         name, ok = QInputDialog.getText(self, "Add zone", "Zone name:")
-        design = self.controller.design
-        if ok and name and design is not None:
-            fabrics = self.controller.fabrics.fabrics()
-            self.controller.set_value(
-                ("zones", name.strip()), fabrics[0].fabric_id if fabrics else ""
-            )
+        if ok:
+            self.add_zone(name)
+
+    def add_zone(self, name: str) -> bool:
+        """Add a zone with the first library fabric (a duplicate name is refused)."""
+        fabrics = self.controller.fabrics.fabrics()
+        fabric_id = fabrics[0].fabric_id if fabrics else ""
+        return bool(self.controller.edit("add_zone", name, fabric_id))
 
     def _remove_zone(self) -> None:
         rows = self.zones.selectionModel().selectedRows() or self.zones.selectedIndexes()
-        session = self.controller.session
-        if not rows or session is None:
-            return
-        cell = self.zones.item(rows[0].row(), 0)
-        if cell is None:
-            return
-        zone = cell.text()
+        if rows and 0 <= rows[0].row() < len(self._zone_names):
+            self.remove_zone(self._zone_names[rows[0].row()])
 
-        def mutate(design: dict[str, object], _patterns: dict[str, object]) -> None:
-            zones = design["zones"]
-            assert isinstance(zones, dict)
-            zones.pop(zone, None)
+    def remove_zone(self, name: str) -> bool:
+        """Remove a zone; refused (and reported) while rows or sections use it."""
+        return bool(self.controller.edit("remove_zone", name))
 
-        self.controller.attempt(session.edit, f"Remove zone {zone}", mutate)
+    def _zone_renamed(self, item: QTableWidgetItem) -> None:
+        if self._filling or item.column() != 0 or item.row() >= len(self._zone_names):
+            return
+        old, new = self._zone_names[item.row()], item.text().strip()
+        if new != old and self.controller.edit("rename_zone", old, new) is None:
+            self.refresh()

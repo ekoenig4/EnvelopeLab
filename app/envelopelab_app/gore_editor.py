@@ -8,7 +8,15 @@ from typing import Literal
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QDoubleValidator,
+    QIntValidator,
+    QPainter,
+    QPainterPath,
+    QPen,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -26,6 +34,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -214,7 +223,9 @@ class GoreEditor(QWidget):
         self.rows_table.setToolTip(
             "Flat-chord gores: seam bows, positive outward, at the middle of the panel's "
             "bottom and top seams.\nMeasured bows are edited here; bows from a crest loft "
-            "are shown read-only (Freeze as measured bows to edit them)."
+            "are shown read-only (Freeze as measured bows to edit them).\n"
+            "Type over a row's name to rename it everywhere; clear its zone for the "
+            "design's first zone."
         )
         self.rows_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         for col in (0, 3, 4):
@@ -341,18 +352,31 @@ class GoreEditor(QWidget):
         self.gore_count.setRange(3, 200)
         self.gore_count.editingFinished.connect(self._count_edited)
         self.locks: dict[str, QCheckBox] = {}
+        self.lock_values: dict[str, QLineEdit] = {}
         locks_box = QGroupBox("Constraint locks")
+        locks_box.setToolTip(
+            "A lock holds its quantity through profile edits. Type a value to lock the "
+            "quantity there: the profile is solved to it, keeping the other locks."
+        )
         locks_layout = QFormLayout(locks_box)
-        for name, text in (
-            ("height", "Fixed height"),
-            ("volume", "Fixed volume"),
-            ("max_diameter", "Fixed maximum diameter"),
-            ("gore_count", "Fixed N (gore count)"),
+        for name, text, unit in (
+            ("height", "Fixed height", "m"),
+            ("volume", "Fixed volume", "m³"),
+            ("max_diameter", "Fixed maximum diameter", "m"),
+            ("gore_count", "Fixed N (gore count)", ""),
         ):
             box = QCheckBox(text)
             box.toggled.connect(lambda on, n=name: self._lock_toggled(n, on))
             self.locks[name] = box
-            locks_layout.addRow(box)
+            value = QLineEdit()
+            value.setObjectName(f"lockValue_{name}")
+            value.setPlaceholderText(unit)
+            value.setValidator(
+                QIntValidator(3, 200) if name == "gore_count" else QDoubleValidator()
+            )
+            value.editingFinished.connect(lambda n=name: self._lock_value_edited(n))
+            self.lock_values[name] = value
+            locks_layout.addRow(box, value)
         locks_layout.addRow("Gores N", self.gore_count)
 
         self.outputs: dict[str, QLabel] = {}
@@ -482,7 +506,7 @@ class GoreEditor(QWidget):
             bows = design_seam_bows(design) if flat else []
             self.rows_table.setRowCount(len(rows))
             for i, row in enumerate(rows):
-                self.rows_table.setItem(i, 0, _item(row.letter, editable=False))
+                self.rows_table.setItem(i, 0, _item(row.letter))
                 self.rows_table.setItem(i, 1, _item(f"{row.finished_height:.4f}"))
                 zone = row_zone(design, session.patterns, row.letter)
                 self.rows_table.setItem(i, 2, _item(zone))
@@ -506,8 +530,18 @@ class GoreEditor(QWidget):
                 self._show_crest(bows)
             self.gore_count.setValue(design.gores.count)
             locks = session.project.locks
+            profile = profile_from_arrays(r, z, design.gores.profile_interpolation)
+            current = {
+                "height": f"{profile.height:.3f}",
+                "max_diameter": f"{profile.max_width:.3f}",
+                "volume": ""
+                if self.controller.outputs is None
+                else f"{self.controller.outputs.volume:.2f}",
+                "gore_count": str(design.gores.count),
+            }
             for name, box in self.locks.items():
                 box.setChecked(getattr(locks, name) is not None)
+                self.lock_values[name].setText(current[name])
             self.gore_count.setEnabled(locks.gore_count is None)
             self._show_outputs()
         finally:
@@ -758,7 +792,10 @@ class GoreEditor(QWidget):
         if self._updating or design is None or design.gores is None:
             return
         letter = design.gores.panel_rows[item.row()].letter
-        if item.column() == 1:
+        if item.column() == 0:
+            if self.controller.edit("rename_row", letter, item.text()) is None:
+                self.refresh()
+        elif item.column() == 1:
             try:
                 value = float(item.text())
             except ValueError:
@@ -785,12 +822,7 @@ class GoreEditor(QWidget):
                 self.refresh()
         elif item.column() == 2:
             zone = item.text().strip() or None
-            if (
-                self.controller.set_row_pattern(
-                    letter, {"zone": zone}, f"Row {letter}: zone {zone}"
-                )
-                is None
-            ):
+            if self.controller.edit("set_row_zone", letter, zone) is None:
                 self.refresh()
 
     def _row_selected(self) -> None:
@@ -816,6 +848,25 @@ class GoreEditor(QWidget):
         if self.gore_count.value() != design.gores.count:
             if self.controller.edit("set_gore_count", self.gore_count.value()) is None:
                 self.refresh()
+
+    def _lock_value_edited(self, name: str) -> None:
+        if self._updating or self.controller.design is None:
+            return
+        text = self.lock_values[name].text().strip()
+        try:
+            value = float(text)
+        except ValueError:
+            self.refresh()
+            return
+        self.set_lock_target(name, value)
+
+    def set_lock_target(self, name: str, value: float) -> None:
+        """Lock ``name`` at ``value`` (m, m³ or a count) and solve the design to it."""
+        if self.controller.edit("set_lock_target", name, value) is None:
+            self.refresh()
+        else:
+            self.controller.bump()
+            self.controller.stateChanged.emit()
 
     def _lock_toggled(self, name: str, on: bool) -> None:
         if self._updating:
