@@ -167,6 +167,21 @@ def test_parsers_read_the_last_block(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(os.name == "nt", reason="uses a POSIX shell script as a fake ccx")
+@pytest.mark.parametrize("name", ["ccx_static", "ccx_dynamic", "ccx_2.23"])
+def test_windows_build_names_are_found_on_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    fake = tmp_path / name
+    fake.write_text("#!/bin/sh\necho 'This is Version 2.23'\n")
+    fake.chmod(0o755)
+    monkeypatch.delenv(ENV_VAR, raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    found = find_calculix()
+    assert found is not None and found.executable == fake.resolve()
+    assert found.version == "2.23"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="uses a POSIX shell script as a fake ccx")
 def test_explicit_executable_and_version(tmp_path: Path) -> None:
     fake = tmp_path / "ccx"
     fake.write_text("#!/bin/sh\necho 'This is Version 2.99'\n")

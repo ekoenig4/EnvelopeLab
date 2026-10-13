@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- CalculiX on Windows: step-by-step instructions (Windows zip from the CalculiX site, or
+  conda-forge), a *Browse…* button for the CalculiX executable in Preferences, and
+  detection of the Windows executable names `ccx_static.exe` and `ccx_dynamic.exe` (and
+  `ccx_2.23`) on PATH.
 - Windows install script: `scripts\install_env.cmd` (or `install_env.ps1`) finds or
   installs Python, creates the virtualenv, installs EnvelopeLab and checks that it starts;
   it works where PowerShell blocks scripts, and can add a desktop shortcut.

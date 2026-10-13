@@ -11,7 +11,19 @@ from pathlib import Path
 
 #: Environment variable that points at a specific ``ccx`` executable.
 ENV_VAR = "ENVELOPELAB_CCX"
-_CANDIDATES = ("ccx", "ccx_2.22", "ccx_2.21", "ccx_2.20", "ccx.exe")
+# Names the executable has: distribution packages (ccx, ccx_2.2x) and the Windows builds
+# from the CalculiX site (ccx_static.exe, ccx_dynamic.exe). shutil.which adds ".exe" on
+# Windows.
+_CANDIDATES = (
+    "ccx",
+    "ccx_2.23",
+    "ccx_2.22",
+    "ccx_2.21",
+    "ccx_2.20",
+    "ccx_static",
+    "ccx_dynamic",
+    "ccx.exe",
+)
 
 SETUP_MESSAGE = """\
 CalculiX (ccx) was not found, so verification solves cannot run.
@@ -20,11 +32,13 @@ EnvelopeLab runs CalculiX as a separate program; nothing else in EnvelopeLab nee
 Install the CalculiX solver (version 2.20 or newer) and make `ccx` available:
 
   Debian/Ubuntu:  sudo apt-get install calculix-ccx
+  Windows:        download calculix_2.23_4win.zip (or 2.22) from www.dhondt.de and
+                  unzip it, e.g. to C:\\CalculiX
   conda (any OS): conda install -c conda-forge calculix
-  Windows/macOS:  the conda-forge package, or a build from www.calculix.de
 
-Then either put `ccx` on PATH or set ENVELOPELAB_CCX to the executable's full path.
-See docs/dev/calculix-installation.md for details."""
+Then give EnvelopeLab the executable (ccx, ccx.exe or ccx_static.exe): in the app,
+File > Preferences > CalculiX executable; or set ENVELOPELAB_CCX to its full path;
+or put its folder on PATH. See docs/dev/calculix-installation.md for details."""
 
 
 class CalculixNotFoundError(RuntimeError):

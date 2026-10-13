@@ -39,7 +39,8 @@ changed permanently. The script
 | `-NoCheck`, `-DryRun` | skip the checks; print the commands without running them |
 
 Then start the application from the shortcut, or with `.venv\Scripts\envelopelab.exe`.
-CalculiX is optional and installed separately (see below).
+CalculiX is optional and installed separately: see
+[CalculiX on Windows](../dev/calculix-installation.md#windows).
 
 To activate the virtualenv in PowerShell yourself (`.venv\Scripts\Activate.ps1`), allow
 local scripts once with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or use
@@ -124,8 +125,11 @@ Windows and macOS need no extra libraries. On Linux install:
 ### CalculiX (optional)
 
 Without `ccx` everything works except **Run CalculiX**, which is disabled with an
-explanation. See [CalculiX installation](../dev/calculix-installation.md); after installing,
-use **Simulation ▸ Detect CalculiX again** or restart.
+explanation. On Linux, `scripts/install_env.sh` installs it. On Windows, download the
+Windows zip from the CalculiX site, unzip it, and choose its `ccx_static.exe` in
+**File ▸ Preferences ▸ CalculiX executable ▸ Browse…**; step by step in
+[CalculiX installation](../dev/calculix-installation.md#windows). After installing, use
+**Simulation ▸ Detect CalculiX again** or restart.
 
 ## Starting the application
 

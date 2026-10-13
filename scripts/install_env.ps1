@@ -168,8 +168,9 @@ except ImportError:
 else:
     found = find_calculix()
     print(f"CalculiX: {found.version} at {found.executable}" if found else
-          "CalculiX: ccx not found (optional: Run CalculiX will be disabled; "
-          "see docs/dev/calculix-installation.md)")
+          "CalculiX: ccx not found (optional: Run CalculiX will be disabled). To add it, "
+          "unzip the Windows build from www.dhondt.de and choose its ccx_static.exe in "
+          "File > Preferences > CalculiX executable; see docs/dev/calculix-installation.md")
 '@ | & $VenvPython -
     if ($ExtrasList -contains "gui") {
         # Start the main window headless: proves Qt, PySide6 and the app import and run.

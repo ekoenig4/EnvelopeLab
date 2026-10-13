@@ -11,10 +11,13 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QVBoxLayout,
     QWidget,
 )
@@ -49,6 +52,15 @@ class PreferencesDialog(QDialog):
         self.calculix_mesh.setValue(prefs.calculix_mesh_mm)
         self.ccx = QLineEdit(prefs.ccx_path)
         self.ccx.setPlaceholderText("ccx on PATH or $ENVELOPELAB_CCX")
+        self.ccx.setToolTip(
+            "Full path of the CalculiX solver, e.g. C:\\CalculiX\\ccx_static.exe on Windows. "
+            "Empty: $ENVELOPELAB_CCX, then ccx on PATH."
+        )
+        ccx_browse = QPushButton("Browse…")
+        ccx_browse.clicked.connect(self._browse_ccx)
+        ccx_row = QHBoxLayout()
+        ccx_row.addWidget(self.ccx, 1)
+        ccx_row.addWidget(ccx_browse)
         self.auto_patterns = QCheckBox("Regenerate patterns after every edit")
         self.auto_patterns.setChecked(prefs.auto_regenerate_patterns)
         self.keep_rows = QCheckBox("Keep panel rows fitted to the meridian after profile edits")
@@ -65,7 +77,7 @@ class PreferencesDialog(QDialog):
         form.addRow("Autosave every", self.autosave)
         form.addRow("Preview mesh edge length", self.preview_mesh)
         form.addRow("CalculiX mesh edge length", self.calculix_mesh)
-        form.addRow("CalculiX executable", self.ccx)
+        form.addRow("CalculiX executable", ccx_row)
         form.addRow(self.auto_patterns)
         form.addRow(self.keep_rows)
         form.addRow(self.enable_3d)
@@ -79,6 +91,16 @@ class PreferencesDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addWidget(buttons)
+
+    def _browse_ccx(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "CalculiX executable",
+            self.ccx.text(),
+            "CalculiX (ccx*);;Programs (*.exe);;All files (*)",
+        )
+        if path:
+            self.ccx.setText(path)
 
     def result_preferences(self) -> Preferences:
         """Preferences as edited."""
