@@ -210,8 +210,18 @@ def input_groups(
             "parachute_hole_diameter": gores.get("parachute_hole_diameter"),
             "seal_overlap": gores.get("seal_overlap"),
             "special": design.get("special"),
-            # Only a set loft enters, so designs without one keep their fingerprints.
+            # Only a set loft enters, so designs without one keep their fingerprints; the
+            # same for the gore construction fields at their defaults.
             **({"loft": gores["loft"]} if gores.get("loft") is not None else {}),
+            **{
+                key: gores[key]
+                for key, default in (
+                    ("construction", "lobe"),
+                    ("profile_interpolation", "spline"),
+                    ("crest_loft", None),
+                )
+                if gores.get(key, default) != default
+            },
         },
         "seam_allowance": {
             "seam_types": [s.get("allowance") for s in seam_types],
@@ -226,6 +236,7 @@ def input_groups(
             "design": {
                 r["letter"]: r["zone"] for r in gores.get("panel_rows") or [] if r.get("zone")
             },
+            **({"panels": gores["panel_zones"]} if gores.get("panel_zones") else {}),
         },
         "tape_paths": per_row("tape_paths"),
         "feature_locations": per_row("feature_locations"),

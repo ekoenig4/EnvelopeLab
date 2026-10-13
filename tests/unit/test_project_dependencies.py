@@ -118,3 +118,27 @@ def test_manual_outline_invalidates_assembly_and_simulation(session: ProjectSess
     status = session.tracker.statuses()
     assert status["patterns"] == status["rest_mesh"] == status["simulation"] == "stale"
     assert status["profile"] == "current"
+
+
+def test_gore_construction_fields_mark_the_geometry_stale(session: ProjectSession) -> None:
+    edits.set_profile_interpolation(session, "linear")
+    assert session.tracker.statuses()["patterns"] == "stale"
+    for spec in ARTIFACTS:
+        session.mark_built(spec.name)
+    edits.set_construction(session, "flat_chord")
+    assert session.tracker.statuses()["patterns"] == "stale"
+    for spec in ARTIFACTS:
+        session.mark_built(spec.name)
+    edits.set_crest_loft(session, 0.03, [(0.0, 1.0)])
+    assert session.tracker.statuses()["patterns"] == "stale"
+
+
+def test_panel_zones_mark_the_materials_stale(session: ProjectSession) -> None:
+    assert session.design.gores is not None
+    letter = session.design.gores.panel_rows[0].letter
+    zone = next(iter(session.design.zones))
+    session.set_design_value(
+        ("gores", "panel_zones"), [{"name": "badge", "row": letter, "gores": [1], "zone": zone}]
+    )
+    status = session.tracker.statuses()
+    assert status["rest_mesh"] == "stale" and status["patterns"] == "stale"

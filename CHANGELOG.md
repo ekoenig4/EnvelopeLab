@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: changing the gore construction, the profile interpolation, the crest loft or
+  the panel zones did not mark the patterns, meshes and results built from the design as
+  stale. Designs that do not use them keep their fingerprints.
 - The gore editor edits flat-chord gores: construction (lobe or flat chord), profile
   between points (spline or straight segments), the crest loft (fraction and taper
   stations), measured seam bows per row in mm, *Freeze as measured bows*, *Use crest
