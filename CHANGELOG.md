@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- The Properties panel builds its editors from the design schema. Yes/no fields get a
+  check box, fields with fixed choices a drop-down list, and optional values a *Clear*
+  button. Optional sections (parachute rings, red line, flying wires, scoop) can be
+  added and removed. Turning vents, seam types, features, scale variants and panel zones
+  can be added and removed one by one. Fields owned by the gore editor or the Materials
+  panel are read-only. Fixed: the flying-wire count could not be edited; control points
+  and row letters could be edited there without the locks. Scale variants appear in the
+  design tree.
 - Fixed: changing the gore construction, the profile interpolation, the crest loft or
   the panel zones did not mark the patterns, meshes and results built from the design as
   stale. Designs that do not use them keep their fingerprints.

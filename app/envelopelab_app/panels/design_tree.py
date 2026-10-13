@@ -26,6 +26,7 @@ SECTIONS = (
     ("rigging", "Rigging (red line, flying wires)", "rigging"),
     ("turning_vents", "Turning vents", "turning_vents"),
     ("scoop", "Scoop", "scoop"),
+    ("scale_variants", "Scale variants", "scale_variants"),
     ("special", "Special shape", "geometry"),
 )
 

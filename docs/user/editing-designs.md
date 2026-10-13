@@ -81,7 +81,30 @@ Select a section in the **Design Tree** (operating conditions, tapes, seam types
 parachute, rigging, turning vents, …) and edit its fields in **Properties**; the
 parachute, red line, flying wires and turning vents are added and checked in the
 **Rigging** panel ([guide](rigging.md)). Values are SI: lengths m, temperatures K (°C shown
-beside), pressure Pa, masses kg. The **Materials** panel lists your fabric library with source
+beside), pressure Pa, masses kg.
+
+Each field gets the editor its value needs:
+
+* **Numbers and text** are typed. **Lists** are separated by commas (`E, F`), and
+  name-to-value maps are typed as `name=value, name=value` (for example the fixed sizes
+  of a scale variant).
+* **Yes/no fields** are check boxes, and **fields with fixed choices** (for example a
+  vent's direction or a value's source tag) are drop-down lists.
+* **Optional values** have a *Clear* button. Clearing a value the design needs, such as
+  a centre ring's diameter while the ring is there, is refused.
+* **Optional sections**, for example the parachute's crown and centre rings, have *Add*
+  and *Remove* buttons. *Add* starts from the rigging defaults.
+* **Lists of entries** have *Add* and *Remove* buttons per entry. This covers turning
+  vents, seam types, features, scale variants and panel zones, which give single panels
+  of a row their own zone. A new entry copies the last one under a free name; a new panel
+  zone takes the first free panel.
+
+Fields that another editor owns are shown greyed out with that editor's name: the
+profile, rows, gore count, construction and lofts belong to the gore editor, and the zones
+to the **Materials** panel. Every change is one undoable step. A value the design schema
+refuses is reported and changes nothing.
+
+The **Materials** panel lists your fabric library with source
 tags and maps each material zone to a fabric. The library is shared by all your designs:
 create fabrics there once (**New fabric…**, **Duplicate…**) and use them anywhere; see
 [Creating fabrics for all your designs](fabric-library.md).
