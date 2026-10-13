@@ -4,6 +4,47 @@ EnvelopeLab needs **Python 3.11 or newer**. The Python dependencies are installe
 `pip`; on Linux a few system libraries are needed as well (the Qt, VTK and Gmsh wheels
 link against them). The CalculiX verification solver is an optional separate program.
 
+## Quick install on Windows
+
+Windows needs no system libraries. You need [Git](https://git-scm.com/download/win), and
+Python 3.11 or newer (the script can install Python 3.12 for you). In a command prompt or
+PowerShell:
+
+```bat
+git clone https://github.com/ekoenig4/EnvelopeLab.git
+cd EnvelopeLab
+scripts\install_env.cmd -InstallPython -Shortcut
+```
+
+You can also double-click `scripts\install_env.cmd` in Explorer. It runs
+`scripts\install_env.ps1` with PowerShell's execution policy bypassed for that one run, so
+it works where PowerShell reports *"running scripts is disabled on this system"*; nothing is
+changed permanently. The script
+
+1. finds Python 3.11 or newer (the `py` launcher first, preferring 3.12 and 3.13), or, with
+   `-InstallPython`, installs Python 3.12 for your user with `winget`;
+2. creates the virtualenv `.venv` and runs `pip install -e ".[gui,fast]"`;
+3. checks that the library and Gmsh import, reports whether CalculiX (`ccx`) was found, and
+   starts the main window headless to prove Qt works;
+4. with `-Shortcut`, puts an *EnvelopeLab* shortcut on your desktop.
+
+| Option | Effect |
+|---|---|
+| `-InstallPython` | install Python 3.12 with winget when no suitable Python is found |
+| `-Shortcut` | desktop shortcut to the application |
+| `-Dev` | also the test and docs tools (`dev,docs` extras) and the pre-commit hooks |
+| `-Extras gui` | only the application, without the compiled solver kernel |
+| `-Venv DIR` | another virtualenv directory |
+| `-Python C:\path\to\python.exe` | the Python used to create the virtualenv |
+| `-NoCheck`, `-DryRun` | skip the checks; print the commands without running them |
+
+Then start the application from the shortcut, or with `.venv\Scripts\envelopelab.exe`.
+CalculiX is optional and installed separately (see below).
+
+To activate the virtualenv in PowerShell yourself (`.venv\Scripts\Activate.ps1`), allow
+local scripts once with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or use
+`.venv\Scripts\activate.bat` in a command prompt.
+
 ## Quick install with the script (Linux, containers)
 
 From a checkout of the repository:

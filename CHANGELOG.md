@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Windows install script: `scripts\install_env.cmd` (or `install_env.ps1`) finds or
+  installs Python, creates the virtualenv, installs EnvelopeLab and checks that it starts;
+  it works where PowerShell blocks scripts, and can add a desktop shortcut.
 - Every part of a design can be changed in the GUI. Zones can be renamed (every reference
   follows), and *Add zone* and *Remove zone* refuse duplicates and zones in use. Rows can
   be renamed in the gore editor, and a row's zone is set in one place (gore editor or

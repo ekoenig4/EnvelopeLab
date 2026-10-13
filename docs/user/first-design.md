@@ -11,7 +11,8 @@ live outputs and saves it as a project.
 
 ## Install and start
 
-See [Installation](installation.md) (on Linux: `bash scripts/install_env.sh`), then:
+See [Installation](installation.md) (on Windows: `scripts\install_env.cmd`; on Linux:
+`bash scripts/install_env.sh`), then:
 
 ```bash
 envelopelab                          # or: python -m envelopelab_app [project.elproj]
