@@ -15,6 +15,7 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QTransform,
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -69,6 +70,8 @@ HANDLE_RADIUS = 6.0  # px
 #: Handle colours: normal and selected.
 HANDLE_COLOR = "#1f77b4"
 SELECTED_COLOR = "#ff7f0e"
+#: Colour of the parachute marks (as in the pattern and 3D views).
+PARACHUTE_COLOR = "#9467bd"
 #: Curvature-comb spikes drawn (about) and the longest spike, as a share of the view.
 COMB_SPIKES = 160
 COMB_LENGTH = 0.12
@@ -184,6 +187,10 @@ class ProfileCanvas(QGraphicsView):
         self.row_highlight.setPen(highlight)
         self.equator = QGraphicsPathItem()
         self.equator.setPen(QPen(QColor("#2ca02c"), 0, Qt.PenStyle.DashLine))
+        self.openings = QGraphicsPathItem()
+        self.openings.setPen(QPen(QColor("#1f4e79"), 0, Qt.PenStyle.DashDotLine))
+        self.parachute = QGraphicsPathItem()
+        self.parachute.setPen(QPen(QColor(PARACHUTE_COLOR), 0, Qt.PenStyle.DashLine))
         for item in (
             self._axis,
             self._mirror,
@@ -191,6 +198,8 @@ class ProfileCanvas(QGraphicsView):
             self.row_highlight,
             self.seam_ticks,
             self.equator,
+            self.openings,
+            self.parachute,
             self._curve,
         ):
             self.scene().addItem(item)
@@ -198,6 +207,8 @@ class ProfileCanvas(QGraphicsView):
         self.seams: list[float] = []
         self.row_names: list[str] = []
         self.highlighted_row: int | None = None
+        #: Parachute overlap along the tape below the top opening, m (None: no parachute).
+        self.seal_overlap: float | None = None
         self.labels: list[QGraphicsSimpleTextItem] = []
         # A bound slot: Qt drops it when the view is destroyed, before the scene's items.
         self.scene().selectionChanged.connect(self._scene_selection)
@@ -250,7 +261,15 @@ class ProfileCanvas(QGraphicsView):
         for handle in self.handles:
             self.scene().removeItem(handle)
         self.handles = []
-        for item in (self._curve, self._mirror, self.comb, self.seam_ticks, self.equator):
+        for item in (
+            self._curve,
+            self._mirror,
+            self.comb,
+            self.seam_ticks,
+            self.equator,
+            self.openings,
+            self.parachute,
+        ):
             item.setPath(QPainterPath())
         self.row_highlight.setPath(QPainterPath())
         self._clear_labels()
@@ -363,9 +382,16 @@ class ProfileCanvas(QGraphicsView):
         self.comb.setPath(self._comb_path(profile) if self.show_comb else QPainterPath())
         self._draw_rows(profile)
         self._draw_equator(profile)
+        self._draw_openings(profile)
 
-    def _label(self, text: str, r: float, z: float, colour: str, tip: str) -> None:
+    def _label(
+        self, text: str, r: float, z: float, colour: str, tip: str, above: bool = False
+    ) -> None:
+        """A label whose top-left corner is at (r, z), m; ``above`` puts it on top of that
+        point instead (its height is in pixels, since labels ignore the zoom)."""
         label = QGraphicsSimpleTextItem(text)
+        if above:
+            label.setTransform(QTransform.fromTranslate(0.0, -label.boundingRect().height()))
         label.setBrush(QBrush(QColor(colour)))
         label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
         label.setPos(QPointF(r, -z))
@@ -430,6 +456,44 @@ class ProfileCanvas(QGraphicsView):
             f"widest point: radius {eq.r:.3f} m, {eq.height_above_mouth:.3f} m above the "
             f"mouth, {eq.s:.3f} m along the tape",
         )
+
+    def _draw_openings(self, profile: MeridianProfile) -> None:
+        """Dash-dot lines from the axis to the mouth and to the top opening, and a dashed
+        line to the parachute's edge (the overlap down the tape from the top opening)."""
+        path = QPainterPath()
+        ends = (
+            ("mouth", float(profile.r[0]), float(profile.z[0]), "the mouth", False),
+            ("top hole", float(profile.r[-1]), float(profile.z[-1]), "the parachute hole", True),
+        )
+        for name, r, z, what, above in ends:
+            path.moveTo(0.0, -z)
+            path.lineTo(r, -z)
+            self._label(
+                f"{name} Ø {2 * r:.2f} m",
+                0.05 * max(r, 1e-3),
+                z,
+                "#1f4e79",
+                f"{what}: diameter {2 * r:.3f} m at height {z - float(profile.z[0]):.3f} m",
+                above,
+            )
+        self.openings.setPath(path)
+        chute = QPainterPath()
+        overlap = self.seal_overlap
+        if overlap is not None and 0.0 < overlap < profile.meridian_length:
+            s_edge = profile.meridian_length - overlap
+            r_edge = float(profile.radius_at(s_edge))
+            z_edge = float(profile.height_at(s_edge))
+            chute.moveTo(0.0, -z_edge)
+            chute.lineTo(r_edge, -z_edge)
+            self._label(
+                f"parachute Ø {2 * r_edge:.2f} m",
+                0.45 * r_edge,
+                z_edge,
+                PARACHUTE_COLOR,
+                f"parachute edge: diameter {2 * r_edge:.3f} m, overlapping the envelope "
+                f"{overlap:.3f} m down the tape from the top opening",
+            )
+        self.parachute.setPath(chute)
 
     @staticmethod
     def _comb_path(profile: MeridianProfile) -> QPainterPath:
@@ -671,6 +735,8 @@ class GoreEditor(QWidget):
             ("height", "Height"),
             ("max_diameter", "Maximum diameter"),
             ("equator", "Equator (widest point)"),
+            ("openings", "Mouth / top hole Ø"),
+            ("parachute", "Parachute Ø (seated edge)"),
             ("area", "Fabric area"),
             ("volume", "Volume"),
             ("gross_lift", "Gross lift"),
@@ -784,6 +850,9 @@ class GoreEditor(QWidget):
                 frozenset(k for k, s in enumerate(layout.segments) if k > 0 and not s.smooth)
                 if isinstance(layout, SegmentLayout)
                 else frozenset()
+            )
+            self.canvas.seal_overlap = (
+                design.gores.seal_overlap if design.parachute is not None else None
             )
             self.canvas.seams = seam_fractions(design)
             self.canvas.row_names = [row.letter for row in design.gores.panel_rows]
@@ -1114,6 +1183,13 @@ class GoreEditor(QWidget):
         if self.controller.edit("set_profile_interpolation", value) is None:
             self.refresh()
 
+    def _openings_text(self) -> str:
+        design = self.controller.design
+        if design is None or design.gores is None:
+            return "-"
+        r, _ = control_arrays(design)
+        return f"{2 * r[0]:.3f} m / {2 * r[-1]:.3f} m"
+
     def _show_outputs(self) -> None:
         out = self.controller.outputs
         if out is None:
@@ -1129,6 +1205,10 @@ class GoreEditor(QWidget):
             if out.equator is None
             else f"{out.equator.height_above_mouth:.3f} m above the mouth, "
             f"{out.equator.s:.3f} m along the tape ({out.equator.fraction:.0%})",
+            "openings": self._openings_text(),
+            "parachute": "-"
+            if out.rigging is None or out.rigging.parachute is None
+            else f"{out.rigging.parachute.geometry.diameter:.3f} m",
             "area": f"{out.area:.2f} m²",
             "volume": f"{out.volume:.2f} m³",
             "gross_lift": f"{out.gross_lift:.0f} N ({out.gross_lift / 9.80665:.1f} kg)",

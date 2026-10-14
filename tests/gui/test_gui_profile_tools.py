@@ -167,3 +167,28 @@ def test_rows_and_equator_are_marked_on_the_profile(window: MainWindow) -> None:
     assert canvas.seam_ticks.path().boundingRect() != before
     canvas.end_drag()
     assert session.design.gores is not None
+
+
+def test_mouth_top_hole_and_parachute_are_marked(window: MainWindow) -> None:
+    session = window.new_project(standard_gore_design("open", 2600.0, 17.0, 18.0, 16, 8))
+    editor = window.gore_editor
+    canvas = editor.canvas
+    gores = session.design.gores
+    assert gores is not None and session.design.parachute is not None
+    texts = [label.text() for label in canvas.labels]
+    assert f"mouth Ø {gores.mouth_diameter:.2f} m" in texts
+    assert f"top hole Ø {gores.parachute_hole_diameter:.2f} m" in texts
+    rigging = window.controller.rigging
+    assert rigging is not None and rigging.parachute is not None
+    chute = rigging.parachute.geometry.diameter
+    assert f"parachute Ø {chute:.2f} m" in texts  # same edge as the rigging analysis
+    assert editor.outputs["parachute"].text() == f"{chute:.3f} m"
+    assert editor.outputs["openings"].text().startswith(f"{gores.mouth_diameter:.3f} m / ")
+    # A wider overlap moves the parachute edge down and out.
+    window.rigging.set_seal_overlap(gores.seal_overlap + 0.3)
+    wider = [label.text() for label in canvas.labels if label.text().startswith("parachute")]
+    assert wider and wider[0] != f"parachute Ø {chute:.2f} m"
+    # No parachute: no parachute mark.
+    window.rigging.remove_parachute()
+    assert canvas.parachute.path().isEmpty()
+    assert not [label for label in canvas.labels if label.text().startswith("parachute")]

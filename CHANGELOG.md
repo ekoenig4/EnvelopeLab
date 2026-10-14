@@ -3,6 +3,8 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: the profile canvas also marks the mouth, the top (parachute) hole and the
+  seated parachute edge with their diameters, and the live outputs list them.
 - Added: the profile canvas marks every row seam with a tick and each row's letter, and
   highlights the row selected in the table. A dashed line marks the equator (the widest
   point, with its diameter); the live outputs give its height above the mouth and its

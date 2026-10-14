@@ -26,6 +26,11 @@ in the undo history. Nothing is edited by hand in JSON.
   widest point of the envelope, labelled with its diameter. *Live outputs* say how far
   above the mouth the equator is and how far along the tape (also as a percentage of the
   tape length).
+  Dash-dot lines from the axis mark the **mouth** and the **top (parachute) hole**,
+  labelled with their diameters. With a parachute, a purple dashed line marks its seated
+  **edge**, the overlap down the tape from the top hole, labelled with the parachute's
+  diameter; it moves when the overlap is changed in the Rigging panel. *Live outputs*
+  list the mouth and top-hole diameters and the parachute diameter.
 * **Control-point table**: type exact radius and height values (m). *Insert point after*
   adds a point on the curve halfway to the next one; *Delete point* removes one.
 * **Editing many points at once** (*Edit selected points*):
