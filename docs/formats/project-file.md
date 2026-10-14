@@ -38,7 +38,7 @@ clean exit, and offered for recovery at the next start otherwise.
   "$defs": {
     "ConstraintLocks": {
       "additionalProperties": false,
-      "description": "Constraint locks of the standard-gore editor.\n\nA lock holds its value (m, m^3 or a count) from the moment it was switched on; edits\nof the profile are corrected to keep every locked quantity (see\n:func:`envelopelab.project.gore_design.apply_locks`).",
+      "description": "Constraint locks of the standard-gore editor.\n\nA lock holds its value (m, m^3 or a count) from the moment it was switched on; edits\nof the profile are corrected to keep every locked quantity (see\n:func:`envelopelab.project.gore_design.apply_locks`). ``mouth_diameter`` and\n``top_diameter`` hold the diameters of the profile's end points: the mouth and the\ntop (parachute) hole, m.",
       "properties": {
         "gore_count": {
           "anyOf": [
@@ -78,6 +78,32 @@ clean exit, and offered for recovery at the next start otherwise.
           ],
           "default": null,
           "title": "Max Diameter"
+        },
+        "mouth_diameter": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Mouth Diameter"
+        },
+        "top_diameter": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Top Diameter"
         },
         "volume": {
           "anyOf": [

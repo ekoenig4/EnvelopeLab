@@ -40,9 +40,12 @@ the control points are corrected:
 | volume \(V\), diameter free | \( r' = k r \), \(k\) by Brent's method |
 | volume, height free | \( z' = z_0 + k(z - z_0) \), \(k\) by Brent's method |
 | volume, height and diameter | fullness \( r' = r_{max}(r/r_{max})^{1/k} \): keeps \(r_{max}\), moves the other radii (the mouth too) |
+| mouth or top-hole diameter \(d\) | the end control point's radius is set to \(d/2\) after every other correction step |
 | gore count \(N\) | edits of \(N\) are refused |
 
-Iteration is needed because the spline through scaled points is not the scaled spline (the
+The maximum-diameter correction scales the end radii too, so it alternates with pinning
+the locked ends until both hold (the maximum lies inside the profile, so pinning the ends
+does not move it). Iteration is needed because the spline through scaled points is not the scaled spline (the
 chord parameterisation changes). After correction every lock is checked (lengths 1 mm,
 volume 0.1 %); an edit that cannot meet them raises `LockError` and changes nothing.
 

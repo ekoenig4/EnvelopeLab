@@ -263,3 +263,23 @@ def test_taper_stations_follow_row_seams_in_the_gore_editor(window: MainWindow) 
     assert gores is not None and gores.crest_loft is not None
     assert gores.crest_loft.taper[1].at_row is None
     assert gores.crest_loft.taper[1].station == 0.45
+
+
+def test_mouth_and_top_hole_diameters_are_locked_in_the_gore_editor(
+    gore_window: MainWindow,
+) -> None:
+    session = gore_window.controller.session
+    assert session is not None and session.design.gores is not None
+    editor = gore_window.gore_editor
+    top = round(session.design.gores.parachute_hole_diameter + 0.2, 3)
+    editor.lock_values["top_diameter"].setText(str(top))
+    editor.lock_values["top_diameter"].editingFinished.emit()
+    assert session.project.locks.top_diameter == top
+    assert editor.locks["top_diameter"].isChecked()
+    gores = session.design.gores
+    assert gores is not None and gores.parachute_hole_diameter == top
+    assert 2.0 * gores.meridian_profile_control_points[-1].x == pytest.approx(top)
+    editor.locks["mouth_diameter"].click()
+    assert session.project.locks.mouth_diameter == pytest.approx(
+        2.0 * gores.meridian_profile_control_points[0].x
+    )

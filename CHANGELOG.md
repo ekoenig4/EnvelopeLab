@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: *Fixed mouth diameter* and *Fixed top (parachute) hole diameter* constraint
+  locks in the gore editor; profile edits keep the locked end radii, and a typed target
+  solves the design to it, keeping the other locks.
 - Fixed: in a Wayland session (WSLg under Windows 11, many Linux desktops) Qt chose its
   Wayland platform, where the 3D view's render window crashes the application.
   EnvelopeLab now selects Qt's X11 platform (`xcb`) when an X server is present, unless

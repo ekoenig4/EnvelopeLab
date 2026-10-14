@@ -81,11 +81,16 @@ in the undo history. Nothing is edited by hand in JSON.
   row* puts a straight seam inside a row with measured bows, and *Merge with next*
   keeps the outer seams' bows. The design volume does not include the crest; see
   [theory](../theory/gore-geometry.md#flat-chord-gores-and-the-crest-loft-flat_chord_rows-crestloft).
-* **Constraint locks**: *Fixed height*, *Fixed volume*, *Fixed maximum diameter* and
-  *Fixed N* hold the value the quantity had when the lock was switched on. Profile edits
-  are corrected to keep every locked value (lengths within 1 mm, volume within 0.1 %); an
-  edit that cannot is refused. With height, diameter *and* volume locked, the fullness of
-  the profile changes, which also moves the mouth radius.
+* **Constraint locks**: *Fixed height*, *Fixed volume*, *Fixed maximum diameter*,
+  *Fixed mouth diameter*, *Fixed top (parachute) hole diameter* and *Fixed N* hold the
+  value the quantity had when the lock was switched on. Profile edits are corrected to
+  keep every locked value (lengths within 1 mm, volume within 0.1 %); an edit that cannot
+  is refused. With height, diameter *and* volume locked, the fullness of the profile
+  changes, which also moves the mouth radius unless the mouth diameter is locked too.
+  The mouth and top-hole locks hold the first and last control points' radii: dragging
+  those points sideways does nothing while they are locked. Typing a mouth or top-hole
+  target also sets the design's stated mouth diameter, or its parachute hole and crown
+  ring diameters.
   The field beside each lock shows the current value. Type a target there to lock the
   quantity at that value: the profile is solved to it in one step, keeping the other
   locks; a target that cannot be met is refused. See

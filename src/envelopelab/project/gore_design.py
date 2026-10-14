@@ -836,14 +836,29 @@ def _hold(
     raise LockError(f"could not hold the locked {which} of {target:.4f} m")
 
 
+def _pin_openings(r: FloatArray, locks: ConstraintLocks) -> FloatArray:
+    """Set the end radii to the locked mouth and top-hole diameters, m."""
+    if locks.mouth_diameter is None and locks.top_diameter is None:
+        return r
+    r = r.copy()
+    if locks.mouth_diameter is not None:
+        r[0] = 0.5 * locks.mouth_diameter
+    if locks.top_diameter is not None:
+        r[-1] = 0.5 * locks.top_diameter
+    return r
+
+
 def _hold_lengths(
     r: FloatArray, z: FloatArray, locks: ConstraintLocks, interpolation: Interpolation
 ) -> tuple[FloatArray, FloatArray]:
-    for _ in range(10):
+    # The maximum-diameter hold scales every radius, the end radii too; alternate it with
+    # pinning the ends (the maximum lies inside the profile, so this converges).
+    for _ in range(20):
         if locks.height is not None:
             r, z = _hold(r, z, locks.height, "height", interpolation)
         if locks.max_diameter is not None:
             r, z = _hold(r, z, locks.max_diameter, "diameter", interpolation)
+        r = _pin_openings(r, locks)
         profile = profile_from_arrays(r, z, interpolation)
         ok_h = locks.height is None or abs(profile.height - locks.height) <= LENGTH_TOLERANCE
         ok_d = (
@@ -852,7 +867,7 @@ def _hold_lengths(
         )
         if ok_h and ok_d:
             return r, z
-    raise LockError("height and diameter locks could not both be held")
+    raise LockError("the height, diameter and opening locks could not all be held")
 
 
 def apply_locks(
@@ -869,7 +884,8 @@ def apply_locks(
     r, z : ndarray
         Edited control-point radii and heights, m.
     locks : ConstraintLocks
-        Locked height (m), volume (m^3) and maximum diameter (m).
+        Locked height (m), volume (m^3), maximum diameter (m), and mouth and top-hole
+        diameters (m; the end control points' radii are set to half of them).
     width_model : GoreWidthModel, optional
         Gore count and loft of the design: the locked volume is the lofted volume
         (:func:`~envelopelab.geometry.gore.lofted_volume`); default the surface of
@@ -941,6 +957,14 @@ def check_locks(design: DesignDocument, locks: ConstraintLocks) -> list[str]:
         out.append(f"volume {volume:.2f} m^3, locked {locks.volume:.2f} m^3")
     if locks.gore_count is not None and design.gores.count != locks.gore_count:
         out.append(f"gore count {design.gores.count}, locked {locks.gore_count}")
+    r, _ = control_arrays(design)
+    for name, label, radius in (
+        ("mouth_diameter", "mouth diameter", r[0]),
+        ("top_diameter", "top hole diameter", r[-1]),
+    ):
+        locked = getattr(locks, name)
+        if locked is not None and abs(2.0 * radius - locked) > LENGTH_TOLERANCE:
+            out.append(f"{label} {2.0 * radius:.4f} m, locked {locked:.4f} m")
     return out
 
 

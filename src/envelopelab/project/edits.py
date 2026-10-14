@@ -35,7 +35,19 @@ from envelopelab.project.model import ConstraintLocks, ManualOutline, PatternSet
 from envelopelab.project.session import ProjectSession
 from envelopelab.project.shapes import ShapeSpec
 
-LOCKABLE = ("height", "volume", "max_diameter", "gore_count")
+LOCKABLE = (
+    "height",
+    "volume",
+    "max_diameter",
+    "mouth_diameter",
+    "top_diameter",
+    "gore_count",
+)
+#: Opening locks and the design fields that state the same diameter.
+OPENING_FIELDS = {
+    "mouth_diameter": ("mouth_diameter",),
+    "top_diameter": ("parachute_hole_diameter", "crown_ring"),
+}
 
 
 def _gores(design: dict[str, Any]) -> dict[str, Any]:
@@ -720,16 +732,18 @@ def set_lock_target(session: ProjectSession, name: str, value: float) -> bool:
 
     The other locks keep their values: the control points are corrected for all of them
     (:func:`~envelopelab.project.gore_design.apply_locks`) and the rows refitted. For the
-    gore count the design gets that count and the lock holds it.
+    gore count the design gets that count and the lock holds it. A mouth or top-hole
+    diameter also sets the design fields that state it (``gores.mouth_diameter``;
+    ``gores.parachute_hole_diameter`` and ``gores.crown_ring``).
 
     Parameters
     ----------
     session : ProjectSession
         Session to edit.
-    name : {"height", "volume", "max_diameter", "gore_count"}
+    name : {"height", "volume", "max_diameter", "mouth_diameter", "top_diameter", "gore_count"}
         Quantity to lock.
     value : float
-        Target: m (height, maximum diameter), m^3 (volume) or a count.
+        Target: m (height and the diameters), m^3 (volume) or a count.
 
     Returns
     -------
@@ -769,6 +783,8 @@ def set_lock_target(session: ProjectSession, name: str, value: float) -> bool:
         ]
         for row, h in zip(gores["panel_rows"], heights, strict=True):
             row["finished_height"] = h
+        for field in OPENING_FIELDS.get(name, ()):
+            gores[field] = float(value)
 
     changed = session.edit(f"Lock {name.replace('_', ' ')} at {value:g}", mutate)
     session.project.locks = locks
@@ -788,10 +804,13 @@ def set_lock(session: ProjectSession, name: str, enabled: bool) -> ConstraintLoc
     value: float | int | None = None
     if enabled:
         profile = design_profile(session.design)
+        r, _ = control_arrays(session.design)
         value = {
             "height": profile.height,
             "volume": design_volume(session.design, profile),
             "max_diameter": profile.max_width,
+            "mouth_diameter": 2.0 * float(r[0]),
+            "top_diameter": 2.0 * float(r[-1]),
             "gore_count": session.design.gores.count,
         }[name]
     session.project.locks = session.project.locks.model_copy(update={name: value})

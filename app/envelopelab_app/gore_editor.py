@@ -365,6 +365,8 @@ class GoreEditor(QWidget):
             ("height", "Fixed height", "m"),
             ("volume", "Fixed volume", "m³"),
             ("max_diameter", "Fixed maximum diameter", "m"),
+            ("mouth_diameter", "Fixed mouth diameter", "m"),
+            ("top_diameter", "Fixed top (parachute) hole diameter", "m"),
             ("gore_count", "Fixed N (gore count)", ""),
         ):
             box = QCheckBox(text)
@@ -536,6 +538,8 @@ class GoreEditor(QWidget):
             current = {
                 "height": f"{profile.height:.3f}",
                 "max_diameter": f"{profile.max_width:.3f}",
+                "mouth_diameter": f"{2.0 * r[0]:.3f}",
+                "top_diameter": f"{2.0 * r[-1]:.3f}",
                 "volume": ""
                 if self.controller.outputs is None
                 else f"{self.controller.outputs.volume:.2f}",

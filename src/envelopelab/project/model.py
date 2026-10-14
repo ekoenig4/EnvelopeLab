@@ -182,7 +182,9 @@ class ConstraintLocks(BaseModel):
 
     A lock holds its value (m, m^3 or a count) from the moment it was switched on; edits
     of the profile are corrected to keep every locked quantity (see
-    :func:`envelopelab.project.gore_design.apply_locks`).
+    :func:`envelopelab.project.gore_design.apply_locks`). ``mouth_diameter`` and
+    ``top_diameter`` hold the diameters of the profile's end points: the mouth and the
+    top (parachute) hole, m.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -190,6 +192,8 @@ class ConstraintLocks(BaseModel):
     height: float | None = Field(default=None, gt=0.0)
     volume: float | None = Field(default=None, gt=0.0)
     max_diameter: float | None = Field(default=None, gt=0.0)
+    mouth_diameter: float | None = Field(default=None, gt=0.0)
+    top_diameter: float | None = Field(default=None, gt=0.0)
     gore_count: int | None = Field(default=None, ge=3)
 
 
