@@ -11,7 +11,11 @@ licensed design and passing the tests that use it says nothing about airworthine
   seam made to differ by :data:`ASYMMETRY`, as in hand-drawn patterns.
 * ``shapes/blister.obj``: a closed mesh blister for the ``mesh`` shape of
   ``special.yaml``: an elliptical footprint round its base point, standing
-  :data:`BLISTER_HEIGHT` proud, sunk :data:`BLISTER_DEPTH` into the envelope.
+  :data:`BLISTER_HEIGHT` proud, sunk :data:`BLISTER_DEPTH` into the envelope. The
+  footprint is a structured ring mesh joined by integer arithmetic, so its faces are the
+  same on every platform (a Delaunay triangulation of a regular grid breaks its many ties
+  differently from one build of Qhull to the next); ``--check`` compares the vertices to
+  :data:`VERTEX_TOLERANCE`, since the last printed digit may differ with the maths library.
 
 Usage::
 
@@ -28,7 +32,6 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
-from scipy.spatial import Delaunay
 
 from envelopelab.features.primitives import EnvelopeSurface
 from envelopelab.geometry.gore import CrestLoft, MeridianProfile, crest_bows
@@ -54,9 +57,12 @@ ASYMMETRY = 0.0008
 BLISTER_AXES = (0.9, 0.7)
 BLISTER_HEIGHT = 0.5
 BLISTER_DEPTH = 0.3
-BLISTER_SPACING = 0.08
-BLISTER_RIM = 96
+#: Rings of the footprint mesh; ring j (1 = innermost) has RING_STEP * j points.
+BLISTER_RINGS = 12
+RING_STEP = 8
 BLISTER_OVERSHOOT = 1.08
+#: ``--check``: largest vertex difference (m) still counted as current.
+VERTEX_TOLERANCE = 1e-5
 
 
 def corners() -> tuple[np.ndarray, np.ndarray]:
@@ -105,6 +111,39 @@ def generated_block() -> str:
     return "\n".join(lines) + "\n"
 
 
+def footprint(a: float, b: float) -> tuple[np.ndarray, np.ndarray]:
+    """Ring mesh of the elliptical footprint (semi-axes a, b, m): points, CCW triangles.
+
+    The centre, then :data:`BLISTER_RINGS` rings out to :data:`BLISTER_OVERSHOOT`; ring j
+    has ``RING_STEP * j`` points. Neighbouring rings are zipped by comparing the angle
+    fractions ``i / n`` exactly in integers, so the faces never depend on rounding.
+    """
+    points = [np.zeros((1, 2))]
+    rings = [[0]]
+    for j in range(1, BLISTER_RINGS + 1):
+        n = RING_STEP * j
+        t = 2.0 * math.pi * np.arange(n) / n
+        scale = BLISTER_OVERSHOOT * j / BLISTER_RINGS
+        start = sum(len(p) for p in points)
+        points.append(scale * np.column_stack([a * np.cos(t), b * np.sin(t)]))
+        rings.append(list(range(start, start + n)))
+    faces = []
+    for inner, outer in zip(rings, rings[1:], strict=False):
+        if len(inner) == 1:
+            faces += [(inner[0], outer[k], outer[(k + 1) % len(outer)]) for k in range(len(outer))]
+            continue
+        n_in, n_out = len(inner), len(outer)
+        i = k = 0
+        while i < n_in or k < n_out:
+            if k == n_out or (i < n_in and (i + 1) * n_out <= (k + 1) * n_in):
+                faces.append((inner[i], outer[k % n_out], inner[(i + 1) % n_in]))
+                i += 1
+            else:
+                faces.append((inner[i % n_in], outer[k], outer[(k + 1) % n_out]))
+                k += 1
+    return np.vstack(points), np.array(faces, dtype=np.int64)
+
+
 def blister_mesh() -> tuple[np.ndarray, np.ndarray]:
     """Closed blister mesh in the shape frame (z out, x up the tape), m."""
     special = load_shape_file(SPECIAL)
@@ -119,21 +158,8 @@ def blister_mesh() -> tuple[np.ndarray, np.ndarray]:
     g0 = spec.placement.gore - 0.5 + spec.placement.across
     k = surface.gore_angle * float(np.interp(s0, surface.profile.s, surface.profile.r))
     a, b = BLISTER_AXES
-    t = np.linspace(0.0, 2.0 * math.pi, BLISTER_RIM, endpoint=False)
-    outer = BLISTER_OVERSHOOT * np.column_stack([a * np.cos(t), b * np.sin(t)])
-    gu, gv = np.meshgrid(
-        np.arange(-a, a, BLISTER_SPACING) + 0.5 * BLISTER_SPACING,
-        np.arange(-b, b, BLISTER_SPACING) + 0.5 * BLISTER_SPACING,
-    )
-    grid = np.column_stack([gu.ravel(), gv.ravel()])
-    rho = np.hypot(grid[:, 0] / a, grid[:, 1] / b)
-    grid = grid[(rho < BLISTER_OVERSHOOT - 0.05) & (rho > 0.05)]
-    uv = np.vstack([[0.0, 0.0], grid, outer])
-    first_outer = len(uv) - len(outer)
-    tri = Delaunay(uv).simplices
-    p, q, w = uv[tri[:, 0]], uv[tri[:, 1]], uv[tri[:, 2]]
-    ccw = (q[:, 0] - p[:, 0]) * (w[:, 1] - p[:, 1]) - (q[:, 1] - p[:, 1]) * (w[:, 0] - p[:, 0])
-    tri = np.where((ccw > 0)[:, None], tri, tri[:, ::-1])
+    uv, tri = footprint(a, b)
+    first_outer = len(uv) - RING_STEP * BLISTER_RINGS
     rho = np.minimum(np.hypot(uv[:, 0] / a, uv[:, 1] / b), BLISTER_OVERSHOOT)
     s = s0 + uv[:, 1]
     theta = (g0 + uv[:, 0] / k) * surface.gore_angle
@@ -172,6 +198,20 @@ def obj_text(verts: np.ndarray, faces: np.ndarray) -> str:
     return "\n".join(lines) + "\n"
 
 
+def same_mesh(old: str, new: str) -> bool:
+    """Whether two OBJ texts have the same faces and vertices within the tolerance."""
+
+    def parse(text: str) -> tuple[np.ndarray, list[str]]:
+        rows = [line.split() for line in text.splitlines()]
+        verts = np.array([[float(x) for x in r[1:]] for r in rows if r[:1] == ["v"]])
+        return verts.reshape(-1, 3), [" ".join(r) for r in rows if r[:1] == ["f"]]
+
+    (v0, f0), (v1, f1) = parse(old), parse(new)
+    if f0 != f1 or v0.shape != v1.shape:
+        return False
+    return bool(np.max(np.abs(v0 - v1), initial=0.0) <= VERTEX_TOLERANCE)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--check", action="store_true", help="exit 1 if the files are stale")
@@ -187,7 +227,7 @@ def main(argv: list[str] | None = None) -> int:
         SHAPE.write_text(shape_text, encoding="utf-8")
     mesh_text = obj_text(*blister_mesh())
     if args.check:
-        if not MESH.is_file() or MESH.read_text(encoding="utf-8") != mesh_text:
+        if not MESH.is_file() or not same_mesh(MESH.read_text(encoding="utf-8"), mesh_text):
             stale.append(MESH.name)
     else:
         MESH.parent.mkdir(exist_ok=True)

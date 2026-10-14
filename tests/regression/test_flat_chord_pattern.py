@@ -40,6 +40,24 @@ def test_generated_files_are_current() -> None:
     assert done.returncode == 0, done.stdout + done.stderr
 
 
+def test_the_blister_mesh_is_the_same_on_every_platform() -> None:
+    """Faces come from integer arithmetic; vertices are compared to a tolerance."""
+    sys.path.insert(0, str(FIXTURE))
+    try:
+        import make_fixture
+    finally:
+        sys.path.remove(str(FIXTURE))
+    uv, tri = make_fixture.footprint(0.9, 0.7)
+    p, q, w = uv[tri[:, 0]], uv[tri[:, 1]], uv[tri[:, 2]]
+    ccw = (q[:, 0] - p[:, 0]) * (w[:, 1] - p[:, 1]) - (q[:, 1] - p[:, 1]) * (w[:, 0] - p[:, 0])
+    assert np.all(ccw > 0)
+    text = (FIXTURE / "shapes" / "blister.obj").read_text(encoding="utf-8")
+    nudged = text.replace("v 0.000000 -0.000000 0.500000", "v 0.000001 0.000000 0.500000", 1)
+    assert nudged != text and make_fixture.same_mesh(text, nudged)
+    first_face = next(line for line in text.splitlines() if line.startswith("f "))
+    assert not make_fixture.same_mesh(text, text.replace(first_face, "f 1 3 2", 1))
+
+
 def test_the_design_is_the_whole_pattern_set() -> None:
     gores = DESIGN.gores
     assert gores is not None
