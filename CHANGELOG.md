@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: in a Wayland session (WSLg under Windows 11, many Linux desktops) Qt chose its
+  Wayland platform, where the 3D view's render window crashes the application.
+  EnvelopeLab now selects Qt's X11 platform (`xcb`) when an X server is present, unless
+  `QT_QPA_PLATFORM` is set.
+- A crash log (`~/.local/state/envelopelab/crash.log` on Linux and WSL) records the
+  versions and display settings of each start, and the Python stack of a crash or an
+  unhandled error. `envelopelab --diagnose` prints them with the OpenGL renderer.
+- CI also runs on Windows with WSL 2 Ubuntu 24.04: the Linux install script, the full
+  verification, and the 3D renderer and launcher under Xvfb.
 - Crest-loft taper stations can follow a row seam (*Follows seam* in the gore editor,
   `bottom of <row>` in shape files). They stay on the seam when rows are resized,
   renamed or split. Design schema version 5 (ADR-0023); version-4 designs open unchanged.

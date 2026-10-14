@@ -127,3 +127,57 @@ def test_designed_shapes_are_drawn_without_edges(qtbot: QtBot, settings: QSettin
     # drawn it renders as a black blob instead of in the layer colour.
     assert not actor.GetProperty().GetEdgeVisibility()
     w.close()
+
+
+def test_flat_chord_design_renders_with_its_crest_and_panel_details(
+    qtbot: QtBot, settings: QSettings, tmp_path: Path
+) -> None:
+    from envelopelab.io.shape_file import load_shape_file
+
+    special = load_shape_file(
+        Path(__file__).parents[1] / "fixtures/flat_chord_pattern/special.yaml"
+    )
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    session = w.new_project(special.design())
+    for shape in special.shapes(session.design):
+        w.controller.edit("add_shape", shape)
+    w.controller.shapes.wait(60_000)
+    w.view3d.refresh()
+    assert w.view3d.plotter is not None
+    assert {"design", "marks", "shape:blister"} <= set(w.view3d.labels())
+    image = tmp_path / "flat.png"
+    w.view3d.plotter.screenshot(str(image))
+    assert image.stat().st_size > 1000
+    w.gore_editor.use_crest.click()
+    w.view3d.refresh()
+    w.view3d.plotter.screenshot(str(image))
+    assert image.stat().st_size > 1000
+    w.close()
+
+
+def test_the_launcher_starts_with_the_3d_view_in_a_wayland_session(tmp_path: Path) -> None:
+    """The real start-up path, as under WSLg: Wayland and X both present, no platform set."""
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if k != "QT_QPA_PLATFORM"}
+    env.update(
+        WAYLAND_DISPLAY="wayland-test",
+        ENVELOPELAB_QUIT_AFTER_MS="3000",
+        XDG_STATE_HOME=str(tmp_path / "state"),
+        HOME=str(tmp_path),
+    )
+    done = subprocess.run(
+        [sys.executable, "-m", "envelopelab_app", str(GORE_PROJECT)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    log = tmp_path / "state" / "envelopelab" / "crash.log"
+    assert done.returncode == 0, done.stderr + (log.read_text() if log.exists() else "")
+    assert "xcb" in done.stderr and log.exists()
+    assert "QT_QPA_PLATFORM: xcb" in log.read_text()

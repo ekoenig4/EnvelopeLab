@@ -6,6 +6,12 @@ selects software OpenGL (``LIBGL_ALWAYS_SOFTWARE=1``) under WSL, unless the user
 variable already or asked for hardware rendering (``--hardware-gl``). ``--software-gl``
 selects it anywhere. Mesa reads the variable when the first OpenGL context is created, so
 this must run before the QApplication and the 3D view exist.
+
+The 3D view (VTK through pyvistaqt) renders into an X11 window on Linux. In a Wayland
+session (WSLg is one) Qt 6 picks its Wayland platform, and the VTK render window then
+crashes the application. The launcher therefore selects Qt's X11 platform (``xcb``,
+through XWayland) when both a Wayland and an X server are present, unless the user chose a
+platform (``QT_QPA_PLATFORM``).
 """
 
 from __future__ import annotations
@@ -15,6 +21,7 @@ from collections.abc import MutableMapping
 from pathlib import Path
 
 SOFTWARE_GL = "LIBGL_ALWAYS_SOFTWARE"
+QT_PLATFORM = "QT_QPA_PLATFORM"
 PROC_VERSION = Path("/proc/version")
 
 
@@ -75,3 +82,32 @@ def configure_graphics(
             "black); start with --hardware-gl to use the GPU"
         )
     return None
+
+
+def select_qt_platform(
+    environ: MutableMapping[str, str], platform: str = sys.platform
+) -> str | None:
+    """Select Qt's X11 platform in a Wayland session that also has an X server.
+
+    Parameters
+    ----------
+    environ : mapping
+        Environment to update (``os.environ`` in the launcher).
+    platform : str
+        ``sys.platform``.
+
+    Returns
+    -------
+    str or None
+        Why ``xcb`` was selected, or None when nothing was changed (a platform chosen by
+        the user, no Wayland session, no X server, or not Linux).
+    """
+    if not platform.startswith("linux") or QT_PLATFORM in environ:
+        return None
+    if not environ.get("WAYLAND_DISPLAY") or not environ.get("DISPLAY"):
+        return None
+    environ[QT_PLATFORM] = "xcb"
+    return (
+        "Wayland session: using Qt's X11 platform (xcb), which the 3D view needs; set "
+        "QT_QPA_PLATFORM to choose another"
+    )

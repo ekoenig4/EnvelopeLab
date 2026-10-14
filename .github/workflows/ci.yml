@@ -47,3 +47,41 @@ jobs:
           QT_QPA_PLATFORM: xcb
           ENVELOPELAB_TEST_3D: "1"
         run: xvfb-run -a -s "-screen 0 1920x1200x24" python -m pytest tests/gui/test_gui_renderer.py
+
+  wsl-ubuntu:
+    # Windows 11 with WSL 2 and Ubuntu 24.04, the set-up many builders use. GitHub's
+    # Windows runners run the same WSL 2 (Windows Server 2022 image). They have no WSLg
+    # desktop, so the GUI runs on Xvfb there: the suite headless, the 3D renderer and the
+    # launcher on an X display with a Wayland session announced, as under WSLg.
+    name: WSL 2 Ubuntu 24.04 (Windows)
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: wsl-bash {0}
+    steps:
+      - name: Keep LF line endings in the checkout
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+      - uses: Vampire/setup-wsl@v7
+        with:
+          distribution: Ubuntu-24.04
+          wsl-version: 2
+          additional-packages: rsync
+      - name: Copy the checkout into the Linux file system
+        run: rsync -a "$(wslpath -u '${{ github.workspace }}')/" ~/EnvelopeLab/
+      - name: Install with the builders' script (system libraries, CalculiX, Xvfb, venv)
+        run: cd ~/EnvelopeLab && bash scripts/install_env.sh
+      - name: Diagnose report (as envelopelab --diagnose prints it under WSLg)
+        run: |
+          cd ~/EnvelopeLab && source .venv/bin/activate
+          WAYLAND_DISPLAY=wayland-0 xvfb-run -a python -m envelopelab_app --diagnose
+      - name: Verify
+        run: |
+          cd ~/EnvelopeLab && source .venv/bin/activate
+          QT_QPA_PLATFORM=offscreen python scripts/verify.py
+      - name: 3D renderer and launcher under Xvfb
+        run: |
+          cd ~/EnvelopeLab && source .venv/bin/activate
+          QT_QPA_PLATFORM=xcb ENVELOPELAB_TEST_3D=1 xvfb-run -a -s "-screen 0 1920x1200x24" \
+            python -m pytest tests/gui/test_gui_renderer.py

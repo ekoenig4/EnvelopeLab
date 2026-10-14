@@ -141,9 +141,17 @@ envelopelab --software-gl   # software OpenGL (Mesa llvmpipe): slower, works eve
 envelopelab --hardware-gl   # GPU OpenGL even where software is the default (WSL)
 ```
 
-Under **WSL** (Windows Subsystem for Linux, WSLg) the application selects software OpenGL
-by itself and says so on start-up, because the WSL GPU driver draws the window black. An
-explicit `LIBGL_ALWAYS_SOFTWARE` setting in your environment is always respected.
+Under **WSL** (Windows Subsystem for Linux, WSLg) the application sets up the display
+by itself and says so on start-up:
+
+* **Software OpenGL**, because the WSL GPU driver draws the window black.
+* **Qt's X11 platform** (`xcb`): WSLg is a Wayland session, and the 3D view's render
+  window needs X11 there; under Wayland it crashes the application. The same applies in
+  any Linux Wayland session that also has an X server (XWayland).
+
+Your own `LIBGL_ALWAYS_SOFTWARE` and `QT_QPA_PLATFORM` settings are always respected.
+WSL 2 with Ubuntu 24.04 is tested in CI, but on GitHub's Windows runners without the WSLg
+desktop.
 
 On a machine without a display (a container, a server over SSH), run it on a virtual
 display:
@@ -153,6 +161,22 @@ QT_QPA_PLATFORM=xcb xvfb-run -a -s "-screen 0 1920x1200x24" envelopelab
 ```
 
 ## Troubleshooting
+
+**The application crashes or closes without a message.** EnvelopeLab writes a crash log
+on every start. A crash in Qt, the 3D view or the OpenGL driver leaves the Python stack of
+every thread in it, below the versions and display settings it started with:
+
+| System | Crash log |
+|---|---|
+| Linux, WSL | `~/.local/state/envelopelab/crash.log` (or `$XDG_STATE_HOME/envelopelab/`) |
+| Windows | `%LOCALAPPDATA%\EnvelopeLab\crash.log` |
+| macOS | `~/Library/Logs/EnvelopeLab/crash.log` |
+
+The log holds the last run only, so copy it before starting again. Then:
+* run `envelopelab --diagnose`, which prints the same settings and the OpenGL renderer
+  that is used;
+* to rule out the 3D view, start with `envelopelab --no-3d`;
+* send both outputs with the steps that led to the crash.
 
 **`Could not load the Qt platform plugin "xcb" … xcb-cursor0 or libxcb-cursor0 is needed`,
 then `no Qt platform plugin could be initialized` and an abort.** Qt 6.5 and newer need the
