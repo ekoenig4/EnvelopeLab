@@ -1410,6 +1410,55 @@ clean exit, and offered for recovery at the next start otherwise.
       "title": "RedLineSpec",
       "type": "object"
     },
+    "ReferenceProfile": {
+      "additionalProperties": false,
+      "description": "A profile drawn over the design for comparison (``envelopelab.project.references``).\n\nIt keeps its own copy of the outline, so it does not change when the design or the\nfile it came from changes.\n\nAttributes\n----------\nname : str\n    Shown on the canvas.\nsource : str\n    Where it came from: a file path, or a snapshot of the design with its time.\nr, z : list of float\n    Outline from the mouth to the top opening, m (radius, height).\nvisible : bool\n    Drawn on the profile canvas.\nz_offset : float\n    Vertical shift for display and comparison, m (to align with the design).",
+      "properties": {
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "r": {
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "title": "R",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "title": "Source",
+          "type": "string"
+        },
+        "visible": {
+          "default": true,
+          "title": "Visible",
+          "type": "boolean"
+        },
+        "z": {
+          "items": {
+            "type": "number"
+          },
+          "minItems": 2,
+          "title": "Z",
+          "type": "array"
+        },
+        "z_offset": {
+          "default": 0.0,
+          "title": "Z Offset",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "r",
+        "z"
+      ],
+      "title": "ReferenceProfile",
+      "type": "object"
+    },
     "RevolvedShape": {
       "additionalProperties": false,
       "description": "Profile ``(rho, zeta)`` points (m) revolved about the axis; number of skin gores.",
@@ -2415,6 +2464,13 @@ clean exit, and offered for recovery at the next start otherwise.
         "$ref": "#/$defs/ProvenanceEntry"
       },
       "title": "Provenance",
+      "type": "array"
+    },
+    "references": {
+      "items": {
+        "$ref": "#/$defs/ReferenceProfile"
+      },
+      "title": "References",
       "type": "array"
     },
     "runs": {

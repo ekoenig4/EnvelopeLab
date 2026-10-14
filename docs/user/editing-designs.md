@@ -59,6 +59,19 @@ in the undo history. Nothing is edited by hand in JSON.
     Each of these is one undoable edit. The constraint locks are applied to the result as
     to any profile edit, and rows stay fitted
     ([theory](../theory/profile-editing.md)).
+* **Reference profiles** (below the point tools): other outlines drawn dashed over the
+  profile for comparison, each in its own colour with a legend at the top left.
+    * *Add from file…* reads a shape file (`.yaml`) or another project (`.elproj`).
+    * *Snapshot current* keeps the profile as it is now, so later edits can be compared
+      with it.
+    * In the table, untick a reference to hide it or type over its name to rename it.
+      *Δz* shifts it up or down (m) to line it up with the design. *Max distance* is the
+      largest gap between it and the current profile.
+    * *Remove* deletes the selected reference.
+
+  A reference keeps its own copy of the outline, 401 points along the tape. It does not
+  change when the design or its file changes. References are saved with the project and
+  change nothing in the design.
 * **Panel rows**: name, finished height along the tape (m) and fabric zone per row;
   *Split row*, *Merge with next*, and *Fit rows to meridian*. With *Keep panel rows
   fitted* (Preferences, on by default) every profile edit rescales the rows in the same

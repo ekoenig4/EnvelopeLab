@@ -61,6 +61,15 @@ from envelopelab.project.gore_design import (
     row_zone,
     seam_fractions,
 )
+from envelopelab.project.references import (
+    add_reference,
+    reference_deviation,
+    reference_from_file,
+    reference_profile,
+    remove_reference,
+    snapshot_reference,
+    update_reference,
+)
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.refresh import Refresher
 
@@ -70,6 +79,8 @@ HANDLE_RADIUS = 6.0  # px
 #: Handle colours: normal and selected.
 HANDLE_COLOR = "#1f77b4"
 SELECTED_COLOR = "#ff7f0e"
+#: Colours of reference outlines, in turn.
+REFERENCE_COLORS = ("#8c564b", "#e377c2", "#17becf", "#bcbd22", "#7f7f7f", "#d62728")
 #: Colour of the parachute marks (as in the pattern and 3D views).
 PARACHUTE_COLOR = "#9467bd"
 #: Curvature-comb spikes drawn (about) and the longest spike, as a share of the view.
@@ -209,6 +220,9 @@ class ProfileCanvas(QGraphicsView):
         self.highlighted_row: int | None = None
         #: Control points whose radius is locked (the mouth or top hole), m.
         self.locked_radii: dict[int, float] = {}
+        #: Reference outlines drawn dashed: (name, r, z, colour), m.
+        self.references: list[tuple[str, np.ndarray, np.ndarray, str]] = []
+        self.reference_items: list[QGraphicsPathItem] = []
         #: Parachute overlap along the tape below the top opening, m (None: no parachute).
         self.seal_overlap: float | None = None
         self.labels: list[QGraphicsSimpleTextItem] = []
@@ -256,12 +270,15 @@ class ProfileCanvas(QGraphicsView):
         self.scene().blockSignals(blocker)
         self.pointsSelected.emit()
         self._draw(r, z)
-        span = max(float(np.max(r)), float(np.ptp(z)), 1e-3)
+        # The view holds the design and every visible reference.
+        all_r = np.concatenate([r, *(ref[1] for ref in self.references)])
+        all_z = np.concatenate([z, *(ref[2] for ref in self.references)])
+        span = max(float(np.max(all_r)), float(np.ptp(all_z)), 1e-3)
         rect = QRectF(
-            -1.1 * float(np.max(r)),
-            -float(np.max(z)) - 0.1 * span,
-            2.2 * float(np.max(r)) + 1e-3,
-            float(np.ptp(z)) + 0.2 * span,
+            -1.1 * float(np.max(all_r)),
+            -float(np.max(all_z)) - 0.1 * span,
+            2.2 * float(np.max(all_r)) + 1e-3,
+            float(np.ptp(all_z)) + 0.2 * span,
         )
         self.scene().setSceneRect(rect)
         self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
@@ -282,6 +299,10 @@ class ProfileCanvas(QGraphicsView):
         ):
             item.setPath(QPainterPath())
         self.row_highlight.setPath(QPainterPath())
+        self.references = []
+        for item in self.reference_items:
+            self.scene().removeItem(item)
+        self.reference_items = []
         self._clear_labels()
 
     def current_points(self) -> tuple[np.ndarray, np.ndarray]:
@@ -396,6 +417,7 @@ class ProfileCanvas(QGraphicsView):
         self._draw_rows(profile)
         self._draw_equator(profile)
         self._draw_openings(profile)
+        self._draw_references()
 
     def _label(
         self, text: str, r: float, z: float, colour: str, tip: str, above: bool = False
@@ -469,6 +491,36 @@ class ProfileCanvas(QGraphicsView):
             f"widest point: radius {eq.r:.3f} m, {eq.height_above_mouth:.3f} m above the "
             f"mouth, {eq.s:.3f} m along the tape",
         )
+
+    def _draw_references(self) -> None:
+        """Each reference outline as a dashed line in its colour, named at its top."""
+        for item in self.reference_items:
+            self.scene().removeItem(item)
+        self.reference_items = []
+        for name, r, z, colour in self.references:
+            path = QPainterPath()
+            path.moveTo(float(r[0]), float(-z[0]))
+            for a, b in zip(r[1:], z[1:], strict=True):
+                path.lineTo(float(a), float(-b))
+            item = QGraphicsPathItem(path)
+            pen = QPen(QColor(colour), 2.0, Qt.PenStyle.DashLine)
+            pen.setCosmetic(True)
+            item.setPen(pen)
+            item.setZValue(1)
+            item.setToolTip(f"reference: {name}")
+            self.scene().addItem(item)
+            self.reference_items.append(item)
+        # A legend in the empty left half, one line per reference (16 px apart).
+        rect = self.scene().sceneRect()
+        for k, (name, _r, _z, colour) in enumerate(self.references):
+            self._label(
+                f"- - {name}",
+                rect.left() * 0.95,
+                -rect.top() - 0.02 * rect.height(),
+                colour,
+                f"reference: {name}",
+            )
+            self.labels[-1].setTransform(QTransform.fromTranslate(0.0, 16.0 * k))
 
     def _draw_openings(self, profile: MeridianProfile) -> None:
         """Dash-dot lines from the axis to the mouth and to the top opening, and a dashed
@@ -777,6 +829,7 @@ class GoreEditor(QWidget):
         buttons.addWidget(del_point)
         side_layout.addLayout(buttons)
         side_layout.addWidget(tools)
+        side_layout.addWidget(self._build_references())
         side_layout.addWidget(QLabel("Panel rows (mouth first)"))
         side_layout.addWidget(self.rows_table)
         row_buttons = QHBoxLayout()
@@ -877,8 +930,10 @@ class GoreEditor(QWidget):
                 self.canvas.locked_radii[0] = 0.5 * locks.mouth_diameter
             if locks is not None and locks.top_diameter is not None:
                 self.canvas.locked_radii[len(r) - 1] = 0.5 * locks.top_diameter
+            self._set_canvas_references()
             self.canvas.set_points(r, z, layout, corners)
             self._show_points(r, z, layout)
+            self._show_references()
             session = self.controller.session
             assert session is not None
             rows = design.gores.panel_rows
@@ -1436,6 +1491,142 @@ class GoreEditor(QWidget):
             self.canvas.select(rows)
         finally:
             self._syncing = False
+
+    # -- reference profiles -------------------------------------------------------------
+
+    def _build_references(self) -> QGroupBox:
+        box = QGroupBox("Reference profiles")
+        box.setToolTip(
+            "Other outlines drawn dashed over the profile for comparison: from a shape file "
+            "or project, or a snapshot of this design as it is now. They are saved with "
+            "the project and change nothing in the design."
+        )
+        layout = QVBoxLayout(box)
+        self.refs_table = QTableWidget(0, 4)
+        self.refs_table.setObjectName("referencesTable")
+        self.refs_table.setHorizontalHeaderLabels(["show / name", "Δz (m)", "max distance", ""])
+        self.refs_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.refs_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.refs_table.setColumnHidden(3, True)
+        self.refs_table.itemChanged.connect(self._reference_edited)
+        layout.addWidget(self.refs_table)
+        buttons = QHBoxLayout()
+        add = QPushButton("Add from file…")
+        add.setObjectName("addReferenceFile")
+        add.clicked.connect(self._choose_reference_file)
+        snap = QPushButton("Snapshot current")
+        snap.setObjectName("snapshotReference")
+        snap.setToolTip("Keep the profile as it is now as a reference, to compare later edits.")
+        snap.clicked.connect(self.snapshot_reference)
+        remove = QPushButton("Remove")
+        remove.clicked.connect(self._remove_reference)
+        for b in (add, snap, remove):
+            buttons.addWidget(b)
+        layout.addLayout(buttons)
+        return box
+
+    def _set_canvas_references(self) -> None:
+        session = self.controller.session
+        refs = session.project.references if session is not None else []
+        self.canvas.references = []
+        for k, ref in enumerate(refs):
+            if ref.visible:
+                profile = reference_profile(ref)
+                colour = REFERENCE_COLORS[k % len(REFERENCE_COLORS)]
+                self.canvas.references.append((ref.name, profile.r, profile.z, colour))
+
+    def _show_references(self) -> None:
+        session = self.controller.session
+        design = self.controller.design
+        refs = session.project.references if session is not None else []
+        self.refs_table.setRowCount(len(refs))
+        for k, ref in enumerate(refs):
+            name = _item(ref.name)
+            name.setFlags(name.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            name.setCheckState(Qt.CheckState.Checked if ref.visible else Qt.CheckState.Unchecked)
+            name.setForeground(QBrush(QColor(REFERENCE_COLORS[k % len(REFERENCE_COLORS)])))
+            name.setToolTip(ref.source)
+            self.refs_table.setItem(k, 0, name)
+            self.refs_table.setItem(k, 1, _item(f"{ref.z_offset:.3f}"))
+            try:
+                gap = "-" if design is None else f"{reference_deviation(ref, design) * 1e3:.0f} mm"
+            except ValueError:
+                gap = "-"
+            self.refs_table.setItem(k, 2, _item(gap, editable=False))
+
+    def add_reference_file(self, path: str) -> bool:
+        """Add the profile of a shape file or project as a reference; False if refused."""
+        session = self.controller.session
+        if session is None:
+            return False
+        try:
+            ref = reference_from_file(path)
+        except (OSError, ValueError, KeyError) as exc:
+            self.controller.editRejected.emit(f"no reference from {path}: {exc}")
+            return False
+        add_reference(session, ref)
+        self._references_changed()
+        return True
+
+    def _choose_reference_file(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Reference profile",
+            "",
+            "Shape files and projects (*.yaml *.yml *.elproj);;All files (*)",
+        )
+        if path:
+            self.add_reference_file(path)
+
+    def snapshot_reference(self) -> None:
+        """Keep the current profile as a reference."""
+        session = self.controller.session
+        if session is None or session.design.gores is None:
+            return
+        add_reference(session, snapshot_reference(session.design))
+        self._references_changed()
+
+    def _remove_reference(self) -> None:
+        session = self.controller.session
+        rows = self.refs_table.selectionModel().selectedRows()
+        if session is None or not rows:
+            return
+        remove_reference(session, rows[0].row())
+        self._references_changed()
+
+    def _reference_edited(self, item: QTableWidgetItem) -> None:
+        session = self.controller.session
+        if self._updating or session is None:
+            return
+        k = item.row()
+        if item.column() == 0:
+            visible = item.checkState() == Qt.CheckState.Checked
+            done = self.controller.attempt(
+                update_reference, session, k, name=item.text(), visible=visible
+            )
+        elif item.column() == 1:
+            try:
+                offset = float(item.text())
+            except ValueError:
+                self.controller.editRejected.emit(f"not a number: {item.text()!r}")
+                offset = None
+            done = (
+                None
+                if offset is None
+                else self.controller.attempt(update_reference, session, k, z_offset=offset)
+            )
+        else:
+            return
+        if done is None:
+            self.refresh()
+        else:
+            self._references_changed()
+
+    def _references_changed(self) -> None:
+        self.controller.bump()
+        self.controller.stateChanged.emit()
 
     def _need_selection(self, at_least: int = 1) -> list[int] | None:
         selected = self.canvas.selected_indices()

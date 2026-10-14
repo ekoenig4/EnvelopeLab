@@ -344,6 +344,44 @@ class RunRecord(BaseModel):
         return sum(f.severity == "error" for f in self.findings)
 
 
+class ReferenceProfile(BaseModel):
+    """A profile drawn over the design for comparison (``envelopelab.project.references``).
+
+    It keeps its own copy of the outline, so it does not change when the design or the
+    file it came from changes.
+
+    Attributes
+    ----------
+    name : str
+        Shown on the canvas.
+    source : str
+        Where it came from: a file path, or a snapshot of the design with its time.
+    r, z : list of float
+        Outline from the mouth to the top opening, m (radius, height).
+    visible : bool
+        Drawn on the profile canvas.
+    z_offset : float
+        Vertical shift for display and comparison, m (to align with the design).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1)
+    source: str = ""
+    r: list[float] = Field(min_length=2)
+    z: list[float] = Field(min_length=2)
+    visible: bool = True
+    z_offset: float = 0.0
+
+    @model_validator(mode="after")
+    def validate_points(self) -> ReferenceProfile:
+        if len(self.r) != len(self.z):
+            raise ValueError("a reference profile needs as many radii as heights")
+        if any(v < 0.0 for v in self.r):
+            raise ValueError("reference radii must be non-negative")
+        return self
+
+
 class Project(BaseModel):
     """An EnvelopeLab project file (``envelopelab.project`` v2)."""
 
@@ -357,6 +395,7 @@ class Project(BaseModel):
     versions: list[DesignVersion] = Field(default_factory=list)
     provenance: list[ProvenanceEntry] = Field(default_factory=list)
     runs: list[RunRecord] = Field(default_factory=list)
+    references: list[ReferenceProfile] = Field(default_factory=list)
 
 
 def state_to_data(state: DesignState) -> dict[str, Any]:

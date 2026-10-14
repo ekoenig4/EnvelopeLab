@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: reference profiles in the gore editor. Another envelope's outline, from a
+  shape file or project, or a snapshot of the current profile, is drawn dashed over the
+  design. Each can be shown or hidden, renamed and shifted vertically, and the table
+  shows its largest distance from the current profile. References are saved in the
+  project file (`references`) and change nothing in the design.
 - Fixed: with the mouth or top-hole diameter locked, the opening's control point could
   be dragged sideways on the canvas and stayed drawn there although the design had not
   changed. It now keeps the locked radius during the drag. Its radius cell is read-only,

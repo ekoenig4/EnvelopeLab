@@ -225,3 +225,48 @@ def test_locked_opening_nodes_keep_their_radius(window: MainWindow, qtbot: objec
     canvas.end_drag()
     qtbot.wait(50)  # type: ignore[attr-defined]
     assert canvas.handles[-1].pos().x() == pytest.approx(r0[-1])
+
+
+def test_reference_profiles_overlay_the_design(window: MainWindow) -> None:
+    from pathlib import Path
+
+    from PySide6.QtCore import Qt
+
+    shape = Path(__file__).resolve().parents[1] / "fixtures" / "flat_chord_pattern" / "shape.yaml"
+    session = window.new_project(standard_gore_design("ref", 2600.0, 17.0, 18.0, 16, 8))
+    editor = window.gore_editor
+    canvas = editor.canvas
+    assert editor.add_reference_file(str(shape))
+    editor.snapshot_reference()
+    assert [r.name for r in session.project.references][0] == "shape"
+    assert len(canvas.reference_items) == 2
+    legend = [label.text() for label in canvas.labels if label.text().startswith("- - ")]
+    assert legend[0] == "- - shape"
+    table = editor.refs_table
+    gap = table.item(1, 2)
+    assert gap is not None and gap.text() in ("0 mm", "1 mm")  # the snapshot is the design
+    # Edits are compared with the snapshot.
+    window.controller.edit("scale_points", [4, 5, 6, 7], 1.1, 1.0)
+    gap = table.item(1, 2)
+    assert gap is not None and int(gap.text().split()[0]) > 50
+    # Hide one, shift the other, rename.
+    show = table.item(0, 0)
+    assert show is not None
+    show.setCheckState(Qt.CheckState.Unchecked)
+    assert not session.project.references[0].visible and len(canvas.reference_items) == 1
+    offset = table.item(1, 1)
+    assert offset is not None
+    offset.setText("0.5")
+    assert session.project.references[1].z_offset == 0.5
+    name = table.item(1, 0)
+    assert name is not None
+    name.setText("before scaling")
+    assert session.project.references[1].name == "before scaling"
+    # A file that holds no profile is refused with a message.
+    messages: list[str] = []
+    window.controller.editRejected.connect(messages.append)
+    assert not editor.add_reference_file(str(shape.with_name("README.md")))
+    assert messages and "no reference" in messages[-1]
+    table.selectRow(0)
+    editor._remove_reference()
+    assert [r.name for r in session.project.references] == ["before scaling"]
