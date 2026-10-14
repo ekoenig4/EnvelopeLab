@@ -71,6 +71,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
+import numpy.typing as npt
 from scipy.optimize import brentq
 
 from envelopelab.atmosphere import gas_density, gross_lift
@@ -83,6 +84,7 @@ from envelopelab.geometry.gore import (
     MeridianProfile,
     PanelRow,
     SeamAllowance,
+    crest_offsets_from_bows,
     flat_chord_rows,
     lofted_area,
     lofted_volume,
@@ -426,6 +428,50 @@ def design_seam_bows(
     if all(s.bow_bottom is not None and s.bow_top is not None for s in specs):
         return [(float(s.bow_bottom or 0.0), float(s.bow_top or 0.0)) for s in specs]
     return [(0.0, 0.0)] * len(specs)
+
+
+def design_crest_offset(
+    design: DesignDocument, s: npt.ArrayLike, profile: MeridianProfile | None = None
+) -> FloatArray:
+    r"""Crest offset of a flat-chord design along the tape, m (0 for lobe gores).
+
+    The crest is the middle of the fabric between two tapes. With a crest loft it stands
+    :math:`\delta(s) = \lambda\tau(f)r(s)` outside the flat chord. With measured seam
+    bows the offset at each row boundary follows from the bows
+    (:func:`~envelopelab.geometry.gore.crest_offsets_from_bows`) and is interpolated
+    linearly between boundaries, 0 at the mouth and the top opening. With straight seams
+    it is 0.
+
+    Parameters
+    ----------
+    design : DesignDocument
+        Gore design.
+    s : array_like
+        Tape lengths from the mouth, m.
+    profile : MeridianProfile, optional
+        The design's profile (computed when not given).
+
+    Returns
+    -------
+    ndarray
+        Offset normal to the tape, m, positive outward.
+    """
+    s_arr = np.asarray(s, dtype=np.float64)
+    gores = design.gores
+    if gores is None or gores.construction != "flat_chord":
+        return np.zeros_like(s_arr)
+    profile = profile or design_profile(design)
+    crest = design_crest_loft(design)
+    if crest is not None:
+        offset = crest.offset(s_arr / profile.meridian_length, profile.radius_at(s_arr))
+        return np.asarray(offset, dtype=np.float64)
+    bows = design_seam_bows(design, profile)
+    if not any(b or t for b, t in bows):
+        return np.zeros_like(s_arr)
+    heights = _row_heights(design, profile)
+    boundaries = np.concatenate(([0.0], np.cumsum(heights)))
+    delta = crest_offsets_from_bows(profile, boundaries, bows)
+    return np.asarray(np.interp(s_arr, boundaries, delta), dtype=np.float64)
 
 
 def _flat_chord_panel_rows(
@@ -1273,7 +1319,11 @@ class DisplaySurface:
     every horizontal seam (row boundary) is a mesh line. Between adjacent tapes each
     horizontal section is the design's fabric lobe, a circular arc of radius
     :math:`\rho = k r` (:func:`lobe_ring`); without a loft (:math:`k = 1`) that is the
-    surface of revolution through the tapes.
+    surface of revolution through the tapes. A flat-chord gore is the flat chord between
+    the tapes with its crest raised by the crest offset :math:`\delta(s)`
+    (:func:`design_crest_offset`), normal to the tape, as a parabola across the gore,
+    :math:`\delta(1 - u^2)` (:func:`crest_section`); this is the shape as cut, the
+    inflated shape is a solver result.
 
     Attributes
     ----------
@@ -1351,6 +1401,245 @@ def lobe_ring(radius: float, ratio: float, n_gores: int, per_gore: int) -> Float
     return np.vstack(out)
 
 
+def _outward_normals(profile: MeridianProfile, s: FloatArray) -> tuple[FloatArray, FloatArray]:
+    """Outward unit normal of the meridian (radial, axial components) at tape lengths s."""
+    h = 1e-4 * profile.meridian_length
+    lo = np.clip(s - h, 0.0, profile.meridian_length)
+    hi = np.clip(s + h, 0.0, profile.meridian_length)
+    dr = profile.radius_at(hi) - profile.radius_at(lo)
+    dz = profile.height_at(hi) - profile.height_at(lo)
+    norm = np.hypot(dr, dz)
+    norm[norm == 0.0] = 1.0
+    return dz / norm, -dr / norm
+
+
+def crest_section(
+    radius: float,
+    offset: float,
+    normal: tuple[float, float],
+    n_gores: int,
+    per_gore: int,
+) -> tuple[FloatArray, FloatArray]:
+    r"""Horizontal section of flat-chord gores with a raised crest, m.
+
+    Each gore is the flat chord between its tapes (:func:`lobe_ring` with
+    :math:`k = \infty`), moved by :math:`\delta(1 - u^2)` along the outward normal of the
+    meridian, :math:`u \in [-1, 1]` across the gore (0 at its middle). The tapes stay on
+    the profile and the crest stands :math:`\delta` out, the parabola the seam bows are
+    cut as.
+
+    Parameters
+    ----------
+    radius : float
+        Tape radius r, m.
+    offset : float
+        Crest offset :math:`\delta`, m.
+    normal : (float, float)
+        Outward meridian normal (radial, axial), unit length.
+    n_gores : int
+        Gores N.
+    per_gore : int
+        Points per gore (the first is on the gore's left tape).
+
+    Returns
+    -------
+    (ndarray, ndarray)
+        x, y, shape (N * per_gore, 2), and the height change of each point, m.
+    """
+    xy = lobe_ring(radius, math.inf, n_gores, per_gore)
+    u = -1.0 + 2.0 * np.arange(per_gore) / per_gore
+    bump = np.tile(offset * (1.0 - u**2), n_gores)
+    phi = 2.0 * math.pi * (np.repeat(np.arange(n_gores), per_gore) + 0.5) / n_gores
+    xy = xy + np.column_stack((np.cos(phi), np.sin(phi))) * (bump * normal[0])[:, None]
+    return xy, bump * normal[1]
+
+
+def display_points(
+    design: DesignDocument,
+    s: npt.ArrayLike,
+    theta: npt.ArrayLike,
+    profile: MeridianProfile | None = None,
+) -> FloatArray:
+    r"""Points of the display surface (:func:`display_surface`) at tape lengths and
+    azimuths, m.
+
+    Gore :math:`g` (1..N) spans the azimuths :math:`2\pi(g-1)/N` to :math:`2\pi g/N`; a
+    point's position across it, :math:`u \in [-1, 1]`, gives its place on the lobe arc or,
+    for flat-chord gores, on the flat chord with the raised crest
+    (:func:`lobe_ring`, :func:`crest_section`).
+
+    Parameters
+    ----------
+    design : DesignDocument
+        Gore design.
+    s : array_like
+        Tape lengths from the mouth, m.
+    theta : array_like
+        Azimuths, rad (gore 1 starts at 0).
+    profile : MeridianProfile, optional
+        The design's profile (computed when not given).
+
+    Returns
+    -------
+    ndarray, shape (n, 3)
+        x, y, z, m.
+    """
+    assert design.gores is not None
+    profile = profile or design_profile(design)
+    s_arr, th = np.broadcast_arrays(
+        np.asarray(s, dtype=np.float64).ravel(), np.asarray(theta, dtype=np.float64).ravel()
+    )
+    n = design.gores.count
+    gore_angle = 2.0 * math.pi / n
+    index = np.floor(np.mod(th, 2.0 * math.pi) / gore_angle)
+    u = 2.0 * (np.mod(th, 2.0 * math.pi) / gore_angle - index) - 1.0
+    r, z = profile.radius_at(s_arr), profile.height_at(s_arr)
+    sin_n, cos_n = math.sin(math.pi / n), math.cos(math.pi / n)
+    if design.gores.construction == "flat_chord":
+        a = r * cos_n
+        b = r * sin_n * u
+        bump = design_crest_offset(design, s_arr, profile) * (1.0 - u**2)
+        nr, nz = _outward_normals(profile, s_arr)
+        a = a + bump * nr
+        z = z + bump * nz
+    else:
+        k = np.asarray(
+            design_width_model(design).lobe_ratio(r, s_arr / profile.meridian_length),
+            dtype=np.float64,
+        )
+        a, b = np.empty_like(r), np.empty_like(r)
+        for i, (ri, ki, ui) in enumerate(zip(r, k, u, strict=True)):
+            theta_i = math.asin(min(sin_n / ki, 1.0)) if math.isfinite(ki) else 0.0
+            if theta_i == 0.0:
+                a[i], b[i] = ri * cos_n, ri * sin_n * ui
+            else:
+                rho = ki * ri
+                t_i = theta_i * ui
+                a[i] = ri * cos_n - rho * math.cos(theta_i) + rho * math.cos(t_i)
+                b[i] = rho * math.sin(t_i)
+    phi = (index + 0.5) * gore_angle
+    c, s_ = np.cos(phi), np.sin(phi)
+    return np.column_stack((a * c - b * s_, a * s_ + b * c, z))
+
+
+def panel_to_display(
+    design: DesignDocument,
+    row: PanelRow,
+    gore: int,
+    xy: npt.ArrayLike,
+    profile: MeridianProfile | None = None,
+) -> FloatArray:
+    """Points given in a panel's pattern coordinates, on the display surface, m.
+
+    A point's height between the panel's finished bottom and top seam lines (bows
+    included) gives its tape length between the row's seams; its distance from the
+    centreline over the panel's half width at that height gives its place across the gore.
+
+    Parameters
+    ----------
+    design : DesignDocument
+        Gore design.
+    row : PanelRow
+        The panel's row (:func:`panel_rows`).
+    gore : int
+        Gore number, 1..N.
+    xy : array_like, shape (n, 2)
+        Points in panel coordinates (x across from the centreline, y up from the bottom
+        corners), m.
+    profile : MeridianProfile, optional
+        The design's profile (computed when not given).
+
+    Returns
+    -------
+    ndarray, shape (n, 3)
+        m.
+    """
+    assert design.gores is not None
+    pts = np.atleast_2d(np.asarray(xy, dtype=np.float64))
+    edge = row.right_edge
+    y0, y1 = float(edge[0, 1]), float(edge[-1, 1])
+    w0, w1 = max(float(edge[0, 0]), 1e-9), max(float(edge[-1, 0]), 1e-9)
+    x, y = pts[:, 0], pts[:, 1]
+    bottom = y0 - row.bottom_bow * (1.0 - np.clip(x / w0, -1.0, 1.0) ** 2)
+    top = y1 + row.top_bow * (1.0 - np.clip(x / w1, -1.0, 1.0) ** 2)
+    f = np.clip((y - bottom) / np.maximum(top - bottom, 1e-9), 0.0, 1.0)
+    s = row.s_bottom + f * (row.s_top - row.s_bottom)
+    half = np.interp(np.clip(y, y0, y1), edge[:, 1], edge[:, 0])
+    u = np.clip(x / np.maximum(half, 1e-9), -1.0, 1.0)
+    gore_angle = 2.0 * math.pi / design.gores.count
+    # Just inside the gore at its edges, so that a point on a tape stays in this gore.
+    theta = (gore - 0.5 + 0.5 * u * (1.0 - 1e-9)) * gore_angle
+    return display_points(design, s, theta, profile)
+
+
+def envelope_marks(
+    design: DesignDocument,
+    patterns: PatternSet,
+    rows: Sequence[PanelRow] | None = None,
+    per_seam: int = 24,
+) -> dict[str, list[FloatArray]]:
+    """Polylines of the design's panel-level details on the display surface, m.
+
+    Keys (present only when the design has some): ``panel_zones`` (outline of every panel
+    in a panel zone), ``tape_paths`` and ``feature_locations`` (the pattern annotations of
+    each row, on every panel of the row, since a row is cut once per gore).
+    """
+    assert design.gores is not None
+    profile = design_profile(design)
+    rows = list(rows) if rows is not None else panel_rows(design, patterns)
+    by_letter = {r.label: r for r in rows}
+    n = design.gores.count
+    gore_angle = 2.0 * math.pi / n
+    out: dict[str, list[FloatArray]] = {}
+    outlines: list[FloatArray] = []
+    for zone in design.gores.panel_zones:
+        row = by_letter.get(zone.row)
+        if row is None:
+            continue
+        for gore in zone.gores:
+            t0 = (gore - 1) * gore_angle * (1.0 + 1e-12)
+            t1 = gore * gore_angle * (1.0 - 1e-12)
+            across = np.linspace(t0, t1, per_seam)
+            along = np.linspace(row.s_bottom, row.s_top, per_seam)
+            s = np.concatenate(
+                (np.full(per_seam, row.s_bottom), along, np.full(per_seam, row.s_top), along[::-1])
+            )
+            th = np.concatenate(
+                (across, np.full(per_seam, t1), across[::-1], np.full(per_seam, t0))
+            )
+            outlines.append(display_points(design, s, th, profile))
+    if outlines:
+        out["panel_zones"] = outlines
+    tapes: list[FloatArray] = []
+    circles: list[FloatArray] = []
+    ring = np.linspace(0.0, 2.0 * math.pi, 33)
+    for letter, ann in patterns.rows.items():
+        row = by_letter.get(letter)
+        if row is None:
+            continue
+        for gore in range(1, n + 1):
+            for tape in ann.tape_paths:
+                pts = np.asarray(tape.points, dtype=np.float64)
+                dense = np.vstack(
+                    [
+                        np.linspace(a, b, 8, endpoint=False)
+                        for a, b in zip(pts[:-1], pts[1:], strict=True)
+                    ]
+                    + [pts[-1:]]
+                )
+                tapes.append(panel_to_display(design, row, gore, dense, profile))
+            for feat in ann.feature_locations:
+                xy = np.column_stack(
+                    (feat.x + feat.radius * np.cos(ring), feat.y + feat.radius * np.sin(ring))
+                )
+                circles.append(panel_to_display(design, row, gore, xy, profile))
+    if tapes:
+        out["tape_paths"] = tapes
+    if circles:
+        out["feature_locations"] = circles
+    return out
+
+
 def display_surface(design: DesignDocument, per_gore: int = 6, per_row: int = 8) -> DisplaySurface:
     """Display tessellation of a gore design (see :class:`DisplaySurface`).
 
@@ -1384,10 +1673,25 @@ def display_surface(design: DesignDocument, per_gore: int = 6, per_row: int = 8)
     s = np.array(stations)
     r, z = profile.radius_at(s), profile.height_at(s)
     width_model = design_width_model(design)
-    k = width_model.lobe_ratio(r, s / length)
     m = n * per_gore
-    xy = np.vstack([lobe_ring(float(a), float(b), n, per_gore) for a, b in zip(r, k, strict=True)])
-    pts = np.column_stack((xy, np.repeat(z, m)))
+    flat = design.gores.construction == "flat_chord"
+
+    def section(s_at: FloatArray, r_at: FloatArray, count: int) -> tuple[FloatArray, FloatArray]:
+        """x, y and height change of the sections at tape lengths s_at."""
+        if not flat:
+            k = width_model.lobe_ratio(r_at, s_at / length)
+            xy = [lobe_ring(float(a), float(b), n, count) for a, b in zip(r_at, k, strict=True)]
+            return np.vstack(xy), np.zeros(len(s_at) * n * count)
+        delta = design_crest_offset(design, s_at, profile)
+        nr, nz = _outward_normals(profile, s_at)
+        parts = [
+            crest_section(float(a), float(d), (float(c), float(e)), n, count)
+            for a, d, c, e in zip(r_at, delta, nr, nz, strict=True)
+        ]
+        return np.vstack([p[0] for p in parts]), np.concatenate([p[1] for p in parts])
+
+    xy, dz = section(s, r, per_gore)
+    pts = np.column_stack((xy, np.repeat(z, m) + dz))
     faces, gores, rows = [], [], []
     for i in range(len(s) - 1):
         for j in range(m):
@@ -1398,12 +1702,11 @@ def display_surface(design: DesignDocument, per_gore: int = 6, per_row: int = 8)
             rows += [s_row[i]] * 2
     seams_h = []
     for bound in dict.fromkeys(bounds):
-        rb = float(profile.radius_at(bound))
-        kb = float(width_model.lobe_ratio(rb, bound / length))
-        ring = lobe_ring(rb, kb, n, 4 * per_gore)
-        ring = np.vstack((ring, ring[:1]))
-        z_ring = np.full(len(ring), float(profile.height_at(bound)))
-        seams_h.append(np.column_stack((ring, z_ring)))
+        sb = np.array([bound])
+        ring, ring_dz = section(sb, profile.radius_at(sb), 4 * per_gore)
+        z_ring = float(profile.height_at(bound)) + ring_dz
+        seam = np.column_stack((ring, z_ring))
+        seams_h.append(np.vstack((seam, seam[:1])))
     dense = np.linspace(0.0, bounds[-1], 200)
     rd, zd = profile.radius_at(dense), profile.height_at(dense)
     seams_v = [

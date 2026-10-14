@@ -384,3 +384,44 @@ def footprint_preview(
     length = float(surface.profile.meridian_length)
     out: FloatArray = surface.point(np.clip(s, 0.0, length), theta)
     return out
+
+
+def display_offset(design: DesignDocument, placed: PrimitiveDesign) -> FloatArray:
+    """Shift that puts a placed shape on the display surface, m, shape (3,).
+
+    Shapes are placed and simulated on the surface of revolution through the tapes
+    (:class:`~envelopelab.features.primitives.EnvelopeSurface`). The 3D view draws the
+    envelope with its lobes or raised crests (:func:`~envelopelab.project.gore_design.
+    display_surface`), so each shape is moved by the gap at its base point to sit on it.
+    Display only: no shape geometry or result changes.
+    """
+    from envelopelab.project.gore_design import display_points
+
+    s = np.array([placed.base_s])
+    theta = np.array([placed.base_theta])
+    on_display = display_points(design, s, theta)[0]
+    on_revolution = placed.surface.point(s, theta)[0]
+    return np.asarray(on_display - on_revolution, dtype=np.float64)
+
+
+def feed_hole_rings(
+    design: DesignDocument, placed: PrimitiveDesign, points: int = 33
+) -> list[FloatArray]:
+    """Every feed hole of a placed shape as a ring on the display surface, m.
+
+    A hole's centre is given in the chart round the base point (hoop arc, tape arc,
+    ``FeedHoleMark.chart_xy``); its circle is drawn in that chart, which is the envelope
+    near the base point to first order.
+    """
+    from envelopelab.project.gore_design import display_points
+
+    r0, _ = placed.surface.radius_height(np.array([placed.base_s]))
+    radius = max(float(r0[0]), 1e-9)
+    t = np.linspace(0.0, 2.0 * math.pi, points)
+    rings = []
+    for hole in placed.feed_holes:
+        cx, cy = hole.chart_xy
+        s = placed.base_s + cy + hole.radius * np.sin(t)
+        theta = placed.base_theta + (cx + hole.radius * np.cos(t)) / radius
+        rings.append(display_points(design, s, theta))
+    return rings

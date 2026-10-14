@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- The 3D view shows the gore design as edited:
+  - flat-chord gores with their crest raised by the crest loft or by the offset the
+    measured seam bows imply (`crest_offsets_from_bows`), seams bowing outward;
+  - panel zones in their fabric's colour and outlined;
+  - the pattern view's tape paths and feature locations;
+  - the feed holes of special shapes, with the shapes moved onto the drawn surface.
+  Display only: designs, volumes and results are unchanged.
 - Fixed: a set `ENVELOPELAB_CCX` that did not work stopped the search for CalculiX, so a
   working `ccx` on PATH was ignored, and nothing said why. EnvelopeLab now tries the
   preference, `ENVELOPELAB_CCX` and PATH in turn. Quoted paths, `%VARIABLES%` and folders

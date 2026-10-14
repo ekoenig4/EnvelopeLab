@@ -1106,6 +1106,73 @@ def crest_bows(
     return [(float(beta[k]), float(beta[k + 1])) for k in range(rows)]
 
 
+def _boundary_weights(profile: MeridianProfile, b: FloatArray) -> FloatArray:
+    r"""Sum of :math:`2\tan(\varphi_i/2)` over the profile nodes that :func:`crest_bows`
+    gives to each row boundary (zero at the mouth and the top opening)."""
+    rows = len(b) - 1
+    weight = np.zeros(rows + 1)
+    if rows >= 2:
+        phi = _turning_angles(profile)
+        inside = (profile.s > b[0]) & (profile.s < b[-1]) & (phi != 0.0)
+        s = profile.s[inside]
+        row = np.clip(np.searchsorted(b, s, side="right") - 1, 0, rows - 1)
+        upper = (s - b[row]) > (b[row + 1] - s)
+        nearest = np.clip(row + upper.astype(np.int64), 1, rows - 1)
+        np.add.at(weight, nearest, 2.0 * np.tan(phi[inside] / 2.0))
+    return weight
+
+
+def crest_offsets_from_bows(
+    profile: MeridianProfile,
+    boundaries: npt.ArrayLike,
+    bows: Sequence[tuple[float, float]],
+    min_turn: float = 1e-3,
+) -> FloatArray:
+    r"""Crest offset at each row boundary implied by seam bows, m (inverse of
+    :func:`crest_bows`).
+
+    :func:`crest_bows` gives boundary :math:`j` the bow
+    :math:`\beta_j = \tfrac12\sum_i 2\delta_i\tan(\varphi_i/2)` over the profile nodes
+    nearest to it. Taking :math:`\delta` constant over those nodes,
+
+    .. math:: \delta_j = \frac{2\beta_j}{\sum_i 2\tan(\varphi_i/2)},
+
+    with :math:`\beta_j` the mean of the two seam lines that meet there (they differ for a
+    measured pattern). It reproduces the crest offset of a crest loft at the boundaries to
+    first order in the variation of :math:`\delta` between them.
+
+    Parameters
+    ----------
+    profile : MeridianProfile
+        Tape profile, m.
+    boundaries : array_like
+        Row boundaries along the tape, m, mouth first (rows + 1 values).
+    bows : sequence of (float, float)
+        (bottom, top) bow of each row, m, positive outward.
+    min_turn : float
+        Smallest total tape turn at a boundary, rad, that carries an offset: where the
+        tape is straight (a cylinder), seam bows cannot be shown as an offset and the
+        offset is 0.
+
+    Returns
+    -------
+    ndarray, shape (rows + 1,)
+        Crest offset :math:`\delta_j`, m, positive outward; 0 at the mouth and the top
+        opening, which stay straight.
+    """
+    b = np.asarray(boundaries, dtype=np.float64)
+    rows = len(b) - 1
+    if len(bows) != rows:
+        raise ValueError("one (bottom, top) bow pair per row")
+    weight = _boundary_weights(profile, b)
+    delta = np.zeros(rows + 1)
+    for j in range(1, rows):
+        beta = 0.5 * (bows[j - 1][1] + bows[j][0])
+        if abs(weight[j]) >= min_turn:
+            delta[j] = 2.0 * beta / weight[j]
+    return _as_array(delta)
+
+
 def _line_intersection(p: FloatArray, d: FloatArray, q: FloatArray, e: FloatArray) -> FloatArray:
     """Intersection of the lines p + t d and q + u e (m)."""
     det = d[0] * (-e[1]) - d[1] * (-e[0])

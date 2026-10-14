@@ -123,11 +123,35 @@ create fabrics there once (**New fabric…**, **Duplicate…**) and use them any
 
 ## The 3D design surface
 
-The 3D view draws the design as a solid surface: each panel row in its fabric's colour,
-every second gore slightly darker, the vertical seams (load tapes) as thick dark lines and
-the horizontal row seams as thinner grey rings, so individual gores and panels can be
-picked out. Between the tapes each gore bulges as its loft's lobe (a circle through the
-tapes without a loft). The parachute, rigging and scoop are a separate layer.
+The 3D view draws the design as a solid surface, so individual gores and panels can be
+picked out:
+
+* every panel is drawn in its fabric's colour (its panel zone's, else its row's), with
+  every second gore slightly darker;
+* the vertical seams (load tapes) are thick dark lines, and the horizontal row seams
+  thinner grey rings.
+
+Between the tapes, each gore shows the loft you set in the gore editor, as cut:
+* **Lobe gores** bulge as the lobe of their loft (a circle through the tapes without one).
+* **Flat-chord gores** are the flat chord between the tapes with the crest raised by the
+  crest offset, a parabola across the gore, so the horizontal seams bow outward
+  mid-gore. With a crest loft the offset is \(\lambda\tau r\). With measured seam bows
+  it is the offset those bows imply at each seam. With straight seams the gores are flat.
+  The layer's label says which one is drawn.
+
+How far the fabric really stands out under pressure is a result of the preview and
+CalculiX solves.
+
+Other layers:
+* **Panel details:** the outlines of the panels in a panel zone, and the tape paths and
+  feature locations placed in the pattern view (on every panel of the row, since a row
+  is cut once per gore).
+* **Special shapes**, each with its feed holes as magenta rings. They are moved onto the
+  drawn surface, but are placed and simulated on the surface through the tapes.
+* **Parachute and rigging:** the parachute, rigging, turning vents and scoop.
+
+Notches, labels, grain and seam allowances belong to the cut panels and appear in the 2D
+pattern view only.
 
 ## The 2D pattern view
 

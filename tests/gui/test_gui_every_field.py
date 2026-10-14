@@ -11,6 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 from pydantic import BaseModel
 
 from envelopelab.design.model import DesignDocument
@@ -189,3 +190,40 @@ def test_lock_targets_are_typed_in_the_gore_editor(gore_window: MainWindow) -> N
     assert editor.locks["volume"].isChecked()
     outputs = gore_window.controller.outputs
     assert outputs is not None and abs(outputs.volume / target - 1.0) < 1e-3
+
+
+def test_the_3d_view_follows_the_gore_and_pattern_edits(window: MainWindow) -> None:
+    session = window.new_project(load_shape_file(SPECIAL).design())
+    for shape in load_shape_file(SPECIAL).shapes(session.design):
+        window.controller.edit("add_shape", shape)
+    window.controller.shapes.wait(60_000)
+    view = window.view3d
+    view.refresh()
+    labels = view.labels()
+    assert "crest from the seam bows" in labels["design"]
+    before = view.layers["design"].points.copy()
+    # Panel zones are outlined, the blister's two extra feed holes drawn.
+    assert "panel zones" in labels["marks"]
+    assert len(view.layers["marks"].polylines["panel_zones"]) == 3
+    assert "2 feed hole(s)" in labels["shape:blister"]
+    # A crest-loft edit changes the drawn surface; straight seams flatten it.
+    window.gore_editor.use_crest.click()
+    view.refresh()
+    assert "crest loft" in view.labels()["design"]
+    crest = view.layers["design"].points.copy()
+    assert not np.allclose(crest, before)
+    window.gore_editor.straight_seams.click()
+    view.refresh()
+    assert "straight seams" in view.labels()["design"]
+    flat = view.layers["design"].points
+    assert np.max(np.linalg.norm(crest - flat, axis=1)) > 0.05
+    # A tape path placed in the pattern view shows on every panel of the row.
+    window.patterns.regenerate()
+    window.controller.select("row:C")
+    window.patterns.tape_y.setValue(1.0)
+    window.patterns._add_tape()
+    assert session.patterns.row("C").tape_paths
+    view.refresh()
+    assert "tape paths" in view.labels()["marks"]
+    assert session.design.gores is not None
+    assert len(view.layers["marks"].polylines["tape_paths"]) == session.design.gores.count

@@ -210,6 +210,21 @@ crest is not added: how far it stands out under pressure is a result of the prev
 CalculiX solvers, which sew the bowed panels. The fabric area of the rows includes the
 parabolic segments, \(\tfrac{2}{3}\,2w_c\,b\) per bowed seam.
 
+**Display surface.** The 3D view draws a flat-chord gore as the flat chord between the
+tapes moved by \(\delta(s)(1 - u^2)\) along the outward normal of the meridian,
+\(u \in [-1, 1]\) across the gore (`crest_section`). With measured bows the offset at
+seam \(j\) is taken from the bows by inverting the crest-loft relation above,
+
+\[
+\delta_j = \frac{2\beta_j}{\sum_i 2\tan(\varphi_i/2)},
+\]
+
+over the nodes the crest loft gives to that seam, with \(\beta_j\) the mean of the two
+seam lines (`crest_offsets_from_bows`). It is linear between seams and 0 at the mouth and
+the opening. Where the tape is straight (a total turn below \(10^{-3}\) rad) bows cannot be
+shown as an offset and the offset is 0. This is a display of the cut shape, not the
+inflated shape.
+
 **Cut outline.** Each finished edge (bottom seam, side, top seam, side) is offset outward
 by its allowance, with mitred joints, and the offset edges are extended along their end
 segments to meet at the corners (`bowed_cut_outline`). Straight-seam rows keep the
