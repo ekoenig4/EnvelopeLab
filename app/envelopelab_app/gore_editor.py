@@ -207,6 +207,8 @@ class ProfileCanvas(QGraphicsView):
         self.seams: list[float] = []
         self.row_names: list[str] = []
         self.highlighted_row: int | None = None
+        #: Control points whose radius is locked (the mouth or top hole), m.
+        self.locked_radii: dict[int, float] = {}
         #: Parachute overlap along the tape below the top opening, m (None: no parachute).
         self.seal_overlap: float | None = None
         self.labels: list[QGraphicsSimpleTextItem] = []
@@ -240,6 +242,14 @@ class ProfileCanvas(QGraphicsView):
         for handle in self.handles:
             self.scene().addItem(handle)
             handle.setSelected(handle.index in keep)
+            if handle.index in self.locked_radii:
+                pen = QPen(QColor("#1f4e79"), 2.5, Qt.PenStyle.DotLine)
+                handle.setPen(pen)
+                handle.setCursor(Qt.CursorShape.SizeVerCursor)
+                handle.setToolTip(
+                    handle.toolTip() + " (radius locked: the opening's diameter is locked; "
+                    "the point moves up and down only)"
+                )
             if handle.index in corners:
                 handle.setPen(QPen(QColor("#222222"), 2.5))
                 handle.setToolTip(handle.toolTip() + " (corner: the joint is not smooth)")
@@ -316,6 +326,9 @@ class ProfileCanvas(QGraphicsView):
         dz = float(self._drag_start.y() - pos.y())
         self._drag_delta = (dr, dz)
         r, z = move_points(*self._drag_points, selected, dr, dz, self.soft_radius, self.falloff)
+        for index, radius in self.locked_radii.items():
+            if 0 <= index < r.size:
+                r[index] = radius
         for handle, a, b in zip(self.handles, r, z, strict=True):
             handle.setPos(QPointF(float(a), float(-b)))
         self._draw(r, z)
@@ -858,6 +871,12 @@ class GoreEditor(QWidget):
             self.canvas.row_names = [row.letter for row in design.gores.panel_rows]
             selected_rows = self.rows_table.selectionModel().selectedRows()
             self.canvas.highlighted_row = selected_rows[0].row() if selected_rows else None
+            locks = self.controller.session.project.locks if self.controller.session else None
+            self.canvas.locked_radii = {}
+            if locks is not None and locks.mouth_diameter is not None:
+                self.canvas.locked_radii[0] = 0.5 * locks.mouth_diameter
+            if locks is not None and locks.top_diameter is not None:
+                self.canvas.locked_radii[len(r) - 1] = 0.5 * locks.top_diameter
             self.canvas.set_points(r, z, layout, corners)
             self._show_points(r, z, layout)
             session = self.controller.session
@@ -928,7 +947,10 @@ class GoreEditor(QWidget):
         self.points_table.setHorizontalHeaderLabels(headers)
         self.points_table.setRowCount(len(r))
         for i, (a, b) in enumerate(zip(r, z, strict=True)):
-            self.points_table.setItem(i, 0, _item(f"{a:.4f}"))
+            radius = _item(f"{a:.4f}", editable=i not in self.canvas.locked_radii)
+            if i in self.canvas.locked_radii:
+                radius.setToolTip("locked: unlock the opening's diameter to change it")
+            self.points_table.setItem(i, 0, radius)
             self.points_table.setItem(i, 1, _item(f"{b:.4f}"))
         if not isinstance(layout, SegmentLayout):
             return
@@ -1228,8 +1250,8 @@ class GoreEditor(QWidget):
     # -- edits --------------------------------------------------------------------------
 
     def _point_moved(self, index: int, radius: float, height: float) -> None:
-        if self.controller.edit("move_control_point", index, radius, height) is None:
-            self.refresh()  # refused: put the handle back
+        if not self.controller.edit("move_control_point", index, radius, height):
+            self.refresh()  # refused, or undone by the locks: put the handle back
 
     def _point_edited(self, item: QTableWidgetItem) -> None:
         if self._updating or self.controller.design is None:
@@ -1428,8 +1450,8 @@ class GoreEditor(QWidget):
         return float(self.soft_radius.value()), self.falloff.currentData()
 
     def _points_dragged(self, selected: list[int], dr: float, dz: float) -> None:
-        if self.controller.edit("move_points", selected, dr, dz, *self._soft()) is None:
-            self.refresh()
+        if not self.controller.edit("move_points", selected, dr, dz, *self._soft()):
+            self.refresh()  # refused, or undone by the locks: put the handles back
 
     def scale_selected(self) -> None:
         """Scale the selected points about their centre by the typed percentages."""

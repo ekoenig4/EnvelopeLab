@@ -147,8 +147,10 @@ in the undo history. Nothing is edited by hand in JSON.
   keep every locked value (lengths within 1 mm, volume within 0.1 %); an edit that cannot
   is refused. With height, diameter *and* volume locked, the fullness of the profile
   changes, which also moves the mouth radius unless the mouth diameter is locked too.
-  The mouth and top-hole locks hold the first and last control points' radii: dragging
-  those points sideways does nothing while they are locked. Typing a mouth or top-hole
+  The mouth and top-hole locks hold the first and last control points' radii. While
+  locked, that point is drawn with a dotted ring, it moves only up and down when dragged
+  (also during the drag), its radius cell in the table is read-only, and it cannot be
+  deleted. Typing a mouth or top-hole
   target also sets the design's stated mouth diameter, or its parachute hole and crown
   ring diameters.
   The field beside each lock shows the current value. Type a target there to lock the

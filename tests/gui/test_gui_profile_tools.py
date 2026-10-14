@@ -192,3 +192,36 @@ def test_mouth_top_hole_and_parachute_are_marked(window: MainWindow) -> None:
     window.rigging.remove_parachute()
     assert canvas.parachute.path().isEmpty()
     assert not [label for label in canvas.labels if label.text().startswith("parachute")]
+
+
+def test_locked_opening_nodes_keep_their_radius(window: MainWindow, qtbot: object) -> None:
+    from PySide6.QtCore import Qt
+
+    session = window.new_project(standard_gore_design("lock", 2600.0, 17.0, 18.0, 16, 8))
+    editor = window.gore_editor
+    canvas = editor.canvas
+    editor.locks["mouth_diameter"].click()
+    editor.locks["top_diameter"].click()
+    r0, z0 = control_arrays(session.design)
+    # The table's radius cells of the two opening nodes are read-only.
+    for row in (0, len(r0) - 1):
+        item = editor.points_table.item(row, 0)
+        assert item is not None and not item.flags() & Qt.ItemFlag.ItemIsEditable
+    # Dragging the mouth node sideways and up: it only moves up, during the drag too.
+    handle = canvas.handles[0]
+    start = handle.scenePos()
+    canvas.begin_drag(handle, start, toggle=False)
+    canvas.drag_to(QPointF(start.x() + 0.5, start.y() - 0.3))
+    assert canvas.handles[0].pos().x() == pytest.approx(r0[0])
+    canvas.end_drag()
+    qtbot.waitUntil(lambda: control_arrays(session.design)[1][0] != z0[0])  # type: ignore[attr-defined]
+    r1, z1 = control_arrays(session.design)
+    assert r1[0] == pytest.approx(r0[0]) and z1[0] == pytest.approx(z0[0] + 0.3)
+    # A drag that the locks undo entirely leaves no handle out of place.
+    top = canvas.handles[-1]
+    start = top.scenePos()
+    canvas.begin_drag(top, start, toggle=False)
+    canvas.drag_to(QPointF(start.x() + 0.5, start.y()))
+    canvas.end_drag()
+    qtbot.wait(50)  # type: ignore[attr-defined]
+    assert canvas.handles[-1].pos().x() == pytest.approx(r0[-1])

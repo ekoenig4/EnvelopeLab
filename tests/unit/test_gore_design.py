@@ -273,3 +273,14 @@ def test_seam_fractions_follow_the_row_heights() -> None:
     assert fractions[2] == pytest.approx(sum(heights[:2]) / sum(heights))
     out = gore_outputs(design, PatternSet())
     assert out.equator is not None and 2.0 * out.equator.r == pytest.approx(16.0, abs=1e-3)
+
+
+@pytest.mark.parametrize(("lock", "index"), [("mouth_diameter", 0), ("top_diameter", -1)])
+def test_a_locked_opening_point_cannot_be_deleted(lock: str, index: int) -> None:
+    s = ProjectSession.open(FIXTURE)
+    edits.set_lock(s, lock, True)
+    before = s.design
+    r, _ = control_arrays(s.design)
+    with pytest.raises(LockError, match="unlock"):
+        edits.delete_control_point(s, index % r.size)
+    assert s.design == before

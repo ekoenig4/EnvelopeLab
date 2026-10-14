@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: with the mouth or top-hole diameter locked, the opening's control point could
+  be dragged sideways on the canvas and stayed drawn there although the design had not
+  changed. It now keeps the locked radius during the drag. Its radius cell is read-only,
+  deleting it is refused, and the canvas redraws whenever the locks undo an edit.
 - Added: the profile canvas also marks the mouth, the top (parachute) hole and the
   seated parachute edge with their diameters, and the live outputs list them.
 - Added: the profile canvas marks every row seam with a tick and each row's letter, and

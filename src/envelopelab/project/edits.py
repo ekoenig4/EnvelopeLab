@@ -355,10 +355,27 @@ def insert_control_point(
 def delete_control_point(
     session: ProjectSession, index: int, keep_rows_fitted: bool = True
 ) -> bool:
-    """Remove a control point (at least two remain)."""
+    """Remove a control point (at least two remain).
+
+    Raises
+    ------
+    LockError
+        For the mouth or top point while that opening's diameter is locked: the next
+        point would be pulled out to the locked radius instead.
+    """
     r, z = control_arrays(session.design)
     if len(r) <= 2:
         raise ValueError("a profile needs at least two control points")
+    locks = session.project.locks
+    end = index % len(r)
+    for at, locked, name in (
+        (0, locks.mouth_diameter, "mouth"),
+        (len(r) - 1, locks.top_diameter, "top hole"),
+    ):
+        if end == at and locked is not None:
+            raise LockError(
+                f"the {name} point holds the locked {name} diameter; unlock it to delete the point"
+            )
     points = list(zip(r.tolist(), z.tolist(), strict=True))
     del points[index]
     segments = _segments_of(session.design)
