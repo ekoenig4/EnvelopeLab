@@ -146,3 +146,24 @@ def test_segment_profile_in_the_points_table(window: MainWindow) -> None:
     QApplication.processEvents()
     live = [c for c in table.findChildren(QComboBox) if c.isVisible()]
     assert len(live) == 5
+
+
+def test_rows_and_equator_are_marked_on_the_profile(window: MainWindow) -> None:
+    session = window.new_project(standard_gore_design("rows", 2600.0, 17.0, 18.0, 16, 8))
+    canvas = window.gore_editor.canvas
+    texts = [label.text() for label in canvas.labels]
+    assert texts[:8] == ["A", "B", "C", "D", "E", "F", "G", "H"]
+    assert texts[8].startswith("equator Ø 18.00 m")
+    assert canvas.seam_ticks.path().elementCount() == 2 * 9  # a tick at each of 9 seams
+    assert canvas.row_highlight.path().isEmpty()
+    window.gore_editor.rows_table.selectRow(3)
+    assert canvas.highlighted_row == 3 and not canvas.row_highlight.path().isEmpty()
+    assert "above the mouth" in window.gore_editor.outputs["equator"].text()
+    # The marks follow the curve during a drag (rows stay fitted).
+    before = canvas.seam_ticks.path().boundingRect()
+    handle = canvas.handles[5]
+    canvas.begin_drag(handle, handle.scenePos(), toggle=False)
+    canvas.drag_to(QPointF(handle.scenePos().x() + 1.0, handle.scenePos().y()))
+    assert canvas.seam_ticks.path().boundingRect() != before
+    canvas.end_drag()
+    assert session.design.gores is not None

@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: the profile canvas marks every row seam with a tick and each row's letter, and
+  highlights the row selected in the table. A dashed line marks the equator (the widest
+  point, with its diameter); the live outputs give its height above the mouth and its
+  position along the tape.
 - Added: segment profiles. *Profile between points* gains *Segments*: every span between
   control points is a line, a circular arc (bulge) or part of a smooth curve, and each
   joint is a corner or smooth (G1). Smooth joints that cannot be met are listed as kinks.

@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QGraphicsPathItem,
     QGraphicsScene,
     QGraphicsSceneMouseEvent,
+    QGraphicsSimpleTextItem,
     QGraphicsView,
     QGroupBox,
     QHBoxLayout,
@@ -53,9 +54,11 @@ from envelopelab.project.gore_design import (
     SegmentLayout,
     control_arrays,
     design_seam_bows,
+    profile_equator,
     profile_from_arrays,
     profile_layout,
     row_zone,
+    seam_fractions,
 )
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.refresh import Refresher
@@ -69,6 +72,20 @@ SELECTED_COLOR = "#ff7f0e"
 #: Curvature-comb spikes drawn (about) and the longest spike, as a share of the view.
 COMB_SPIKES = 160
 COMB_LENGTH = 0.12
+
+
+def _point_and_normal(
+    profile: MeridianProfile, s: float
+) -> tuple[tuple[float, float], tuple[float, float]]:
+    """Point (r, z) at tape length ``s`` and the unit normal pointing away from the axis
+    side of the curve (right of the direction of travel), m."""
+    ds = 1e-3 * profile.meridian_length
+    lo, hi = max(0.0, s - ds), min(profile.meridian_length, s + ds)
+    dr = float(profile.radius_at(hi) - profile.radius_at(lo))
+    dz = float(profile.height_at(hi) - profile.height_at(lo))
+    norm = math.hypot(dr, dz) or 1.0
+    point = (float(profile.radius_at(s)), float(profile.height_at(s)))
+    return point, (dz / norm, -dr / norm)
 
 
 class ControlPointHandle(QGraphicsEllipseItem):
@@ -159,8 +176,29 @@ class ProfileCanvas(QGraphicsView):
         self._axis.setPen(QPen(QColor("#888888"), 0, Qt.PenStyle.DotLine))
         self.comb = QGraphicsPathItem()
         self.comb.setPen(QPen(QColor("#d62728"), 0))
-        for item in (self._axis, self._mirror, self.comb, self._curve):
+        self.seam_ticks = QGraphicsPathItem()
+        self.seam_ticks.setPen(QPen(QColor("#555555"), 0))
+        self.row_highlight = QGraphicsPathItem()
+        highlight = QPen(QColor(SELECTED_COLOR), 5.0)
+        highlight.setCosmetic(True)
+        self.row_highlight.setPen(highlight)
+        self.equator = QGraphicsPathItem()
+        self.equator.setPen(QPen(QColor("#2ca02c"), 0, Qt.PenStyle.DashLine))
+        for item in (
+            self._axis,
+            self._mirror,
+            self.comb,
+            self.row_highlight,
+            self.seam_ticks,
+            self.equator,
+            self._curve,
+        ):
             self.scene().addItem(item)
+        #: Row seams as fractions of the tape length, row letters, highlighted row.
+        self.seams: list[float] = []
+        self.row_names: list[str] = []
+        self.highlighted_row: int | None = None
+        self.labels: list[QGraphicsSimpleTextItem] = []
         # A bound slot: Qt drops it when the view is destroyed, before the scene's items.
         self.scene().selectionChanged.connect(self._scene_selection)
 
@@ -212,8 +250,10 @@ class ProfileCanvas(QGraphicsView):
         for handle in self.handles:
             self.scene().removeItem(handle)
         self.handles = []
-        for item in (self._curve, self._mirror, self.comb):
+        for item in (self._curve, self._mirror, self.comb, self.seam_ticks, self.equator):
             item.setPath(QPainterPath())
+        self.row_highlight.setPath(QPainterPath())
+        self._clear_labels()
 
     def current_points(self) -> tuple[np.ndarray, np.ndarray]:
         """Positions of the handles (m)."""
@@ -284,6 +324,20 @@ class ProfileCanvas(QGraphicsView):
 
     # -- drawing ------------------------------------------------------------------------
 
+    def set_rows(
+        self, seams: list[float], names: list[str], highlighted: int | None = None
+    ) -> None:
+        """Mark the panel rows on the profile: ``seams`` are the seams' fractions of the
+        tape length (mouth first, one more than ``names``). The marks follow the curve
+        while points are dragged, as fitted rows do."""
+        self.seams, self.row_names, self.highlighted_row = list(seams), list(names), highlighted
+        self.preview()
+
+    def highlight_row(self, index: int | None) -> None:
+        """Highlight row ``index`` (mouth first) on the profile, or none."""
+        self.highlighted_row = index
+        self.preview()
+
     def set_comb(self, on: bool) -> None:
         """Show or hide the curvature comb."""
         self.show_comb = on
@@ -307,6 +361,75 @@ class ProfileCanvas(QGraphicsView):
         axis.lineTo(0.0, -float(np.max(profile.z)))
         self._axis.setPath(axis)
         self.comb.setPath(self._comb_path(profile) if self.show_comb else QPainterPath())
+        self._draw_rows(profile)
+        self._draw_equator(profile)
+
+    def _label(self, text: str, r: float, z: float, colour: str, tip: str) -> None:
+        label = QGraphicsSimpleTextItem(text)
+        label.setBrush(QBrush(QColor(colour)))
+        label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        label.setPos(QPointF(r, -z))
+        label.setToolTip(tip)
+        label.setZValue(5)
+        self.scene().addItem(label)
+        self.labels.append(label)
+
+    def _clear_labels(self) -> None:
+        for label in self.labels:
+            self.scene().removeItem(label)
+        self.labels = []
+
+    def _draw_rows(self, profile: MeridianProfile) -> None:
+        """Seam ticks across the curve, row letters beside their spans, and the
+        highlighted row's span."""
+        self._clear_labels()
+        ticks, highlight = QPainterPath(), QPainterPath()
+        if len(self.seams) >= 2 and len(self.row_names) == len(self.seams) - 1:
+            length = profile.meridian_length
+            size = 0.03 * max(profile.height, profile.max_width)
+            s = np.clip(np.array(self.seams) * length, 0.0, length)
+            for k, sk in enumerate(s):
+                (r, z), (nr, nz) = _point_and_normal(profile, float(sk))
+                ticks.moveTo(r - size * nr, -(z - size * nz))
+                ticks.lineTo(r + size * nr, -(z + size * nz))
+                if k == len(s) - 1:
+                    break
+                mid = 0.5 * (sk + s[k + 1])
+                (mr, mz), (mnr, mnz) = _point_and_normal(profile, float(mid))
+                name = self.row_names[k]
+                self._label(
+                    name,
+                    mr + 2.0 * size * mnr,
+                    mz + 2.0 * size * mnz,
+                    "#444444",
+                    f"row {name}: {s[k + 1] - sk:.3f} m of tape",
+                )
+            if self.highlighted_row is not None and self.highlighted_row < len(s) - 1:
+                lo, hi = s[self.highlighted_row], s[self.highlighted_row + 1]
+                band = (profile.s >= lo) & (profile.s <= hi)
+                rr, zz = profile.r[band], profile.z[band]
+                if rr.size:
+                    highlight.moveTo(float(rr[0]), float(-zz[0]))
+                    for a, b in zip(rr[1:], zz[1:], strict=True):
+                        highlight.lineTo(float(a), float(-b))
+        self.seam_ticks.setPath(ticks)
+        self.row_highlight.setPath(highlight)
+
+    def _draw_equator(self, profile: MeridianProfile) -> None:
+        """A dashed line from the axis to the widest point, labelled."""
+        eq = profile_equator(profile)
+        path = QPainterPath()
+        path.moveTo(0.0, -eq.z)
+        path.lineTo(eq.r, -eq.z)
+        self.equator.setPath(path)
+        self._label(
+            f"equator Ø {2 * eq.r:.2f} m",
+            0.15 * eq.r,
+            eq.z,
+            "#2ca02c",
+            f"widest point: radius {eq.r:.3f} m, {eq.height_above_mouth:.3f} m above the "
+            f"mouth, {eq.s:.3f} m along the tape",
+        )
 
     @staticmethod
     def _comb_path(profile: MeridianProfile) -> QPainterPath:
@@ -547,6 +670,7 @@ class GoreEditor(QWidget):
             ("meridian_length", "Meridian (tape) length"),
             ("height", "Height"),
             ("max_diameter", "Maximum diameter"),
+            ("equator", "Equator (widest point)"),
             ("area", "Fabric area"),
             ("volume", "Volume"),
             ("gross_lift", "Gross lift"),
@@ -661,6 +785,10 @@ class GoreEditor(QWidget):
                 if isinstance(layout, SegmentLayout)
                 else frozenset()
             )
+            self.canvas.seams = seam_fractions(design)
+            self.canvas.row_names = [row.letter for row in design.gores.panel_rows]
+            selected_rows = self.rows_table.selectionModel().selectedRows()
+            self.canvas.highlighted_row = selected_rows[0].row() if selected_rows else None
             self.canvas.set_points(r, z, layout, corners)
             self._show_points(r, z, layout)
             session = self.controller.session
@@ -997,6 +1125,10 @@ class GoreEditor(QWidget):
             "meridian_length": f"{out.meridian_length:.3f} m",
             "height": f"{out.height:.3f} m",
             "max_diameter": f"{out.max_diameter:.3f} m",
+            "equator": "-"
+            if out.equator is None
+            else f"{out.equator.height_above_mouth:.3f} m above the mouth, "
+            f"{out.equator.s:.3f} m along the tape ({out.equator.fraction:.0%})",
             "area": f"{out.area:.2f} m²",
             "volume": f"{out.volume:.2f} m³",
             "gross_lift": f"{out.gross_lift:.0f} N ({out.gross_lift / 9.80665:.1f} kg)",
@@ -1318,6 +1450,7 @@ class GoreEditor(QWidget):
     def _row_selected(self) -> None:
         design = self.controller.design
         rows = self.rows_table.selectionModel().selectedRows()
+        self.canvas.highlight_row(rows[0].row() if rows else None)
         if rows and design is not None and design.gores is not None:
             self.controller.select(f"row:{design.gores.panel_rows[rows[0].row()].letter}")
 

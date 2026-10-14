@@ -389,6 +389,75 @@ def equal_row_heights(length: float, count: int) -> list[float]:
     return fit_row_heights([1.0] * count, length)
 
 
+@dataclass(frozen=True)
+class Equator:
+    """The equator of a profile: its widest point, the farthest from the axis.
+
+    Attributes
+    ----------
+    s : float
+        Tape length from the mouth, m.
+    r, z : float
+        Radius and height, m.
+    height_above_mouth : float
+        :math:`z - z_{mouth}`, m.
+    fraction : float
+        ``s`` over the tape length, dimensionless (0 at the mouth, 1 at the top opening).
+    """
+
+    s: float
+    r: float
+    z: float
+    height_above_mouth: float
+    fraction: float
+
+
+def profile_equator(profile: MeridianProfile) -> Equator:
+    r"""The widest point of a densely sampled profile, :math:`\arg\max_s r(s)`.
+
+    A parabola through the largest sample and its two neighbours refines the position
+    between samples (exact for a smooth maximum to the sampling's third order). Where
+    the profile has a straight vertical stretch at the widest radius (a cylinder), the
+    middle of that stretch is returned.
+    """
+    r = np.asarray(profile.r)
+    k = int(np.argmax(r))
+    top = float(r[k])
+    lo, hi = k, k  # the contiguous stretch at the widest radius (a cylinder)
+    while lo > 0 and r[lo - 1] >= top - 1e-9:
+        lo -= 1
+    while hi < r.size - 1 and r[hi + 1] >= top - 1e-9:
+        hi += 1
+    s = 0.5 * float(profile.s[lo] + profile.s[hi])
+    if lo == hi and 0 < k < r.size - 1:
+        s0, s1, s2 = profile.s[k - 1 : k + 2]
+        r0, r1, r2 = r[k - 1 : k + 2]
+        # Vertex of the parabola through three (s, r) points.
+        den = (s0 - s1) * (s0 - s2) * (s1 - s2)
+        a = (s2 * (r1 - r0) + s1 * (r0 - r2) + s0 * (r2 - r1)) / den
+        b = (s2**2 * (r0 - r1) + s1**2 * (r2 - r0) + s0**2 * (r1 - r2)) / den
+        if a < 0.0:
+            s = float(np.clip(-b / (2.0 * a), s0, s2))
+    radius = float(profile.radius_at(s))
+    height = float(profile.height_at(s))
+    return Equator(
+        s=s,
+        r=max(radius, top),
+        z=height,
+        height_above_mouth=height - float(profile.z[0]),
+        fraction=s / profile.meridian_length,
+    )
+
+
+def seam_fractions(design: DesignDocument) -> list[float]:
+    """Where the row seams lie along the tape, as fractions of the rows' total height
+    (0 = the mouth, 1 = the top opening), mouth first: one more than there are rows."""
+    assert design.gores is not None
+    heights = np.array([row.finished_height for row in design.gores.panel_rows])
+    cumulative = np.concatenate(([0.0], np.cumsum(heights)))
+    return [float(v) for v in cumulative / cumulative[-1]]
+
+
 def panel_rows(
     design: DesignDocument, patterns: PatternSet, profile: MeridianProfile | None = None
 ) -> list[PanelRow]:
@@ -583,6 +652,8 @@ class GoreOutputs:
         no valid rigging evaluation).
     rigging_mass : float, optional
         Parachute and rigging mass, kg.
+    equator : Equator, optional
+        Widest point of the profile (:func:`profile_equator`).
     """
 
     meridian_length: float
@@ -600,6 +671,7 @@ class GoreOutputs:
     findings: list[DesignFinding] = field(default_factory=list)
     rigging: RiggingOutputs | None = None
     rigging_mass: float | None = None
+    equator: Equator | None = None
 
 
 def zone_areal_masses(
@@ -715,6 +787,7 @@ def gore_outputs(
         findings=findings,
         rigging=rigging,
         rigging_mass=rigging.total_mass,
+        equator=profile_equator(profile),
     )
 
 

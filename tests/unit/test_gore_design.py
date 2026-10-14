@@ -243,3 +243,33 @@ def test_display_surface_follows_gores_and_rows() -> None:
     radii = [float(np.hypot(*ring[0, :2])) for ring in ds.horizontal_seams]
     assert radii[0] == pytest.approx(design.gores.mouth_diameter / 2, abs=1e-3)  # type: ignore[union-attr]
     assert len(ds.horizontal_seams) == 7
+
+
+def test_the_equator_is_the_widest_point() -> None:
+    from envelopelab.geometry.gore import MeridianProfile
+    from envelopelab.project.gore_design import profile_equator
+
+    # Sphere zone -60..70 degrees, R = 8 m: the equator is at z = 0.
+    theta = np.linspace(math.radians(-60.0), math.radians(70.0), 4001)
+    sphere = MeridianProfile.from_points(8.0 * np.cos(theta), 8.0 * np.sin(theta))
+    eq = profile_equator(sphere)
+    assert eq.r == pytest.approx(8.0, abs=1e-6) and eq.z == pytest.approx(0.0, abs=1e-4)
+    assert eq.s == pytest.approx(8.0 * math.radians(60.0), abs=1e-4)
+    assert eq.height_above_mouth == pytest.approx(8.0 * math.sin(math.radians(60.0)), abs=1e-4)
+    assert eq.fraction == pytest.approx(60.0 / 130.0, abs=1e-5)
+    # A cylinder: the middle of the straight widest stretch.
+    cylinder = MeridianProfile.from_points([1.0, 3.0, 3.0, 1.0], [0.0, 1.0, 5.0, 6.0])
+    assert profile_equator(cylinder).z == pytest.approx(3.0, abs=0.01)
+
+
+def test_seam_fractions_follow_the_row_heights() -> None:
+    from envelopelab.project.gore_design import seam_fractions
+
+    design = standard_gore_design("w", 2200.0, 17.0, 16.0, 12, 4)
+    assert design.gores is not None
+    heights = [row.finished_height for row in design.gores.panel_rows]
+    fractions = seam_fractions(design)
+    assert len(fractions) == 5 and fractions[0] == 0.0 and fractions[-1] == pytest.approx(1.0)
+    assert fractions[2] == pytest.approx(sum(heights[:2]) / sum(heights))
+    out = gore_outputs(design, PatternSet())
+    assert out.equator is not None and 2.0 * out.equator.r == pytest.approx(16.0, abs=1e-3)

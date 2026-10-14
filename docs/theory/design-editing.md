@@ -28,6 +28,19 @@ gives \( V = \pi h (r_0^2 + r_0 r_1 + r_1^2)/3 \) and \( A = \pi (r_0 + r_1) \el
 1e-9, and \(L\) equals the hand calculation (21.991 m³ × 0.2790 kg/m³ × 9.80665 m/s² =
 60.17 N at 15 °C / 100 °C).
 
+## Equator and seam positions
+
+The *equator* is the widest point of the profile, \(\arg\max_s r(s)\) on the dense
+profile. A parabola through the widest sample and its two neighbours refines its tape
+position \(s\) between samples. Where the widest radius is a straight vertical stretch
+(a cylinder), the equator is the middle of that stretch. It is reported as \(r\), its
+height above the mouth \(z - z_0\), \(s\) and \(s/L\)
+(`envelopelab.project.gore_design.profile_equator`; validated on a spherical zone, where
+it is \(z = 0\), and on a cylinder).
+
+The row seams on the profile canvas sit at the fractions \(\sum_{i<k} h_i / \sum_i h_i\)
+of the tape length \(L\) (`seam_fractions`), from the rows' finished heights \(h_i\).
+
 ## Constraint locks
 
 A lock holds the value its quantity had when it was switched on. After each profile edit

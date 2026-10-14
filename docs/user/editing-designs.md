@@ -19,6 +19,13 @@ in the undo history. Nothing is edited by hand in JSON.
 
 * **Profile canvas**: drag a control point; the curve follows while you drag, and
   releasing the mouse makes one edit. Radii cannot become negative.
+  The canvas also marks where the panels lie: a tick across the curve at every row seam,
+  and the row letter beside its stretch of tape. Selecting a row in the *Panel rows*
+  table highlights its stretch in orange. The marks follow the curve while you drag, as
+  the fitted rows will. A green dashed line from the axis marks the **equator**, the
+  widest point of the envelope, labelled with its diameter. *Live outputs* say how far
+  above the mouth the equator is and how far along the tape (also as a percentage of the
+  tape length).
 * **Control-point table**: type exact radius and height values (m). *Insert point after*
   adds a point on the curve halfway to the next one; *Delete point* removes one.
 * **Editing many points at once** (*Edit selected points*):
