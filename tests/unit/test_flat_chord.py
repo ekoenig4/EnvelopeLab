@@ -285,7 +285,7 @@ def test_version_3_documents_migrate_to_lobe_gores() -> None:
         del row["bow_bottom"], row["bow_top"]
     raw["meta"]["content_hash"] = None
     loaded = load_design_document(json.dumps(raw))
-    assert loaded.schema_version == CURRENT_SCHEMA_VERSION == 6
+    assert loaded.schema_version == CURRENT_SCHEMA_VERSION == 7
     assert loaded.gores is not None
     assert loaded.gores.construction == "lobe"
     assert loaded.gores.profile_interpolation == "spline"
@@ -307,7 +307,7 @@ def test_version_4_documents_migrate_with_free_taper_stations() -> None:
     raw["meta"]["content_hash"] = None
     raw["meta"]["content_hash"] = _raw_hash(raw)  # written by a version-4 EnvelopeLab
     loaded = load_design_document(json.dumps(raw))
-    assert loaded.schema_version == 6
+    assert loaded.schema_version == 7
     assert loaded.gores is not None and loaded.gores.crest_loft is not None
     assert [p.at_row for p in loaded.gores.crest_loft.taper] == [None, None]
 

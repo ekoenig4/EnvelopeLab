@@ -4,7 +4,6 @@ construction (lobe or flat chord, with its crest loft and seam bows), locks, out
 from __future__ import annotations
 
 import math
-from typing import Literal
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
@@ -47,11 +46,15 @@ from PySide6.QtWidgets import (
 
 from envelopelab.geometry.gore import MeridianProfile, loft_extra_width
 from envelopelab.geometry.profile_editing import FALLOFFS, Falloff, curvature, move_points
+from envelopelab.geometry.profile_segments import resolve_segments
 from envelopelab.project.gore_design import (
     DEFAULT_CREST_LOFT,
+    Interpolation,
+    SegmentLayout,
     control_arrays,
     design_seam_bows,
     profile_from_arrays,
+    profile_layout,
     row_zone,
 )
 from envelopelab_app.controller import WorkspaceController
@@ -139,7 +142,7 @@ class ProfileCanvas(QGraphicsView):
         self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setMinimumSize(320, 320)
         self.handles: list[ControlPointHandle] = []
-        self.interpolation: Literal["spline", "linear"] = "spline"
+        self.interpolation: Interpolation = "spline"
         self.soft_radius = 0.0
         self.falloff: Falloff = "smooth"
         self.show_comb = False
@@ -167,10 +170,15 @@ class ProfileCanvas(QGraphicsView):
     # -- points -------------------------------------------------------------------------
 
     def set_points(
-        self, r: np.ndarray, z: np.ndarray, interpolation: Literal["spline", "linear"] = "spline"
+        self,
+        r: np.ndarray,
+        z: np.ndarray,
+        interpolation: Interpolation = "spline",
+        corners: frozenset[int] = frozenset(),
     ) -> None:
-        """Show control points (m), joined as the design joins them. The selection is
-        kept when the number of points is unchanged."""
+        """Show control points (m), joined as the design joins them; ``corners`` are the
+        joints of a segment profile that are not smooth (drawn with a dark ring). The
+        selection is kept when the number of points is unchanged."""
         self.interpolation = interpolation
         keep = self.selected_indices() if len(self.handles) == len(r) else []
         blocker = self.scene().blockSignals(True)
@@ -183,6 +191,9 @@ class ProfileCanvas(QGraphicsView):
         for handle in self.handles:
             self.scene().addItem(handle)
             handle.setSelected(handle.index in keep)
+            if handle.index in corners:
+                handle.setPen(QPen(QColor("#222222"), 2.5))
+                handle.setToolTip(handle.toolTip() + " (corner: the joint is not smooth)")
         self.scene().blockSignals(blocker)
         self.pointsSelected.emit()
         self._draw(r, z)
@@ -427,6 +438,7 @@ class GoreEditor(QWidget):
         self.interpolation.setObjectName("interpolation")
         self.interpolation.addItem("Spline", "spline")
         self.interpolation.addItem("Straight segments", "linear")
+        self.interpolation.addItem("Segments (lines, arcs, curves)", "segments")
         self.interpolation.setToolTip(
             "How the profile runs between control points: a smooth spline, or straight tape "
             "segments (panel sides of a measured pattern)."
@@ -643,11 +655,14 @@ class GoreEditor(QWidget):
                 )
                 return
             r, z = control_arrays(design)
-            self.canvas.set_points(r, z, design.gores.profile_interpolation)
-            self.points_table.setRowCount(len(r))
-            for i, (a, b) in enumerate(zip(r, z, strict=True)):
-                self.points_table.setItem(i, 0, _item(f"{a:.4f}"))
-                self.points_table.setItem(i, 1, _item(f"{b:.4f}"))
+            layout = profile_layout(design.gores)
+            corners = (
+                frozenset(k for k, s in enumerate(layout.segments) if k > 0 and not s.smooth)
+                if isinstance(layout, SegmentLayout)
+                else frozenset()
+            )
+            self.canvas.set_points(r, z, layout, corners)
+            self._show_points(r, z, layout)
             session = self.controller.session
             assert session is not None
             rows = design.gores.panel_rows
@@ -680,7 +695,7 @@ class GoreEditor(QWidget):
                 self._show_crest(bows)
             self.gore_count.setValue(design.gores.count)
             locks = session.project.locks
-            profile = profile_from_arrays(r, z, design.gores.profile_interpolation)
+            profile = profile_from_arrays(r, z, profile_layout(design.gores))
             current = {
                 "height": f"{profile.height:.3f}",
                 "max_diameter": f"{profile.max_width:.3f}",
@@ -698,6 +713,66 @@ class GoreEditor(QWidget):
             self._show_outputs()
         finally:
             self._updating = False
+
+    def _show_points(self, r: np.ndarray, z: np.ndarray, layout: Interpolation) -> None:
+        """Fill the control-point table; a segment profile adds, per row, the span to the
+        next point (kind and arc bulge) and whether the joint at the point is smooth."""
+        # Replaced cell widgets are not deleted with their cell: remove the old ones first.
+        for combo in self.points_table.findChildren(QComboBox):
+            combo.hide()
+            combo.deleteLater()
+        for row in range(self.points_table.rowCount()):
+            self.points_table.removeCellWidget(row, 2)
+        segmented = isinstance(layout, SegmentLayout)
+        headers = ["radius r (m)", "height z (m)"]
+        if segmented:
+            headers += ["span to next", "smooth joint", "arc bulge"]
+        self.points_table.setColumnCount(len(headers))
+        self.points_table.setHorizontalHeaderLabels(headers)
+        self.points_table.setRowCount(len(r))
+        for i, (a, b) in enumerate(zip(r, z, strict=True)):
+            self.points_table.setItem(i, 0, _item(f"{a:.4f}"))
+            self.points_table.setItem(i, 1, _item(f"{b:.4f}"))
+        if not isinstance(layout, SegmentLayout):
+            return
+        resolved = resolve_segments(r, z, layout.segments, samples=200)
+        n = len(r)
+        for i in range(n):
+            if i < n - 1:
+                combo = QComboBox()
+                combo.setObjectName(f"spanKind{i}")
+                for kind, label in (("line", "line"), ("arc", "arc"), ("curve", "curve")):
+                    combo.addItem(label, kind)
+                combo.setCurrentIndex(combo.findData(layout.segments[i].kind))
+                combo.activated.connect(lambda _x, k=i, c=combo: self._span_kind(k, c))
+                self.points_table.setCellWidget(i, 2, combo)
+            else:
+                self.points_table.removeCellWidget(i, 2)
+                self.points_table.setItem(i, 2, _item("", editable=False))
+            joint = _item("", editable=False)
+            if 0 < i < n - 1:
+                joint.setFlags(joint.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                joint.setCheckState(
+                    Qt.CheckState.Checked if layout.segments[i].smooth else Qt.CheckState.Unchecked
+                )
+            self.points_table.setItem(i, 3, joint)
+            if i < n - 1 and layout.segments[i].kind == "arc":
+                own = resolved[i].bulge == layout.segments[i].bulge
+                bulge = _item(f"{resolved[i].bulge:.4f}", editable=own)
+                bulge.setToolTip(
+                    "tan of a quarter of the arc's angle; positive bows outward going up"
+                    if own
+                    else "set by the tangent of the neighbouring span (smooth joint)"
+                )
+            else:
+                bulge = _item("", editable=False)
+            self.points_table.setItem(i, 4, bulge)
+
+    def _span_kind(self, index: int, combo: QComboBox) -> None:
+        if self._updating:
+            return
+        if self.controller.edit("set_profile_segment", index, kind=combo.currentData()) is None:
+            self.refresh()
 
     def _show_loft(self) -> None:
         design = self.controller.design
@@ -946,6 +1021,23 @@ class GoreEditor(QWidget):
 
     def _point_edited(self, item: QTableWidgetItem) -> None:
         if self._updating or self.controller.design is None:
+            return
+        if item.column() == 3:
+            smooth = item.checkState() == Qt.CheckState.Checked
+            if self.controller.edit("set_profile_segment", item.row(), smooth=smooth) is None:
+                self.refresh()
+            return
+        if item.column() == 4:
+            try:
+                bulge = float(item.text())
+            except ValueError:
+                self.controller.editRejected.emit(f"not a number: {item.text()!r}")
+                self.refresh()
+                return
+            if self.controller.edit("set_profile_segment", item.row(), bulge=bulge) is None:
+                self.refresh()
+            return
+        if item.column() > 1:
             return
         try:
             value = float(item.text())

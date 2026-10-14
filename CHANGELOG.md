@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: segment profiles. *Profile between points* gains *Segments*: every span between
+  control points is a line, a circular arc (bulge) or part of a smooth curve, and each
+  joint is a corner or smooth (G1). Smooth joints that cannot be met are listed as kinks.
+  Converting a spline or straight-segment profile keeps its exact shape. Design schema
+  version 7 (ADR-0025); older designs are unchanged.
 - Added: editing many profile points at once in the gore editor. Points are selected on
   the canvas (click, Ctrl+click or box) or in the table. A drag moves the selection, and
   a soft radius with a falloff makes the neighbours follow. Also *Scale*, *Rotate*,

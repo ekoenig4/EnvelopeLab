@@ -103,3 +103,46 @@ def test_simplify_button(window: MainWindow) -> None:
     count = control_arrays(session.design)[0].size
     assert count < 30 and len(editor.canvas.handles) == count
     assert editor.simplify_status.text().startswith(f"30 → {count} points")
+
+
+def test_segment_profile_in_the_points_table(window: MainWindow) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QComboBox
+
+    session = window.new_project(standard_gore_design("seg", 2600.0, 17.0, 18.0, 16, 8))
+    pts = [(2.7, 0.0), (6.5, 3.0), (9.0, 6.5), (9.0, 10.0), (6.0, 15.0), (1.2, 17.0)]
+    window.controller.edit("set_control_points", pts, "Shape")
+    editor = window.gore_editor
+    index = editor.interpolation.findData("segments")
+    editor.interpolation.setCurrentIndex(index)
+    editor.interpolation.activated.emit(index)
+    gores = session.design.gores
+    assert gores is not None and gores.profile_interpolation == "segments"
+    table = editor.points_table
+    assert table.columnCount() == 5
+    # Span 3 (points 3 to 4) becomes a line, span 4 an arc with a corner and its own bulge.
+    combo = table.cellWidget(2, 2)
+    assert isinstance(combo, QComboBox)
+    combo.setCurrentIndex(combo.findData("line"))
+    combo.activated.emit(combo.currentIndex())
+    combo = table.cellWidget(3, 2)
+    assert isinstance(combo, QComboBox)
+    combo.setCurrentIndex(combo.findData("arc"))
+    combo.activated.emit(combo.currentIndex())
+    joint = table.item(3, 3)
+    assert joint is not None and joint.checkState() == Qt.CheckState.Checked
+    joint.setCheckState(Qt.CheckState.Unchecked)
+    bulge = table.item(3, 4)
+    assert bulge is not None and bulge.flags() & Qt.ItemFlag.ItemIsEditable
+    bulge.setText("0.2")
+    gores = session.design.gores
+    assert gores is not None and gores.profile_segments is not None
+    assert [s.kind for s in gores.profile_segments] == ["curve", "curve", "line", "arc", "curve"]
+    assert gores.profile_segments[3].smooth is False and gores.profile_segments[3].bulge == 0.2
+    # The corner is drawn with a dark ring; old span widgets do not pile up.
+    assert "corner" in editor.canvas.handles[3].toolTip()
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.processEvents()
+    live = [c for c in table.findChildren(QComboBox) if c.isVisible()]
+    assert len(live) == 5

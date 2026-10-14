@@ -20,6 +20,9 @@ shown.
 | Sphere R=8 m zone -50..70 deg, crest 2 % of r: total crest excess | 0.272877 | 0.272918 | m | 0.00015 | 0.001 | pass |
 | Cylinder R=3 m, 12 flat-chord gores, crest 2 %: seam bows | - | - | m | < 1e-06 m | 1e-06 mm | pass |
 | Cone row, 20 flat-chord gores, bows 10/25 mm: finished area | 1.49476 | 1.49477 | m^2 | 2e-06 | 0.001 | pass |
+| Segment profile cone + cylinder + tangent arc cap (R=3 m): volume | 196.873 | 196.873 | m^3 | < 1e-06 | 0.001 | pass |
+| Segment profile cone + cylinder + tangent arc cap (R=3 m): area | 167.49 | 167.49 | m^2 | < 1e-06 | 0.001 | pass |
+| Segment profile cone + cylinder + tangent arc cap (R=3 m): meridian length | 11.5408 | 11.5408 | m | < 1e-06 | 0.001 | pass |
 | Round trip r(s), spherical zone, N=24, small bulge | - | - | m | 0.004 mm | 1 mm | pass |
 | Round trip z(s), spherical zone, N=24, small bulge | - | - | m | 0.016 mm | 1 mm | pass |
 | Round trip r(s), spherical zone, N=24, chord, flat | - | - | m | 0.004 mm | 1 mm | pass |

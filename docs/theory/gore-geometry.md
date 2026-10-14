@@ -173,7 +173,9 @@ h_k = \sqrt{L_k^2 - (w_{k+1} - w_k)^2}
 \]
 
 above the bottom ones. With straight tape segments between row corners
-(`profile_interpolation: linear`) the panel side and the tape agree exactly.
+(`profile_interpolation: linear`) the panel side and the tape agree exactly. A profile can
+also be built from lines, arcs and smooth curves span by span
+(`profile_interpolation: segments`; [profile editing](profile-editing.md#segment-profiles)).
 
 **Bowed seams.** The bottom and top seam lines bow outward from the straight corner line
 as parabolas

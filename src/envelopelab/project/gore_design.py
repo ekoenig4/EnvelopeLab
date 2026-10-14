@@ -78,6 +78,7 @@ from envelopelab.atmosphere import gas_density, gross_lift
 from envelopelab.design.model import (
     CrestLoftSpec,
     DesignDocument,
+    GoreSpec,
     TaperPoint,
     row_bottom_fraction,
 )
@@ -95,6 +96,7 @@ from envelopelab.geometry.gore import (
     lofted_volume,
     split_rows,
 )
+from envelopelab.geometry.profile_segments import Segment, segment_kinks, segment_points
 from envelopelab.mass_estimate import (
     MassEstimate,
     TapeMasses,
@@ -179,26 +181,61 @@ _PROFILE_CACHE: OrderedDict[bytes, MeridianProfile] = OrderedDict()
 _PROFILE_CACHE_SIZE = 64
 
 
+@dataclass(frozen=True)
+class SegmentLayout:
+    """The segments of a ``profile_interpolation: segments`` design, one per span
+    (:mod:`envelopelab.geometry.profile_segments`). Frozen and hashable: it is part of
+    the profile cache key, like the interpolation name."""
+
+    segments: tuple[Segment, ...]
+
+
+#: How a profile runs between its control points: a spline, straight segments, or the
+#: design's own segments.
+Interpolation = Literal["spline", "linear"] | SegmentLayout
+
+
+def profile_layout(gores: GoreSpec) -> Interpolation:
+    """How a gore design's profile runs between its control points."""
+    if gores.profile_interpolation != "segments":
+        return gores.profile_interpolation
+    assert gores.profile_segments is not None
+    return SegmentLayout(tuple(Segment(s.kind, s.bulge, s.smooth) for s in gores.profile_segments))
+
+
 def profile_from_arrays(
-    r: FloatArray, z: FloatArray, interpolation: Literal["spline", "linear"] = "spline"
+    r: FloatArray, z: FloatArray, interpolation: Interpolation = "spline"
 ) -> MeridianProfile:
-    """Densely sampled profile through control points (m), spline or straight segments.
+    """Densely sampled profile through control points (m): a spline, straight segments,
+    or lines, arcs and curves (:class:`SegmentLayout`).
 
     The profile is a pure function of the control points, and every live output of the
     editor asks for it, so the most recent profiles are memoized by their control-point
     values. Cached arrays are read-only: a caller that tried to change one in place would
-    fail loudly instead of corrupting the cache.
+    fail loudly instead of corrupting the cache. A segment layout of only curves is the
+    spline, and one of only lines the straight segments, sample for sample.
     """
     r_arr = np.ascontiguousarray(r, dtype=np.float64)
     z_arr = np.ascontiguousarray(z, dtype=np.float64)
-    key = interpolation.encode() + b"|" + r_arr.tobytes() + b"|" + z_arr.tobytes()
+    if isinstance(interpolation, SegmentLayout):
+        kinds = {s.kind for s in interpolation.segments}
+        if kinds == {"curve"}:
+            interpolation = "spline"
+        elif kinds == {"line"}:
+            interpolation = "linear"
+    key = repr(interpolation).encode() + b"|" + r_arr.tobytes() + b"|" + z_arr.tobytes()
     hit = _PROFILE_CACHE.get(key)
     if hit is not None:
         _PROFILE_CACHE.move_to_end(key)
         return hit
-    profile = MeridianProfile.from_control_points(
-        r_arr, z_arr, samples=PROFILE_SAMPLES, interpolation=interpolation
-    )
+    if isinstance(interpolation, SegmentLayout):
+        profile = MeridianProfile.from_points(
+            *segment_points(r_arr, z_arr, interpolation.segments, PROFILE_SAMPLES)
+        )
+    else:
+        profile = MeridianProfile.from_control_points(
+            r_arr, z_arr, samples=PROFILE_SAMPLES, interpolation=interpolation
+        )
     for arr in (profile.s, profile.r, profile.z):
         arr.setflags(write=False)
     _PROFILE_CACHE[key] = profile
@@ -219,7 +256,7 @@ def design_profile(design: DesignDocument) -> MeridianProfile:
     if r.size < 2:
         raise ValueError("a profile needs at least two control points")
     assert design.gores is not None
-    return profile_from_arrays(r, z, design.gores.profile_interpolation)
+    return profile_from_arrays(r, z, profile_layout(design.gores))
 
 
 def design_loft(design: DesignDocument) -> GoreLoft | None:
@@ -728,6 +765,20 @@ def design_findings(design: DesignDocument, patterns: PatternSet) -> list[Design
                 "rows",
             )
         )
+    layout = profile_layout(g)
+    if isinstance(layout, SegmentLayout):
+        z_points = control_arrays(design)[1]
+        for k, turn in segment_kinks(r, z_points, layout.segments):
+            out.append(
+                DesignFinding(
+                    "profile_kink",
+                    "warning",
+                    f"control point {k + 1}: the joint is set smooth but the profile turns "
+                    f"{math.degrees(turn):.1f} degrees there (two lines, or an arc tangent "
+                    "on its other side)",
+                    "profile",
+                )
+            )
     if abs(2.0 * r[0] - g.mouth_diameter) > LENGTH_TOLERANCE:
         out.append(
             DesignFinding(
@@ -805,9 +856,6 @@ def _scaled_r(r: FloatArray, z: FloatArray, k: float) -> tuple[FloatArray, Float
 def _fuller(r: FloatArray, z: FloatArray, k: float) -> tuple[FloatArray, FloatArray]:
     r_max = float(r.max())
     return r_max * np.power(np.clip(r / r_max, 0.0, 1.0), 1.0 / k), z
-
-
-Interpolation = Literal["spline", "linear"]
 
 
 def _volume(
@@ -890,8 +938,8 @@ def apply_locks(
         Gore count and loft of the design: the locked volume is the lofted volume
         (:func:`~envelopelab.geometry.gore.lofted_volume`); default the surface of
         revolution through the tapes.
-    interpolation : {"spline", "linear"}
-        How the profile runs between control points (``GoreSpec.profile_interpolation``);
+    interpolation : {"spline", "linear"} or SegmentLayout
+        How the profile runs between control points (:func:`profile_layout`);
         the locked lengths and volume are those of this profile.
 
     Returns

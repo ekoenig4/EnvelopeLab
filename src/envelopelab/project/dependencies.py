@@ -218,6 +218,7 @@ def input_groups(
                 for key, default in (
                     ("construction", "lobe"),
                     ("profile_interpolation", "spline"),
+                    ("profile_segments", None),
                     ("crest_loft", None),
                 )
                 if gores.get(key, default) != default

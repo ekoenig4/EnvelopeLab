@@ -112,6 +112,7 @@ OWNED: dict[tuple[str, ...], str] = {
     ("gores", "crest_loft"): "Gore editor",
     ("gores", "construction"): "Gore editor",
     ("gores", "profile_interpolation"): "Gore editor",
+    ("gores", "profile_segments"): "Gore editor",
     ("zones",): "Materials panel",
 }
 

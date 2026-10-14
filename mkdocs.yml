@@ -26,7 +26,7 @@ nav:
       - Appendage pressure and load paths: theory/appendage-pressure-and-load-paths.md
       - Special-shape primitives: theory/special-shape-primitives.md
       - Design editing and staleness: theory/design-editing.md
-      - Profile editing and simplify: theory/profile-editing.md
+      - Profile editing, segments and simplify: theory/profile-editing.md
       - Shape families: theory/shape-families.md
       - Parachute and rigging: theory/rigging.md
   - Validation:
@@ -70,6 +70,7 @@ nav:
       - ADR-0022: adr/ADR-0022-shape-file-v2.md
       - ADR-0023: adr/ADR-0023-row-anchored-taper-stations.md
       - ADR-0024: adr/ADR-0024-parachute-centre-panel.md
+      - ADR-0025: adr/ADR-0025-segment-profiles.md
 theme:
   name: material
 markdown_extensions:

@@ -473,7 +473,7 @@ def test_version_5_parachutes_migrate_without_a_centre_panel(design: DesignDocum
     raw["meta"]["content_hash"] = None
     raw["meta"]["content_hash"] = _raw_hash(raw)  # written by a version-5 EnvelopeLab
     loaded = load_design_document(json.dumps(raw))
-    assert loaded.schema_version == CURRENT_SCHEMA_VERSION == 6
+    assert loaded.schema_version == CURRENT_SCHEMA_VERSION == 7
     assert loaded.parachute is not None and loaded.parachute.centre_panel_diameter is None
     out = rigging_outputs(loaded)
     assert out.parachute is not None and out.parachute.centre_panel is None

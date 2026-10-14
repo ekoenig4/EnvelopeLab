@@ -65,9 +65,31 @@ in the undo history. Nothing is edited by hand in JSON.
   Switching resets the loft: lobe gores lose their seam bows, and flat-chord gores get a
   default crest loft (2 % of the tape radius, tapered to zero at both ends). With
   *Fixed volume* locked, the profile is corrected to keep the volume, because a flat-chord
-  gore holds less than a lobed one. *Profile between points* chooses a smooth *Spline* or
-  *Straight segments*, for a measured pattern whose panel sides are straight; the locks
-  and the row fit follow that choice.
+  gore holds less than a lobed one. *Profile between points* chooses a smooth *Spline*,
+  *Straight segments* (for a measured pattern whose panel sides are straight), or
+  *Segments (lines, arcs, curves)*. The locks and the row fit follow that choice.
+* **Segment profiles**: with *Segments*, each control point is a joint, and the table
+  gets three columns:
+    * *span to next*: how the profile runs to the next point. A *line* gives a straight
+      cone or cylinder section; an *arc* a circular arc; a *curve* a smooth spline.
+      Consecutive curves form one smooth run.
+    * *smooth joint*: ticked, the profile has no corner at the point. A ring-less point is
+      smooth; a point drawn with a dark ring is a corner.
+    * *arc bulge*: the arc's bulge, tan of a quarter of its angle. Positive bows outward
+      going up; 0 is straight and 1 a half circle. A greyed value is set by the
+      neighbouring span: an arc with a smooth start follows the span before it, and an
+      arc with a corner start before a smooth line ends tangent to that line.
+
+    At a smooth joint the more flexible span adapts: lines are fixed, an arc or curve
+    takes the neighbour's tangent. A smooth joint that cannot be met, such as two lines
+    at an angle, is listed as a warning with the angle of the kink.
+
+    Switching from *Spline* or *Straight segments* to *Segments* keeps the exact shape
+    (all curves, or all lines), so you can then change only the spans you want: for
+    example a straight cylinder in the middle and an arc shoulder. *Insert point after*
+    splits a span into two that draw the same. *Delete point* merges two spans. *Straighten*
+    turns the spans it covers into lines. *Simplify* is for spline and straight-segment
+    profiles only. Shape files cannot describe segment profiles yet.
 * **Gore loft** (lobe gores): how far each gore bulges between its two load tapes. Each row of the
   table is a *station* along the tape (0 at the mouth, 1 at the top opening) and its
   *lobe ratio* \(k = \rho/r\), the radius of the fabric lobe over the tape radius; the

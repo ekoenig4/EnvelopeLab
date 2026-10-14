@@ -17,10 +17,21 @@ from envelopelab.design.model import DesignDocument, row_bottom_fraction
 from envelopelab.geometry import profile_editing
 from envelopelab.geometry.gore import LENGTH_TOLERANCE, GoreLoft, GoreWidthModel
 from envelopelab.geometry.profile_editing import Falloff, FloatArray
+from envelopelab.geometry.profile_segments import (
+    MAX_BULGE,
+    SEGMENT_KINDS,
+    Segment,
+    SegmentKind,
+    arc_points,
+    merge_segments,
+    resolve_segments,
+    split_segment,
+)
 from envelopelab.project.dependencies import canonical_hash
 from envelopelab.project.gore_design import (
     DEFAULT_CREST_LOFT,
     LockError,
+    SegmentLayout,
     apply_locks,
     control_arrays,
     design_profile,
@@ -32,6 +43,7 @@ from envelopelab.project.gore_design import (
     outline_edges,
     panel_rows,
     profile_from_arrays,
+    profile_layout,
 )
 from envelopelab.project.model import ConstraintLocks, ManualOutline, PatternSet, utc_now
 from envelopelab.project.session import ProjectSession
@@ -59,11 +71,23 @@ def _gores(design: dict[str, Any]) -> dict[str, Any]:
     return gores
 
 
+def _segments_of(design: DesignDocument) -> list[Segment] | None:
+    """The design's profile segments (a copy), or None when it is not a segment profile."""
+    assert design.gores is not None
+    layout = profile_layout(design.gores)
+    return list(layout.segments) if isinstance(layout, SegmentLayout) else None
+
+
+def _segment_dicts(segments: Sequence[Segment]) -> list[dict[str, Any]]:
+    return [{"kind": s.kind, "bulge": float(s.bulge), "smooth": bool(s.smooth)} for s in segments]
+
+
 def set_control_points(
     session: ProjectSession,
     points: Sequence[tuple[float, float]],
     description: str = "Edit profile",
     keep_rows_fitted: bool = True,
+    segments: Sequence[Segment] | None = None,
 ) -> bool:
     """Replace the meridian control points (radius, height in m).
 
@@ -77,6 +101,9 @@ def set_control_points(
         History text.
     keep_rows_fitted : bool
         Rescale the panel rows to the new meridian length.
+    segments : sequence of Segment, optional
+        New profile segments, one per span, for a segment profile whose number of points
+        changes (default: keep the design's).
 
     Returns
     -------
@@ -98,15 +125,23 @@ def set_control_points(
         raise ValueError("control points must be finite")
     design = session.design
     assert design.gores is not None
-    interpolation = design.gores.profile_interpolation
-    r, z = apply_locks(r, z, session.project.locks, design_width_model(design), interpolation)
-    profile = profile_from_arrays(r, z, interpolation)
+    layout = profile_layout(design.gores)
+    if segments is not None:
+        if not isinstance(layout, SegmentLayout):
+            raise ValueError("segments are given only for a segment profile")
+        layout = SegmentLayout(tuple(segments))
+    if isinstance(layout, SegmentLayout) and len(layout.segments) != r.size - 1:
+        raise ValueError(f"{r.size} control points need {r.size - 1} profile segments")
+    r, z = apply_locks(r, z, session.project.locks, design_width_model(design), layout)
+    profile = profile_from_arrays(r, z, layout)
 
     def mutate(design: dict[str, Any], _patterns: dict[str, Any]) -> None:
         gores = _gores(design)
         gores["meridian_profile_control_points"] = [
             {"x": float(a), "y": float(b)} for a, b in zip(r, z, strict=True)
         ]
+        if isinstance(layout, SegmentLayout):
+            gores["profile_segments"] = _segment_dicts(layout.segments)
         if keep_rows_fitted:
             heights = [row["finished_height"] for row in gores["panel_rows"]]
             for row, h in zip(
@@ -200,8 +235,16 @@ def straighten_points(
     joining them (a straight section); one command, locks applied."""
     r, z = profile_editing.straighten_points(*control_arrays(session.design), first, last)
     lo, hi = sorted((first, last))
+    segments = _segments_of(session.design)
+    if segments is not None:  # a straight section of a segment profile is lines
+        for k in range(lo, hi):
+            segments[k] = Segment("line", 0.0, segments[k].smooth if k == lo else True)
     return set_control_points(
-        session, _points(r, z), f"Straighten points {lo + 1} to {hi + 1}", keep_rows_fitted
+        session,
+        _points(r, z),
+        f"Straighten points {lo + 1} to {hi + 1}",
+        keep_rows_fitted,
+        segments,
     )
 
 
@@ -246,9 +289,13 @@ def simplify_profile(
     r, z = control_arrays(design)
     if r.size <= 2:
         raise ValueError("the profile has only two control points")
-    result = profile_editing.simplify_profile(
-        r, z, tolerance, design.gores.profile_interpolation, max_points
-    )
+    interpolation = design.gores.profile_interpolation
+    if interpolation == "segments":
+        raise ValueError(
+            "Simplify works on spline and straight-segment profiles; a segment profile's "
+            "points are its joints"
+        )
+    result = profile_editing.simplify_profile(r, z, tolerance, interpolation, max_points)
     if not result.within_tolerance or result.count >= r.size:
         raise ValueError(
             f"no profile with fewer than {r.size} points stays within "
@@ -271,14 +318,37 @@ def insert_control_point(
     r, z = control_arrays(session.design)
     if not 0 <= after < len(r) - 1:
         raise IndexError("insert between two existing control points")
-    profile = design_profile(session.design)
-    chord = np.concatenate(([0.0], np.cumsum(np.hypot(np.diff(r), np.diff(z)))))
-    s_mid = 0.5 * (chord[after] + chord[after + 1]) * profile.meridian_length / chord[-1]
-    new = (float(profile.radius_at(s_mid)), float(profile.height_at(s_mid)))
+    gores = session.design.gores
+    assert gores is not None
+    layout = profile_layout(gores)
+    if isinstance(layout, SegmentLayout):
+        # Halfway along the span itself, so a split arc or line draws the same: an arc's
+        # exact angular middle, else halfway along the sampled curve.
+        span = resolve_segments(r, z, layout.segments)[after]
+        if span.kind == "arc":
+            ends = np.array([[r[after], z[after]], [r[after + 1], z[after + 1]]])
+            middle = arc_points(ends[0], ends[1], span.bulge, 3)[1]
+            new = (float(middle[0]), float(middle[1]))
+        else:
+            pts = span.points
+            along = np.concatenate(([0.0], np.cumsum(np.hypot(*np.diff(pts, axis=0).T))))
+            half = 0.5 * along[-1]
+            new = (
+                float(np.interp(half, along, pts[:, 0])),
+                float(np.interp(half, along, pts[:, 1])),
+            )
+    else:
+        profile = design_profile(session.design)
+        chord = np.concatenate(([0.0], np.cumsum(np.hypot(np.diff(r), np.diff(z)))))
+        s_mid = 0.5 * (chord[after] + chord[after + 1]) * profile.meridian_length / chord[-1]
+        new = (float(profile.radius_at(s_mid)), float(profile.height_at(s_mid)))
     points = list(zip(r.tolist(), z.tolist(), strict=True))
     points.insert(after + 1, new)
+    segments = _segments_of(session.design)
+    if segments is not None:
+        segments[after : after + 1] = split_segment(segments[after])
     return set_control_points(
-        session, points, f"Insert control point {after + 2}", keep_rows_fitted
+        session, points, f"Insert control point {after + 2}", keep_rows_fitted, segments
     )
 
 
@@ -291,8 +361,16 @@ def delete_control_point(
         raise ValueError("a profile needs at least two control points")
     points = list(zip(r.tolist(), z.tolist(), strict=True))
     del points[index]
+    segments = _segments_of(session.design)
+    if segments is not None:
+        if index == 0:
+            del segments[0]
+        elif index == len(segments):
+            del segments[-1]
+        else:
+            segments[index - 1 : index + 1] = [merge_segments(segments[index - 1], segments[index])]
     return set_control_points(
-        session, points, f"Delete control point {index + 1}", keep_rows_fitted
+        session, points, f"Delete control point {index + 1}", keep_rows_fitted, segments
     )
 
 
@@ -354,7 +432,7 @@ def set_loft(
     heights: list[float] | None = None
     if session.project.locks.volume is not None:
         r0, z0 = control_arrays(design)
-        interpolation = design.gores.profile_interpolation
+        interpolation = profile_layout(design.gores)
         r, z = apply_locks(r0, z0, session.project.locks, width_model, interpolation)
         if not (np.array_equal(r, r0) and np.array_equal(z, z0)):
             new_points = [{"x": float(a), "y": float(b)} for a, b in zip(r, z, strict=True)]
@@ -418,7 +496,7 @@ def set_construction(
         update={"construction": construction, "loft": None, "crest_loft": crest}
     )
     width_model = design_width_model(design.model_copy(update={"gores": changed}))
-    interpolation = design.gores.profile_interpolation
+    interpolation = profile_layout(design.gores)
     new_points: list[dict[str, float]] | None = None
     heights: list[float] | None = None
     if session.project.locks.volume is not None:
@@ -560,21 +638,24 @@ def set_row_bows(session: ProjectSession, index: int, bottom: float, top: float)
 
 def set_profile_interpolation(
     session: ProjectSession,
-    interpolation: Literal["spline", "linear"],
+    interpolation: Literal["spline", "linear", "segments"],
     keep_rows_fitted: bool = True,
 ) -> bool:
-    """Choose how the profile runs between control points: a spline or straight segments.
+    """Choose how the profile runs between control points: a spline, straight segments,
+    or segments (a line, arc or curve per span).
 
-    The tape length, volume, height and widest diameter all depend on it, so the control
-    points are corrected for the locked quantities and the panel rows refitted in the same
-    command.
+    Switching to segments draws the same profile: every span becomes a smooth curve
+    (from a spline) or a line (from straight segments), to be changed span by span
+    (:func:`set_profile_segment`). Other switches change the tape length, volume, height
+    and widest diameter, so the control points are corrected for the locked quantities
+    and the panel rows refitted in the same command.
 
     Parameters
     ----------
     session : ProjectSession
         Session to edit.
-    interpolation : {"spline", "linear"}
-        Parametric cubic spline or straight tape segments (``GoreSpec.profile_interpolation``).
+    interpolation : {"spline", "linear", "segments"}
+        ``GoreSpec.profile_interpolation``.
     keep_rows_fitted : bool
         Rescale the panel rows to the new tape length.
 
@@ -590,20 +671,31 @@ def set_profile_interpolation(
     """
     design = session.design
     assert design.gores is not None
-    if interpolation not in ("spline", "linear"):
+    if interpolation not in ("spline", "linear", "segments"):
         raise ValueError(f"unknown profile interpolation {interpolation!r}")
-    if design.gores.profile_interpolation == interpolation:
+    current = design.gores.profile_interpolation
+    if current == interpolation:
         return False
     r0, z0 = control_arrays(design)
-    r, z = apply_locks(r0, z0, session.project.locks, design_width_model(design), interpolation)
+    spans = r0.size - 1
+    segments: list[Segment] | None = None
+    layout: Literal["spline", "linear"] | SegmentLayout
+    if interpolation == "segments":
+        kind: SegmentKind = "line" if current == "linear" else "curve"
+        segments = [Segment(kind, 0.0, kind == "curve") for _ in range(spans)]
+        layout = SegmentLayout(tuple(segments))
+    else:
+        layout = interpolation
+    r, z = apply_locks(r0, z0, session.project.locks, design_width_model(design), layout)
     heights = fit_row_heights(
         [row.finished_height for row in design.gores.panel_rows],
-        profile_from_arrays(r, z, interpolation).meridian_length,
+        profile_from_arrays(r, z, layout).meridian_length,
     )
 
     def mutate(data: dict[str, Any], _patterns: dict[str, Any]) -> None:
         gores = _gores(data)
         gores["profile_interpolation"] = interpolation
+        gores["profile_segments"] = None if segments is None else _segment_dicts(segments)
         gores["meridian_profile_control_points"] = [
             {"x": float(a), "y": float(b)} for a, b in zip(r, z, strict=True)
         ]
@@ -611,8 +703,60 @@ def set_profile_interpolation(
             for row, h in zip(gores["panel_rows"], heights, strict=True):
                 row["finished_height"] = h
 
-    label = "straight segments" if interpolation == "linear" else "spline"
-    return session.edit(f"Profile between points: {label}", mutate)
+    label = {"linear": "straight segments", "spline": "spline", "segments": "segments"}
+    return session.edit(f"Profile between points: {label[interpolation]}", mutate)
+
+
+def set_profile_segment(
+    session: ProjectSession,
+    index: int,
+    kind: SegmentKind | None = None,
+    bulge: float | None = None,
+    smooth: bool | None = None,
+    keep_rows_fitted: bool = True,
+) -> bool:
+    """Change how span ``index`` (from control point ``index`` to ``index + 1``) of a
+    segment profile is drawn: its kind, its arc bulge (dimensionless,
+    :class:`~envelopelab.geometry.profile_segments.Segment`) or whether the joint at
+    its start is smooth. One command; the locks are re-applied and the rows refitted
+    (:func:`set_control_points`).
+
+    Raises
+    ------
+    ValueError
+        When the design is not a segment profile or a value is out of range.
+    IndexError
+        For an unknown span.
+    """
+    segments = _segments_of(session.design)
+    if segments is None:
+        raise ValueError("choose 'segments' for the profile first")
+    if not 0 <= index < len(segments):
+        raise IndexError(f"no span {index}")
+    old = segments[index]
+    if kind is not None and kind not in SEGMENT_KINDS:
+        raise ValueError(f"unknown segment kind {kind!r}")
+    if bulge is not None and not (math.isfinite(bulge) and abs(bulge) <= MAX_BULGE):
+        raise ValueError(f"the arc bulge must be between -{MAX_BULGE} and {MAX_BULGE}")
+    new = Segment(
+        kind if kind is not None else old.kind,
+        float(bulge) if bulge is not None else old.bulge,
+        bool(smooth) if smooth is not None else old.smooth,
+    )
+    if new == old:
+        return False
+    segments[index] = new
+    r, z = control_arrays(session.design)
+    what = (
+        f"{new.kind}"
+        if kind is not None
+        else f"bulge {new.bulge:g}"
+        if bulge is not None
+        else ("smooth joint" if new.smooth else "corner")
+    )
+    return set_control_points(
+        session, _points(r, z), f"Span {index + 1}: {what}", keep_rows_fitted, segments
+    )
 
 
 def set_row_heights(session: ProjectSession, heights: Sequence[float], description: str) -> bool:
@@ -905,7 +1049,7 @@ def set_lock_target(session: ProjectSession, name: str, value: float) -> bool:
     if not (math.isfinite(value) and value > 0.0):
         raise ValueError(f"{name} must be a positive number")
     locks = session.project.locks.model_copy(update={name: float(value)})
-    interpolation = design.gores.profile_interpolation
+    interpolation = profile_layout(design.gores)
     r0, z0 = control_arrays(design)
     r, z = apply_locks(r0, z0, locks, design_width_model(design), interpolation)
     heights = fit_row_heights(

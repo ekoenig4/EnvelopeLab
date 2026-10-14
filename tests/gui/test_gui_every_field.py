@@ -74,6 +74,7 @@ def test_owned_fields_have_their_editors(gore_window: MainWindow) -> None:
         ("gores", "crest_loft"): editor.crest_table,
         ("gores", "construction"): editor.construction,
         ("gores", "profile_interpolation"): editor.interpolation,
+        ("gores", "profile_segments"): editor.points_table,
         ("zones",): gore_window.materials.zones,
     }
     for pattern, name in OWNED.items():

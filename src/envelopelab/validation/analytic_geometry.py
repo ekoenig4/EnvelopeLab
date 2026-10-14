@@ -34,6 +34,7 @@ from envelopelab.geometry.gore import (
     profile_from_gore_widths,
     split_rows,
 )
+from envelopelab.geometry.profile_segments import Segment, segment_points
 
 ErrorKind = Literal["relative", "absolute"]
 
@@ -228,6 +229,46 @@ def _flat_chord_benchmarks() -> list[BenchmarkResult]:
     return out
 
 
+def _segment_benchmarks() -> list[BenchmarkResult]:
+    """Segment profile: cone (r 1 -> 3 m over 2 m), cylinder (R 3 m, 4 m), and a cap arc
+    made tangent to the cylinder, which closes it as a hemisphere."""
+    r = np.array([1.0, 3.0, 3.0, 0.0])
+    z = np.array([0.0, 2.0, 6.0, 9.0])
+    line = Segment("line", 0.0, False)
+    segments = [line, line, Segment("arc", 0.0, True)]
+    profile = MeridianProfile.from_points(*segment_points(r, z, segments))
+    radius, slant = 3.0, math.hypot(2.0, 2.0)
+    cone_v = math.pi * 2.0 / 3.0 * (1.0 + radius + radius**2)
+    cone_a = math.pi * (1.0 + radius) * slant
+    name = "Segment profile cone + cylinder + tangent arc cap (R=3 m)"
+    return [
+        BenchmarkResult(
+            f"{name}: volume",
+            profile.volume,
+            cone_v + math.pi * radius**2 * 4.0 + 2.0 / 3.0 * math.pi * radius**3,
+            "m^3",
+            "relative",
+            1e-3,
+        ),
+        BenchmarkResult(
+            f"{name}: area",
+            profile.area,
+            cone_a + 2.0 * math.pi * radius * 4.0 + 2.0 * math.pi * radius**2,
+            "m^2",
+            "relative",
+            1e-3,
+        ),
+        BenchmarkResult(
+            f"{name}: meridian length",
+            profile.meridian_length,
+            slant + 4.0 + math.pi * radius / 2.0,
+            "m",
+            "relative",
+            1e-3,
+        ),
+    ]
+
+
 def run_benchmarks() -> list[BenchmarkResult]:
     """Run every analytic benchmark.
 
@@ -294,6 +335,7 @@ def run_benchmarks() -> list[BenchmarkResult]:
     )
     results += _loft_benchmarks(sphere, radius)
     results += _flat_chord_benchmarks()
+    results += _segment_benchmarks()
     zone = _sphere(radius, -math.radians(60.0), math.radians(80.0))
     varying_loft = GoreLoft(stations=(0.0, 1.0), ratios=(1.5, 0.8))
     for label, width_model in (

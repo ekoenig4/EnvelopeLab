@@ -14,7 +14,6 @@ from envelopelab.project.gore_design import (
     control_arrays,
     design_profile,
     design_volume,
-    profile_from_arrays,
     standard_gore_design,
 )
 from envelopelab.project.session import ProjectSession
@@ -71,9 +70,7 @@ def test_simplify_reduces_the_points_within_the_tolerance() -> None:
     result = edits.simplify_profile(s, 0.002)
     r, z = control_arrays(s.design)
     assert result.count == r.size < 40
-    gores = s.design.gores
-    assert gores is not None
-    after = profile_from_arrays(r, z, gores.profile_interpolation)
+    after = design_profile(s.design)
     assert profile_deviation(before, after) <= 0.002 * 1.01
     s.undo()
     assert control_arrays(s.design)[0].size == 40

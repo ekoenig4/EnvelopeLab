@@ -26,7 +26,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-CURRENT_SCHEMA_VERSION = 6
+CURRENT_SCHEMA_VERSION = 7
 
 SourceTagName = Literal["datasheet", "measured", "assumed"]
 
@@ -54,6 +54,29 @@ class MeridianControlPoint(BaseModel):
 
     x: float
     y: float
+
+
+class ProfileSegment(BaseModel):
+    """How one span between consecutive profile control points is drawn
+    (``profile_interpolation: segments``; :mod:`envelopelab.geometry.profile_segments`).
+
+    Attributes
+    ----------
+    kind : {"line", "arc", "curve"}
+        Straight line, circular arc, or part of a smooth spline run.
+    bulge : float
+        Arc: tan of a quarter of the included angle, positive counter-clockwise in
+        (r, z) (outward going up the profile), dimensionless; 0 is straight, 1 a half
+        circle. Ignored when the arc is made tangent to a neighbour.
+    smooth : bool
+        The joint at the span's start point is tangent-continuous (G1).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["line", "arc", "curve"] = "curve"
+    bulge: float = Field(default=0.0, ge=-5.0, le=5.0)
+    smooth: bool = True
 
 
 class PanelRow(BaseModel):
@@ -222,6 +245,9 @@ class GoreSpec(BaseModel):
       per row (``PanelRow.bow_bottom``/``bow_top``) or from ``crest_loft``
       (``docs/theory/gore-geometry.md``). Panel-row heights are tape lengths.
 
+    ``profile_interpolation`` is ``"segments"`` when ``profile_segments`` gives, for every
+    span between consecutive control points, a line, an arc or a smooth curve and whether
+    the joint at its start is smooth (:mod:`envelopelab.geometry.profile_segments`), or
     ``profile_interpolation`` is ``"spline"`` (parametric cubic spline through the control
     points) or ``"linear"`` (straight tape segments). ``panel_zones`` gives single panels
     (row and gores) their own material zone, e.g. an applique or a doubled panel.
@@ -238,7 +264,8 @@ class GoreSpec(BaseModel):
     seal_overlap: float = Field(ge=0)
     loft: list[LoftPoint] | None = None
     construction: Literal["lobe", "flat_chord"] = "lobe"
-    profile_interpolation: Literal["spline", "linear"] = "spline"
+    profile_interpolation: Literal["spline", "linear", "segments"] = "spline"
+    profile_segments: list[ProfileSegment] | None = None
     crest_loft: CrestLoftSpec | None = None
     panel_zones: list[PanelZone] = Field(default_factory=list)
 
@@ -256,6 +283,18 @@ class GoreSpec(BaseModel):
             raise ValueError("give both seam bows for every row, or for none")
         if any(bows) and self.crest_loft is not None:
             raise ValueError("give measured seam bows or a crest loft, not both")
+        return self
+
+    @model_validator(mode="after")
+    def validate_profile_segments(self) -> GoreSpec:
+        spans = len(self.meridian_profile_control_points) - 1
+        if self.profile_interpolation == "segments":
+            if self.profile_segments is None or len(self.profile_segments) != spans:
+                raise ValueError(
+                    f"profile_interpolation 'segments' needs one profile segment per span ({spans})"
+                )
+        elif self.profile_segments is not None:
+            raise ValueError("profile_segments need profile_interpolation 'segments'")
         return self
 
     @model_validator(mode="after")
@@ -825,6 +864,15 @@ def _upgrade_v5_to_v6(raw: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_v6_to_v7(raw: dict[str, Any]) -> dict[str, Any]:
+    """Version 7 adds segment profiles (``gores.profile_interpolation: segments`` with
+    ``gores.profile_segments``); version-6 profiles are splines or straight segments, as
+    before."""
+    upgraded = dict(raw)
+    upgraded["schema_version"] = 7
+    return upgraded
+
+
 def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
     """Upgrade raw design data to :data:`CURRENT_SCHEMA_VERSION`, one version at a time."""
     version = int(raw.get("schema_version", 0))
@@ -842,6 +890,8 @@ def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
             upgraded = _upgrade_v4_to_v5(upgraded)
         elif version == 5:
             upgraded = _upgrade_v5_to_v6(upgraded)
+        elif version == 6:
+            upgraded = _upgrade_v6_to_v7(upgraded)
         else:
             raise ValueError(f"unsupported schema version: {version}")
         version += 1

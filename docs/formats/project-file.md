@@ -204,7 +204,7 @@ clean exit, and offered for recovery at the next start otherwise.
           "type": "array"
         },
         "schema_version": {
-          "default": 6,
+          "default": 7,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -680,7 +680,7 @@ clean exit, and offered for recovery at the next start otherwise.
     },
     "GoreSpec": {
       "additionalProperties": false,
-      "description": "Standard-gore envelope: meridian, gores, panel rows and openings (m).\n\n``construction`` says how a gore is cut:\n\n* ``\"lobe\"`` (default): the flat gore follows the width model, with a circular lobe\n  between tapes set by ``loft`` (:class:`LoftPoint`), interpolated linearly between\n  stations and constant beyond the first and last; ``None`` is the small-bulge gore\n  (ratio 1 everywhere). Horizontal seams are straight.\n* ``\"flat_chord\"``: every row is a flat tape-to-tape trapezoid with straight sides of\n  the row's tape length; the gore is lofted lengthwise by bowed horizontal seams, given\n  per row (``PanelRow.bow_bottom``/``bow_top``) or from ``crest_loft``\n  (``docs/theory/gore-geometry.md``). Panel-row heights are tape lengths.\n\n``profile_interpolation`` is ``\"spline\"`` (parametric cubic spline through the control\npoints) or ``\"linear\"`` (straight tape segments). ``panel_zones`` gives single panels\n(row and gores) their own material zone, e.g. an applique or a doubled panel.",
+      "description": "Standard-gore envelope: meridian, gores, panel rows and openings (m).\n\n``construction`` says how a gore is cut:\n\n* ``\"lobe\"`` (default): the flat gore follows the width model, with a circular lobe\n  between tapes set by ``loft`` (:class:`LoftPoint`), interpolated linearly between\n  stations and constant beyond the first and last; ``None`` is the small-bulge gore\n  (ratio 1 everywhere). Horizontal seams are straight.\n* ``\"flat_chord\"``: every row is a flat tape-to-tape trapezoid with straight sides of\n  the row's tape length; the gore is lofted lengthwise by bowed horizontal seams, given\n  per row (``PanelRow.bow_bottom``/``bow_top``) or from ``crest_loft``\n  (``docs/theory/gore-geometry.md``). Panel-row heights are tape lengths.\n\n``profile_interpolation`` is ``\"segments\"`` when ``profile_segments`` gives, for every\nspan between consecutive control points, a line, an arc or a smooth curve and whether\nthe joint at its start is smooth (:mod:`envelopelab.geometry.profile_segments`), or\n``profile_interpolation`` is ``\"spline\"`` (parametric cubic spline through the control\npoints) or ``\"linear\"`` (straight tape segments). ``panel_zones`` gives single panels\n(row and gores) their own material zone, e.g. an applique or a doubled panel.",
       "properties": {
         "construction": {
           "default": "lobe",
@@ -762,10 +762,26 @@ clean exit, and offered for recovery at the next start otherwise.
           "default": "spline",
           "enum": [
             "spline",
-            "linear"
+            "linear",
+            "segments"
           ],
           "title": "Profile Interpolation",
           "type": "string"
+        },
+        "profile_segments": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ProfileSegment"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile Segments"
         },
         "seal_overlap": {
           "minimum": 0,
@@ -1300,6 +1316,36 @@ clean exit, and offered for recovery at the next start otherwise.
         }
       },
       "title": "PatternSet",
+      "type": "object"
+    },
+    "ProfileSegment": {
+      "additionalProperties": false,
+      "description": "How one span between consecutive profile control points is drawn\n(``profile_interpolation: segments``; :mod:`envelopelab.geometry.profile_segments`).\n\nAttributes\n----------\nkind : {\"line\", \"arc\", \"curve\"}\n    Straight line, circular arc, or part of a smooth spline run.\nbulge : float\n    Arc: tan of a quarter of the included angle, positive counter-clockwise in\n    (r, z) (outward going up the profile), dimensionless; 0 is straight, 1 a half\n    circle. Ignored when the arc is made tangent to a neighbour.\nsmooth : bool\n    The joint at the span's start point is tangent-continuous (G1).",
+      "properties": {
+        "bulge": {
+          "default": 0.0,
+          "maximum": 5.0,
+          "minimum": -5.0,
+          "title": "Bulge",
+          "type": "number"
+        },
+        "kind": {
+          "default": "curve",
+          "enum": [
+            "line",
+            "arc",
+            "curve"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "smooth": {
+          "default": true,
+          "title": "Smooth",
+          "type": "boolean"
+        }
+      },
+      "title": "ProfileSegment",
       "type": "object"
     },
     "ProvenanceEntry": {
