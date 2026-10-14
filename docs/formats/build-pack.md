@@ -6,6 +6,8 @@ A build pack is a directory written by `envelopelab.export.build_pack.export_bui
 | File | Content |
 |---|---|
 | `envelope-row-<R>.dxf` | Envelope row panel `R`, cut once per gore |
+| `parachute-panel.dxf` | Parachute radial panel, cut once per radial panel; bottom = the parachute edge |
+| `parachute-centre.dxf` | Parachute centre panel (a circle), cut once; only when the parachute has one |
 | `<shape>-G<k>.dxf`, `<shape>-P<k>.dxf` | Skin gore or panel `k` of a special shape |
 | `<shape>-TIP.dxf` | Flat tip disc of a tube or revolved shape |
 | `<shape>-mark-G<g>-<R>.dxf` | Marking sheet: envelope panel (gore `g`, row `R`) with the shape's footprint line, match marks and feed hole |
@@ -22,7 +24,7 @@ towards the tip for skin pieces).
 |---|---|
 | `CUT` | Cut outline, with the seam allowance |
 | `SEW` | Finished (sewn-line) outline |
-| `EDGE_<NAME>` | Each finished edge on its own: `RIM`, `LEFT`, `RIGHT`, `TOP` (skin), `LEFT`, `RIGHT`, `BOTTOM`, `TOP` (envelope panels) |
+| `EDGE_<NAME>` | Each finished edge on its own: `RIM`, `LEFT`, `RIGHT`, `TOP` (skin), `LEFT`, `RIGHT`, `BOTTOM`, `TOP` (envelope and parachute radial panels), `RIM` (parachute centre panel) |
 | `MARKS` | Match marks (crosses) and their numbers |
 | `ATTACH` | Footprint line of a shape (marking sheets); in seam pairs the k-th line of a sheet is edge `attach<k>` |
 | `HOLE` | Feed hole (marking sheets) |
@@ -59,9 +61,10 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
 }
 ```
 
-`kind` is `envelope panel`, `skin piece` or `marking` (cut count 0). A seam pair lists the
-finished edges sewn together, with lengths summed on each side (all of a tube's panel
-tops against its tip disc, for example). `ease_mm` is the planned length of side `a`
+`kind` is `envelope panel`, `parachute panel`, `skin piece` or `marking` (cut count 0). A
+seam pair lists the finished edges sewn together, with lengths summed on each side (all
+of a tube's panel tops against its tip disc, or the `top` of the parachute radial panel
+once per radial panel against the centre panel's `rim`, for example). `ease_mm` is the planned length of side `a`
 minus side `b`: 0 for edges cut to the same length, and for a shape's rim against the
 footprint lines on its marking sheets the attachment ease worked in between match
 marks (checked per mark interval when the shape is designed).

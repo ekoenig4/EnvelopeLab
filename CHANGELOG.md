@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: build packs include the parachute: `parachute-panel.dxf` (the radial panel, cut
+  once per radial panel) and `parachute-centre.dxf` (the centre circle, cut once), with
+  their radial seams and centre seam checked by the output QA. A parachute whose pattern
+  cannot be made stops the export with the reason.
 - Added: the parachute can have a flat circular centre panel
   (`parachute.centre_panel_diameter`). Its radial panels are then trapezoids sewn to the
   circle, instead of wedges that run to the centre ring. The pattern view, the 3D view and

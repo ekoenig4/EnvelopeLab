@@ -61,8 +61,9 @@ shapes**, or its tab).
    convergence status, iterations, final residual, mesh size, heights above the envelope
    as designed and inflated, chamber pressure, wrinkled fraction, rim tape tension and
    the factor of safety of each region. It is drawn in the 3D View as a separate layer.
-6. **Export build pack…** writes the envelope rows and every shape's pieces and marking
-   sheets (DXF, PDF and `index.json`, section 4). **Export to Blender (OBJ)…** writes the
+6. **Export build pack…** writes the envelope rows, the parachute (radial panel and
+   centre panel) and every shape's pieces and marking sheets (DXF, PDF and `index.json`,
+   section 4). **Export to Blender (OBJ)…** writes the
    envelope, every shape and every current shape simulation (section 5).
 
 Nothing is hidden. A shape that cannot be placed (for example a base too large for the
