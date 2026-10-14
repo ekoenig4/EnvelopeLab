@@ -45,7 +45,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from envelopelab.geometry.gore import loft_extra_width
+from envelopelab.geometry.gore import MeridianProfile, loft_extra_width
+from envelopelab.geometry.profile_editing import FALLOFFS, Falloff, curvature, move_points
 from envelopelab.project.gore_design import (
     DEFAULT_CREST_LOFT,
     control_arrays,
@@ -59,73 +60,120 @@ from envelopelab_app.refresh import Refresher
 HANDLE_RADIUS = 6.0  # px
 
 
+#: Handle colours: normal and selected.
+HANDLE_COLOR = "#1f77b4"
+SELECTED_COLOR = "#ff7f0e"
+#: Curvature-comb spikes drawn (about) and the longest spike, as a share of the view.
+COMB_SPIKES = 160
+COMB_LENGTH = 0.12
+
+
 class ControlPointHandle(QGraphicsEllipseItem):
-    """A draggable control point (scene units: m, y axis pointing down = -z)."""
+    """A selectable, draggable control point (scene units: m, y axis down = -z).
+
+    Dragging moves the selection (and, with soft selection, its neighbours) through the
+    canvas, so a group moves as one.
+    """
 
     def __init__(self, canvas: ProfileCanvas, index: int, r: float, z: float) -> None:
         super().__init__(-HANDLE_RADIUS, -HANDLE_RADIUS, 2 * HANDLE_RADIUS, 2 * HANDLE_RADIUS)
         self.canvas = canvas
         self.index = index
         self.setPos(QPointF(r, -z))
-        self.setBrush(QBrush(QColor("#1f77b4")))
         self.setPen(QPen(QColor("white"), 1.5))
-        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True)
         self.setCursor(Qt.CursorShape.SizeAllCursor)
         self.setZValue(10)
-        self.setToolTip(f"control point {index + 1}")
+        self.setToolTip(
+            f"control point {index + 1}: drag to move the selection; Ctrl+click to add to "
+            "or remove from it; drag on empty space to box-select"
+        )
+        self._colour()
+
+    def _colour(self) -> None:
+        self.setBrush(QBrush(QColor(SELECTED_COLOR if self.isSelected() else HANDLE_COLOR)))
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value: object) -> object:  # noqa: N802
-        if change == QGraphicsItem.GraphicsItemChange.ItemPositionChange and isinstance(
-            value, QPointF
-        ):
-            # Radii cannot be negative.
-            return QPointF(max(0.0, value.x()), value.y())
-        if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
-            self.canvas.preview()
+        if change == QGraphicsItem.GraphicsItemChange.ItemSelectedHasChanged:
+            self._colour()
         return super().itemChange(change, value)
 
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # noqa: N802
+        toggle = bool(
+            event.modifiers()
+            & (Qt.KeyboardModifier.ControlModifier | Qt.KeyboardModifier.ShiftModifier)
+        )
+        self.canvas.begin_drag(self, event.scenePos(), toggle)
+        event.accept()
+
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # noqa: N802
+        self.canvas.drag_to(event.scenePos())
+        event.accept()
+
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent) -> None:  # noqa: N802
-        super().mouseReleaseEvent(event)
-        pos = self.pos()
-        index, r, z = self.index, float(pos.x()), float(-pos.y())
-        # Emit after this event returns: the edit rebuilds the handles, this one included.
-        QTimer.singleShot(0, lambda: self.canvas.pointMoved.emit(index, r, z))
+        self.canvas.end_drag()
+        event.accept()
 
 
 class ProfileCanvas(QGraphicsView):
-    """2D meridian profile (radius right, height up) with draggable control points.
+    """2D meridian profile (radius right, height up) with selectable control points.
 
-    ``pointMoved(index, radius_m, height_m)`` is emitted when a drag ends; the editor
-    turns it into one undoable command.
+    Click a point, Ctrl/Shift+click to add or remove points, or drag a box on empty space
+    to select several. Dragging any selected point moves the whole selection; with a soft
+    radius (m, along the control polygon) the neighbours follow by the falloff
+    (:mod:`envelopelab.geometry.profile_editing`). When a drag ends
+    ``pointsDragged(indices, dr_m, dz_m)`` is emitted (``pointMoved(index, r_m, z_m)``
+    for one point without soft selection); the editor turns it into one undoable command.
     """
 
     pointMoved = Signal(int, float, float)  # noqa: N815
+    pointsDragged = Signal(object, float, float)  # noqa: N815
+    pointsSelected = Signal()  # noqa: N815
 
     def __init__(self) -> None:
         super().__init__()
         self.setScene(QGraphicsScene(self))
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
+        self.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
         self.setMinimumSize(320, 320)
         self.handles: list[ControlPointHandle] = []
         self.interpolation: Literal["spline", "linear"] = "spline"
+        self.soft_radius = 0.0
+        self.falloff: Falloff = "smooth"
+        self.show_comb = False
+        self._drag_start: QPointF | None = None
+        self._drag_points: tuple[np.ndarray, np.ndarray] | None = None
+        self._drag_delta = (0.0, 0.0)
         self._curve = QGraphicsPathItem()
-        self._curve.setPen(QPen(QColor("#1f77b4"), 0))
+        self._curve.setPen(QPen(QColor(HANDLE_COLOR), 0))
         self._mirror = QGraphicsPathItem()
         pen = QPen(QColor("#9aa5b1"), 0)
         pen.setStyle(Qt.PenStyle.DashLine)
         self._mirror.setPen(pen)
         self._axis = QGraphicsPathItem()
         self._axis.setPen(QPen(QColor("#888888"), 0, Qt.PenStyle.DotLine))
-        for item in (self._axis, self._mirror, self._curve):
+        self.comb = QGraphicsPathItem()
+        self.comb.setPen(QPen(QColor("#d62728"), 0))
+        for item in (self._axis, self._mirror, self.comb, self._curve):
             self.scene().addItem(item)
+        # A bound slot: Qt drops it when the view is destroyed, before the scene's items.
+        self.scene().selectionChanged.connect(self._scene_selection)
+
+    def _scene_selection(self) -> None:
+        self.pointsSelected.emit()
+
+    # -- points -------------------------------------------------------------------------
 
     def set_points(
         self, r: np.ndarray, z: np.ndarray, interpolation: Literal["spline", "linear"] = "spline"
     ) -> None:
-        """Show control points (m), joined as the design joins them."""
+        """Show control points (m), joined as the design joins them. The selection is
+        kept when the number of points is unchanged."""
         self.interpolation = interpolation
+        keep = self.selected_indices() if len(self.handles) == len(r) else []
+        blocker = self.scene().blockSignals(True)
         for handle in self.handles:
             self.scene().removeItem(handle)
         self.handles = [
@@ -134,6 +182,9 @@ class ProfileCanvas(QGraphicsView):
         ]
         for handle in self.handles:
             self.scene().addItem(handle)
+            handle.setSelected(handle.index in keep)
+        self.scene().blockSignals(blocker)
+        self.pointsSelected.emit()
         self._draw(r, z)
         span = max(float(np.max(r)), float(np.ptp(z)), 1e-3)
         rect = QRectF(
@@ -150,8 +201,8 @@ class ProfileCanvas(QGraphicsView):
         for handle in self.handles:
             self.scene().removeItem(handle)
         self.handles = []
-        self._curve.setPath(QPainterPath())
-        self._mirror.setPath(QPainterPath())
+        for item in (self._curve, self._mirror, self.comb):
+            item.setPath(QPainterPath())
 
     def current_points(self) -> tuple[np.ndarray, np.ndarray]:
         """Positions of the handles (m)."""
@@ -159,10 +210,73 @@ class ProfileCanvas(QGraphicsView):
         z = np.array([-h.pos().y() for h in self.handles])
         return r, z
 
+    def selected_indices(self) -> list[int]:
+        """Indices of the selected control points, mouth first."""
+        return [h.index for h in self.handles if h.isSelected()]
+
+    def select(self, indices: list[int]) -> None:
+        """Select exactly these control points."""
+        wanted = set(indices)
+        blocker = self.scene().blockSignals(True)
+        for handle in self.handles:
+            handle.setSelected(handle.index in wanted)
+        self.scene().blockSignals(blocker)
+        self.pointsSelected.emit()
+
+    # -- dragging -----------------------------------------------------------------------
+
+    def begin_drag(self, handle: ControlPointHandle, pos: QPointF, toggle: bool) -> None:
+        """Start dragging from ``handle`` (scene position ``pos``)."""
+        if toggle:
+            handle.setSelected(not handle.isSelected())
+        elif not handle.isSelected():
+            self.select([handle.index])
+        self._drag_start = QPointF(pos)
+        self._drag_points = self.current_points()
+        self._drag_delta = (0.0, 0.0)
+
+    def drag_to(self, pos: QPointF) -> None:
+        """Preview the drag at scene position ``pos`` (no command yet)."""
+        if self._drag_start is None or self._drag_points is None:
+            return
+        selected = self.selected_indices()
+        if not selected:
+            return
+        dr = float(pos.x() - self._drag_start.x())
+        dz = float(self._drag_start.y() - pos.y())
+        self._drag_delta = (dr, dz)
+        r, z = move_points(*self._drag_points, selected, dr, dz, self.soft_radius, self.falloff)
+        for handle, a, b in zip(self.handles, r, z, strict=True):
+            handle.setPos(QPointF(float(a), float(-b)))
+        self._draw(r, z)
+
+    def end_drag(self) -> None:
+        """Finish a drag: emit the move as one edit (after this event returns, because the
+        edit rebuilds the handles)."""
+        selected = self.selected_indices()
+        dr, dz = self._drag_delta
+        self._drag_start, self._drag_points = None, None
+        self._drag_delta = (0.0, 0.0)
+        if not selected or (dr == 0.0 and dz == 0.0):
+            return
+        if len(selected) == 1 and self.soft_radius == 0.0:
+            handle = self.handles[selected[0]]
+            index, r, z = handle.index, float(handle.pos().x()), float(-handle.pos().y())
+            QTimer.singleShot(0, lambda: self.pointMoved.emit(index, r, z))
+        else:
+            QTimer.singleShot(0, lambda: self.pointsDragged.emit(selected, dr, dz))
+
     def preview(self) -> None:
-        """Redraw the curve while a point is dragged (no command yet)."""
+        """Redraw the curve through the handles' current positions."""
         if len(self.handles) >= 2:
             self._draw(*self.current_points())
+
+    # -- drawing ------------------------------------------------------------------------
+
+    def set_comb(self, on: bool) -> None:
+        """Show or hide the curvature comb."""
+        self.show_comb = on
+        self.preview()
 
     def _draw(self, r: np.ndarray, z: np.ndarray) -> None:
         try:
@@ -181,6 +295,32 @@ class ProfileCanvas(QGraphicsView):
         axis.moveTo(0.0, -float(np.min(z)))
         axis.lineTo(0.0, -float(np.max(profile.z)))
         self._axis.setPath(axis)
+        self.comb.setPath(self._comb_path(profile) if self.show_comb else QPainterPath())
+
+    @staticmethod
+    def _comb_path(profile: MeridianProfile) -> QPainterPath:
+        """Curvature comb: spikes of length proportional to the curvature, drawn on the
+        side away from the centre of curvature, and the line joining their tips."""
+        k = curvature(profile)
+        step = max(1, profile.s.size // COMB_SPIKES)
+        idx = np.arange(0, profile.s.size, step)
+        tr = np.gradient(profile.r)[idx]
+        tz = np.gradient(profile.z)[idx]
+        norm = np.hypot(tr, tz)
+        norm[norm == 0.0] = 1.0
+        nr, nz = -tz / norm, tr / norm  # left normal, towards the centre where k > 0
+        k_max = float(np.max(np.abs(k[idx]))) or 1.0
+        scale = COMB_LENGTH * max(profile.height, profile.max_width) / k_max
+        tip_r = profile.r[idx] - scale * k[idx] * nr
+        tip_z = profile.z[idx] - scale * k[idx] * nz
+        comb = QPainterPath()
+        for a, b, c, d in zip(profile.r[idx], profile.z[idx], tip_r, tip_z, strict=True):
+            comb.moveTo(float(a), float(-b))
+            comb.lineTo(float(c), float(-d))
+        comb.moveTo(float(tip_r[0]), float(-tip_z[0]))
+        for c, d in zip(tip_r[1:], tip_z[1:], strict=True):
+            comb.lineTo(float(c), float(-d))
+        return comb
 
     def resizeEvent(self, event: object) -> None:  # noqa: N802
         super().resizeEvent(event)  # type: ignore[arg-type]
@@ -201,10 +341,13 @@ class GoreEditor(QWidget):
         super().__init__()
         self.controller = controller
         self._updating = False
+        self._syncing = False
         self.header = QLabel()
         self.header.setObjectName("goreEditorHeader")
         self.canvas = ProfileCanvas()
         self.canvas.pointMoved.connect(self._point_moved)
+        self.canvas.pointsDragged.connect(self._points_dragged)
+        self.canvas.pointsSelected.connect(self._canvas_selection)
 
         self.points_table = QTableWidget(0, 2)
         self.points_table.setHorizontalHeaderLabels(["radius r (m)", "height z (m)"])
@@ -215,6 +358,8 @@ class GoreEditor(QWidget):
         add_point.clicked.connect(self._insert_point)
         del_point = QPushButton("Delete point")
         del_point.clicked.connect(self._delete_point)
+        self.points_table.itemSelectionChanged.connect(self._table_selection)
+        tools = self._build_point_tools()
 
         self.rows_table = QTableWidget(0, 5)
         self.rows_table.setHorizontalHeaderLabels(
@@ -416,6 +561,7 @@ class GoreEditor(QWidget):
         buttons.addWidget(add_point)
         buttons.addWidget(del_point)
         side_layout.addLayout(buttons)
+        side_layout.addWidget(tools)
         side_layout.addWidget(QLabel("Panel rows (mouth first)"))
         side_layout.addWidget(self.rows_table)
         row_buttons = QHBoxLayout()
@@ -815,6 +961,217 @@ class GoreEditor(QWidget):
         height = value if item.column() == 1 else float(z[item.row()])
         if self.controller.edit("move_control_point", item.row(), radius, height) is None:
             self.refresh()
+
+    # -- bulk point editing -------------------------------------------------------------
+
+    def _build_point_tools(self) -> QGroupBox:
+        box = QGroupBox("Edit selected points")
+        box.setToolTip(
+            "Select points on the profile (click, Ctrl+click, or drag a box on empty space) "
+            "or in the table, then drag any selected point or use the tools below.\n"
+            "Soft radius: neighbours within this distance along the profile follow a drag, "
+            "scale or rotation, less the further away they are."
+        )
+        form = QFormLayout(box)
+        self.selection_label = QLabel("no points selected")
+        self.selection_label.setObjectName("selectionLabel")
+        select_all = QPushButton("Select all")
+        select_all.clicked.connect(
+            lambda: self.canvas.select(list(range(len(self.canvas.handles))))
+        )
+        top = QHBoxLayout()
+        top.addWidget(self.selection_label, 1)
+        top.addWidget(select_all)
+        form.addRow(top)
+        self.soft_radius = QDoubleSpinBox()
+        self.soft_radius.setObjectName("softRadius")
+        self.soft_radius.setRange(0.0, 1000.0)
+        self.soft_radius.setDecimals(2)
+        self.soft_radius.setSingleStep(0.25)
+        self.soft_radius.setSuffix(" m")
+        self.soft_radius.setSpecialValueText("off")
+        self.soft_radius.valueChanged.connect(self._soft_changed)
+        self.falloff = QComboBox()
+        self.falloff.setObjectName("falloff")
+        for name in FALLOFFS:
+            self.falloff.addItem(name, name)
+        self.falloff.currentIndexChanged.connect(self._soft_changed)
+        soft = QHBoxLayout()
+        soft.addWidget(self.soft_radius)
+        soft.addWidget(self.falloff)
+        form.addRow("Soft radius, falloff", soft)
+        self.scale_r = QDoubleSpinBox()
+        self.scale_z = QDoubleSpinBox()
+        for spin, object_name in ((self.scale_r, "scaleR"), (self.scale_z, "scaleZ")):
+            spin.setObjectName(object_name)
+            spin.setRange(1.0, 1000.0)
+            spin.setValue(100.0)
+            spin.setSuffix(" %")
+        scale = QPushButton("Scale")
+        scale.setObjectName("scalePoints")
+        scale.clicked.connect(self.scale_selected)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("across"))
+        row.addWidget(self.scale_r)
+        row.addWidget(QLabel("up"))
+        row.addWidget(self.scale_z)
+        row.addWidget(scale)
+        form.addRow("Scale about centre", row)
+        self.rotate_deg = QDoubleSpinBox()
+        self.rotate_deg.setObjectName("rotateDeg")
+        self.rotate_deg.setRange(-180.0, 180.0)
+        self.rotate_deg.setSuffix(" °")
+        rotate = QPushButton("Rotate")
+        rotate.setObjectName("rotatePoints")
+        rotate.clicked.connect(self.rotate_selected)
+        row = QHBoxLayout()
+        row.addWidget(self.rotate_deg)
+        row.addWidget(rotate)
+        form.addRow("Rotate about centre", row)
+        straighten = QPushButton("Straighten")
+        straighten.setObjectName("straightenPoints")
+        straighten.setToolTip(
+            "Make a straight section: the points between the first and last selected point "
+            "go onto the line joining them."
+        )
+        straighten.clicked.connect(self.straighten_selected)
+        smooth = QPushButton("Smooth")
+        smooth.setObjectName("smoothPoints")
+        smooth.setToolTip("Even out the selected points (the ends of the profile stay put).")
+        smooth.clicked.connect(self.smooth_selected)
+        self.comb_box = QCheckBox("Curvature comb")
+        self.comb_box.setObjectName("curvatureComb")
+        self.comb_box.setToolTip(
+            "Spikes show how sharply the profile bends: look for wiggles, flat spots and "
+            "kinks (one tall spike)."
+        )
+        self.comb_box.toggled.connect(self.canvas.set_comb)
+        row = QHBoxLayout()
+        row.addWidget(straighten)
+        row.addWidget(smooth)
+        row.addWidget(self.comb_box)
+        form.addRow(row)
+        self.simplify_tolerance = QDoubleSpinBox()
+        self.simplify_tolerance.setObjectName("simplifyTolerance")
+        self.simplify_tolerance.setRange(0.1, 1000.0)
+        self.simplify_tolerance.setValue(2.0)
+        self.simplify_tolerance.setSuffix(" mm")
+        simplify = QPushButton("Simplify")
+        simplify.setObjectName("simplifyProfile")
+        simplify.setToolTip(
+            "Replace all control points by as few as keep the profile within the tolerance "
+            "(the mouth and top points stay)."
+        )
+        simplify.clicked.connect(self.simplify)
+        row = QHBoxLayout()
+        row.addWidget(self.simplify_tolerance)
+        row.addWidget(simplify)
+        form.addRow("Simplify within", row)
+        self.simplify_status = QLabel()
+        self.simplify_status.setObjectName("simplifyStatus")
+        self.simplify_status.setWordWrap(True)
+        form.addRow(self.simplify_status)
+        return box
+
+    def select_all_points(self) -> None:
+        """Select every control point."""
+        self.canvas.select(list(range(len(self.canvas.handles))))
+
+    def _soft_changed(self) -> None:
+        self.canvas.soft_radius = float(self.soft_radius.value())
+        self.canvas.falloff = self.falloff.currentData()
+
+    def _canvas_selection(self) -> None:
+        selected = self.canvas.selected_indices()
+        self.selection_label.setText(
+            f"{len(selected)} point(s) selected" if selected else "no points selected"
+        )
+        if self._syncing:
+            return
+        self._syncing = True
+        try:
+            model = self.points_table.selectionModel()
+            self.points_table.clearSelection()
+            for i in selected:
+                index = self.points_table.model().index(i, 0)
+                model.select(
+                    index,
+                    model.SelectionFlag.Select | model.SelectionFlag.Rows,
+                )
+        finally:
+            self._syncing = False
+
+    def _table_selection(self) -> None:
+        if self._syncing:
+            return
+        self._syncing = True
+        try:
+            rows = sorted({i.row() for i in self.points_table.selectionModel().selectedRows()})
+            self.canvas.select(rows)
+        finally:
+            self._syncing = False
+
+    def _need_selection(self, at_least: int = 1) -> list[int] | None:
+        selected = self.canvas.selected_indices()
+        if len(selected) < at_least:
+            self.controller.editRejected.emit(
+                f"select at least {at_least} control point(s) on the profile first"
+            )
+            return None
+        return selected
+
+    def _soft(self) -> tuple[float, Falloff]:
+        return float(self.soft_radius.value()), self.falloff.currentData()
+
+    def _points_dragged(self, selected: list[int], dr: float, dz: float) -> None:
+        if self.controller.edit("move_points", selected, dr, dz, *self._soft()) is None:
+            self.refresh()
+
+    def scale_selected(self) -> None:
+        """Scale the selected points about their centre by the typed percentages."""
+        selected = self._need_selection()
+        if selected is None:
+            return
+        kr, kz = self.scale_r.value() / 100.0, self.scale_z.value() / 100.0
+        if self.controller.edit("scale_points", selected, kr, kz, None, *self._soft()) is None:
+            self.refresh()
+
+    def rotate_selected(self) -> None:
+        """Rotate the selected points about their centre by the typed angle."""
+        selected = self._need_selection()
+        if selected is None:
+            return
+        angle = math.radians(self.rotate_deg.value())
+        if self.controller.edit("rotate_points", selected, angle, None, *self._soft()) is None:
+            self.refresh()
+
+    def straighten_selected(self) -> None:
+        """Make the stretch between the first and last selected point straight."""
+        selected = self._need_selection(2)
+        if selected is None:
+            return
+        if self.controller.edit("straighten_points", selected[0], selected[-1]) is None:
+            self.refresh()
+
+    def smooth_selected(self) -> None:
+        """Smooth the selected points (all points when none is selected)."""
+        selected = self.canvas.selected_indices() or list(range(len(self.canvas.handles)))
+        if self.controller.edit("smooth_points", selected, 0.5, 1) is None:
+            self.refresh()
+
+    def simplify(self) -> None:
+        """Replace the control points by fewer within the typed tolerance."""
+        before = len(self.canvas.handles)
+        tolerance = self.simplify_tolerance.value() / 1000.0
+        result = self.controller.edit("simplify_profile", tolerance)
+        if result is None:
+            self.simplify_status.setText("")
+            self.refresh()
+            return
+        self.simplify_status.setText(
+            f"{before} → {result.count} points; largest change {result.deviation * 1e3:.1f} mm "
+            "(before the locks are re-applied)."
+        )
 
     def _selected_row(self, table: QTableWidget) -> int:
         rows = table.selectionModel().selectedRows()

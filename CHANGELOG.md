@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: editing many profile points at once in the gore editor. Points are selected on
+  the canvas (click, Ctrl+click or box) or in the table. A drag moves the selection, and
+  a soft radius with a falloff makes the neighbours follow. Also *Scale*, *Rotate*,
+  *Straighten* (a straight section), *Smooth*, and a curvature comb.
+- Added: *Simplify* replaces the profile's control points with as few as keep it within
+  a tolerance (mm). It uses Ramer-Douglas-Peucker for straight segments and greedy
+  insertion for splines, keeps the mouth and top points, and refuses when no profile
+  with fewer points meets the tolerance.
 - Added: build packs include the parachute: `parachute-panel.dxf` (the radial panel, cut
   once per radial panel) and `parachute-centre.dxf` (the centre circle, cut once), with
   their radial seams and centre seam checked by the output QA. A parachute whose pattern

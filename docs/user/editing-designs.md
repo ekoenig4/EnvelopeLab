@@ -21,6 +21,32 @@ in the undo history. Nothing is edited by hand in JSON.
   releasing the mouse makes one edit. Radii cannot become negative.
 * **Control-point table**: type exact radius and height values (m). *Insert point after*
   adds a point on the curve halfway to the next one; *Delete point* removes one.
+* **Editing many points at once** (*Edit selected points*):
+    * *Select* points by clicking one, Ctrl/Shift+clicking to add or remove one, dragging
+      a box on empty canvas, or selecting rows in the table (the two follow each other).
+      *Select all* takes every point. Selected points are orange.
+    * *Drag* any selected point to move the whole selection.
+    * *Soft radius* (m, along the profile) and *falloff*: neighbours within the radius
+      follow a drag, scale or rotation, less the further away they are (*smooth*,
+      *linear*, *sharp*, *sphere* or *constant*). Use it to push a shoulder out or pull a
+      neck in without kinks. *Off* moves only the selected points.
+    * *Scale* the selection about its centre (% across and up). *Rotate* it about its
+      centre (degrees, counter-clockwise).
+    * *Straighten* makes a straight section. The points between the first and last
+      selected point go onto the line joining those two.
+    * *Smooth* evens out the selected points (all points when none is selected). The
+      mouth and top points stay put.
+    * *Curvature comb*: red spikes show how sharply the profile bends. Wiggles, flat spots
+      and kinks (one tall spike) stand out.
+    * *Simplify within* a tolerance (mm) replaces all control points by as few as keep the
+      profile within it. The mouth and top points stay, and the status line says how many
+      points remain and the largest change. If no profile with fewer points meets the
+      tolerance, nothing changes. Use it after importing or tracing a profile with many
+      points.
+
+    Each of these is one undoable edit. The constraint locks are applied to the result as
+    to any profile edit, and rows stay fitted
+    ([theory](../theory/profile-editing.md)).
 * **Panel rows**: name, finished height along the tape (m) and fabric zone per row;
   *Split row*, *Merge with next*, and *Fit rows to meridian*. With *Keep panel rows
   fitted* (Preferences, on by default) every profile edit rescales the rows in the same

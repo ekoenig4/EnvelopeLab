@@ -14,7 +14,9 @@ from typing import Any, Literal
 import numpy as np
 
 from envelopelab.design.model import DesignDocument, row_bottom_fraction
+from envelopelab.geometry import profile_editing
 from envelopelab.geometry.gore import LENGTH_TOLERANCE, GoreLoft, GoreWidthModel
+from envelopelab.geometry.profile_editing import Falloff, FloatArray
 from envelopelab.project.dependencies import canonical_hash
 from envelopelab.project.gore_design import (
     DEFAULT_CREST_LOFT,
@@ -125,6 +127,141 @@ def move_control_point(
     points = list(zip(r.tolist(), z.tolist(), strict=True))
     points[index] = (float(radius), float(height))
     return set_control_points(session, points, f"Move control point {index + 1}", keep_rows_fitted)
+
+
+def _points(r: FloatArray, z: FloatArray) -> list[tuple[float, float]]:
+    return list(zip(r.tolist(), z.tolist(), strict=True))
+
+
+def move_points(
+    session: ProjectSession,
+    selected: Sequence[int],
+    dr: float,
+    dz: float,
+    radius: float = 0.0,
+    falloff: Falloff = "smooth",
+    keep_rows_fitted: bool = True,
+) -> bool:
+    """Move the selected control points by (dr, dz) m, with soft selection of radius
+    ``radius`` m (:func:`~envelopelab.geometry.profile_editing.move_points`); one command,
+    locks applied (:func:`set_control_points`)."""
+    r, z = profile_editing.move_points(
+        *control_arrays(session.design), selected, dr, dz, radius, falloff
+    )
+    return set_control_points(
+        session, _points(r, z), f"Move {len(set(selected))} point(s)", keep_rows_fitted
+    )
+
+
+def scale_points(
+    session: ProjectSession,
+    selected: Sequence[int],
+    factor_r: float,
+    factor_z: float,
+    pivot: tuple[float, float] | None = None,
+    radius: float = 0.0,
+    falloff: Falloff = "smooth",
+    keep_rows_fitted: bool = True,
+) -> bool:
+    """Scale the selected control points about ``pivot`` (m; default their centroid),
+    dimensionless factors across and up (:func:`~envelopelab.geometry.profile_editing.
+    scale_points`); one command, locks applied."""
+    r, z = profile_editing.scale_points(
+        *control_arrays(session.design), selected, factor_r, factor_z, pivot, radius, falloff
+    )
+    return set_control_points(
+        session, _points(r, z), f"Scale {len(set(selected))} point(s)", keep_rows_fitted
+    )
+
+
+def rotate_points(
+    session: ProjectSession,
+    selected: Sequence[int],
+    angle: float,
+    pivot: tuple[float, float] | None = None,
+    radius: float = 0.0,
+    falloff: Falloff = "smooth",
+    keep_rows_fitted: bool = True,
+) -> bool:
+    """Rotate the selected control points by ``angle`` rad about ``pivot`` (m; default
+    their centroid); one command, locks applied."""
+    r, z = profile_editing.rotate_points(
+        *control_arrays(session.design), selected, angle, pivot, radius, falloff
+    )
+    return set_control_points(
+        session, _points(r, z), f"Rotate {len(set(selected))} point(s)", keep_rows_fitted
+    )
+
+
+def straighten_points(
+    session: ProjectSession, first: int, last: int, keep_rows_fitted: bool = True
+) -> bool:
+    """Put the control points between ``first`` and ``last`` on the straight line
+    joining them (a straight section); one command, locks applied."""
+    r, z = profile_editing.straighten_points(*control_arrays(session.design), first, last)
+    lo, hi = sorted((first, last))
+    return set_control_points(
+        session, _points(r, z), f"Straighten points {lo + 1} to {hi + 1}", keep_rows_fitted
+    )
+
+
+def smooth_points(
+    session: ProjectSession,
+    selected: Sequence[int],
+    strength: float = 0.5,
+    iterations: int = 1,
+    keep_rows_fitted: bool = True,
+) -> bool:
+    """Laplacian smoothing of the selected interior control points; one command, locks
+    applied (they also undo the slight shrinkage of smoothing)."""
+    r, z = profile_editing.smooth_points(
+        *control_arrays(session.design), selected, strength, iterations
+    )
+    return set_control_points(
+        session, _points(r, z), f"Smooth {len(set(selected))} point(s)", keep_rows_fitted
+    )
+
+
+def simplify_profile(
+    session: ProjectSession,
+    tolerance: float,
+    max_points: int | None = None,
+    keep_rows_fitted: bool = True,
+) -> profile_editing.Simplified:
+    """Replace the control points by fewer ones whose profile stays within ``tolerance``
+    m of the current one (:func:`~envelopelab.geometry.profile_editing.simplify_profile`).
+
+    Returns
+    -------
+    Simplified
+        The new points and their deviation (before the locks are re-applied).
+
+    Raises
+    ------
+    ValueError
+        When no profile with fewer points meets the tolerance; nothing is changed.
+    """
+    design = session.design
+    assert design.gores is not None
+    r, z = control_arrays(design)
+    if r.size <= 2:
+        raise ValueError("the profile has only two control points")
+    result = profile_editing.simplify_profile(
+        r, z, tolerance, design.gores.profile_interpolation, max_points
+    )
+    if not result.within_tolerance or result.count >= r.size:
+        raise ValueError(
+            f"no profile with fewer than {r.size} points stays within "
+            f"{tolerance * 1e3:g} mm (best: {result.count} points, "
+            f"{result.deviation * 1e3:.1f} mm)"
+        )
+    set_control_points(
+        session,
+        _points(result.r, result.z),
+        f"Simplify profile to {result.count} points ({result.deviation * 1e3:.1f} mm)",
+        keep_rows_fitted,
+    )
+    return result
 
 
 def insert_control_point(
