@@ -178,7 +178,7 @@ clean exit, and offered for recovery at the next start otherwise.
           "type": "array"
         },
         "schema_version": {
-          "default": 4,
+          "default": 5,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -2115,8 +2115,22 @@ clean exit, and offered for recovery at the next start otherwise.
     },
     "TaperPoint": {
       "additionalProperties": false,
-      "description": "One station of a crest-loft taper.\n\nAttributes\n----------\nstation : float\n    Fraction of the tape length from the mouth (0) to the top opening (1).\ntaper : float\n    Taper of the crest offset at the station, dimensionless (1: the full loft fraction).",
+      "description": "One station of a crest-loft taper.\n\nAttributes\n----------\nstation : float\n    Fraction of the tape length from the mouth (0) to the top opening (1).\ntaper : float\n    Taper of the crest offset at the station, dimensionless (1: the full loft fraction).\nat_row : str, optional\n    The station is the bottom seam of this panel row, and follows it when rows are\n    resized; ``station`` then holds that seam's fraction (kept in step by every edit,\n    :func:`sync_taper_anchors`). None: a free station.",
       "properties": {
+        "at_row": {
+          "anyOf": [
+            {
+              "maxLength": 8,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "At Row"
+        },
         "station": {
           "maximum": 1,
           "minimum": 0,

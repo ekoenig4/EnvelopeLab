@@ -63,6 +63,13 @@ in the undo history. Nothing is edited by hand in JSON.
       of the tape radius, and a *taper* table of stations along the tape. Edit the
       fraction and the table; *Add station* and *Remove station* work as for the gore
       loft. The panel-row table shows the computed bows read-only, in mm.
+      *Follows seam* puts a station on a row's bottom seam, for example *bottom of F*. It
+      then moves with that seam when rows are resized, renamed or split, or when the
+      profile changes. Typing a station number frees it again. A seam's bow comes from
+      the crest offset where the tape turns near that seam (at the seam itself for
+      straight tape segments). So for no loft below row F and the full loft from F up,
+      set taper 0 at *bottom of E* and 1 at *bottom of F*: the E–F seam is the first to
+      bow.
     * *Measured bows*: each row has its own bottom and top bow, typed in the panel-row
       table in mm, positive outward. *Freeze as measured bows* turns the crest loft's
       bows into measured ones, so you can adjust single seams; the panels do not change.

@@ -170,6 +170,19 @@ When the rows carry measured bows, the file's design uses them, scaled with the 
 length for variants. The crest loft then generates seams only when asked
 (`ShapeFile.design(seams="crest")`). Without measured bows, the crest loft sets the seams.
 
+A taper station may also be a row seam, written `bottom of <row>`, for example
+`[bottom of F, 1]`. It then stays on that seam in the design, through row edits and
+scaled variants (ADR-0023). The first row's bottom is the mouth: give it as `0` or a
+station name. For example, no loft on the rows below F and the full loft from F up,
+ramping up over row E:
+
+```yaml
+loft:
+  crest:
+    fraction: 0.03
+    taper: [[0, 0], [bottom of E, 0], [bottom of F, 1], [1, 1]]
+```
+
 ### Rows, zones and panel zones
 
 `rows` lists the panel rows from the mouth up. Each row has:

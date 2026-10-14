@@ -75,7 +75,12 @@ import numpy.typing as npt
 from scipy.optimize import brentq
 
 from envelopelab.atmosphere import gas_density, gross_lift
-from envelopelab.design.model import CrestLoftSpec, DesignDocument, TaperPoint
+from envelopelab.design.model import (
+    CrestLoftSpec,
+    DesignDocument,
+    TaperPoint,
+    row_bottom_fraction,
+)
 from envelopelab.geometry.gore import (
     LENGTH_TOLERANCE,
     CrestLoft,
@@ -232,10 +237,15 @@ def design_crest_loft(design: DesignDocument) -> CrestLoft | None:
     if design.gores is None or design.gores.crest_loft is None:
         return None
     spec = design.gores.crest_loft
+    letters = [r.letter for r in design.gores.panel_rows]
+    heights = [r.finished_height for r in design.gores.panel_rows]
+    # A row-anchored station is its row's bottom seam (the stored station mirrors it).
+    stations = tuple(
+        p.station if p.at_row is None else row_bottom_fraction(heights, letters.index(p.at_row))
+        for p in spec.taper
+    )
     return CrestLoft(
-        fraction=spec.fraction,
-        stations=tuple(p.station for p in spec.taper),
-        taper=tuple(p.taper for p in spec.taper),
+        fraction=spec.fraction, stations=stations, taper=tuple(p.taper for p in spec.taper)
     )
 
 

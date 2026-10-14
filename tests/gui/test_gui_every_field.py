@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 from pydantic import BaseModel
 
 from envelopelab.design.model import DesignDocument
@@ -227,3 +228,38 @@ def test_the_3d_view_follows_the_gore_and_pattern_edits(window: MainWindow) -> N
     assert "tape paths" in view.labels()["marks"]
     assert session.design.gores is not None
     assert len(view.layers["marks"].polylines["tape_paths"]) == session.design.gores.count
+
+
+def test_taper_stations_follow_row_seams_in_the_gore_editor(window: MainWindow) -> None:
+    from PySide6.QtWidgets import QComboBox
+
+    session = window.new_project(load_shape_file(SPECIAL).design())
+    editor = window.gore_editor
+    editor.use_crest.click()  # default crest loft: stations 0, 0.5, 1
+    combo = editor.crest_table.cellWidget(1, 2)
+    assert isinstance(combo, QComboBox) and combo.currentData() is None
+    index = combo.findData("E")
+    combo.setCurrentIndex(index)
+    combo.activated.emit(index)
+    gores = session.design.gores
+    assert gores is not None and gores.crest_loft is not None
+    point = gores.crest_loft.taper[1]
+    assert point.at_row == "E"
+    heights = [r.finished_height for r in gores.panel_rows]
+    assert point.station == pytest.approx(sum(heights[:5]) / sum(heights))
+    # Making row B taller moves the station with the seam under E.
+    height = editor.rows_table.item(2, 1)
+    assert height is not None
+    height.setText(f"{heights[2] + 0.3:.4f}")
+    gores = session.design.gores
+    assert gores is not None and gores.crest_loft is not None
+    heights = [r.finished_height for r in gores.panel_rows]
+    assert gores.crest_loft.taper[1].station == pytest.approx(sum(heights[:5]) / sum(heights))
+    # Typing a station frees the point.
+    station = editor.crest_table.item(1, 0)
+    assert station is not None
+    station.setText("0.45")
+    gores = session.design.gores
+    assert gores is not None and gores.crest_loft is not None
+    assert gores.crest_loft.taper[1].at_row is None
+    assert gores.crest_loft.taper[1].station == 0.45

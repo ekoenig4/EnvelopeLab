@@ -282,3 +282,40 @@ def test_smalley_version_1_file_is_unchanged() -> None:
     assert sf.format_version == 1
     assert sf.span == "poles" and sf.rows == () and sf.rigging == {}
     assert sf.shape.interpolation == "spline" and sf.shape.construction == "lobe"
+
+
+def test_taper_stations_can_name_row_seams() -> None:
+    raw = _raw()
+    for row in raw["rows"]:
+        del row["bow"]
+    raw["loft"] = {
+        "crest": {
+            "fraction": 0.03,
+            "taper": [[0.0, 0.0], ["bottom of C", 0.0], ["bottom of D", 1.0], [1.0, 1.0]],
+        }
+    }
+    sf = parse_shape_file(raw, PATH)
+    assert sf.crest is not None and sf.crest.stations == (0.0, 0.5, 0.75, 1.0)
+    design = sf.design()
+    assert design.gores is not None and design.gores.crest_loft is not None
+    taper = design.gores.crest_loft.taper
+    assert [(p.station, p.at_row) for p in taper] == [
+        (0.0, None),
+        (0.5, "C"),
+        (0.75, "D"),
+        (1.0, None),
+    ]
+    # A scaled variant keeps them on the seams.
+    variant = sf.design(sf.solve({**sf.hold, "tape_length": 30.0}))
+    assert variant.gores is not None and variant.gores.crest_loft is not None
+    assert [p.at_row for p in variant.gores.crest_loft.taper] == [None, "C", "D", None]
+
+
+@pytest.mark.parametrize("where", ["bottom of NOMEX", "bottom of Z"])
+def test_taper_row_seams_must_exist(where: str) -> None:
+    raw = _raw()
+    for row in raw["rows"]:
+        del row["bow"]
+    raw["loft"] = {"crest": {"fraction": 0.03, "taper": [[where, 1.0]]}}
+    with pytest.raises(ShapeFileError, match="no such row seam"):
+        parse_shape_file(raw, PATH)

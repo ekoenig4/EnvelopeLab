@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 
 from envelopelab.commands import Command, CommandStack
-from envelopelab.design.model import DesignDocument
+from envelopelab.design.model import DesignDocument, sync_taper_anchors
 from envelopelab.project.dependencies import (
     ArtifactStatus,
     ArtifactTracker,
@@ -375,6 +375,8 @@ class ProjectSession:
         design, patterns = _state_data(self.project.state)
         design, patterns = copy.deepcopy(design), copy.deepcopy(patterns)
         mutate(design, patterns)
+        # Row-anchored crest-loft stations follow their rows through every edit.
+        sync_taper_anchors(design)
         shapes = _shapes_data(self.project.state)
         return self.apply_state(_state_from(design, patterns, shapes), description, provenance)
 

@@ -210,3 +210,59 @@ def test_wizard_designs_meet_their_targets_for_every_construction(
         profile.meridian_length, abs=1e-6
     )
     assert design.meta.content_hash == design.compute_content_hash()
+
+
+def _anchors(s: ProjectSession) -> list[tuple[float, str | None]]:
+    gores = s.design.gores
+    assert gores is not None and gores.crest_loft is not None
+    return [(p.station, p.at_row) for p in gores.crest_loft.taper]
+
+
+def _bottom(s: ProjectSession, letter: str) -> float:
+    gores = s.design.gores
+    assert gores is not None
+    heights = [r.finished_height for r in gores.panel_rows]
+    index = [r.letter for r in gores.panel_rows].index(letter)
+    return sum(heights[:index]) / sum(heights)
+
+
+def test_taper_stations_can_follow_row_seams() -> None:
+    s = measured()
+    # No loft below row E, the full 3 % from row F up.
+    assert edits.set_crest_loft(s, 0.03, [(0.0, 0.0), ("E", 0.0), ("F", 1.0), (1.0, 1.0)])
+    anchors = _anchors(s)
+    assert [a for _, a in anchors] == [None, "E", "F", None]
+    assert anchors[1][0] == pytest.approx(_bottom(s, "E"))
+    bows = design_seam_bows(s.design)
+    assert all(b == pytest.approx(0.0) and t == pytest.approx(0.0) for b, t in bows[:5])
+    assert bows[5][1] > 0.01  # the E/F seam bows
+    # Resizing rows moves the anchored stations with their seams.
+    gores = s.design.gores
+    assert gores is not None
+    heights = [r.finished_height for r in gores.panel_rows]
+    heights[2], heights[3] = heights[2] + 0.4, heights[3] - 0.4
+    assert edits.set_row_heights(s, heights, "resize")
+    anchors = _anchors(s)
+    assert anchors[1][0] == pytest.approx(_bottom(s, "E"))
+    assert anchors[2][0] == pytest.approx(_bottom(s, "F"))
+    # Renaming and splitting keep them attached.
+    assert edits.rename_row(s, "E", "EQ")
+    assert [a for _, a in _anchors(s)] == [None, "EQ", "F", None]
+    assert edits.split_row(s, 1)
+    assert _anchors(s)[1][0] == pytest.approx(_bottom(s, "EQ"))
+    # Merging away the row a station sits under leaves a free station where it was.
+    index = [r.letter for r in s.design.gores.panel_rows].index("EQ")  # type: ignore[union-attr]
+    where = _anchors(s)[2][0]
+    assert edits.merge_row_with_next(s, index)
+    station, anchor = _anchors(s)[2]
+    assert station == pytest.approx(where) and anchor is None
+
+
+def test_row_anchored_stations_are_checked() -> None:
+    s = measured()
+    before = s.design
+    with pytest.raises(ValueError, match="unknown row"):
+        edits.set_crest_loft(s, 0.03, [("Z", 1.0)])
+    with pytest.raises(ValueError, match="strictly increasing"):
+        edits.set_crest_loft(s, 0.03, [("E", 0.0), (_bottom(s, "E"), 1.0)])
+    assert s.design == before

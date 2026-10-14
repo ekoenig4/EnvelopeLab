@@ -19,13 +19,14 @@ from __future__ import annotations
 
 import json
 import math
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-CURRENT_SCHEMA_VERSION = 4
+CURRENT_SCHEMA_VERSION = 5
 
 SourceTagName = Literal["datasheet", "measured", "assumed"]
 
@@ -111,12 +112,17 @@ class TaperPoint(BaseModel):
         Fraction of the tape length from the mouth (0) to the top opening (1).
     taper : float
         Taper of the crest offset at the station, dimensionless (1: the full loft fraction).
+    at_row : str, optional
+        The station is the bottom seam of this panel row, and follows it when rows are
+        resized; ``station`` then holds that seam's fraction (kept in step by every edit,
+        :func:`sync_taper_anchors`). None: a free station.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     station: float = Field(ge=0, le=1)
     taper: float = Field(ge=0, allow_inf_nan=False)
+    at_row: str | None = Field(default=None, min_length=1, max_length=8)
 
 
 class CrestLoftSpec(BaseModel):
@@ -137,10 +143,38 @@ class CrestLoftSpec(BaseModel):
 
     @model_validator(mode="after")
     def validate_stations(self) -> CrestLoftSpec:
+        # Stations anchored at a row are checked with the rows (GoreSpec).
+        if any(p.at_row is not None for p in self.taper):
+            return self
         stations = [p.station for p in self.taper]
         if any(b <= a for a, b in zip(stations, stations[1:], strict=False)):
             raise ValueError("crest-loft taper stations must be strictly increasing")
         return self
+
+
+def row_bottom_fraction(heights: Sequence[float], index: int) -> float:
+    """Fraction of the tape length (0 at the mouth, 1 at the top opening) at the bottom
+    seam of row ``index``, from the rows' finished heights (m, mouth first)."""
+    total = float(sum(heights))
+    if total <= 0.0:
+        raise ValueError("rows have no length")
+    return float(sum(heights[:index])) / total
+
+
+def sync_taper_anchors(design: dict[str, Any]) -> None:
+    """Set the station of every row-anchored crest-loft taper point (JSON design data,
+    in place) to its row's bottom seam. A point whose row no longer exists is left for
+    validation to report."""
+    gores = design.get("gores")
+    if not isinstance(gores, dict) or not gores.get("crest_loft"):
+        return
+    rows = gores.get("panel_rows") or []
+    letters = [r.get("letter") for r in rows]
+    heights = [float(r.get("finished_height", 0.0)) for r in rows]
+    for point in gores["crest_loft"].get("taper") or []:
+        row = point.get("at_row")
+        if row is not None and row in letters:
+            point["station"] = row_bottom_fraction(heights, letters.index(row))
 
 
 class PanelZone(BaseModel):
@@ -222,6 +256,24 @@ class GoreSpec(BaseModel):
             raise ValueError("give both seam bows for every row, or for none")
         if any(bows) and self.crest_loft is not None:
             raise ValueError("give measured seam bows or a crest loft, not both")
+        return self
+
+    @model_validator(mode="after")
+    def validate_crest_anchors(self) -> GoreSpec:
+        if self.crest_loft is None:
+            return self
+        letters = [r.letter for r in self.panel_rows]
+        heights = [r.finished_height for r in self.panel_rows]
+        stations = []
+        for point in self.crest_loft.taper:
+            if point.at_row is None:
+                stations.append(point.station)
+            elif point.at_row not in letters:
+                raise ValueError(f"crest-loft taper: unknown row {point.at_row!r}")
+            else:
+                stations.append(row_bottom_fraction(heights, letters.index(point.at_row)))
+        if any(b <= a for a, b in zip(stations, stations[1:], strict=False)):
+            raise ValueError("crest-loft taper stations must be strictly increasing")
         return self
 
     @model_validator(mode="after")
@@ -743,6 +795,14 @@ def _upgrade_v3_to_v4(raw: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_v4_to_v5(raw: dict[str, Any]) -> dict[str, Any]:
+    """Version 5 lets a crest-loft taper station follow a row seam (``at_row``); version-4
+    stations are free stations (the default)."""
+    upgraded = dict(raw)
+    upgraded["schema_version"] = 5
+    return upgraded
+
+
 def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
     """Upgrade raw design data to :data:`CURRENT_SCHEMA_VERSION`, one version at a time."""
     version = int(raw.get("schema_version", 0))
@@ -756,6 +816,8 @@ def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
             upgraded = _upgrade_v2_to_v3(upgraded)
         elif version == 3:
             upgraded = _upgrade_v3_to_v4(upgraded)
+        elif version == 4:
+            upgraded = _upgrade_v4_to_v5(upgraded)
         else:
             raise ValueError(f"unsupported schema version: {version}")
         version += 1

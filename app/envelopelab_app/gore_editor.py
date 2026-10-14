@@ -302,15 +302,17 @@ class GoreEditor(QWidget):
             "Crest offset over the tape radius where the taper is 1 (δ = fraction · taper · r)."
         )
         self.crest_fraction.editingFinished.connect(self._crest_fraction_edited)
-        self.crest_table = QTableWidget(0, 2)
+        self.crest_table = QTableWidget(0, 3)
         self.crest_table.setObjectName("crestTable")
-        self.crest_table.setHorizontalHeaderLabels(["station (0–1)", "taper"])
+        self.crest_table.setHorizontalHeaderLabels(["station (0–1)", "taper", "follows seam"])
         self.crest_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.crest_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.crest_table.setToolTip(
             "Taper of the crest offset along the tape (station: fraction of the tape length, "
             "0 at the mouth, 1 at the top opening), interpolated linearly and held beyond the "
-            "first and last station."
+            "first and last station.\nFollows seam: put the station on a row's bottom seam; "
+            "it then moves with the seam when rows are resized, renamed or split. Typing a "
+            "station frees it."
         )
         self.crest_table.itemChanged.connect(self._crest_edited)
         self.crest_status = QLabel()
@@ -616,10 +618,20 @@ class GoreEditor(QWidget):
         assert design is not None and design.gores is not None
         crest = design.gores.crest_loft
         points = [] if crest is None else crest.taper
+        seams = [r.letter for r in design.gores.panel_rows[1:]]
         self.crest_table.setRowCount(len(points))
         for i, point in enumerate(points):
             self.crest_table.setItem(i, 0, _item(f"{point.station:.4f}"))
             self.crest_table.setItem(i, 1, _item(f"{point.taper:.4f}"))
+            combo = QComboBox()
+            combo.addItem("(free)", None)
+            for letter in seams:
+                combo.addItem(f"bottom of {letter}", letter)
+            combo.setCurrentIndex(max(0, combo.findData(point.at_row)))
+            combo.activated.connect(
+                lambda _i, row=i, c=combo: self.anchor_crest_station(row, c.currentData())
+            )
+            self.crest_table.setCellWidget(i, 2, combo)
         self.crest_fraction.setValue(0.0 if crest is None else crest.fraction * 100.0)
         excess = sum(a + b for a, b in bows) * 1e3
         measured = any(r.bow_bottom is not None for r in design.gores.panel_rows)
@@ -642,11 +654,35 @@ class GoreEditor(QWidget):
         self.freeze_crest.setEnabled(crest is not None)
         self.straight_seams.setEnabled(crest is not None or measured)
 
-    def _crest_points(self) -> list[tuple[float, float]]:
+    def _crest_points(self) -> list[tuple[float | str, float]]:
+        """(station or anchoring row, taper) of every taper point."""
         design = self.controller.design
         assert design is not None and design.gores is not None
         crest = design.gores.crest_loft
-        return [] if crest is None else [(p.station, p.taper) for p in crest.taper]
+        if crest is None:
+            return []
+        return [(p.station if p.at_row is None else p.at_row, p.taper) for p in crest.taper]
+
+    def _crest_stations(self) -> list[float]:
+        """Every taper point's station, fraction of the tape length."""
+        design = self.controller.design
+        assert design is not None and design.gores is not None
+        crest = design.gores.crest_loft
+        return [] if crest is None else [p.station for p in crest.taper]
+
+    def anchor_crest_station(self, index: int, row: str | None) -> None:
+        """Put taper point ``index`` on the bottom seam of ``row`` (None: free it where it
+        is)."""
+        if self._updating:
+            return
+        points = self._crest_points()
+        stations = self._crest_stations()
+        if not 0 <= index < len(points):
+            return
+        where: float | str = stations[index] if row is None else row
+        points[index] = (where, points[index][1])
+        if self.controller.edit("set_crest_loft", self._crest_fraction(), points) is None:
+            self.refresh()
 
     def _crest_fraction(self) -> float:
         design = self.controller.design
@@ -676,8 +712,9 @@ class GoreEditor(QWidget):
             self.refresh()
             return
         points = self._crest_points()
-        station, taper = points[item.row()]
-        points[item.row()] = (value, taper) if item.column() == 0 else (station, value)
+        where, taper = points[item.row()]
+        # A typed station is a free one; a taper keeps the point where it is.
+        points[item.row()] = (value, taper) if item.column() == 0 else (where, value)
         if self.controller.edit("set_crest_loft", self._crest_fraction(), points) is None:
             self.refresh()
 
@@ -687,7 +724,7 @@ class GoreEditor(QWidget):
             return
         # Middle of the widest gap (ends included), with the interpolated taper, so the
         # new station does not change the seams until it is edited.
-        stations = [p[0] for p in points]
+        stations = self._crest_stations()
         bounds = sorted({0.0, *stations, 1.0})
         gaps = [(b - a, a, b) for a, b in zip(bounds, bounds[1:], strict=False)]
         _, a, b = max(gaps)

@@ -285,11 +285,31 @@ def test_version_3_documents_migrate_to_lobe_gores() -> None:
         del row["bow_bottom"], row["bow_top"]
     raw["meta"]["content_hash"] = None
     loaded = load_design_document(json.dumps(raw))
-    assert loaded.schema_version == CURRENT_SCHEMA_VERSION == 4
+    assert loaded.schema_version == CURRENT_SCHEMA_VERSION == 5
     assert loaded.gores is not None
     assert loaded.gores.construction == "lobe"
     assert loaded.gores.profile_interpolation == "spline"
     assert loaded.gores.panel_zones == []
+
+
+def test_version_4_documents_migrate_with_free_taper_stations() -> None:
+    from envelopelab.design.model import _raw_hash
+
+    design = _flat_chord_design()
+    raw = json.loads(dump_design_document(design))
+    raw["schema_version"] = 4
+    raw["gores"]["crest_loft"] = {
+        "fraction": 0.03,
+        "taper": [{"station": 0.0, "taper": 0.0}, {"station": 1.0, "taper": 1.0}],
+    }
+    for row in raw["gores"]["panel_rows"]:
+        row["bow_bottom"] = row["bow_top"] = None
+    raw["meta"]["content_hash"] = None
+    raw["meta"]["content_hash"] = _raw_hash(raw)  # written by a version-4 EnvelopeLab
+    loaded = load_design_document(json.dumps(raw))
+    assert loaded.schema_version == 5
+    assert loaded.gores is not None and loaded.gores.crest_loft is not None
+    assert [p.at_row for p in loaded.gores.crest_loft.taper] == [None, None]
 
 
 def test_panel_zones_split_the_fabric_mass() -> None:

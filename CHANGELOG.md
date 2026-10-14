@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Crest-loft taper stations can follow a row seam (*Follows seam* in the gore editor,
+  `bottom of <row>` in shape files). They stay on the seam when rows are resized,
+  renamed or split. Design schema version 5 (ADR-0023); version-4 designs open unchanged.
 - The 3D view shows the gore design as edited:
   - flat-chord gores with their crest raised by the crest loft or by the offset the
     measured seam bows imply (`crest_offsets_from_bows`), seams bowing outward;

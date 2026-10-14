@@ -16,7 +16,7 @@ files are read unchanged.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -251,24 +251,54 @@ def _parse_rows(raw: object, stations: Mapping[str, float]) -> tuple[RowSpec, ..
     return tuple(rows)
 
 
-def _parse_crest(raw: object, stations: Mapping[str, float]) -> CrestLoft:
+#: A crest-loft taper station at a row's bottom seam: ``bottom of <row>``.
+ROW_SEAM_PREFIX = "bottom of "
+
+
+def _row_bottoms(rows: Sequence[RowSpec]) -> dict[str, float]:
+    """Station (fraction of L) of the bottom seam of every row but the first."""
+    return {
+        row.name: below.top
+        for below, row in zip(rows, rows[1:], strict=False)
+        if below.top is not None
+    }
+
+
+def _parse_crest(
+    raw: object, stations: Mapping[str, float], rows: Sequence[RowSpec] = ()
+) -> tuple[CrestLoft, tuple[str | None, ...]]:
+    """The crest loft and, per taper station, the row whose bottom seam it is (if any)."""
     if not isinstance(raw, dict) or "fraction" not in raw:
         raise ShapeFileError("loft.crest: {fraction, taper: [[s, taper], ...]}")
     taper = raw.get("taper", [[0.0, 1.0]])
     if not isinstance(taper, list) or not taper:
         raise ShapeFileError("loft.crest.taper: a list of [s, taper] entries")
-    points = []
+    bottoms = _row_bottoms(rows)
+    points: list[tuple[float, float, str | None]] = []
     for i, entry in enumerate(taper):
+        key = f"loft.crest.taper[{i}]"
         if not isinstance(entry, list) or len(entry) != 2:
-            raise ShapeFileError(f"loft.crest.taper[{i}]: [s, taper]")
-        points.append((_station(entry[0], stations, f"loft.crest.taper[{i}]"), float(entry[1])))
-    points.sort()
+            raise ShapeFileError(f"{key}: [s, taper]")
+        where = entry[0]
+        if isinstance(where, str) and where.startswith(ROW_SEAM_PREFIX):
+            row = where[len(ROW_SEAM_PREFIX) :].strip()
+            if row not in bottoms:
+                names = ", ".join(bottoms) or "none (the file has no rows)"
+                raise ShapeFileError(
+                    f"{key}: {where!r}: no such row seam (rows above the first: {names}; "
+                    "the first row's bottom is the mouth, 0)"
+                )
+            points.append((bottoms[row], float(entry[1]), row))
+        else:
+            points.append((_station(where, stations, key), float(entry[1]), None))
+    points.sort(key=lambda point: point[0])
     try:
-        return CrestLoft(
-            float(raw["fraction"]), tuple(s for s, _ in points), tuple(t for _, t in points)
+        crest = CrestLoft(
+            float(raw["fraction"]), tuple(p[0] for p in points), tuple(p[1] for p in points)
         )
     except (TypeError, ValueError) as exc:
         raise ShapeFileError(f"loft.crest: {exc}") from exc
+    return crest, tuple(p[2] for p in points)
 
 
 #: Keys a child file replaces whole instead of merging (its own regression data).
@@ -401,6 +431,7 @@ class ShapeFile:
     zones: dict[str, str] = field(default_factory=dict)
     panel_zones: tuple[dict[str, Any], ...] = ()
     crest: CrestLoft | None = None
+    crest_rows: tuple[str | None, ...] = ()
     seal_overlap: float | None = None
     crown_ring: float | None = None
     rigging: dict[str, Any] = field(default_factory=dict)
@@ -634,6 +665,7 @@ class ShapeFile:
         """The crest loft re-expressed in fractions of the design's tape length."""
         assert self.crest is not None
         crest = self.crest
+        anchored = {s: row for s, row in zip(crest.stations, self.crest_rows, strict=False) if row}
         inside = [s for s in crest.stations if lower < s < upper]
         stations = [lower, *inside, upper]
         taper = [float(v) for v in np.interp(stations, crest.stations, crest.taper)]
@@ -641,7 +673,11 @@ class ShapeFile:
         return {
             "fraction": crest.fraction,
             "taper": [
-                {"station": min(max((s - lower) / span, 0.0), 1.0), "taper": v}
+                {
+                    "station": min(max((s - lower) / span, 0.0), 1.0),
+                    "taper": v,
+                    "at_row": anchored.get(s) if lower < s < upper else None,
+                }
                 for s, v in zip(stations, taper, strict=True)
             ],
         }
@@ -862,7 +898,9 @@ def _hold_value(shape: NormalizedShape, name: str, value: object) -> float:
     return parse_quantity(value, QUANTITIES[name].dimension, f"design.hold.{name}")
 
 
-def _parse_loft(raw: object, stations: dict[str, float]) -> GoreLoft | CrestLoft | None:
+def _parse_loft(
+    raw: object, stations: dict[str, float], rows: Sequence[RowSpec] = ()
+) -> GoreLoft | tuple[CrestLoft, tuple[str | None, ...]] | None:
     """The ``loft`` block: ``{ratio: k}`` or ``{stations: [[s, k], ...]}`` (a lobe loft; s a
     fraction of L or a station name; k the lobe-radius ratio, dimensionless), or
     ``{crest: {fraction, taper}}`` (a crest loft of a flat-chord gore)."""
@@ -871,7 +909,7 @@ def _parse_loft(raw: object, stations: dict[str, float]) -> GoreLoft | CrestLoft
     if isinstance(raw, dict) and "crest" in raw:
         if len(raw) != 1:
             raise ShapeFileError("loft: give either a lobe loft or 'crest', not both")
-        return _parse_crest(raw["crest"], stations)
+        return _parse_crest(raw["crest"], stations, rows)
     if not isinstance(raw, dict) or ("ratio" in raw) == ("stations" in raw):
         raise ShapeFileError(
             "loft: give either 'ratio' (constant), 'stations' ([s, k] list) or 'crest'"
@@ -993,8 +1031,9 @@ def parse_shape_file(raw: object, path: Path) -> ShapeFile:
         raise ShapeFileError("design.construction must be 'lobe' or 'flat_chord'")
     if version == 1 and "construction" in design:
         raise ShapeFileError("design.construction: needs format_version 2")
-    loft = _parse_loft(raw.get("loft"), stations)
-    crest = loft if isinstance(loft, CrestLoft) else None
+    rows = _parse_rows(raw.get("rows"), stations)
+    loft = _parse_loft(raw.get("loft"), stations, rows)
+    crest, crest_rows = loft if isinstance(loft, tuple) else (None, ())
     lobe = loft if isinstance(loft, GoreLoft) else None
     if crest is not None and construction != "flat_chord":
         raise ShapeFileError("loft.crest: needs design.construction: flat_chord")
@@ -1031,7 +1070,6 @@ def parse_shape_file(raw: object, path: Path) -> ShapeFile:
     allowance = parse_quantity(
         design.get("seam_allowance", "0 m"), "length", "design.seam_allowance"
     )
-    rows = _parse_rows(raw.get("rows"), stations)
     if any(row.bows is not None for row in rows):
         if construction != "flat_chord":
             raise ShapeFileError("rows.bow: needs design.construction: flat_chord")
@@ -1068,6 +1106,7 @@ def parse_shape_file(raw: object, path: Path) -> ShapeFile:
         zones=zones,
         panel_zones=tuple(dict(z) for z in panel_zones),
         crest=crest,
+        crest_rows=crest_rows,
         seal_overlap=None
         if seal is None
         else parse_quantity(seal, "length", "openings.seal_overlap"),

@@ -13,7 +13,7 @@ from typing import Any, Literal
 
 import numpy as np
 
-from envelopelab.design.model import DesignDocument
+from envelopelab.design.model import DesignDocument, row_bottom_fraction
 from envelopelab.geometry.gore import LENGTH_TOLERANCE, GoreLoft, GoreWidthModel
 from envelopelab.project.dependencies import canonical_hash
 from envelopelab.project.gore_design import (
@@ -302,7 +302,7 @@ def set_construction(
 def set_crest_loft(
     session: ProjectSession,
     fraction: float | None,
-    taper: Sequence[tuple[float, float]] | None = None,
+    taper: Sequence[tuple[float | str, float]] | None = None,
 ) -> bool:
     """Set the crest loft of a flat-chord design, or remove it (straight seams).
 
@@ -317,9 +317,11 @@ def set_crest_loft(
     fraction : float or None
         Crest offset over the tape radius where the taper is 1, dimensionless
         (0.02 = 2 %). ``None`` removes the crest loft and every seam bow.
-    taper : sequence of (float, float)
-        (station, taper): station a fraction of the tape length from the mouth (0) to the
-        top opening (1), taper dimensionless. Sorted by station; at least one.
+    taper : sequence of (float or str, float)
+        (station, taper), taper dimensionless; at least one, sorted by station. A station
+        is a fraction of the tape length from the mouth (0) to the top opening (1), or a
+        row name: the bottom seam of that row, which the station then follows when rows
+        are resized, renamed or split (``TaperPoint.at_row``).
 
     Returns
     -------
@@ -329,16 +331,26 @@ def set_crest_loft(
     Raises
     ------
     ValueError
-        For a lobe design or an invalid crest loft (negative fraction, no taper, repeated
-        or out-of-range station); nothing is changed.
+        For a lobe design, an unknown row or an invalid crest loft (negative fraction, no
+        taper, repeated or out-of-range station); nothing is changed.
     """
     value: dict[str, Any] | None = None
     if fraction is not None:
-        points = sorted((float(f), float(k)) for f, k in (taper or ()))
-        value = {
-            "fraction": float(fraction),
-            "taper": [{"station": f, "taper": k} for f, k in points],
-        }
+        gores = session.design.gores
+        assert gores is not None
+        letters = [r.letter for r in gores.panel_rows]
+        heights = [r.finished_height for r in gores.panel_rows]
+        points: list[dict[str, Any]] = []
+        for where, k in taper or ():
+            if isinstance(where, str):
+                if where not in letters:
+                    raise ValueError(f"crest-loft taper: unknown row {where!r}")
+                station = row_bottom_fraction(heights, letters.index(where))
+                points.append({"station": station, "taper": float(k), "at_row": where})
+            else:
+                points.append({"station": float(where), "taper": float(k), "at_row": None})
+        points.sort(key=lambda point: point["station"])
+        value = {"fraction": float(fraction), "taper": points}
 
     def mutate(data: dict[str, Any], _patterns: dict[str, Any]) -> None:
         gores = _gores(data)
@@ -521,6 +533,10 @@ def merge_row_with_next(session: ProjectSession, index: int) -> bool:
         data = _gores(design)["panel_rows"]
         data[index]["finished_height"] += data[index + 1]["finished_height"]
         upper = data.pop(index + 1)
+        # The seam under the upper row is gone: stations anchored there stay where they are.
+        for point in (_gores(design).get("crest_loft") or {}).get("taper") or []:
+            if point.get("at_row") == upper["letter"]:
+                point["at_row"] = None
         if upper.get("bow_top") is not None:
             data[index]["bow_top"] = upper["bow_top"]  # the merged row ends at its seam
         removed = upper["letter"]
@@ -689,6 +705,9 @@ def rename_row(session: ProjectSession, old: str, new: str) -> bool:
                 zone["row"] = new
         for vent in data.get("turning_vents") or []:
             vent["rows"] = [new if r == old else r for r in vent["rows"]]
+        for point in (gores.get("crest_loft") or {}).get("taper") or []:
+            if point.get("at_row") == old:
+                point["at_row"] = new
         rows = patterns.get("rows", {})
         if old in rows:
             rows[new] = rows.pop(old)
