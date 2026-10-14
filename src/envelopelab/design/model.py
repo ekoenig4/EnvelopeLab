@@ -26,7 +26,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-CURRENT_SCHEMA_VERSION = 5
+CURRENT_SCHEMA_VERSION = 6
 
 SourceTagName = Literal["datasheet", "measured", "assumed"]
 
@@ -492,6 +492,11 @@ class ParachuteSpec(BaseModel):
         attached; the parachute panels end at it.
     centre_ring_diameter : float, optional
         m; required with ``centre_ring``.
+    centre_panel_diameter : float, optional
+        Diameter of a flat circular centre panel, m: the radial panels end at this circle
+        on the parachute (trapezoids) and the centre panel closes it. Larger than the
+        centre ring, smaller than the parachute hole. None: the radial panels run to the
+        centre ring or the apex (triangular wedges).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -506,11 +511,19 @@ class ParachuteSpec(BaseModel):
     crown_ring: RingSpec | None = None
     centre_ring: RingSpec | None = None
     centre_ring_diameter: float | None = Field(default=None, gt=0.0)
+    centre_panel_diameter: float | None = Field(default=None, gt=0.0)
 
     @model_validator(mode="after")
     def validate_centre_ring(self) -> ParachuteSpec:
         if self.centre_ring is not None and self.centre_ring_diameter is None:
             raise ValueError("a centre ring needs centre_ring_diameter")
+        if (
+            self.centre_panel_diameter is not None
+            and self.centre_ring is not None
+            and self.centre_ring_diameter is not None
+            and self.centre_panel_diameter <= self.centre_ring_diameter
+        ):
+            raise ValueError("the centre panel must be larger than the centre ring")
         return self
 
 
@@ -803,6 +816,15 @@ def _upgrade_v4_to_v5(raw: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_v5_to_v6(raw: dict[str, Any]) -> dict[str, Any]:
+    """Version 6 adds the parachute's optional flat centre panel
+    (``parachute.centre_panel_diameter``); version-5 parachutes have none (their radial
+    panels run to the centre ring or the apex, as before)."""
+    upgraded = dict(raw)
+    upgraded["schema_version"] = 6
+    return upgraded
+
+
 def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
     """Upgrade raw design data to :data:`CURRENT_SCHEMA_VERSION`, one version at a time."""
     version = int(raw.get("schema_version", 0))
@@ -818,6 +840,8 @@ def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
             upgraded = _upgrade_v3_to_v4(upgraded)
         elif version == 4:
             upgraded = _upgrade_v4_to_v5(upgraded)
+        elif version == 5:
+            upgraded = _upgrade_v5_to_v6(upgraded)
         else:
             raise ValueError(f"unsupported schema version: {version}")
         version += 1

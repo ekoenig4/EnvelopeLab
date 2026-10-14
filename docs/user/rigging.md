@@ -32,6 +32,28 @@ error in **Validation / Warnings**. Values that are not assessed (the red line's
 the centralising lines' load) say so. The parachute and rigging mass appears in the
 editor's live outputs and is subtracted from the lift margin.
 
+## Parachute overlap and centre panel
+
+The **Parachute** box at the top of the Rigging panel sets two things directly:
+
+* **Overlap with the envelope (m)**: how far the parachute reaches past the top hole onto
+  the envelope, measured along the fabric (`gores.seal_overlap`). Internal pressure presses
+  this band against the envelope to seal it. A wider overlap makes the parachute and its
+  radial panels larger and moves the shroud-line attachment down with the edge. The overlap
+  must be less than the hole radius.
+* **Centre panel diameter (m)**: the parachute is cut as one radial panel per shroud line,
+  each a trapezoid from the edge to this circle, plus one circular centre panel that joins
+  them. New parachutes get a quarter of the hole diameter. Leave it empty for radial panels
+  that run to the centre ring (narrow wedges). It must be larger than the centre ring and
+  smaller than the hole.
+
+The pattern view shows the radial panel (`PARACHUTE xN`) on top of the gore rows and the
+centre panel (`PARACHUTE CENTRE x1`) above it. The tree lists both finished sizes; the
+radial panels' top edges and the centre panel's edge are checked to be the same length.
+
+Parachutes from designs saved before the centre panel existed have none; type a diameter
+to add one.
+
 ## Placing the elements
 
 Select **Parachute**, **Rigging (red line, flying wires)** or **Turning vents** in the
@@ -44,7 +66,8 @@ Design Tree and edit the fields in **Properties** (SI values):
 | | `shroud_attachment` | m along the load tape below the parachute edge |
 | | `centralizing_depth` | m below the crown opening where the centralising lines meet |
 | | `crown_ring`, `centre_ring` | ring class, linear mass (kg/m), strength (N) and required factor of safety; remove to model none |
-| | `centre_ring_diameter` | m; the parachute panels end at the centre ring |
+| | `centre_ring_diameter` | m; without a centre panel the parachute panels end at the centre ring |
+| | `centre_panel_diameter` | m; a flat circular centre panel that the radial panels (then trapezoids) are sewn to; empty: none (wedges) |
 | Red line | `guide_seam` | load tape (1..N) the line is led down |
 | | `spare_length` | m of extra line below the basket attachment |
 | Flying wires | `count` | wires; the gore count must be a multiple |

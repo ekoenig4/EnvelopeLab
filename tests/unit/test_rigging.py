@@ -62,7 +62,9 @@ def test_new_designs_have_parachute_red_line_and_flying_wires(design: DesignDocu
 def test_parachute_panels_cover_the_parachute(design: DesignDocument) -> None:
     out = rigging_outputs(design)
     assert out.parachute is not None and out.parachute.panel is not None
-    area = out.parachute.panel_count * out.parachute.panel.finished_area
+    centre = out.parachute.centre_panel
+    assert centre is not None
+    area = out.parachute.panel_count * out.parachute.panel.finished_area + centre.finished_area
     assert area == pytest.approx(out.parachute.geometry.area, rel=0.02)  # flat gores vs revolution
     assert out.parachute.panel.cut_area > out.parachute.panel.finished_area
 
@@ -346,8 +348,9 @@ def test_default_parachute_has_crown_and_centre_rings(design: DesignDocument) ->
     g = out.parachute.geometry
     assert rings["crown ring"].length == pytest.approx(2 * math.pi * g.hole_radius)
     assert g.apex_radius == pytest.approx(0.1)  # 5 % of the 4 m hole
+    assert g.centre_panel_radius == pytest.approx(0.5)  # a quarter of the hole diameter
     assert out.parachute.panel is not None
-    assert out.parachute.panel.top_width == pytest.approx(2 * math.pi * 0.1 / 12, rel=1e-3)
+    assert out.parachute.panel.top_width == pytest.approx(2 * math.pi * 0.5 / 12, rel=1e-3)
     assert all(r.passes and r.tension is not None and r.tension > 0 for r in rings.values())
     assert out.masses["parachute:crown ring"] > 0.0
 
@@ -366,8 +369,57 @@ def test_flat_parachute_centre_ring_not_assessed(design: DesignDocument) -> None
 
 
 def test_centre_ring_larger_than_hole_is_an_error(design: DesignDocument) -> None:
-    big = _with(design, ("parachute", "centre_ring_diameter"), 10.0)
+    wedges = _with(design, ("parachute", "centre_panel_diameter"), None)
+    big = _with(wedges, ("parachute", "centre_ring_diameter"), 10.0)
     assert _codes(big)["parachute_geometry"] == "error"
+
+
+def test_radial_panels_are_trapezoids_closed_by_a_circular_centre_panel(
+    design: DesignDocument,
+) -> None:
+    out = rigging_outputs(design)
+    pr = out.parachute
+    assert pr is not None and pr.panel is not None and pr.centre_panel is not None
+    centre = pr.centre_panel
+    assert centre.diameter == pytest.approx(1.0) and centre.label == "PC"
+    # The top edges of the N trapezoids are sewn to the circle's edge: equal lengths.
+    assert pr.panel_count * pr.panel.top_seam_length == pytest.approx(centre.seam_length, abs=1e-3)
+    assert pr.panel.top_width > 0.2 and pr.panel.bottom_width > pr.panel.top_width
+    radii = np.hypot(*centre.finished_outline.T)
+    assert np.allclose(radii, 0.5) and np.allclose(
+        np.hypot(*centre.cut_outline.T), 0.5 + centre.allowance
+    )
+    assert centre.allowance > 0.0
+    assert out.masses["parachute:centre panel fabric"] == pytest.approx(pr.centre_mass)
+    assert pr.centre_mass > 0.0
+    assert not [f for f in out.findings if f.code == "parachute_centre_seam"]
+    # Without a centre panel the radial panels run to the centre ring: narrow wedges.
+    wedges = rigging_outputs(_with(design, ("parachute", "centre_panel_diameter"), None))
+    assert wedges.parachute is not None and wedges.parachute.panel is not None
+    assert wedges.parachute.centre_panel is None
+    assert wedges.parachute.panel.top_width == pytest.approx(2 * math.pi * 0.1 / 12, rel=1e-3)
+    assert wedges.parachute.geometry.area == pytest.approx(pr.geometry.area, rel=0.01)
+
+
+def test_centre_panel_outside_the_ring_and_hole_is_refused(design: DesignDocument) -> None:
+    from pydantic import ValidationError
+
+    assert (
+        _codes(_with(design, ("parachute", "centre_panel_diameter"), 4.5))["parachute_geometry"]
+        == "error"
+    )
+    with pytest.raises(ValidationError, match="larger than the centre ring"):
+        _with(design, ("parachute", "centre_panel_diameter"), 0.15)
+
+
+def test_seal_overlap_moves_the_parachute_edge(design: DesignDocument) -> None:
+    narrow = rigging_outputs(_with(design, ("gores", "seal_overlap"), 0.2)).parachute
+    wide = rigging_outputs(_with(design, ("gores", "seal_overlap"), 0.6)).parachute
+    assert narrow is not None and wide is not None
+    assert wide.geometry.edge_s == pytest.approx(narrow.geometry.edge_s - 0.4, abs=1e-9)
+    assert wide.geometry.diameter > narrow.geometry.diameter
+    assert narrow.panel is not None and wide.panel is not None
+    assert wide.panel.side_length > narrow.panel.side_length
 
 
 def test_centre_ring_needs_a_diameter(design: DesignDocument) -> None:
@@ -403,3 +455,25 @@ def test_scoop_gores_must_fit(design: DesignDocument) -> None:
 
     wide = default_scoop(design).model_copy(update={"gore_count": 13})
     assert _codes(design.model_copy(update={"scoop": wide}))["scoop_gores"] == "error"
+
+
+def test_version_5_parachutes_migrate_without_a_centre_panel(design: DesignDocument) -> None:
+    import json
+
+    from envelopelab.design.model import (
+        CURRENT_SCHEMA_VERSION,
+        _raw_hash,
+        dump_design_document,
+        load_design_document,
+    )
+
+    raw = json.loads(dump_design_document(design))
+    raw["schema_version"] = 5
+    del raw["parachute"]["centre_panel_diameter"]
+    raw["meta"]["content_hash"] = None
+    raw["meta"]["content_hash"] = _raw_hash(raw)  # written by a version-5 EnvelopeLab
+    loaded = load_design_document(json.dumps(raw))
+    assert loaded.schema_version == CURRENT_SCHEMA_VERSION == 6
+    assert loaded.parachute is not None and loaded.parachute.centre_panel_diameter is None
+    out = rigging_outputs(loaded)
+    assert out.parachute is not None and out.parachute.centre_panel is None

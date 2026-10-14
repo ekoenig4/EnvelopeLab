@@ -204,7 +204,7 @@ clean exit, and offered for recovery at the next start otherwise.
           "type": "array"
         },
         "schema_version": {
-          "default": 5,
+          "default": 6,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -1186,7 +1186,7 @@ clean exit, and offered for recovery at the next start otherwise.
     },
     "ParachuteSpec": {
       "additionalProperties": false,
-      "description": "The parachute (deflation port) that closes the crown opening from inside.\n\nThe parachute's diameter follows from the envelope: it covers the parachute hole\n(``gores.parachute_hole_diameter``) and overlaps the envelope by ``gores.seal_overlap``\nmeasured along the fabric. One shroud line and one centralising line leave each\nradial seam of the parachute.\n\nAttributes\n----------\npanel_count : int\n    Radial parachute panels (and shroud lines), >= 3.\nbillow : float\n    Rise of the inflated cap over the hole, as a fraction of the hole diameter\n    (0 = flat), dimensionless.\nzone : str, optional\n    Material zone of the parachute fabric; default the design's first zone.\nshroud_attachment : float\n    Distance along the envelope load tape from the parachute edge down to where each\n    shroud line is attached, m.\ncentralizing_depth : float\n    Depth of the centralising-line confluence (red-line attachment) below the crown\n    opening, m.\nshroud_line, centralizing_line : LineSpec\n    Line classes.\ncrown_ring : RingSpec, optional\n    Ring sewn into the rim of the crown opening (its diameter is the opening's).\ncentre_ring : RingSpec, optional\n    Ring at the parachute apex where the radial tapes meet and the crown line is\n    attached; the parachute panels end at it.\ncentre_ring_diameter : float, optional\n    m; required with ``centre_ring``.",
+      "description": "The parachute (deflation port) that closes the crown opening from inside.\n\nThe parachute's diameter follows from the envelope: it covers the parachute hole\n(``gores.parachute_hole_diameter``) and overlaps the envelope by ``gores.seal_overlap``\nmeasured along the fabric. One shroud line and one centralising line leave each\nradial seam of the parachute.\n\nAttributes\n----------\npanel_count : int\n    Radial parachute panels (and shroud lines), >= 3.\nbillow : float\n    Rise of the inflated cap over the hole, as a fraction of the hole diameter\n    (0 = flat), dimensionless.\nzone : str, optional\n    Material zone of the parachute fabric; default the design's first zone.\nshroud_attachment : float\n    Distance along the envelope load tape from the parachute edge down to where each\n    shroud line is attached, m.\ncentralizing_depth : float\n    Depth of the centralising-line confluence (red-line attachment) below the crown\n    opening, m.\nshroud_line, centralizing_line : LineSpec\n    Line classes.\ncrown_ring : RingSpec, optional\n    Ring sewn into the rim of the crown opening (its diameter is the opening's).\ncentre_ring : RingSpec, optional\n    Ring at the parachute apex where the radial tapes meet and the crown line is\n    attached; the parachute panels end at it.\ncentre_ring_diameter : float, optional\n    m; required with ``centre_ring``.\ncentre_panel_diameter : float, optional\n    Diameter of a flat circular centre panel, m: the radial panels end at this circle\n    on the parachute (trapezoids) and the centre panel closes it. Larger than the\n    centre ring, smaller than the parachute hole. None: the radial panels run to the\n    centre ring or the apex (triangular wedges).",
       "properties": {
         "billow": {
           "maximum": 0.5,
@@ -1201,6 +1201,19 @@ clean exit, and offered for recovery at the next start otherwise.
         },
         "centralizing_line": {
           "$ref": "#/$defs/LineSpec"
+        },
+        "centre_panel_diameter": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Centre Panel Diameter"
         },
         "centre_ring": {
           "anyOf": [

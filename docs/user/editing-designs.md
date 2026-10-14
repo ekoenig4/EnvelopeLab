@@ -169,8 +169,8 @@ pattern view only.
 
 The pattern view fills the **Patterns** mode (Ctrl+2), beside the Materials panel. It stacks the
 pieces vertically in the order they are sewn up a gore: the scoop (if any) at the bottom,
-the panel rows from the mouth up (e.g. the Nomex mouth row, then the nylon rows), and the
-parachute panel on top. Each panel row is drawn as cut (dashed) and finished (solid,
+the panel rows from the mouth up (e.g. the Nomex mouth row, then the nylon rows), the
+parachute's radial panel on top and, above it, its circular centre panel. Each panel row is drawn as cut (dashed) and finished (solid,
 filled with the zone's fabric colour) outlines with its label, grain arrow, notches, tapes
 and features; the parachute and scoop panels are read-only here (edit them in the
 Rigging panel and Properties).

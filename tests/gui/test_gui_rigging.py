@@ -95,6 +95,48 @@ def test_parachute_panel_in_the_pattern_view(gore_window: MainWindow) -> None:
     gore_window.patterns.regenerate()
     item = gore_window.patterns.parachute_item
     assert item is not None and "PARACHUTE x8" in item.toolTip()
+    centre = gore_window.patterns.centre_item
+    assert centre is not None and "PARACHUTE CENTRE x1" in centre.toolTip()
+    # The circle sits above the radial panel.
+    top = item.mapToScene(item.polygon()).boundingRect()
+    circle = centre.mapToScene(centre.polygon()).boundingRect()
+    assert circle.bottom() < top.top()
+    assert abs(circle.width() - circle.height()) < 1e-3  # a 145-point polygon
+
+
+def test_parachute_overlap_and_centre_panel_in_the_rigging_panel(gore_window: MainWindow) -> None:
+    panel = gore_window.rigging
+    assert not panel.parachute_box.isEnabled()
+    _add_all(gore_window)
+    session = gore_window.controller.session
+    assert session is not None and session.design.parachute is not None
+    assert panel.parachute_box.isEnabled()
+    centre = session.design.parachute.centre_panel_diameter
+    assert centre is not None and panel.settings["centre_panel"].text() == f"{centre:g}"
+    panel.settings["overlap"].setText("0.35")
+    panel.settings["overlap"].editingFinished.emit()
+    assert session.design.gores is not None and session.design.gores.seal_overlap == 0.35
+    rigging = gore_window.controller.rigging
+    assert rigging is not None and rigging.parachute is not None
+    edge_s = rigging.parachute.geometry.edge_s
+    panel.settings["centre_panel"].setText("0.6")
+    panel.settings["centre_panel"].editingFinished.emit()
+    assert session.design.parachute is not None
+    assert session.design.parachute.centre_panel_diameter == 0.6
+    rigging = gore_window.controller.rigging
+    assert rigging is not None and rigging.parachute is not None
+    assert rigging.parachute.centre_panel is not None
+    assert rigging.parachute.centre_panel.diameter == 0.6
+    assert rigging.parachute.geometry.edge_s == edge_s
+    # Empty: no centre panel, the radial panels are wedges again.
+    panel.settings["centre_panel"].setText("")
+    panel.settings["centre_panel"].editingFinished.emit()
+    assert session.design.parachute is not None
+    assert session.design.parachute.centre_panel_diameter is None
+    # One undo per change.
+    session.undo()
+    assert session.design.parachute is not None
+    assert session.design.parachute.centre_panel_diameter == 0.6
 
 
 def test_wizard_makes_a_nomex_mouth_row_and_n_nylon_rows(window: MainWindow, qtbot: object) -> None:

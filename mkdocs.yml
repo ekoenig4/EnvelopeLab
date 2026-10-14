@@ -68,6 +68,7 @@ nav:
       - ADR-0021: adr/ADR-0021-flat-chord-gores.md
       - ADR-0022: adr/ADR-0022-shape-file-v2.md
       - ADR-0023: adr/ADR-0023-row-anchored-taper-stations.md
+      - ADR-0024: adr/ADR-0024-parachute-centre-panel.md
 theme:
   name: material
 markdown_extensions:

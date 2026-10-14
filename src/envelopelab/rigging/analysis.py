@@ -21,7 +21,7 @@ import numpy as np
 
 from envelopelab.atmosphere import G0, gas_density, pressure_gradient
 from envelopelab.design.model import DesignDocument, LineSpec, RingSpec
-from envelopelab.geometry.gore import LENGTH_TOLERANCE, MeridianProfile, PanelRow
+from envelopelab.geometry.gore import LENGTH_TOLERANCE, MeridianProfile, PanelRow, polygon_area
 from envelopelab.mass_estimate import MassEstimate, TapeMasses, estimate_mass
 from envelopelab.materials.repository import (
     FabricCatalog,
@@ -39,9 +39,12 @@ from envelopelab.rigging.common import (
 )
 from envelopelab.rigging.flying_wires import WireGeometry, wire_geometry, wire_tensions
 from envelopelab.rigging.parachute import (
+    CentrePanel,
     OpeningResult,
     ParachuteGeometry,
     cap_radius,
+    centre_panel,
+    centre_seam_mismatch,
     crown_force,
     opening,
     parachute_panel,
@@ -51,6 +54,9 @@ from envelopelab.rigging.parachute import (
 from envelopelab.rigging.rings import centre_ring_hoop, crown_ring_hoop
 from envelopelab.rigging.scoop import scoop_panel, scoop_profile
 from envelopelab.rigging.turning_vents import VentJet, side_force, vent_jet
+
+#: Largest mismatch of two sewn edges, m (AGENTS.md section 6.6 default; source: assumed).
+SEAM_TOLERANCE = 0.003
 
 
 @dataclass(frozen=True)
@@ -62,7 +68,7 @@ class ParachuteResult:
     geometry : ParachuteGeometry
         Seated shape and line lengths.
     panel : PanelRow, optional
-        Flat pattern of one parachute panel.
+        Flat pattern of one radial parachute panel.
     panel_count : int
         Radial panels (one shroud and one centralising line each).
     crown_pressure : float
@@ -74,10 +80,15 @@ class ParachuteResult:
     opening : OpeningResult
         Red-line travels.
     mass : MassEstimate, optional
-        Parachute fabric, radial and edge tapes and thread.
+        Radial panels' fabric, radial and edge tapes and thread (the centre panel's
+        fabric is ``centre_mass``).
     rings : dict of str to LineResult
         ``crown ring`` and ``centre ring`` when defined: circumference (m), limit hoop
         force (N, tension positive; None when not assessed), strength and mass.
+    centre_panel : CentrePanel, optional
+        Flat circular centre panel (None: the radial panels are wedges).
+    centre_mass : float
+        Fabric mass of the centre panel (cut area), kg.
     """
 
     geometry: ParachuteGeometry
@@ -90,6 +101,8 @@ class ParachuteResult:
     opening: OpeningResult
     mass: MassEstimate | None
     rings: dict[str, LineResult] = field(default_factory=dict)
+    centre_panel: CentrePanel | None = None
+    centre_mass: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -397,6 +410,7 @@ def rigging_outputs(
                 pc.shroud_attachment,
                 pc.centralizing_depth,
                 0.0 if pc.centre_ring is None else 0.5 * (pc.centre_ring_diameter or 0.0),
+                0.5 * (pc.centre_panel_diameter or 0.0),
             )
         except ValueError as exc:
             findings.append(RiggingFinding("parachute_geometry", "error", str(exc), "parachute"))
@@ -473,6 +487,25 @@ def rigging_outputs(
                 sources.update(mass.sources)
             except ValueError as exc:
                 findings.append(RiggingFinding("parachute_panel", "error", str(exc), "parachute"))
+            centre = centre_panel(geom, default_allowance(design))
+            centre_mass = 0.0
+            if centre is not None:
+                fabric = areal.get(zone, MaterialProperty(0.065, "assumed"))
+                centre_mass = abs(polygon_area(centre.cut_outline)) * fabric.value
+                masses["parachute:centre panel fabric"] = centre_mass
+                sources.add(fabric.source)
+                if panel is not None:
+                    mismatch = centre_seam_mismatch(panel, pc.panel_count, centre)
+                    if abs(mismatch) > SEAM_TOLERANCE:
+                        findings.append(
+                            RiggingFinding(
+                                "parachute_centre_seam",
+                                "error",
+                                f"the radial panels' top edges are {mismatch * 1e3:+.1f} mm "
+                                "longer than the centre panel's edge they are sewn to",
+                                "parachute",
+                            )
+                        )
             p_apex = max(grad * (geom.rim_height + geom.cap_rise - z_m), 0.0)
             rings: dict[str, LineResult] = {}
             if pc.crown_ring is not None:
@@ -545,6 +578,8 @@ def rigging_outputs(
                 opening=open_,
                 mass=mass,
                 rings=rings,
+                centre_panel=centre,
+                centre_mass=centre_mass,
             )
 
     # -- flying wires --------------------------------------------------------------
@@ -911,6 +946,16 @@ def rigging_polylines(
             e = point(g.edge_radius, phi, g.edge_height)
             shrouds.append(np.vstack((e, point(g.attachment_radius, phi, g.attachment_height))))
             centrals.append(np.vstack((e, [0.0, 0.0, g.confluence_height])))
+        if g.centre_panel_radius > 0.0:  # the seam round the flat centre panel
+            seams.append(
+                np.column_stack(
+                    (
+                        g.centre_panel_radius * np.cos(ring),
+                        g.centre_panel_radius * np.sin(ring),
+                        np.full_like(ring, float(g.profile.z[-1])),
+                    )
+                )
+            )
         for key in pr.rings:
             radius, height = (
                 (g.hole_radius, g.rim_height)

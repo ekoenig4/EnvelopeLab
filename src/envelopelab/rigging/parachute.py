@@ -17,6 +17,13 @@ Seated shape
   :math:`\rho = (r_h^2 + h^2)/(2h)`. The flat panels are the gores of this surface of
   revolution (:func:`envelopelab.geometry.gore.split_rows`, small-bulge width, one panel
   row from the edge to the apex).
+* Centre panel (optional, diameter :math:`D_c = 2 r_c < 2 r_h`): the radial panels end at
+  the circle of radius :math:`r_c` on the cap, so they are trapezoids, and a flat circular
+  panel of diameter :math:`D_c` closes the centre. Its edge, :math:`\pi D_c`, is sewn to
+  the panels' top edges (together :math:`2\pi r_c` in the small-bulge model). The disc is
+  cut flat: the cap's rise inside the seam,
+  :math:`\rho - \sqrt{\rho^2 - r_c^2}`, is not in the pattern (it is taken up by the
+  fabric's stretch when pressed); the loads below keep the full cap rise (conservative).
 * Shroud attachment :math:`A`: the load-tape point at :math:`s_A = s_E - a`
   (:math:`a` = ``shroud_attachment``); shroud length :math:`L_s = |E - A|`.
 * Confluence :math:`C = (0, z_t - d)` (:math:`d` = ``centralizing_depth``); centralising
@@ -86,6 +93,10 @@ CAP_SAMPLES = 181
 PATH_SAMPLES = 1201
 #: Label of the parachute panel piece.
 PANEL_LABEL = "P"
+#: Label of the parachute centre panel.
+CENTRE_LABEL = "PC"
+#: Points on the outline of the centre panel.
+CIRCLE_SAMPLES = 145
 
 
 @dataclass(frozen=True)
@@ -103,13 +114,17 @@ class ParachuteGeometry:
     cap_rise : float
         :math:`h`, m.
     apex_radius : float
-        Centre-ring radius where the panels end (0: none), m.
+        Centre-ring radius (0: none), m.
     confluence_height : float
         :math:`z_C`, m.
     shroud_length, centralizing_length : float
         :math:`L_s`, :math:`L_c`, m.
     profile : MeridianProfile
-        Parachute meridian from the edge (s = 0) to the apex, m.
+        Meridian of the radial panels from the edge (s = 0) to where they end: the apex,
+        the centre ring or the centre panel, m.
+    centre_panel_radius : float
+        :math:`r_c`, radius of the flat centre panel (0: none; the radial panels run to
+        the apex or the centre ring), m.
     """
 
     hole_radius: float
@@ -126,6 +141,7 @@ class ParachuteGeometry:
     shroud_length: float
     centralizing_length: float
     profile: MeridianProfile
+    centre_panel_radius: float = 0.0
 
     @property
     def diameter(self) -> float:
@@ -134,13 +150,13 @@ class ParachuteGeometry:
 
     @property
     def meridian_length(self) -> float:
-        """Parachute fabric length from edge to apex, m."""
-        return self.profile.meridian_length
+        """Parachute fabric length from edge to apex (across the flat centre panel), m."""
+        return self.profile.meridian_length + self.centre_panel_radius
 
     @property
     def area(self) -> float:
-        """Parachute fabric area (finished), m^2."""
-        return self.profile.area
+        """Parachute fabric area (finished; radial panels and the flat centre panel), m^2."""
+        return self.profile.area + math.pi * self.centre_panel_radius**2
 
     @property
     def hole_area(self) -> float:
@@ -206,6 +222,7 @@ def seated_geometry(
     shroud_attachment: float,
     centralizing_depth: float,
     apex_radius: float = 0.0,
+    centre_panel_radius: float = 0.0,
 ) -> ParachuteGeometry:
     """Seated parachute geometry on an envelope profile (module docstring).
 
@@ -223,6 +240,9 @@ def seated_geometry(
         Confluence depth below the rim, m.
     apex_radius : float
         Radius of the parachute centre ring (0: none), m.
+    centre_panel_radius : float
+        Radius of the flat centre panel, :math:`0 \\le r_c < r_h` (0: none; the radial
+        panels run to the centre ring or the apex), m. Larger than ``apex_radius``.
 
     Returns
     -------
@@ -231,8 +251,8 @@ def seated_geometry(
     Raises
     ------
     ValueError
-        When the overlap or the attachment do not fit on the meridian, or the top
-        opening is closed.
+        When the overlap or the attachment do not fit on the meridian, the top opening is
+        closed, or the centre panel is not between the centre ring and the hole rim.
     """
     length = envelope.meridian_length
     r_h, z_t = _point_at(envelope, length)
@@ -249,11 +269,17 @@ def seated_geometry(
         )
     r_e, z_e = _point_at(envelope, s_e)
     r_a, z_a = _point_at(envelope, s_a)
+    if centre_panel_radius > 0.0 and not apex_radius < centre_panel_radius < r_h:
+        raise ValueError(
+            f"centre panel diameter {2.0 * centre_panel_radius:.3f} m must be larger than "
+            f"the centre ring ({2.0 * apex_radius:.3f} m) and smaller than the parachute "
+            f"hole ({2.0 * r_h:.3f} m)"
+        )
     rise = billow * 2.0 * r_h
     s_top = envelope.s[envelope.s > s_e]
     seg_r = np.concatenate(([r_e], envelope.radius_at(s_top)))
     seg_z = np.concatenate(([z_e], envelope.height_at(s_top)))
-    cr, cz = cap_points(r_h, z_t, rise, apex_radius)
+    cr, cz = cap_points(r_h, z_t, rise, max(apex_radius, centre_panel_radius))
     keep = np.hypot(seg_r - r_h, seg_z - z_t) > 1e-9
     profile = MeridianProfile.from_points(
         np.concatenate((seg_r[keep], cr)), np.concatenate((seg_z[keep], cz))
@@ -274,11 +300,13 @@ def seated_geometry(
         shroud_length=math.hypot(r_e - r_a, z_e - z_a),
         centralizing_length=math.hypot(r_e, z_e - z_c),
         profile=profile,
+        centre_panel_radius=centre_panel_radius,
     )
 
 
 def parachute_panel(geometry: ParachuteGeometry, panel_count: int, allowance: float) -> PanelRow:
-    """Flat pattern of one parachute panel (edge at the bottom, apex at the top).
+    """Flat pattern of one radial parachute panel: edge at the bottom, and at the top the
+    apex (a triangular wedge), the centre ring or the centre panel (a trapezoid).
 
     Parameters
     ----------
@@ -302,6 +330,69 @@ def parachute_panel(geometry: ParachuteGeometry, panel_count: int, allowance: fl
         labels=[PANEL_LABEL],
         allowance=SeamAllowance(side=allowance, bottom=allowance, top=allowance),
     )[0]
+
+
+@dataclass(frozen=True)
+class CentrePanel:
+    """The flat circular centre panel of the parachute.
+
+    Attributes
+    ----------
+    label : str
+        :data:`CENTRE_LABEL`.
+    diameter : float
+        Finished diameter (the seam line), m.
+    allowance : float
+        Seam allowance outside the seam line, m.
+    finished_outline, cut_outline : ndarray, shape (n, 2)
+        Circles about the origin, counter-clockwise, m.
+    """
+
+    label: str
+    diameter: float
+    allowance: float
+    finished_outline: FloatArray
+    cut_outline: FloatArray
+
+    @property
+    def seam_length(self) -> float:
+        r"""Finished circumference sewn to the radial panels, :math:`\pi D_c`, m."""
+        return math.pi * self.diameter
+
+    @property
+    def finished_area(self) -> float:
+        r""":math:`\pi D_c^2 / 4`, m^2."""
+        return math.pi * self.diameter**2 / 4.0
+
+
+def _circle(radius: float) -> FloatArray:
+    t = np.linspace(0.0, 2.0 * math.pi, CIRCLE_SAMPLES, endpoint=False)
+    return np.column_stack((radius * np.cos(t), radius * np.sin(t)))
+
+
+def centre_panel(geometry: ParachuteGeometry, allowance: float) -> CentrePanel | None:
+    """Flat pattern of the centre panel (None when the parachute has none).
+
+    Parameters
+    ----------
+    geometry : ParachuteGeometry
+        Seated parachute.
+    allowance : float
+        Seam allowance round the edge, m.
+    """
+    r_c = geometry.centre_panel_radius
+    if r_c <= 0.0:
+        return None
+    return CentrePanel(CENTRE_LABEL, 2.0 * r_c, allowance, _circle(r_c), _circle(r_c + allowance))
+
+
+def centre_seam_mismatch(panel: PanelRow, panel_count: int, centre: CentrePanel) -> float:
+    """Sum of the radial panels' top edges minus the centre panel's edge, m.
+
+    The two are sewn together; a builder eases a few millimetres, more is a pattern error
+    (build-pack sewn-edge tolerance, AGENTS.md section 6.6).
+    """
+    return panel_count * panel.top_seam_length - centre.seam_length
 
 
 def crown_force(

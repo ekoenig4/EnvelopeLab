@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: the parachute can have a flat circular centre panel
+  (`parachute.centre_panel_diameter`). Its radial panels are then trapezoids sewn to the
+  circle, instead of wedges that run to the centre ring. The pattern view, the 3D view and
+  the Rigging panel show it, and new parachutes get one a quarter of the hole diameter
+  across. Design schema version 6 (ADR-0024); older designs keep their wedges, so their
+  results do not change.
+- Added: the parachute's overlap with the envelope and its centre-panel diameter are set
+  in a **Parachute** box in the Rigging panel.
 - Added: *Fixed mouth diameter* and *Fixed top (parachute) hole diameter* constraint
   locks in the gore editor; profile edits keep the locked end radii, and a typed target
   solves the design to it, keeping the other locks.

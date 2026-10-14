@@ -56,6 +56,7 @@ from envelopelab.project.gore_design import (
     row_zone,
 )
 from envelopelab.project.model import RowPattern
+from envelopelab.rigging.parachute import CentrePanel
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.refresh import Refresher
 
@@ -348,6 +349,7 @@ class PatternPanel(QWidget):
         self.view.handles = []
         self.view.offsets = {}
         self.parachute_item: QGraphicsPolygonItem | None = None
+        self.centre_item: QGraphicsPolygonItem | None = None
         self.scoop_item: QGraphicsPolygonItem | None = None
         first = self.view.content_rect.isEmpty()
         self.view.content_rect = QRectF()
@@ -527,30 +529,46 @@ class PatternPanel(QWidget):
         self.view.content_rect = self.view.content_rect.united(bounds)
 
     def _draw_parachute(self, y: float, stale: bool) -> None:
-        """The parachute panel on top of the rows (read-only; placed from the Rigging
-        panel)."""
+        """The parachute's radial panel on top of the rows and its centre panel above it
+        (read-only; placed from the Rigging panel)."""
         rigging = self.controller.rigging
         session = self.controller.session
         if rigging is None or session is None:
             return
         design = session.design
         pr = rigging.parachute
-        if pr is not None and pr.panel is not None and design.parachute is not None:
-            zone = design.parachute.zone or next(iter(design.zones), "")
-            self.parachute_item = self._piece(
-                pr.panel,
-                f"PARACHUTE x{pr.panel_count}",
+        if pr is None or pr.panel is None or design.parachute is None:
+            return
+        zone = design.parachute.zone or next(iter(design.zones), "")
+        centre = pr.centre_panel
+        top = "the centre panel" if centre is not None else "the centre ring or apex"
+        self.parachute_item = self._piece(
+            pr.panel,
+            f"PARACHUTE x{pr.panel_count}",
+            zone,
+            y,
+            stale,
+            f"edge at the bottom, {top} at the top; shroud and centralising lines at each "
+            "side seam's bottom end",
+        )
+        if centre is not None:
+            radius = 0.5 * centre.diameter + centre.allowance
+            above = float(pr.panel.cut_outline[:, 1].max()) + GAP + radius
+            self.centre_item = self._piece(
+                centre,
+                "PARACHUTE CENTRE x1",
                 zone,
-                y,
+                y + above,
                 stale,
-                "edge at the bottom, centre ring at the top; shroud and centralising lines "
-                "at each side seam's bottom end",
+                f"sewn round its edge ({centre.seam_length:.3f} m) to the tops of the "
+                f"{pr.panel_count} radial panels",
             )
 
     def _piece(
-        self, panel: PanelRow, text: str, zone: str, y: float, stale: bool, note: str
+        self, panel: PanelRow | CentrePanel, text: str, zone: str, y: float, stale: bool, note: str
     ) -> QGraphicsPolygonItem:
-        """Draw a read-only piece with its finished bottom seam at height ``y`` (m)."""
+        """Draw a read-only piece with its origin (a panel's finished bottom seam, the centre
+        panel's centre) at height ``y`` (m)."""
         origin = QPointF(0.0, -y)
         drawn: list[QGraphicsPolygonItem] = []
         self._in_container(
@@ -560,7 +578,7 @@ class PatternPanel(QWidget):
         return drawn[0]
 
     def _draw_piece(
-        self, panel: PanelRow, text: str, zone: str, stale: bool, note: str
+        self, panel: PanelRow | CentrePanel, text: str, zone: str, stale: bool, note: str
     ) -> QGraphicsPolygonItem:
         scene = self.view.scene()
         grey = QColor("#9e9e9e")
@@ -579,7 +597,10 @@ class PatternPanel(QWidget):
         font.setPointSizeF(7.5)
         label.setFont(font)
         label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-        label.setPos(-0.25 * panel.bottom_width, -panel.finished_height * 0.4)
+        if isinstance(panel, PanelRow):
+            label.setPos(-0.25 * panel.bottom_width, -panel.finished_height * 0.4)
+        else:
+            label.setPos(-0.3 * panel.diameter, 0.0)
         label.setToolTip(finished.toolTip())
         scene.addItem(label)
         return finished

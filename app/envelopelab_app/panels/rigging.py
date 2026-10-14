@@ -1,7 +1,8 @@
 """Rigging panel: add or remove the parachute, red line, flying wires and turning vents,
 and read their lengths, limit loads and factors of safety.
 
-Placements are edited in the Properties panel (select Parachute, Rigging or Turning vents
+The parachute's overlap with the envelope and its centre panel are set here; the other
+placements are edited in the Properties panel (select Parachute, Rigging or Turning vents
 in the Design Tree); this panel shows what :func:`envelopelab.rigging.rigging_outputs`
 computes from them. A factor of safety below the requirement is shown in red and listed
 in the Validation panel; a value that is not assessed says so.
@@ -13,10 +14,13 @@ import math
 from typing import Any
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtGui import QBrush, QColor, QDoubleValidator
 from PySide6.QtWidgets import (
+    QFormLayout,
     QGridLayout,
+    QGroupBox,
     QLabel,
+    QLineEdit,
     QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -78,12 +82,39 @@ class RiggingPanel(QWidget):
             button.clicked.connect(action)
             self.buttons[key] = button
             grid.addWidget(button, i // 2, i % 2)
+        self._updating = False
+        self.settings: dict[str, QLineEdit] = {}
+        self.parachute_box = QGroupBox("Parachute")
+        form = QFormLayout(self.parachute_box)
+        for key, text, tip in (
+            (
+                "overlap",
+                "Overlap with the envelope (m)",
+                "How far the parachute reaches past the top hole onto the envelope, measured "
+                "along the fabric; internal pressure presses this band against the envelope "
+                "to seal it.",
+            ),
+            (
+                "centre_panel",
+                "Centre panel diameter (m)",
+                "A flat circular panel at the centre: the radial panels end at this circle "
+                "(trapezoids). Empty or 0: no centre panel, the radial panels are wedges.",
+            ),
+        ):
+            edit = QLineEdit()
+            edit.setObjectName(f"parachute_{key}")
+            edit.setValidator(QDoubleValidator(0.0, 1e3, 4))
+            edit.setToolTip(tip)
+            edit.editingFinished.connect(lambda k=key: self._settings_edited(k))
+            self.settings[key] = edit
+            form.addRow(text, edit)
         self.summary = QLabel()
         self.summary.setWordWrap(True)
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Item", "Value"])
         layout = QVBoxLayout(self)
         layout.addLayout(grid)
+        layout.addWidget(self.parachute_box)
         layout.addWidget(self.summary)
         layout.addWidget(self.tree)
         self.refresher = Refresher(
@@ -101,6 +132,42 @@ class RiggingPanel(QWidget):
         if self.controller.session is None:
             return
         self.controller.attempt(self.controller.session.set_design_value, path, value, description)
+
+    def _overlap(self) -> float:
+        design = self.controller.design
+        return 0.0 if design is None or design.gores is None else design.gores.seal_overlap
+
+    def set_seal_overlap(self, value: float) -> None:
+        """Set how far the parachute overlaps the envelope round the top hole (m, along the
+        fabric)."""
+        self._set(("gores", "seal_overlap"), float(value), f"Parachute overlap {value:g} m")
+
+    def set_centre_panel(self, diameter: float | None) -> None:
+        """Give the parachute a flat centre panel of ``diameter`` (m), or none."""
+        text = "none" if diameter is None else f"{diameter:g} m"
+        self._set(
+            ("parachute", "centre_panel_diameter"),
+            None if diameter is None else float(diameter),
+            f"Parachute centre panel {text}",
+        )
+
+    def _settings_edited(self, key: str) -> None:
+        if self._updating:
+            return
+        text = self.settings[key].text().strip()
+        if key == "centre_panel" and text in ("", "0"):
+            self.set_centre_panel(None)
+        else:
+            try:
+                value = float(text)
+            except ValueError:
+                self.refresh()
+                return
+            if key == "overlap":
+                self.set_seal_overlap(value)
+            else:
+                self.set_centre_panel(value)
+        self.refresh()
 
     def _dump(self, spec: Any) -> Any:
         return spec.model_dump(by_alias=True, mode="json")
@@ -218,6 +285,14 @@ class RiggingPanel(QWidget):
                 "Parachute and rigging analysis is available for standard-gore designs only."
             )
             return
+        self._updating = True
+        try:
+            self.parachute_box.setEnabled(design.parachute is not None)
+            self.settings["overlap"].setText(f"{self._overlap():g}")
+            centre = design.parachute.centre_panel_diameter if design.parachute else None
+            self.settings["centre_panel"].setText("" if centre is None else f"{centre:g}")
+        finally:
+            self._updating = False
         self.buttons["add_parachute"].setEnabled(design.parachute is None)
         self.buttons["remove_parachute"].setEnabled(design.parachute is not None)
         self.buttons["add_red_line"].setEnabled(design.rigging.red_line is None)
@@ -249,15 +324,26 @@ class RiggingPanel(QWidget):
             node = self._row(self.tree, "Parachute", f"{g.diameter:.3f} m diameter")
             self._row(node, "panels", f"{pr.panel_count}")
             self._row(node, "hole diameter", f"{2 * g.hole_radius:.3f} m")
+            self._row(node, "seal overlap", f"{self._overlap():.3f} m along the fabric")
             self._row(node, "fabric length edge to apex", f"{g.meridian_length:.3f} m")
             self._row(node, "fabric area", f"{g.area:.2f} m²")
             if pr.panel is not None:
+                top = pr.panel.top_width
+                shape = "trapezoid" if top > 1e-6 else "wedge"
                 self._row(
                     node,
-                    "panel (cut)",
-                    f"{pr.panel.bottom_width:.3f} m wide at the edge, "
+                    f"radial panel x{pr.panel_count} ({shape}, finished)",
+                    f"{pr.panel.bottom_width:.3f} m wide at the edge, {top:.3f} m at the top, "
                     f"{pr.panel.side_length:.3f} m long",
                 )
+            centre = pr.centre_panel
+            self._row(
+                node,
+                "centre panel x1 (finished)",
+                "none (the radial panels meet at the centre)"
+                if centre is None
+                else f"circle {centre.diameter:.3f} m diameter, edge {centre.seam_length:.3f} m",
+            )
             self._row(node, "crown pressure", f"{pr.crown_pressure:.1f} Pa")
             self._row(node, "shroud-line load (static)", f"{pr.force:.0f} N")
             self._line(node, pr.shroud)

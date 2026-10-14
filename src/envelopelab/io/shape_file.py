@@ -151,6 +151,7 @@ RIGGING_LENGTHS = frozenset(
         "shroud_attachment",
         "centralizing_depth",
         "centre_ring_diameter",
+        "centre_panel_diameter",
         "spare_length",
         "frame_radius",
         "frame_drop",

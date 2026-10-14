@@ -212,7 +212,7 @@ Without `rows`, the design gets equal rows (count chosen when the design is made
 Each `rigging` section is merged over EnvelopeLab's default for it
 (`envelopelab.rigging.defaults`), using the design model's field names
 (`docs/formats/design-schema.md`). Lengths need a unit: `shroud_attachment`,
-`centralizing_depth`, `centre_ring_diameter`, `spare_length`, `frame_radius`,
+`centralizing_depth`, `centre_ring_diameter`, `centre_panel_diameter`, `spare_length`, `frame_radius`,
 `frame_drop`, `crows_foot_drop`, `height` and `opening_width`. Each turning vent is
 merged over the default vent. `null` removes a section.
 
