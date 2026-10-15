@@ -8,7 +8,7 @@ the same command, so the design stays consistent and one undo restores both.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
@@ -46,7 +46,24 @@ from envelopelab.project.gore_design import (
     profile_from_arrays,
     profile_layout,
 )
-from envelopelab.project.model import ConstraintLocks, ManualOutline, PatternSet, utc_now
+from envelopelab.project.model import (
+    ConstraintLocks,
+    ManualOutline,
+    PatternSet,
+    ProfileTarget,
+    utc_now,
+)
+from envelopelab.project.profile_match import (
+    FIT_TOLERANCE,
+    MAX_CONTROL_POINTS,
+    ProfileUpdate,
+    SolvedMeridian,
+    adopted_control_points,
+    compensated_control_points,
+    solved_deviation,
+    target_profile,
+    updatable_interpolation,
+)
 from envelopelab.project.session import ProjectSession
 from envelopelab.project.shapes import ShapeSpec
 
@@ -529,6 +546,160 @@ def delete_control_point(
     return set_control_points(
         session, points, f"Delete control point {index + 1}", keep_rows_fitted, segments
     )
+
+
+#: Locks that a profile update from a solved shape would fight (it moves these on purpose).
+SHAPE_LOCKS = ("height", "volume", "max_diameter", "mouth_diameter", "top_diameter")
+
+
+def _check_shape_locks(session: ProjectSession) -> None:
+    locked = [name for name in SHAPE_LOCKS if getattr(session.project.locks, name) is not None]
+    if locked:
+        raise LockError(
+            f"unlock {', '.join(n.replace('_', ' ') for n in locked)} first: a profile "
+            "update from a solved shape changes them on purpose"
+        )
+
+
+def _with_target(
+    session: ProjectSession, target: ProfileTarget | None, edit: Callable[[], bool]
+) -> bool:
+    """Run a profile edit with ``target`` as the project's compensation target.
+
+    The target is set first, so that views refreshed by the edit already show it, and put
+    back when the edit is refused.
+    """
+    previous = session.project.profile_target
+    session.project.profile_target = target
+    try:
+        changed = edit()
+    except Exception:
+        session.project.profile_target = previous
+        raise
+    if target != previous:
+        session.mark_aux_dirty()
+    return changed
+
+
+def compensate_profile(
+    session: ProjectSession,
+    solved: SolvedMeridian,
+    relaxation: float = 1.0,
+    tolerance: float = FIT_TOLERANCE,
+    keep_rows_fitted: bool = True,
+) -> ProfileUpdate:
+    """Correct the cut profile so the inflated tapes land on the intended line (one step).
+
+    The first step stores the drawn profile as the project's
+    :class:`~envelopelab.project.model.ProfileTarget`; later steps correct towards that
+    target, so repeated steps converge on it instead of drifting with the cut line. See
+    :func:`envelopelab.project.profile_match.compensated_control_points`.
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit; ``solved`` must come from a run of its current design.
+    solved : SolvedMeridian
+        Solved tape line, m.
+    relaxation : float
+        Step factor in (0, 1], dimensionless.
+    tolerance : float
+        Fit tolerance, m.
+    keep_rows_fitted : bool
+        Rescale the panel rows to the new meridian length.
+
+    Returns
+    -------
+    ProfileUpdate
+        The control points written (m) and their fit error (m).
+
+    Raises
+    ------
+    LockError
+        When height, volume, maximum, mouth or top-hole diameter is locked.
+    ValueError
+        For a segment profile (switch it to a spline or straight segments first).
+    """
+    _check_shape_locks(session)
+    design = session.design
+    interpolation = updatable_interpolation(design)
+    target = session.project.profile_target
+    if target is None:
+        r, z = control_arrays(design)
+        target = ProfileTarget(
+            control_points=list(zip(r.tolist(), z.tolist(), strict=True)),
+            interpolation=interpolation,
+        )
+    goal = target_profile(target)
+    update = compensated_control_points(
+        design, solved, relaxation, tolerance, MAX_CONTROL_POINTS, goal
+    )
+    deviation = solved_deviation(goal, solved).max_distance
+    _with_target(
+        session,
+        target.model_copy(update={"step_deviations": [*target.step_deviations, deviation]}),
+        lambda: set_control_points(
+            session, update.points, "Compensate profile for the solved shape", keep_rows_fitted
+        ),
+    )
+    return update
+
+
+def adopt_solved_profile(
+    session: ProjectSession,
+    solved: SolvedMeridian,
+    tolerance: float = FIT_TOLERANCE,
+    keep_rows_fitted: bool = True,
+) -> ProfileUpdate:
+    """Replace the profile by the solved tape line; any compensation target is dropped
+    (the solved line becomes the intent).
+
+    See :func:`envelopelab.project.profile_match.adopted_control_points`; parameters,
+    return value and errors as :func:`compensate_profile`.
+    """
+    _check_shape_locks(session)
+    update = adopted_control_points(session.design, solved, tolerance, MAX_CONTROL_POINTS)
+    _with_target(
+        session,
+        None,
+        lambda: set_control_points(
+            session, update.points, "Adopt solved profile", keep_rows_fitted
+        ),
+    )
+    return update
+
+
+def restore_profile_target(session: ProjectSession, keep_rows_fitted: bool = True) -> bool:
+    """Set the drawn profile back to the compensation target and drop the target
+    (undoes every compensation step in one command; the target is not restored by undo).
+
+    Raises
+    ------
+    ValueError
+        When the project has no compensation target.
+    """
+    target = session.project.profile_target
+    if target is None:
+        raise ValueError("no compensation target to restore")
+    _check_shape_locks(session)
+    return _with_target(
+        session,
+        None,
+        lambda: set_control_points(
+            session, target.control_points, "Restore the intended profile", keep_rows_fitted
+        ),
+    )
+
+
+def clear_profile_target(session: ProjectSession) -> None:
+    """Forget the compensation target, keeping the drawn (cut) profile as it is.
+
+    Like the locks the target is an editor setting saved with the project, not a design
+    edit, so this does not enter the undo history.
+    """
+    if session.project.profile_target is not None:
+        session.project.profile_target = None
+        session.mark_aux_dirty()
 
 
 def set_gore_count(session: ProjectSession, count: int) -> bool:

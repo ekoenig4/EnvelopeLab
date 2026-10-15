@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- The gore editor draws the solved tape line of the latest preview and CalculiX run over
+  the profile, with its deviation from the intended profile (largest and RMS distance,
+  height and diameter change). Stale and unconverged runs are drawn dotted and flagged.
+  *Compensate towards intended profile* changes the cut so the inflated tapes land on
+  the drawn profile, one step per solve. The intended profile is kept in the project
+  file as `profile_target`. On the generic fixture the deviation fell 103 → 47 → 32 → 21
+  → 16 mm in four preview steps. *Adopt solved shape* makes the drawn profile the solved
+  line. Both need a current, converged run. New run result arrays carry the gore count.
 - Added: *Set profile from file…* in the gore editor takes a shape file's or project's
   profile into the open design (points, interpolation, segments). The rows are refitted,
   the locks applied, and the edit can be undone. *Use as profile* does the same from a

@@ -512,7 +512,8 @@ def run_record(
     -------
     (RunRecord, dict of str to ndarray)
         Record, and positions / initial positions (m), triangles, principal resultants
-        (N/m) and wrinkle state for the 3D view.
+        (N/m) and wrinkle state for the 3D view, and the gore count of a ring design (for
+        :func:`envelopelab.project.profile_match.solved_meridian`).
     """
     iterations = (
         int(result.residual_history[-1][0])
@@ -561,6 +562,10 @@ def run_record(
         "triangles": np.asarray(result.triangles, dtype=np.int64),
         "principal": np.asarray(result.principal, dtype=np.float64),
     }
+    rings = built.build.spec.rings
+    if rings:
+        # Lets the editor find the load tapes of a run after the gore count was edited.
+        arrays["gore_count"] = np.array([rings[0].gore_count], dtype=np.int64)
     if result.wrinkle_state is not None:
         arrays["wrinkle_state"] = np.asarray(result.wrinkle_state, dtype=np.int8)
     return record, arrays

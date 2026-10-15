@@ -54,12 +54,22 @@ from envelopelab.project.gore_design import (
     Interpolation,
     SegmentLayout,
     control_arrays,
+    design_profile,
     design_seam_bows,
     profile_equator,
     profile_from_arrays,
     profile_layout,
     row_zone,
     seam_fractions,
+)
+from envelopelab.project.profile_match import (
+    SEGMENTS_REFUSAL,
+    ProfileUpdate,
+    RunShape,
+    SolvedMeridian,
+    latest_run_shape,
+    station_points,
+    target_profile,
 )
 from envelopelab.project.references import (
     add_reference,
@@ -180,6 +190,7 @@ class ProfileCanvas(QGraphicsView):
         self._drag_start: QPointF | None = None
         self._drag_points: tuple[np.ndarray, np.ndarray] | None = None
         self._drag_delta = (0.0, 0.0)
+        self._points_extent = (1.0, 0.0, 1.0)
         self._curve = QGraphicsPathItem()
         self._curve.setPen(QPen(QColor(HANDLE_COLOR), 0))
         self._mirror = QGraphicsPathItem()
@@ -226,6 +237,9 @@ class ProfileCanvas(QGraphicsView):
         #: Parachute overlap along the tape below the top opening, m (None: no parachute).
         self.seal_overlap: float | None = None
         self.labels: list[QGraphicsSimpleTextItem] = []
+        #: Ghost lines (solved tape lines, compensation target) by key: (line, mirror).
+        self.ghosts: dict[str, tuple[QGraphicsPathItem, QGraphicsPathItem]] = {}
+        self._extent = (0.0, 0.0, 0.0)  # largest r, lowest and highest z of the ghosts, m
         # A bound slot: Qt drops it when the view is destroyed, before the scene's items.
         self.scene().selectionChanged.connect(self._scene_selection)
 
@@ -270,18 +284,53 @@ class ProfileCanvas(QGraphicsView):
         self.scene().blockSignals(blocker)
         self.pointsSelected.emit()
         self._draw(r, z)
-        # The view holds the design and every visible reference.
+        # The view holds the design, every visible reference and the ghost lines.
         all_r = np.concatenate([r, *(ref[1] for ref in self.references)])
         all_z = np.concatenate([z, *(ref[2] for ref in self.references)])
-        span = max(float(np.max(all_r)), float(np.ptp(all_z)), 1e-3)
+        self._points_extent = (float(np.max(all_r)), float(np.min(all_z)), float(np.max(all_z)))
+        self._fit()
+
+    def _fit(self) -> None:
+        r_pts, z_lo, z_hi = self._points_extent
+        r_max = max(r_pts, self._extent[0]) if self.ghosts else r_pts
+        if self.ghosts:
+            z_lo, z_hi = min(z_lo, self._extent[1]), max(z_hi, self._extent[2])
+        span = max(r_max, z_hi - z_lo, 1e-3)
         rect = QRectF(
-            -1.1 * float(np.max(all_r)),
-            -float(np.max(all_z)) - 0.1 * span,
-            2.2 * float(np.max(all_r)) + 1e-3,
-            float(np.ptp(all_z)) + 0.2 * span,
+            -1.1 * r_max, -z_hi - 0.1 * span, 2.2 * r_max + 1e-3, (z_hi - z_lo) + 0.2 * span
         )
         self.scene().setSceneRect(rect)
         self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+
+    def set_ghosts(self, ghosts: dict[str, tuple[np.ndarray, np.ndarray, QPen]]) -> None:
+        """Show ghost lines ``{key: (r, z, pen)}`` (m) behind the profile, mirrored."""
+        for line, mirror in self.ghosts.values():
+            self.scene().removeItem(line)
+            self.scene().removeItem(mirror)
+        self.ghosts = {}
+        extent = [0.0, math.inf, -math.inf]
+        for key, (r, z, pen) in ghosts.items():
+            path, flipped = QPainterPath(), QPainterPath()
+            path.moveTo(float(r[0]), float(-z[0]))
+            flipped.moveTo(float(-r[0]), float(-z[0]))
+            for a, b in zip(r[1:], z[1:], strict=True):
+                path.lineTo(float(a), float(-b))
+                flipped.lineTo(float(-a), float(-b))
+            items = (QGraphicsPathItem(path), QGraphicsPathItem(flipped))
+            for item in items:
+                item.setPen(pen)
+                item.setZValue(-1)
+                self.scene().addItem(item)
+            self.ghosts[key] = items
+            extent = [
+                max(extent[0], float(np.max(r))),
+                min(extent[1], float(np.min(z))),
+                max(extent[2], float(np.max(z))),
+            ]
+        if self.ghosts:
+            self._extent = (extent[0], extent[1], extent[2])
+        if self.handles:
+            self._fit()
 
     def clear(self) -> None:
         """No design."""
@@ -304,6 +353,7 @@ class ProfileCanvas(QGraphicsView):
             self.scene().removeItem(item)
         self.reference_items = []
         self._clear_labels()
+        self.set_ghosts({})
 
     def current_points(self) -> tuple[np.ndarray, np.ndarray]:
         """Positions of the handles (m)."""
@@ -590,6 +640,264 @@ class ProfileCanvas(QGraphicsView):
         self.fitInView(self.scene().sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
 
+#: Ghost line colours (Tableau palette, as the rest of the editor).
+GHOST_COLORS = {"envelopelab-preview": "#ff7f0e", "calculix": "#2ca02c", "target": "#9467bd"}
+SOLVERS = (("calculix", "CalculiX"), ("envelopelab-preview", "Preview"))
+
+
+class SolvedShapePanel(QGroupBox):
+    """Solved tape lines over the drawn profile, and the profile updates made from them.
+
+    Shows the latest preview and CalculiX run of the design as ghost lines on the canvas
+    with their deviation from the intended profile (the compensation target when there is
+    one, else the drawn profile), and offers *Compensate* and *Adopt*
+    (:mod:`envelopelab.project.profile_match`). Updates are allowed only from a current,
+    converged run; a stale or unconverged run is still drawn, flagged as such.
+    """
+
+    def __init__(self, controller: WorkspaceController, canvas: ProfileCanvas) -> None:
+        super().__init__("Solved shape vs profile")
+        self.setObjectName("solvedShapeBox")
+        self.controller = controller
+        self.canvas = canvas
+        self.shapes: dict[str, RunShape | None] = {}
+        self.show_ghost: dict[str, QCheckBox] = {}
+        self.status: dict[str, QLabel] = {}
+        layout = QVBoxLayout(self)
+        for solver, text in SOLVERS:
+            box = QCheckBox(f"{text} tape line")
+            box.setObjectName(f"ghost_{solver}")
+            box.setChecked(True)
+            box.setStyleSheet(f"color: {GHOST_COLORS[solver]}; font-weight: bold;")
+            box.toggled.connect(lambda _on: self.refresh())
+            label = QLabel()
+            label.setObjectName(f"ghostStatus_{solver}")
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            self.show_ghost[solver], self.status[solver] = box, label
+            layout.addWidget(box)
+            layout.addWidget(label)
+        self.magnify = QSpinBox()
+        self.magnify.setObjectName("deviationScale")
+        self.magnify.setRange(1, 50)
+        self.magnify.setValue(1)
+        self.magnify.setPrefix("× ")
+        self.magnify.setToolTip(
+            "Draw the solved lines this many times further from the intended profile, to "
+            "see small deviations. The numbers are never scaled."
+        )
+        self.magnify.valueChanged.connect(lambda _v: self.refresh())
+        magnify_form = QFormLayout()
+        magnify_form.addRow("Show deviation", self.magnify)
+        layout.addLayout(magnify_form)
+        self.target_status = QLabel()
+        self.target_status.setObjectName("targetStatus")
+        self.target_status.setWordWrap(True)
+        self.target_status.setStyleSheet(f"color: {GHOST_COLORS['target']};")
+        layout.addWidget(self.target_status)
+        self.restore = QPushButton("Restore intended profile")
+        self.restore.setToolTip(
+            "Set the drawn profile back to the compensation target and stop compensating."
+        )
+        self.restore.clicked.connect(lambda: self.controller.edit("restore_profile_target"))
+        self.clear = QPushButton("Keep cut, clear target")
+        self.clear.setToolTip("Forget the compensation target; the drawn profile stays.")
+        self.clear.clicked.connect(lambda: self.controller.edit("clear_profile_target"))
+        target_buttons = QHBoxLayout()
+        target_buttons.addWidget(self.restore)
+        target_buttons.addWidget(self.clear)
+        layout.addLayout(target_buttons)
+
+        self.source = QComboBox()
+        self.source.setObjectName("updateSource")
+        for solver, text in SOLVERS:
+            self.source.addItem(text, solver)
+        self.source.setToolTip(
+            "Run whose tape line drives the update. Preview runs are much faster for the "
+            "first steps; verify the result with CalculiX."
+        )
+        self.source.activated.connect(lambda _i: self.refresh())
+        self.relaxation = QDoubleSpinBox()
+        self.relaxation.setObjectName("relaxation")
+        self.relaxation.setRange(0.1, 1.0)
+        self.relaxation.setSingleStep(0.1)
+        self.relaxation.setValue(1.0)
+        self.relaxation.setToolTip(
+            "Fraction of the measured offset corrected per compensation step; lower it if "
+            "a step does not reduce the deviation."
+        )
+        self.tolerance = QDoubleSpinBox()
+        self.tolerance.setObjectName("fitTolerance")
+        self.tolerance.setRange(0.5, 50.0)
+        self.tolerance.setDecimals(1)
+        self.tolerance.setValue(DEFAULT_FIT_TOLERANCE_MM)
+        self.tolerance.setSuffix(" mm")
+        self.tolerance.setToolTip(
+            "Control points are added until the new profile follows its target line within "
+            "this distance (the solved line is only known to about the mesh resolution)."
+        )
+        form = QFormLayout()
+        form.addRow("Update from", self.source)
+        form.addRow("Step factor", self.relaxation)
+        form.addRow("Fit tolerance", self.tolerance)
+        layout.addLayout(form)
+        self.compensate = QPushButton("Compensate towards intended profile")
+        self.compensate.setObjectName("compensateProfile")
+        self.compensate.setToolTip(
+            "Pre-distort the cut so the inflated tapes land on the intended profile (one "
+            "step; run the solver again and repeat until the deviation is small)."
+        )
+        self.compensate.clicked.connect(self._compensate)
+        self.adopt = QPushButton("Adopt solved shape")
+        self.adopt.setObjectName("adoptProfile")
+        self.adopt.setToolTip("Replace the drawn profile by the solved tape line.")
+        self.adopt.clicked.connect(self._adopt)
+        update_buttons = QHBoxLayout()
+        update_buttons.addWidget(self.compensate)
+        update_buttons.addWidget(self.adopt)
+        layout.addLayout(update_buttons)
+        self.update_status = QLabel()
+        self.update_status.setObjectName("updateStatus")
+        self.update_status.setWordWrap(True)
+        layout.addWidget(self.update_status)
+
+    def refresh(self) -> None:
+        """Read the latest runs, draw their ghosts and state what may be done."""
+        session = self.controller.session
+        design = self.controller.design
+        if session is None or design is None or design.gores is None:
+            self.canvas.set_ghosts({})
+            return
+        ghosts: dict[str, tuple[np.ndarray, np.ndarray, QPen]] = {}
+        target = session.project.profile_target
+        reference = "intended profile" if target is not None else "drawn profile"
+        intended = design_profile(design) if target is None else target_profile(target)
+        scale = self.magnify.value()
+        for solver, text in SOLVERS:
+            shape = latest_run_shape(session, solver)
+            self.shapes[solver] = shape
+            self.status[solver].setText(_shape_text(text, shape, reference))
+            self.status[solver].setStyleSheet(_shape_style(shape))
+            if (
+                shape is not None
+                and shape.solved is not None
+                and self.show_ghost[solver].isChecked()
+            ):
+                pen = QPen(QColor(GHOST_COLORS[solver]), 0, Qt.PenStyle.DashLine)
+                if not (shape.record.converged and shape.current):
+                    pen.setStyle(Qt.PenStyle.DotLine)
+                r, z = shape.solved.r, shape.solved.z
+                if scale > 1:
+                    base = station_points(intended, shape.solved.station)
+                    r = base[:, 0] + scale * (r - base[:, 0])
+                    z = base[:, 1] + scale * (z - base[:, 1])
+                ghosts[solver] = (r, z, pen)
+        if target is not None:
+            line = target_profile(target)
+            ghosts["target"] = (
+                np.asarray(line.r),
+                np.asarray(line.z),
+                QPen(QColor(GHOST_COLORS["target"]), 0, Qt.PenStyle.DashDotLine),
+            )
+            history = " → ".join(f"{d * 1e3:.0f}" for d in target.step_deviations)
+            self.target_status.setText(
+                "Compensating: the drawn points are the cut line; the dash-dot line is the "
+                f"intended profile (set {target.created:%Y-%m-%d %H:%M} UTC). Largest "
+                f"deviation before each step: {history} mm."
+            )
+        else:
+            self.target_status.setText(
+                "No compensation target: the drawn profile is the intended shape."
+            )
+        self.restore.setEnabled(target is not None)
+        self.clear.setEnabled(target is not None)
+        self.canvas.set_ghosts(ghosts)
+        shape = self.shapes.get(self.source.currentData())
+        refusal = (
+            f"No {self.source.currentText()} run yet: run one to compare."
+            if shape is None
+            else shape.refusal
+        )
+        if not refusal and design.gores.profile_interpolation == "segments":
+            refusal = SEGMENTS_REFUSAL[0].upper() + SEGMENTS_REFUSAL[1:] + "."
+        for button in (self.compensate, self.adopt):
+            button.setEnabled(not refusal)
+        self.update_status.setText(refusal)
+
+    def _solved(self) -> SolvedMeridian | None:
+        shape = self.shapes.get(self.source.currentData())
+        if shape is None or not shape.usable:
+            return None
+        return shape.solved
+
+    def _compensate(self) -> None:
+        solved = self._solved()
+        if solved is None:
+            return
+        update = self.controller.edit(
+            "compensate_profile",
+            solved,
+            self.relaxation.value(),
+            self.tolerance.value() / 1e3,
+        )
+        self._report(update, "Compensated")
+
+    def _adopt(self) -> None:
+        solved = self._solved()
+        if solved is None:
+            return
+        update = self.controller.edit("adopt_solved_profile", solved, self.tolerance.value() / 1e3)
+        self._report(update, "Adopted")
+
+    def _report(self, update: ProfileUpdate | None, what: str) -> None:
+        if update is None:
+            return
+        self.controller.bump()
+        self.controller.stateChanged.emit()
+        self.update_status.setText(
+            f"{what}: {len(update.points)} control points, within "
+            f"{update.fit_error * 1e3:.1f} mm of the target line. The runs are now stale: "
+            "run the solver again to see the new shape."
+        )
+
+
+#: Default fit tolerance of profile updates, mm.
+DEFAULT_FIT_TOLERANCE_MM = 5.0
+
+
+def _shape_text(name: str, shape: RunShape | None, reference: str) -> str:
+    if shape is None:
+        return f"No {name} run."
+    rec = shape.record
+    head = f"{rec.created:%Y-%m-%d %H:%M}, {rec.mesh_target_mm:g} mm mesh"
+    flags = []
+    if not rec.converged:
+        flags.append(f"NOT CONVERGED ({rec.status}): shape not final")
+    if not shape.current:
+        flags.append("Stale: the design changed since this run")
+    if shape.solved is None or shape.deviation is None:
+        return f"{head}. Tape line not available: {shape.message}"
+    d = shape.deviation
+    text = (
+        f"{head}: max {d.max_distance * 1e3:.0f} mm from the {reference} "
+        f"(RMS {d.rms_distance * 1e3:.0f} mm), height {d.height_change * 1e3:+.0f} mm, "
+        f"max diameter {d.max_diameter_change * 1e3:+.0f} mm"
+    )
+    if shape.solved.seams > 1 and shape.solved.spread > 1e-3:
+        text += f"; seams differ by up to {shape.solved.spread * 1e3:.0f} mm (not axisymmetric)"
+    return text + "." + "".join(f"\n{f}." for f in flags)
+
+
+def _shape_style(shape: RunShape | None) -> str:
+    if shape is None:
+        return ""
+    if not shape.record.converged or shape.solved is None:
+        return "color: #b00020; font-weight: bold;"
+    if not shape.current:
+        return "color: #a05a00;"
+    return ""
+
+
 def _item(text: str, editable: bool = True) -> QTableWidgetItem:
     item = QTableWidgetItem(text)
     if not editable:
@@ -858,6 +1166,8 @@ class GoreEditor(QWidget):
         lobe_layout.addLayout(loft_buttons)
         side_layout.addWidget(self.lobe_box)
         side_layout.addWidget(self.crest_box)
+        self.solved_shape = SolvedShapePanel(controller, self.canvas)
+        side_layout.addWidget(self.solved_shape)
         side_layout.addWidget(locks_box)
         side_layout.addWidget(outputs_box)
 
@@ -881,7 +1191,7 @@ class GoreEditor(QWidget):
             self,
             self.refresh,
             lambda: controller.revision,
-            (controller.stateChanged, controller.sessionChanged),
+            (controller.stateChanged, controller.sessionChanged, controller.runsChanged),
             defer_hidden=lambda: controller.defer_hidden,
         )
         controller.fileChanged.connect(self._update_header)
@@ -992,6 +1302,7 @@ class GoreEditor(QWidget):
                 self.lock_values[name].setText(current[name])
             self.gore_count.setEnabled(locks.gore_count is None)
             self._show_outputs()
+            self.solved_shape.refresh()
         finally:
             self._updating = False
 

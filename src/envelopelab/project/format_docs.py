@@ -27,6 +27,13 @@ KEYS: tuple[tuple[str, str], ...] = (
         "count).",
     ),
     (
+        "`profile_target`",
+        "Optional; written only while the gore profile is compensated for the solved "
+        "shape. The intended inflated tape line: control points (radius, height, m), "
+        "interpolation, start time and the largest deviation (m) before each compensation "
+        "step. The drawn control points are then the cut line.",
+    ),
+    (
         "`state.shapes`",
         "Special shapes placed on the envelope (version 2): `kind` (`dome`, `tube`, "
         "`revolved` or `mesh`), unique `name`, `placement` (gore from 1, tape position m, "

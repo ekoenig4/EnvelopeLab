@@ -27,6 +27,7 @@ nav:
       - Special-shape primitives: theory/special-shape-primitives.md
       - Design editing and staleness: theory/design-editing.md
       - Profile editing, segments and simplify: theory/profile-editing.md
+      - Solved shape vs drawn profile: theory/profile-matching.md
       - Shape families: theory/shape-families.md
       - Parachute and rigging: theory/rigging.md
   - Validation:
@@ -71,6 +72,7 @@ nav:
       - ADR-0023: adr/ADR-0023-row-anchored-taper-stations.md
       - ADR-0024: adr/ADR-0024-parachute-centre-panel.md
       - ADR-0025: adr/ADR-0025-segment-profiles.md
+      - ADR-0026: adr/ADR-0026-profile-compensation-target.md
 theme:
   name: material
 markdown_extensions:

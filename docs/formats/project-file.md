@@ -14,6 +14,7 @@ around it:
 | `state.design` | The design document (SI units: m, K, Pa, kg). |
 | `state.patterns.rows.<letter>` | Pattern annotations of one panel row: printed label, grain angle (degrees from the panel x axis), fabric zone, seam-allowance override (m), notches, tape paths and feature locations (panel coordinates, m), and an optional **manual outline override** (m) with the time, reason and the geometry hash it was drawn over. |
 | `locks` | Constraint locks of the gore editor (height m, volume m³, maximum diameter m, gore count). |
+| `profile_target` | Optional; written only while the gore profile is compensated for the solved shape. The intended inflated tape line: control points (radius, height, m), interpolation, start time and the largest deviation (m) before each compensation step. The drawn control points are then the cut line. |
 | `state.shapes` | Special shapes placed on the envelope (version 2): `kind` (`dome`, `tube`, `revolved` or `mesh`), unique `name`, `placement` (gore from 1, tape position m, fraction across the gore, lean and lean direction in degrees), the shape's sizes (m) or revolved profile (m) or mesh vertices (m) and triangles, panel or gore count, match marks per piece, feed-hole radius (m, optional), seam allowance (m) and skin fabric id (optional). Version 1 files read as having no shapes. |
 | `snapshots` | Named copies of `state` with their design content hash. |
 | `versions` | Committed design versions (`version_id`, `parent_id`, message, state). |
@@ -1348,6 +1349,56 @@ clean exit, and offered for recovery at the next start otherwise.
       "title": "ProfileSegment",
       "type": "object"
     },
+    "ProfileTarget": {
+      "additionalProperties": false,
+      "description": "Intended inflated tape line of a standard-gore design under profile compensation.\n\nWhile a design's profile is compensated for the solved shape\n(:func:`envelopelab.project.edits.compensate_profile`), the drawn control points are\nthe *cut* line and this is the line the builder wants to fly. Like the locks it is an\neditor setting, not part of the design state.\n\nAttributes\n----------\ncontrol_points : list of (float, float)\n    Radius and height, m, mouth first (at least two).\ninterpolation : {\"spline\", \"linear\"}\n    How the points are joined.\ncreated : datetime\n    When compensation started (UTC).\nstep_deviations : list of float\n    Largest distance of the solved tape line from this target before each\n    compensation step, m (oldest first): the convergence history of the compensation.",
+      "properties": {
+        "control_points": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "minItems": 2,
+          "title": "Control Points",
+          "type": "array"
+        },
+        "created": {
+          "format": "date-time",
+          "title": "Created",
+          "type": "string"
+        },
+        "interpolation": {
+          "default": "spline",
+          "enum": [
+            "spline",
+            "linear"
+          ],
+          "title": "Interpolation",
+          "type": "string"
+        },
+        "step_deviations": {
+          "items": {
+            "type": "number"
+          },
+          "title": "Step Deviations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "control_points"
+      ],
+      "title": "ProfileTarget",
+      "type": "object"
+    },
     "ProvenanceEntry": {
       "additionalProperties": false,
       "description": "One entry of the append-only provenance log.",
@@ -2458,6 +2509,17 @@ clean exit, and offered for recovery at the next start otherwise.
     },
     "locks": {
       "$ref": "#/$defs/ConstraintLocks"
+    },
+    "profile_target": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ProfileTarget"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
     },
     "provenance": {
       "items": {

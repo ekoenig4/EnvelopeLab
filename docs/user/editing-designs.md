@@ -182,6 +182,49 @@ in the undo history. Nothing is edited by hand in JSON.
   locks; a target that cannot be met is refused. See
   [theory](../theory/design-editing.md).
 
+### Solved shape vs profile
+
+The patterns cut from a profile do not inflate exactly onto it. Tapes stretch, gores
+lobe and the crown flattens. The **Solved shape vs profile** box draws the tape line of
+the latest **Preview** (orange) and **CalculiX** (green) run over the profile canvas,
+mirrored like the profile. Each line has a check box to show or hide it. Under each check
+box, the run is summarised: its date and mesh, the largest and RMS distance from the
+intended profile, and the change of height and maximum diameter.
+
+A few centimetres on an envelope several metres tall are hard to see, so *Show
+deviation* (× 1 to × 50) draws the solved lines that many times further from the intended
+profile. The numbers are never scaled.
+
+A **stale** run (the design changed since) is drawn dotted and flagged in amber. A run
+that is **not converged** is drawn dotted and flagged in red: its shape is not final.
+Neither can drive a profile update.
+
+Two buttons change the profile from the run chosen under *Update from*:
+
+* **Compensate towards intended profile** changes the cut so that the inflated tapes land
+  on the profile you drew. The first step keeps your drawn profile as the **intended
+  profile** (dash-dot purple line). The drawn control points become the *cut* line. Run
+  the solver again and repeat: the box lists the largest deviation before each step, so
+  you can see it shrink. A third to a half of the error typically goes per step. Lower
+  the *Step factor* if a step does not reduce the deviation. *Restore intended profile*
+  sets the drawn profile back to the target in one undoable edit. *Keep cut, clear
+  target* stops compensating and keeps the current cut.
+* **Adopt solved shape** replaces the drawn profile by the solved tape line, so the
+  profile shows what the patterns fly. It drops any intended profile.
+
+Both buttons work only from a current, converged run. Both add control points where the
+solved line needs them, until the new profile follows it within the *Fit tolerance*
+(5 mm by default; the solved line is only known to about the mesh size). Each is one
+undoable edit. Unlock *Fixed height*, *Fixed volume*, *Fixed maximum diameter* and the
+mouth and top-hole diameter locks first, because the update changes them on purpose. A
+*Segments* profile (lines and arcs) cannot follow a solved line. Switch *Profile between
+points* to *Spline* or *Straight segments* to update it; its ghost lines are shown
+either way.
+
+A practical loop: compensate from fast **Preview** runs until the deviation is small,
+then run **CalculiX** once to verify, and compensate from it if needed. See
+[theory](../theory/profile-matching.md).
+
 ## Properties and materials
 
 Select a section in the **Design Tree** (operating conditions, tapes, seam types,
