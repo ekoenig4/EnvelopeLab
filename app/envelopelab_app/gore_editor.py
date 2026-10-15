@@ -827,6 +827,16 @@ class GoreEditor(QWidget):
         buttons = QHBoxLayout()
         buttons.addWidget(add_point)
         buttons.addWidget(del_point)
+        from_file = QPushButton("Set profile from file…")
+        from_file.setObjectName("profileFromFile")
+        from_file.setToolTip(
+            "Take the profile of a shape file or another project into this design: its "
+            "control points, interpolation and segments. Rows, zones, construction and "
+            "rigging stay; the rows are refitted. Locks still apply (unlock to take the "
+            "profile exactly). One undoable edit."
+        )
+        from_file.clicked.connect(self._choose_profile_file)
+        buttons.addWidget(from_file)
         side_layout.addLayout(buttons)
         side_layout.addWidget(tools)
         side_layout.addWidget(self._build_references())
@@ -1520,7 +1530,14 @@ class GoreEditor(QWidget):
         snap.clicked.connect(self.snapshot_reference)
         remove = QPushButton("Remove")
         remove.clicked.connect(self._remove_reference)
-        for b in (add, snap, remove):
+        use = QPushButton("Use as profile")
+        use.setObjectName("useReferenceProfile")
+        use.setToolTip(
+            "Make the selected reference the design's profile: its outline is fitted with "
+            "as few spline control points as keep it within 2 mm. One undoable edit."
+        )
+        use.clicked.connect(self._use_reference)
+        for b in (add, snap, use, remove):
             buttons.addWidget(b)
         layout.addLayout(buttons)
         return box
@@ -1623,6 +1640,51 @@ class GoreEditor(QWidget):
             self.refresh()
         else:
             self._references_changed()
+
+    def set_profile_file(self, path: str) -> bool:
+        """Take the profile of a shape file or project; False if refused."""
+        if self.controller.session is None:
+            return False
+        try:
+            changed = self.controller.edit("set_profile_from_file", path)
+        except OSError as exc:
+            self.controller.editRejected.emit(f"cannot read {path}: {exc}")
+            changed = None
+        if changed is None:
+            self.refresh()
+            return False
+        return True
+
+    def _choose_profile_file(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Set profile from file",
+            "",
+            "Shape files and projects (*.yaml *.yml *.elproj);;All files (*)",
+        )
+        if path:
+            self.set_profile_file(path)
+
+    def use_reference(self, index: int) -> bool:
+        """Make reference ``index`` the design's profile; False if refused."""
+        fit = self.controller.edit("set_profile_from_reference", index)
+        if fit is None:
+            self.refresh()
+            return False
+        self.simplify_status.setText(
+            f"Profile from reference: {fit.count} points within {fit.deviation * 1e3:.1f} mm "
+            "of it (before the locks are re-applied)."
+        )
+        return True
+
+    def _use_reference(self) -> None:
+        rows = self.refs_table.selectionModel().selectedRows()
+        if rows:
+            self.use_reference(rows[0].row())
+        else:
+            self.controller.editRejected.emit("select a reference profile first")
 
     def _references_changed(self) -> None:
         self.controller.bump()

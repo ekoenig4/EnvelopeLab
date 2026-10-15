@@ -33,6 +33,13 @@ in the undo history. Nothing is edited by hand in JSON.
   list the mouth and top-hole diameters and the parachute diameter.
 * **Control-point table**: type exact radius and height values (m). *Insert point after*
   adds a point on the curve halfway to the next one; *Delete point* removes one.
+  *Set profile from file…* takes the profile of a shape file (`.yaml`) or another project
+  (`.elproj`) into the open design: its control points, interpolation and segments.
+  Everything else stays (rows, zones, construction, parachute and rigging). The rows are
+  refitted to the new tape length, and the design's stated mouth and top-hole diameters
+  follow the new profile. Locks still apply, so with *Fixed volume* the imported shape is
+  scaled to keep the volume; unlock them to take the shape exactly. It is one edit, and
+  *Undo* restores the previous profile.
 * **Editing many points at once** (*Edit selected points*):
     * *Select* points by clicking one, Ctrl/Shift+clicking to add or remove one, dragging
       a box on empty canvas, or selecting rows in the table (the two follow each other).
@@ -67,6 +74,10 @@ in the undo history. Nothing is edited by hand in JSON.
     * In the table, untick a reference to hide it or type over its name to rename it.
       *Δz* shifts it up or down (m) to line it up with the design. *Max distance* is the
       largest gap between it and the current profile.
+    * *Use as profile* makes the selected reference the design's profile. Its outline is
+      fitted with as few spline control points as keep it within 2 mm (a reference with
+      straight sections needs many; *Set profile from file…* takes a file's profile
+      exactly). It is one undoable edit.
     * *Remove* deletes the selected reference.
 
   A reference keeps its own copy of the outline, 401 points along the tape. It does not

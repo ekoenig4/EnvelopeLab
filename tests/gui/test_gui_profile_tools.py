@@ -270,3 +270,31 @@ def test_reference_profiles_overlay_the_design(window: MainWindow) -> None:
     table.selectRow(0)
     editor._remove_reference()
     assert [r.name for r in session.project.references] == ["before scaling"]
+
+
+def test_profile_set_from_a_file_and_from_a_reference(window: MainWindow) -> None:
+    from pathlib import Path
+
+    shape = Path(__file__).resolve().parents[1] / "fixtures" / "flat_chord_pattern" / "shape.yaml"
+    session = window.new_project(standard_gore_design("set", 2600.0, 17.0, 18.0, 16, 8))
+    editor = window.gore_editor
+    assert editor.set_profile_file(str(shape))
+    gores = session.design.gores
+    assert gores is not None and gores.profile_interpolation == "linear"
+    assert len(editor.canvas.handles) == len(gores.meridian_profile_control_points) == 11
+    assert editor.interpolation.currentData() == "linear"
+    messages: list[str] = []
+    window.controller.editRejected.connect(messages.append)
+    assert not editor.set_profile_file(str(shape.with_name("README.md")))
+    assert messages
+    # Back to the wizard shape, from a snapshot taken before.
+    session.undo()
+    editor.snapshot_reference()
+    editor.set_profile_file(str(shape))
+    editor.refs_table.selectRow(0)
+    editor._use_reference()
+    gores = session.design.gores
+    assert gores is not None and gores.profile_interpolation == "spline"
+    assert "Profile from reference" in editor.simplify_status.text()
+    gap = editor.refs_table.item(0, 2)
+    assert gap is not None and int(gap.text().split()[0]) <= 3

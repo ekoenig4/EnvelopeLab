@@ -74,3 +74,58 @@ def test_references_are_saved_with_the_project(tmp_path: Path) -> None:
     (ref,) = again.project.references
     assert ref.name == "shape" and ref.z_offset == 0.25 and not ref.visible
     assert ref.r == s.project.references[0].r
+
+
+def test_the_profile_is_set_from_a_shape_file() -> None:
+    from envelopelab.io.shape_file import load_shape_file
+    from envelopelab.project.gore_design import control_arrays, design_volume
+
+    s = session()
+    before = s.design
+    rows = len(before.gores.panel_rows)  # type: ignore[union-attr]
+    assert edits.set_profile_from_file(s, SHAPE)
+    source = load_shape_file(SHAPE).design()
+    r, z = control_arrays(s.design)
+    r_src, z_src = control_arrays(source)
+    assert np.array_equal(r, r_src) and np.array_equal(z, z_src)
+    gores = s.design.gores
+    assert gores is not None and gores.profile_interpolation == "linear"
+    # Everything else stays; the rows cover the new tape length.
+    assert len(gores.panel_rows) == rows and gores.count == before.gores.count  # type: ignore[union-attr]
+    total = sum(row.finished_height for row in gores.panel_rows)
+    assert total == pytest.approx(design_profile(s.design).meridian_length, abs=1e-6)
+    assert gores.mouth_diameter == pytest.approx(2 * r[0])
+    assert gores.parachute_hole_diameter == pytest.approx(2 * r[-1])
+    s.undo()
+    assert s.design == before
+    # With the volume locked, the shape is scaled to keep it.
+    edits.set_lock(s, "volume", True)
+    volume = design_volume(s.design)
+    edits.set_profile_from_file(s, SHAPE)
+    assert design_volume(s.design) == pytest.approx(volume, rel=1e-3)
+
+
+def test_the_profile_is_set_from_a_project_or_a_reference() -> None:
+    from envelopelab.geometry.profile_editing import profile_deviation
+
+    s = session()
+    assert edits.set_profile_from_file(s, PROJECT)
+    other = ProjectSession.open(PROJECT).design
+    assert profile_deviation(design_profile(s.design), design_profile(other)) < 1e-9
+    # A reference is fitted with a spline within the tolerance.
+    rf.add_reference(s, rf.reference_from_file(SHAPE))
+    outline = rf.reference_profile(s.project.references[0])
+    fit = edits.set_profile_from_reference(s, 0, tolerance=0.003)
+    assert fit.within_tolerance and fit.count < rf.REFERENCE_SAMPLES
+    assert s.design.gores is not None and s.design.gores.profile_interpolation == "spline"
+    assert profile_deviation(outline, design_profile(s.design)) < 0.003 * 1.01
+    with pytest.raises(IndexError):
+        edits.set_profile_from_reference(s, 7)
+
+
+def test_a_file_without_a_profile_changes_nothing() -> None:
+    s = session()
+    before = s.design
+    with pytest.raises((OSError, ValueError)):
+        edits.set_profile_from_file(s, ROOT / "README.md")
+    assert s.design == before and not s.stack.can_undo

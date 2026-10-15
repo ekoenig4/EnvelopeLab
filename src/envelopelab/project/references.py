@@ -79,6 +79,19 @@ def reference_from_file(path: str | Path, name: str | None = None) -> ReferenceP
         through for unreadable files).
     """
     file = Path(path)
+    return reference_from_design(design_from_file(file), name or file.stem, str(file))
+
+
+def design_from_file(path: str | Path) -> DesignDocument:
+    """The standard-gore design of a shape file (``.yaml``/``.yml``) or a project file.
+
+    Raises
+    ------
+    ValueError
+        When the file holds no standard-gore profile (the loaders' own errors pass
+        through for unreadable files).
+    """
+    file = Path(path)
     if file.suffix.lower() in SHAPE_FILE_SUFFIXES:
         from envelopelab.io.shape_file import load_shape_file
 
@@ -87,7 +100,7 @@ def reference_from_file(path: str | Path, name: str | None = None) -> ReferenceP
         design = ProjectSession.open(file).design
     if design.gores is None:
         raise ValueError(f"{file.name} is not a standard-gore design: it has no profile")
-    return reference_from_design(design, name or file.stem, str(file))
+    return design
 
 
 def snapshot_reference(design: DesignDocument, name: str | None = None) -> ReferenceProfile:

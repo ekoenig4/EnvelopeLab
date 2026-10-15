@@ -284,6 +284,9 @@ class WorkspaceController(QObject):
             "set_construction",
             "set_profile_interpolation",
             "set_profile_segment",
+            "set_profile_from_design",
+            "set_profile_from_file",
+            "set_profile_from_reference",
         ):
             kwargs.setdefault("keep_rows_fitted", self.prefs.keep_rows_fitted)
         result = self.attempt(func, self.session, *args, **kwargs)

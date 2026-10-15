@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from pathlib import Path
 from typing import Any, Literal
 
 import numpy as np
@@ -309,6 +310,145 @@ def simplify_profile(
         keep_rows_fitted,
     )
     return result
+
+
+def _replace_profile(
+    session: ProjectSession,
+    r: FloatArray,
+    z: FloatArray,
+    interpolation: Literal["spline", "linear", "segments"],
+    segments: Sequence[Segment] | None,
+    description: str,
+    keep_rows_fitted: bool,
+) -> bool:
+    """Replace the profile (points, interpolation, segments) in one command: the locks
+    are applied, the rows refitted, and the stated mouth, parachute-hole and crown-ring
+    diameters set to the new profile's ends."""
+    design = session.design
+    assert design.gores is not None
+    layout: Literal["spline", "linear"] | SegmentLayout
+    if interpolation == "segments":
+        if segments is None or len(segments) != r.size - 1:
+            raise ValueError("a segment profile needs one segment per span")
+        layout = SegmentLayout(tuple(segments))
+    else:
+        layout = interpolation
+    r, z = apply_locks(r, z, session.project.locks, design_width_model(design), layout)
+    profile = profile_from_arrays(r, z, layout)
+    heights = fit_row_heights(
+        [row.finished_height for row in design.gores.panel_rows], profile.meridian_length
+    )
+
+    def mutate(data: dict[str, Any], _patterns: dict[str, Any]) -> None:
+        gores = _gores(data)
+        gores["meridian_profile_control_points"] = [
+            {"x": float(a), "y": float(b)} for a, b in zip(r, z, strict=True)
+        ]
+        gores["profile_interpolation"] = interpolation
+        gores["profile_segments"] = None if segments is None else _segment_dicts(segments)
+        gores["mouth_diameter"] = 2.0 * float(r[0])
+        gores["parachute_hole_diameter"] = 2.0 * float(r[-1])
+        gores["crown_ring"] = 2.0 * float(r[-1])
+        if keep_rows_fitted:
+            for row, h in zip(gores["panel_rows"], heights, strict=True):
+                row["finished_height"] = h
+
+    return session.edit(description, mutate)
+
+
+def set_profile_from_design(
+    session: ProjectSession,
+    source: DesignDocument,
+    label: str = "another design",
+    keep_rows_fitted: bool = True,
+) -> bool:
+    """Take another design's profile (control points, interpolation and segments) into
+    this design in one undoable command. Everything else (rows, zones, construction,
+    rigging) stays; the rows are refitted to the new tape length, the locks applied
+    (unlock them to take the profile exactly), and the stated opening diameters follow
+    the new profile's ends.
+
+    Raises
+    ------
+    ValueError
+        When ``source`` has no profile or the result is not a valid design (e.g. the
+        parachute's overlap no longer fits the new top hole); nothing is changed.
+    LockError
+        When the locks cannot be held with the new profile.
+    """
+    gores = source.gores
+    if gores is None:
+        raise ValueError(f"{label} is not a standard-gore design: it has no profile")
+    r, z = control_arrays(source)
+    segments = _segments_of(source)
+    return _replace_profile(
+        session,
+        r,
+        z,
+        gores.profile_interpolation,
+        segments,
+        f"Profile from {label}",
+        keep_rows_fitted,
+    )
+
+
+def set_profile_from_file(
+    session: ProjectSession, path: str | Path, keep_rows_fitted: bool = True
+) -> bool:
+    """Take the profile of a shape file (``.yaml``) or project file (``.elproj``)
+    (:func:`set_profile_from_design`)."""
+    from envelopelab.project.references import design_from_file
+
+    file = Path(path)
+    return set_profile_from_design(session, design_from_file(file), file.name, keep_rows_fitted)
+
+
+def set_profile_from_reference(
+    session: ProjectSession,
+    index: int,
+    tolerance: float = 0.002,
+    keep_rows_fitted: bool = True,
+) -> profile_editing.Simplified:
+    """Use reference profile ``index`` (with its offset) as the design's profile.
+
+    A reference outline has hundreds of points; it is fitted with as few spline control
+    points as keep it within ``tolerance`` m (:func:`~envelopelab.geometry.
+    profile_editing.simplify_profile`), which become the design's control points. One
+    undoable command; the locks are applied and the rows refitted.
+
+    Returns
+    -------
+    Simplified
+        The fit (its points and its distance from the reference).
+
+    Raises
+    ------
+    ValueError
+        When no spline within the tolerance is found, or the result is not a valid
+        design; nothing is changed.
+    """
+    from envelopelab.project.references import reference_profile
+
+    refs = session.project.references
+    if not 0 <= index < len(refs):
+        raise IndexError(f"no reference {index}")
+    outline = reference_profile(refs[index])
+    fit = profile_editing.simplify_profile(outline.r, outline.z, tolerance, "spline")
+    if not fit.within_tolerance:
+        raise ValueError(
+            f"no spline within {tolerance * 1e3:g} mm of {refs[index].name} "
+            f"(best {fit.deviation * 1e3:.1f} mm)"
+        )
+    _replace_profile(
+        session,
+        fit.r,
+        fit.z,
+        "spline",
+        None,
+        f"Profile from reference {refs[index].name}",
+        keep_rows_fitted,
+    )
+    return fit
 
 
 def insert_control_point(

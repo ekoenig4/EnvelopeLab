@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: *Set profile from file…* in the gore editor takes a shape file's or project's
+  profile into the open design (points, interpolation, segments). The rows are refitted,
+  the locks applied, and the edit can be undone. *Use as profile* does the same from a
+  reference profile, fitted with a spline within 2 mm.
 - Added: reference profiles in the gore editor. Another envelope's outline, from a
   shape file or project, or a snapshot of the current profile, is drawn dashed over the
   design. Each can be shown or hidden, renamed and shifted vertically, and the table
