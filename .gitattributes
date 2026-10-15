@@ -1,0 +1,6 @@
+# Windows scripts keep CRLF line endings in every checkout (cmd.exe misreads LF-only
+# batch files in places).
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+# Shell scripts keep LF, so a Windows checkout copied into WSL still runs.
+*.sh text eol=lf

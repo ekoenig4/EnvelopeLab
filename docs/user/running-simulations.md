@@ -45,8 +45,8 @@ not converged).
 CalculiX is optional and not bundled. EnvelopeLab looks for `ccx` at the path set in
 **Preferences**, then `$ENVELOPELAB_CCX`, then `PATH` (see
 [CalculiX installation](../dev/calculix-installation.md)). When it is missing,
-**Run CalculiX is disabled**, the status bar says *CalculiX not installed*, and the runs
-panel shows the installation instructions. After installing, use **Simulation ▸ Detect
+**Run CalculiX is disabled**, the status bar says *CalculiX not found*, and the runs
+panel shows where it looked, why each place failed, and the installation instructions. After installing, use **Simulation ▸ Detect
 CalculiX again**.
 
 A CalculiX run launches `ccx` as a separate process for each job of the staged solve; the

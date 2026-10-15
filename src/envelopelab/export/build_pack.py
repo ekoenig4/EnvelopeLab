@@ -3,6 +3,8 @@
 A build pack holds one *sheet* per piece to cut or mark:
 
 * the envelope's row panels (cut once per gore);
+* the parachute's radial panel (cut once per radial panel) and, when it has one, its
+  circular centre panel (cut once);
 * every piece of every special shape's skin (its gores or panels and a tip disc);
 * a *marking* sheet for every envelope panel a shape crosses: the panel with the
   footprint line, the numbered match marks and the feed hole drawn on it.
@@ -69,7 +71,7 @@ class Sheet:
         File stem (unique in the pack).
     piece : str
         Piece label printed in the header.
-    kind : {"envelope panel", "skin piece", "marking"}
+    kind : {"envelope panel", "parachute panel", "skin piece", "marking"}
         What the sheet is for.
     cut_count : int
         Pieces to cut from this sheet (0 for a marking sheet).
@@ -179,8 +181,6 @@ def envelope_sheets(design: DesignDocument, patterns: PatternSet | None = None) 
     out = []
     for row in panel_rows(design, patterns):
         zone = row_zone(design, patterns, row.label)
-        right = row.right_edge
-        left = right[::-1] * np.array([-1.0, 1.0])
         out.append(
             Sheet(
                 name=f"envelope-row-{row.label}",
@@ -190,15 +190,101 @@ def envelope_sheets(design: DesignDocument, patterns: PatternSet | None = None) 
                 fabric=design.zones.get(zone, zone),
                 finished=row.finished_outline,
                 cut=row.cut_outline,
-                edges={
-                    "left": left[::-1],
-                    "right": right,
-                    "bottom": np.array([left[-1], right[0]]),
-                    "top": np.array([left[0], right[-1]]),
-                },
+                edges=_panel_edges(row.right_edge),
             )
         )
     return out
+
+
+def _panel_edges(right: FloatArray) -> dict[str, FloatArray]:
+    """Left, right, bottom and top finished edges of a mirrored panel (right side given)."""
+    left = right[::-1] * np.array([-1.0, 1.0])
+    return {
+        "left": left[::-1],
+        "right": right,
+        "bottom": np.array([left[-1], right[0]]),
+        "top": np.array([left[0], right[-1]]),
+    }
+
+
+def parachute_sheets(design: DesignDocument) -> list[Sheet]:
+    """Sheets of the parachute: its radial panel and its centre panel (if any).
+
+    Parameters
+    ----------
+    design : DesignDocument
+        Standard-gore design, m.
+
+    Returns
+    -------
+    list of Sheet
+        Empty when the design has no parachute; else the radial panel (cut once per
+        radial panel, bottom = the parachute edge) and the centre panel (cut once, its
+        edge ``rim``).
+
+    Raises
+    ------
+    BuildPackError
+        When the design has a parachute but its pattern cannot be made (the rigging
+        analysis' errors are named), so a pack never leaves it out silently.
+    """
+    from envelopelab.rigging import rigging_outputs
+
+    if design.parachute is None:
+        return []
+    result = rigging_outputs(design)
+    pr = result.parachute
+    if pr is None or pr.panel is None:
+        errors = [f.message for f in result.findings if f.target == "parachute"]
+        raise BuildPackError(
+            "the parachute pattern cannot be made: " + ("; ".join(errors) or "no geometry")
+        )
+    zone = design.parachute.zone or next(iter(design.zones), "default")
+    fabric = design.zones.get(zone, zone)
+    centre = pr.centre_panel
+    top = "centre panel" if centre is not None else "centre ring"
+    out = [
+        Sheet(
+            name="parachute-panel",
+            piece="parachute panel",
+            kind="parachute panel",
+            cut_count=pr.panel_count,
+            fabric=fabric,
+            finished=pr.panel.finished_outline,
+            cut=pr.panel.cut_outline,
+            edges=_panel_edges(pr.panel.right_edge),
+            note=f"bottom: parachute edge (shroud and centralising lines at the seams); top: {top}",
+        )
+    ]
+    if centre is not None:
+        out.append(
+            Sheet(
+                name="parachute-centre",
+                piece="parachute centre panel",
+                kind="parachute panel",
+                cut_count=1,
+                fabric=fabric,
+                finished=centre.finished_outline,
+                cut=centre.cut_outline,
+                edges={"rim": np.vstack((centre.finished_outline, centre.finished_outline[:1]))},
+                note=f"edge sewn to the tops of the {pr.panel_count} radial panels",
+            )
+        )
+    return out
+
+
+def parachute_seam_pairs(sheets: Sequence[Sheet]) -> list[SeamPair]:
+    """Edges of the parachute sewn together: the radial seams and, with a centre panel,
+    the radial panels' tops (all of them) against its edge."""
+    panel = next((s for s in sheets if s.name == "parachute-panel"), None)
+    if panel is None:
+        return []
+    pairs = [SeamPair(((panel.name, "left"),), ((panel.name, "right"),))]
+    centre = next((s for s in sheets if s.name == "parachute-centre"), None)
+    if centre is not None:
+        tops = tuple((panel.name, "top") for _ in range(panel.cut_count))
+        pairs.append(SeamPair(tops, ((centre.name, "rim"),)))
+    return pairs
 
 
 def primitive_sheets(
@@ -244,14 +330,15 @@ def primitive_sheets(
                 marks=marks,
             )
         )
+    from envelopelab.features.primitives import band_outline
+
     surface = design.surface
-    hole = design.feed_hole
-    for gore, row in sorted({(a.gore, a.row) for a in design.attachment}):
-        band = next(b for b in surface.rows if b.label == row)
-        s = np.linspace(band.s_bottom, band.s_top, 97)
-        half = surface.half_width(s)
-        right = np.column_stack([half, s - band.s_bottom])
-        finished = np.vstack([right, right[::-1] * np.array([-1.0, 1.0])])
+    holes = design.feed_holes
+    panels = {(a.gore, a.row) for a in design.attachment} | {(h.gore, h.row) for h in holes}
+    order = {b.label: i for i, b in enumerate(surface.rows)}
+    for gore, row in sorted(panels):
+        index = order[row]
+        finished = band_outline(surface, index)
         cut = offset_polygon(finished, seam_allowance) if seam_allowance else finished.copy()
         out.append(
             Sheet(
@@ -268,11 +355,11 @@ def primitive_sheets(
                     if (m.gore, m.row) == (gore, row)
                 ],
                 lines=[a.points for a in design.attachment if (a.gore, a.row) == (gore, row)],
-                holes=(
-                    [(hole.centre_xy[0], hole.centre_xy[1], hole.radius)]
-                    if hole is not None and (hole.gore, hole.row) == (gore, row)
-                    else []
-                ),
+                holes=[
+                    (hole.centre_xy[0], hole.centre_xy[1], hole.radius)
+                    for hole in holes
+                    if (hole.gore, hole.row) == (gore, row)
+                ],
                 note=f"mark {name} on this panel before assembly",
             )
         )
@@ -584,7 +671,8 @@ def export_build_pack(
     roll_width: float = DEFAULT_ROLL_WIDTH,
     marking_allowance: float | None = None,
 ) -> Path:
-    """Export the envelope rows and every primitive's pieces and marking sheets.
+    """Export the envelope rows, the parachute, and every primitive's pieces and marking
+    sheets.
 
     Parameters
     ----------
@@ -610,6 +698,9 @@ def export_build_pack(
     """
     sheets = envelope_sheets(design, patterns)
     pairs = envelope_seam_pairs(sheets)
+    chute = parachute_sheets(design)
+    sheets += chute
+    pairs += parachute_seam_pairs(chute)
     for p in primitives:
         name = p.primitive.name
         fabric = skin_fabric if isinstance(skin_fabric, str) else skin_fabric.get(name, "skin")

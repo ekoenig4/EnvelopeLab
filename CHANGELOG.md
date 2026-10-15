@@ -3,6 +3,150 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: *Set profile from file…* in the gore editor takes a shape file's or project's
+  profile into the open design (points, interpolation, segments). The rows are refitted,
+  the locks applied, and the edit can be undone. *Use as profile* does the same from a
+  reference profile, fitted with a spline within 2 mm.
+- Added: reference profiles in the gore editor. Another envelope's outline, from a
+  shape file or project, or a snapshot of the current profile, is drawn dashed over the
+  design. Each can be shown or hidden, renamed and shifted vertically, and the table
+  shows its largest distance from the current profile. References are saved in the
+  project file (`references`) and change nothing in the design.
+- Fixed: with the mouth or top-hole diameter locked, the opening's control point could
+  be dragged sideways on the canvas and stayed drawn there although the design had not
+  changed. It now keeps the locked radius during the drag. Its radius cell is read-only,
+  deleting it is refused, and the canvas redraws whenever the locks undo an edit.
+- Added: the profile canvas also marks the mouth, the top (parachute) hole and the
+  seated parachute edge with their diameters, and the live outputs list them.
+- Added: the profile canvas marks every row seam with a tick and each row's letter, and
+  highlights the row selected in the table. A dashed line marks the equator (the widest
+  point, with its diameter); the live outputs give its height above the mouth and its
+  position along the tape.
+- Added: segment profiles. *Profile between points* gains *Segments*: every span between
+  control points is a line, a circular arc (bulge) or part of a smooth curve, and each
+  joint is a corner or smooth (G1). Smooth joints that cannot be met are listed as kinks.
+  Converting a spline or straight-segment profile keeps its exact shape. Design schema
+  version 7 (ADR-0025); older designs are unchanged.
+- Added: editing many profile points at once in the gore editor. Points are selected on
+  the canvas (click, Ctrl+click or box) or in the table. A drag moves the selection, and
+  a soft radius with a falloff makes the neighbours follow. Also *Scale*, *Rotate*,
+  *Straighten* (a straight section), *Smooth*, and a curvature comb.
+- Added: *Simplify* replaces the profile's control points with as few as keep it within
+  a tolerance (mm). It uses Ramer-Douglas-Peucker for straight segments and greedy
+  insertion for splines, keeps the mouth and top points, and refuses when no profile
+  with fewer points meets the tolerance.
+- Added: build packs include the parachute: `parachute-panel.dxf` (the radial panel, cut
+  once per radial panel) and `parachute-centre.dxf` (the centre circle, cut once), with
+  their radial seams and centre seam checked by the output QA. A parachute whose pattern
+  cannot be made stops the export with the reason.
+- Added: the parachute can have a flat circular centre panel
+  (`parachute.centre_panel_diameter`). Its radial panels are then trapezoids sewn to the
+  circle, instead of wedges that run to the centre ring. The pattern view, the 3D view and
+  the Rigging panel show it, and new parachutes get one a quarter of the hole diameter
+  across. Design schema version 6 (ADR-0024); older designs keep their wedges, so their
+  results do not change.
+- Added: the parachute's overlap with the envelope and its centre-panel diameter are set
+  in a **Parachute** box in the Rigging panel.
+- Added: *Fixed mouth diameter* and *Fixed top (parachute) hole diameter* constraint
+  locks in the gore editor; profile edits keep the locked end radii, and a typed target
+  solves the design to it, keeping the other locks.
+- Fixed: in a Wayland session (WSLg under Windows 11, many Linux desktops) Qt chose its
+  Wayland platform, where the 3D view's render window crashes the application.
+  EnvelopeLab now selects Qt's X11 platform (`xcb`) when an X server is present, unless
+  `QT_QPA_PLATFORM` is set.
+- A crash log (`~/.local/state/envelopelab/crash.log` on Linux and WSL) records the
+  versions and display settings of each start, and the Python stack of a crash or an
+  unhandled error. `envelopelab --diagnose` prints them with the OpenGL renderer.
+- CI also runs on Windows with WSL 2 Ubuntu 24.04: the Linux install script, the full
+  verification, and the 3D renderer and launcher under Xvfb.
+- Crest-loft taper stations can follow a row seam (*Follows seam* in the gore editor,
+  `bottom of <row>` in shape files). They stay on the seam when rows are resized,
+  renamed or split. Design schema version 5 (ADR-0023); version-4 designs open unchanged.
+- The 3D view shows the gore design as edited:
+  - flat-chord gores with their crest raised by the crest loft or by the offset the
+    measured seam bows imply (`crest_offsets_from_bows`), seams bowing outward;
+  - panel zones in their fabric's colour and outlined;
+  - the pattern view's tape paths and feature locations;
+  - the feed holes of special shapes, with the shapes moved onto the drawn surface.
+  Display only: designs, volumes and results are unchanged.
+- Fixed: a set `ENVELOPELAB_CCX` that did not work stopped the search for CalculiX, so a
+  working `ccx` on PATH was ignored, and nothing said why. EnvelopeLab now tries the
+  preference, `ENVELOPELAB_CCX` and PATH in turn. Quoted paths, `%VARIABLES%` and folders
+  are accepted. The Runs panel shows where it looked and why each place failed, and so
+  does `python -m calculix_adapter`.
+- CalculiX on Windows: step-by-step instructions (Windows zip from the CalculiX site, or
+  conda-forge), a *Browse…* button for the CalculiX executable in Preferences, and
+  detection of the Windows executable names `ccx_static.exe` and `ccx_dynamic.exe` (and
+  `ccx_2.23`) on PATH.
+- Windows install script: `scripts\install_env.cmd` (or `install_env.ps1`) finds or
+  installs Python, creates the virtualenv, installs EnvelopeLab and checks that it starts;
+  it works where PowerShell blocks scripts, and can add a desktop shortcut.
+- Every part of a design can be changed in the GUI. Zones can be renamed (every reference
+  follows), and *Add zone* and *Remove zone* refuse duplicates and zones in use. Rows can
+  be renamed in the gore editor, and a row's zone is set in one place (gore editor or
+  pattern view). Single notches, tape paths and feature locations can be removed. Extra
+  feed holes of special shapes are edited in a table. Locks take a typed target value. A
+  test fails when a new design field has no editor. Findings now report panel zones with
+  an undefined zone.
+- The Properties panel builds its editors from the design schema. Yes/no fields get a
+  check box, fields with fixed choices a drop-down list, and optional values a *Clear*
+  button. Optional sections (parachute rings, red line, flying wires, scoop) can be
+  added and removed. Turning vents, seam types, features, scale variants and panel zones
+  can be added and removed one by one. Fields owned by the gore editor or the Materials
+  panel are read-only. Fixed: the flying-wire count could not be edited; control points
+  and row letters could be edited there without the locks. Scale variants appear in the
+  design tree.
+- Fixed: changing the gore construction, the profile interpolation, the crest loft or
+  the panel zones did not mark the patterns, meshes and results built from the design as
+  stale. Designs that do not use them keep their fingerprints.
+- The gore editor edits flat-chord gores: construction (lobe or flat chord), profile
+  between points (spline or straight segments), the crest loft (fraction and taper
+  stations), measured seam bows per row in mm, *Freeze as measured bows*, *Use crest
+  loft* and *Straight seams*. The new-design wizard can start a flat-chord or
+  straight-segment design.
+- Fixed: splitting a row with measured seam bows was refused, and merging two such rows
+  kept the lower row's top bow instead of the upper row's. Split rows keep their zone,
+  and row letters go on past Z (AA, AB, …).
+- Fixed: editing a design whose profile has straight tape segments
+  (`profile_interpolation: linear`) used a spline for the locks, the row refit and the
+  editor's curve, so a locked volume was held on the wrong profile (6.2 % off for a
+  six-point test profile). Only linear-profile designs change. New edit
+  `set_profile_interpolation` switches a design between spline and straight segments.
+- Example shape files `tests/fixtures/flat_chord_pattern/` (synthetic): a 16-gore,
+  10-row flat-chord pattern set and a special-shape file that `extends` it. The
+  shape-family validation page now also checks the flat-chord fixture's design.
+- Shape files can carry special shapes (`special_shapes`), placed by gore and row; a
+  position `above` the bottom seam is measured up the panel centreline, as on the cut
+  panel. **New design ▸ From shape file** puts them in the new project.
+- A special shape can have several feed holes anywhere inside its footprint
+  (`feed_holes`). Each is checked, cut in the sub-model and drawn on the build pack,
+  including on a panel that only has a hole.
+- Special shapes on flat-chord gores map to the cut panels exactly (straight sides, bowed
+  seams), on the marking sheets too. Lobe-gore results are unchanged.
+- Shape files, format version 2 (ADR-0022): a shape file now describes a whole pattern
+  set, and **New design ▸ From shape file** builds all of it into the design.
+  - Version-1 files load unchanged.
+  - New optional sections:
+    - a profile known only from the mouth to the top opening (`profile.span: cut`);
+    - straight tape segments between stations (`interpolation: linear`);
+    - flat-chord gores with measured seam bows or a crest loft;
+    - named panel rows with zones;
+    - single-panel zones;
+    - the parachute seal overlap and crown ring;
+    - rigging (parachute, red line, flying wires, scoop, turning vents) merged over the
+      defaults;
+    - `extends`, a file built on another one.
+  - When a file gives its own rows and zones, the tab uses them instead of its row-count
+    and fabric choices.
+- Flat-chord gores (design schema version 4, ADR-0021). A new gore construction cuts
+  every row as a flat tape-to-tape trapezoid with straight sides, and lofts the gore
+  lengthwise: its horizontal seams bow outward as parabolas, given per row (measured) or
+  from a crest loft (crest offset as a fraction of the radius with a taper).
+  - Profiles can use straight tape segments between control points.
+  - Single panels can get their own material zone (appliques, doublers).
+  - Row letters may have up to 8 characters.
+  - Version-3 designs open unchanged; their results are bit-identical.
+  - The design volume of a flat-chord gore is that of the flat-gore polygon.
 - The `gui` extra excludes PySide6 6.12: that release drops a reference to `None` on
   every Qt call that returns nothing, so on Python 3.11 the application (and the test
   suite) aborted with "Fatal Python error: none_dealloc" after a while.

@@ -4,6 +4,48 @@ EnvelopeLab needs **Python 3.11 or newer**. The Python dependencies are installe
 `pip`; on Linux a few system libraries are needed as well (the Qt, VTK and Gmsh wheels
 link against them). The CalculiX verification solver is an optional separate program.
 
+## Quick install on Windows
+
+Windows needs no system libraries. You need [Git](https://git-scm.com/download/win), and
+Python 3.11 or newer (the script can install Python 3.12 for you). In a command prompt or
+PowerShell:
+
+```bat
+git clone https://github.com/ekoenig4/EnvelopeLab.git
+cd EnvelopeLab
+scripts\install_env.cmd -InstallPython -Shortcut
+```
+
+You can also double-click `scripts\install_env.cmd` in Explorer. It runs
+`scripts\install_env.ps1` with PowerShell's execution policy bypassed for that one run, so
+it works where PowerShell reports *"running scripts is disabled on this system"*; nothing is
+changed permanently. The script
+
+1. finds Python 3.11 or newer (the `py` launcher first, preferring 3.12 and 3.13), or, with
+   `-InstallPython`, installs Python 3.12 for your user with `winget`;
+2. creates the virtualenv `.venv` and runs `pip install -e ".[gui,fast]"`;
+3. checks that the library and Gmsh import, reports whether CalculiX (`ccx`) was found, and
+   starts the main window headless to prove Qt works;
+4. with `-Shortcut`, puts an *EnvelopeLab* shortcut on your desktop.
+
+| Option | Effect |
+|---|---|
+| `-InstallPython` | install Python 3.12 with winget when no suitable Python is found |
+| `-Shortcut` | desktop shortcut to the application |
+| `-Dev` | also the test and docs tools (`dev,docs` extras) and the pre-commit hooks |
+| `-Extras gui` | only the application, without the compiled solver kernel |
+| `-Venv DIR` | another virtualenv directory |
+| `-Python C:\path\to\python.exe` | the Python used to create the virtualenv |
+| `-NoCheck`, `-DryRun` | skip the checks; print the commands without running them |
+
+Then start the application from the shortcut, or with `.venv\Scripts\envelopelab.exe`.
+CalculiX is optional and installed separately: see
+[CalculiX on Windows](../dev/calculix-installation.md#windows).
+
+To activate the virtualenv in PowerShell yourself (`.venv\Scripts\Activate.ps1`), allow
+local scripts once with `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or use
+`.venv\Scripts\activate.bat` in a command prompt.
+
 ## Quick install with the script (Linux, containers)
 
 From a checkout of the repository:
@@ -83,8 +125,11 @@ Windows and macOS need no extra libraries. On Linux install:
 ### CalculiX (optional)
 
 Without `ccx` everything works except **Run CalculiX**, which is disabled with an
-explanation. See [CalculiX installation](../dev/calculix-installation.md); after installing,
-use **Simulation ▸ Detect CalculiX again** or restart.
+explanation. On Linux, `scripts/install_env.sh` installs it. On Windows, download the
+Windows zip from the CalculiX site, unzip it, and choose its `ccx_static.exe` in
+**File ▸ Preferences ▸ CalculiX executable ▸ Browse…**; step by step in
+[CalculiX installation](../dev/calculix-installation.md#windows). After installing, use
+**Simulation ▸ Detect CalculiX again** or restart.
 
 ## Starting the application
 
@@ -96,9 +141,17 @@ envelopelab --software-gl   # software OpenGL (Mesa llvmpipe): slower, works eve
 envelopelab --hardware-gl   # GPU OpenGL even where software is the default (WSL)
 ```
 
-Under **WSL** (Windows Subsystem for Linux, WSLg) the application selects software OpenGL
-by itself and says so on start-up, because the WSL GPU driver draws the window black. An
-explicit `LIBGL_ALWAYS_SOFTWARE` setting in your environment is always respected.
+Under **WSL** (Windows Subsystem for Linux, WSLg) the application sets up the display
+by itself and says so on start-up:
+
+* **Software OpenGL**, because the WSL GPU driver draws the window black.
+* **Qt's X11 platform** (`xcb`): WSLg is a Wayland session, and the 3D view's render
+  window needs X11 there; under Wayland it crashes the application. The same applies in
+  any Linux Wayland session that also has an X server (XWayland).
+
+Your own `LIBGL_ALWAYS_SOFTWARE` and `QT_QPA_PLATFORM` settings are always respected.
+WSL 2 with Ubuntu 24.04 is tested in CI, but on GitHub's Windows runners without the WSLg
+desktop.
 
 On a machine without a display (a container, a server over SSH), run it on a virtual
 display:
@@ -108,6 +161,22 @@ QT_QPA_PLATFORM=xcb xvfb-run -a -s "-screen 0 1920x1200x24" envelopelab
 ```
 
 ## Troubleshooting
+
+**The application crashes or closes without a message.** EnvelopeLab writes a crash log
+on every start. A crash in Qt, the 3D view or the OpenGL driver leaves the Python stack of
+every thread in it, below the versions and display settings it started with:
+
+| System | Crash log |
+|---|---|
+| Linux, WSL | `~/.local/state/envelopelab/crash.log` (or `$XDG_STATE_HOME/envelopelab/`) |
+| Windows | `%LOCALAPPDATA%\EnvelopeLab\crash.log` |
+| macOS | `~/Library/Logs/EnvelopeLab/crash.log` |
+
+The log holds the last run only, so copy it before starting again. Then:
+* run `envelopelab --diagnose`, which prints the same settings and the OpenGL renderer
+  that is used;
+* to rule out the 3D view, start with `envelopelab --no-3d`;
+* send both outputs with the steps that led to the crash.
 
 **`Could not load the Qt platform plugin "xcb" … xcb-cursor0 or libxcb-cursor0 is needed`,
 then `no Qt platform plugin could be initialized` and an abort.** Qt 6.5 and newer need the

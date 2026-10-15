@@ -28,6 +28,19 @@ gives \( V = \pi h (r_0^2 + r_0 r_1 + r_1^2)/3 \) and \( A = \pi (r_0 + r_1) \el
 1e-9, and \(L\) equals the hand calculation (21.991 m³ × 0.2790 kg/m³ × 9.80665 m/s² =
 60.17 N at 15 °C / 100 °C).
 
+## Equator and seam positions
+
+The *equator* is the widest point of the profile, \(\arg\max_s r(s)\) on the dense
+profile. A parabola through the widest sample and its two neighbours refines its tape
+position \(s\) between samples. Where the widest radius is a straight vertical stretch
+(a cylinder), the equator is the middle of that stretch. It is reported as \(r\), its
+height above the mouth \(z - z_0\), \(s\) and \(s/L\)
+(`envelopelab.project.gore_design.profile_equator`; validated on a spherical zone, where
+it is \(z = 0\), and on a cylinder).
+
+The row seams on the profile canvas sit at the fractions \(\sum_{i<k} h_i / \sum_i h_i\)
+of the tape length \(L\) (`seam_fractions`), from the rows' finished heights \(h_i\).
+
 ## Constraint locks
 
 A lock holds the value its quantity had when it was switched on. After each profile edit
@@ -40,11 +53,23 @@ the control points are corrected:
 | volume \(V\), diameter free | \( r' = k r \), \(k\) by Brent's method |
 | volume, height free | \( z' = z_0 + k(z - z_0) \), \(k\) by Brent's method |
 | volume, height and diameter | fullness \( r' = r_{max}(r/r_{max})^{1/k} \): keeps \(r_{max}\), moves the other radii (the mouth too) |
+| mouth or top-hole diameter \(d\) | the end control point's radius is set to \(d/2\) after every other correction step |
 | gore count \(N\) | edits of \(N\) are refused |
 
-Iteration is needed because the spline through scaled points is not the scaled spline (the
+The maximum-diameter correction scales the end radii too, so it alternates with pinning
+the locked ends until both hold (the maximum lies inside the profile, so pinning the ends
+does not move it). Iteration is needed because the spline through scaled points is not the scaled spline (the
 chord parameterisation changes). After correction every lock is checked (lengths 1 mm,
 volume 0.1 %); an edit that cannot meet them raises `LockError` and changes nothing.
+
+Every quantity above is measured on the design's own profile: a spline, or straight tape
+segments for `profile_interpolation: linear`. Changing the interpolation is itself an edit
+(`set_profile_interpolation`): the locks are re-applied to the new profile and the rows
+refitted to its tape length in the same command.
+
+A typed lock target (`set_lock_target`) is the same correction with the new value in place
+of the held one: the control points are corrected for every lock at once, so the result
+meets the target and keeps the other locked quantities, or the edit is refused.
 
 ## Wizard profile
 

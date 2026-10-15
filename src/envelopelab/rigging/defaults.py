@@ -92,8 +92,9 @@ def default_parachute(design: DesignDocument) -> ParachuteSpec:
     """A parachute with one shroud line per load tape (or per second tape above 24 gores).
 
     Shroud lines attach half a hole diameter below the parachute edge; the confluence is
-    one hole diameter below the crown opening; billow 0.1; a crown ring at the rim and a
-    centre ring of 5 % of the hole diameter (at least 50 mm) at the apex.
+    one hole diameter below the crown opening; billow 0.1; a crown ring at the rim, a
+    centre ring of 5 % of the hole diameter (at least 50 mm) at the apex, and a flat centre
+    panel of a quarter of the hole diameter, so the radial panels are trapezoids.
     """
     g = _gores(design)
     count = g.count if g.count <= 24 or g.count % 2 else g.count // 2
@@ -109,6 +110,7 @@ def default_parachute(design: DesignDocument) -> ParachuteSpec:
         crown_ring=crown_ring(),
         centre_ring=centre_ring(),
         centre_ring_diameter=round(max(0.05, 0.05 * hole), 4),
+        centre_panel_diameter=round(max(0.1, 0.25 * hole), 4),
     )
 
 

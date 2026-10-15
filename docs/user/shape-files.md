@@ -34,4 +34,27 @@ says **NOT CONVERGED** and gives the reachable range, and no design is made.
 A shape file can also define the gore **loft** (the lobe bulge between load tapes) along
 the shape; the design gets it for its own cut, and the volumes in the table include it.
 
+## Pattern sets and special shapes (format version 2)
+
+A version-2 shape file carries a whole pattern set, so the design opens in the editor as
+the pattern describes it:
+* the named rows with their materials (for example a Nomex bottom row);
+* the gore construction, with its seam bows;
+* the parachute seal overlap, the parachute, the turning vents and other rigging;
+* single panels in another fabric;
+* the special shapes.
+
+Example: `tests/fixtures/flat_chord_pattern/shape.yaml`, a synthetic 16-gore, 10-row
+flat-chord pattern set.
+
+When a file has its own rows, the tab shows them and the **Panel rows** count is not used.
+When it has its own zones, the **Fabric** choice is not used either. Holding another
+value (for example a larger envelope volume) scales the whole pattern, measured seam bows
+included.
+
+A file can build on another one with `extends`. For example,
+`tests/fixtures/flat_chord_pattern/special.yaml` takes that envelope and adds a dome, a
+leaning tube, a mesh blister, an applique and a doubled panel. The special shapes of the file are placed on the new design and appear in the
+**Special shapes** mode.
+
 To write your own shape file, see the [format](../formats/shape-file.md).

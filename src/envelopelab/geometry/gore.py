@@ -15,10 +15,14 @@ Assumptions (see docs/theory/gore-geometry.md for the full statement)
 ---------------------------------------------------------------------
 * Axisymmetric envelope with ``n_gores`` identical gores and a tape on every gore seam.
 * Gore length coordinate equals tape arc length; fabric stretch is neglected.
-* Horizontal seams are straight lines across the flat gore (constant :math:`s`).
+* Horizontal seams are straight lines across the flat gore (constant :math:`s`), except in
+  the flat-chord construction with a crest loft, where they bow outward
+  (:func:`flat_chord_rows`).
 * Between adjacent tapes the fabric is a circular lobe (the gore's *loft*); its radius is
   set by the width model (:class:`GoreWidthModel`, :class:`GoreLoft`). The small-bulge
-  form puts the lobe on the circle through the tapes.
+  form puts the lobe on the circle through the tapes. The flat-chord construction
+  (:func:`flat_chord_rows`, :class:`CrestLoft`) instead cuts every row as a flat
+  tape-to-tape trapezoid and lofts the gore lengthwise.
 * :attr:`MeridianProfile.volume` and :attr:`MeridianProfile.area` are those of the
   surface of revolution through the tapes; :func:`lofted_volume` and :func:`lofted_area`
   add the lobes. Open ends (mouth, crown hole) are closed by flat discs for the volume.
@@ -46,6 +50,7 @@ from scipy.interpolate import CubicSpline, make_smoothing_spline
 
 FloatArray = npt.NDArray[np.float64]
 WidthForm = Literal["small_bulge", "chord"]
+ProfileInterpolation = Literal["spline", "linear"]
 CornerTreatment = Literal["miter", "bevel"]
 DEFAULT_LOFT_FRACTIONS: tuple[float, ...] = (0.0, 0.25, 0.5, 0.75, 1.0)
 LENGTH_TOLERANCE = 1e-3  # m; AGENTS.md default geometry tolerance
@@ -127,17 +132,26 @@ class MeridianProfile:
 
     @classmethod
     def from_control_points(
-        cls, r: npt.ArrayLike, z: npt.ArrayLike, samples: int = 4001
+        cls,
+        r: npt.ArrayLike,
+        z: npt.ArrayLike,
+        samples: int = 4001,
+        interpolation: ProfileInterpolation = "spline",
     ) -> MeridianProfile:
-        """Interpolate control points with a parametric cubic spline and sample it densely.
+        """Interpolate control points and sample the curve densely.
 
         Parameters
         ----------
         r, z : array_like
             Control-point radius and height, m, ordered from mouth to top (at least 2).
         samples : int, optional
-            Number of polyline points in the result. With the default 4001 the chord
-            length error of a smooth profile is below 1e-7 relative.
+            Number of evenly spaced polyline points in the result (``"linear"`` adds the
+            control points themselves). With the default 4001 the chord length error of a
+            smooth spline profile is below 1e-7 relative.
+        interpolation : {"spline", "linear"}, optional
+            ``"spline"``: parametric cubic spline (chord-length parameter). ``"linear"``:
+            straight tape segments between the control points, as in a pattern whose
+            panels have straight sides between row corners (:func:`flat_chord_rows`).
 
         Returns
         -------
@@ -146,6 +160,14 @@ class MeridianProfile:
         """
         r_arr, z_arr = _as_array(r), _as_array(z)
         chord = np.concatenate(([0.0], np.cumsum(np.hypot(np.diff(r_arr), np.diff(z_arr)))))
+        if interpolation not in ("spline", "linear"):
+            raise ValueError(f"unknown profile interpolation: {interpolation}")
+        if interpolation == "linear":
+            even = np.linspace(0.0, chord[-1], samples)
+            # Drop even samples that would sit within 1 um of a control point.
+            gap = np.min(np.abs(even[:, None] - chord[None, :]), axis=1)
+            t = np.union1d(even[gap > 1e-6], chord)
+            return cls.from_points(np.interp(t, chord, r_arr), np.interp(t, chord, z_arr))
         if r_arr.size == 2:
             t = np.linspace(0.0, chord[-1], samples)
             return cls.from_points(np.interp(t, chord, r_arr), np.interp(t, chord, z_arr))
@@ -591,6 +613,11 @@ class PanelRow:
         Finished widths at the requested fractions of the height.
     side_length : float
         Finished length of one side (vertical seam line), m.
+    bottom_bow, top_bow : float
+        Depth of the bottom and top seam lines at the centreline beyond the straight
+        corner-to-corner line, m, positive outward (down at the bottom, up at the top).
+        The seam is the parabola :math:`d(x) = b (1 - (x/w_c)^2)` with :math:`w_c` the
+        corner half-width (:func:`bowed_seam`). Zero (the default) is a straight seam.
     """
 
     label: str
@@ -600,11 +627,37 @@ class PanelRow:
     cut_outline: FloatArray = field(repr=False)
     loft: tuple[LoftStation, ...]
     side_length: float
+    bottom_bow: float = 0.0
+    top_bow: float = 0.0
 
     @property
     def finished_height(self) -> float:
-        """Finished panel height along the centreline, m."""
+        """Tape length of the row, m (the centreline height of a lobe-gore row)."""
         return self.s_top - self.s_bottom
+
+    @property
+    def corner_height(self) -> float:
+        """Height of the top corners above the bottom corners, m."""
+        return float(self.right_edge[-1, 1] - self.right_edge[0, 1])
+
+    @property
+    def centre_height(self) -> float:
+        """Finished height along the centreline, bows included, m."""
+        return self.corner_height + self.bottom_bow + self.top_bow
+
+    @property
+    def bottom_seam_length(self) -> float:
+        """Finished length of the bottom seam line, m (its width when straight)."""
+        if self.bottom_bow == 0.0:
+            return self.bottom_width
+        return _polyline_length(*bowed_seam(float(self.right_edge[0, 0]), self.bottom_bow).T)
+
+    @property
+    def top_seam_length(self) -> float:
+        """Finished length of the top seam line, m (its width when straight)."""
+        if self.top_bow == 0.0:
+            return self.top_width
+        return _polyline_length(*bowed_seam(float(self.right_edge[-1, 0]), self.top_bow).T)
 
     @property
     def bottom_width(self) -> float:
@@ -620,7 +673,15 @@ class PanelRow:
     def finished_outline(self) -> FloatArray:
         """Finished polygon, m, counter-clockwise from the bottom-right corner."""
         mirrored = self.right_edge[::-1] * np.array([-1.0, 1.0])
-        return _as_array(np.vstack((self.right_edge, mirrored)))
+        parts = [self.right_edge]
+        if self.top_bow != 0.0:
+            top = bowed_seam(float(self.right_edge[-1, 0]), self.top_bow)
+            parts.append(top[1:-1] + [0.0, float(self.right_edge[-1, 1])])
+        parts.append(mirrored)
+        if self.bottom_bow != 0.0:
+            bottom = bowed_seam(float(self.right_edge[0, 0]), -self.bottom_bow)[::-1]
+            parts.append(bottom[1:-1] + [0.0, float(self.right_edge[0, 1])])
+        return _as_array(np.vstack(parts))
 
     @property
     def finished_area(self) -> float:
@@ -904,6 +965,385 @@ def split_rows(
                 cut_outline=cut_outline(right_edge, allowance, corner),
                 loft=loft,
                 side_length=_polyline_length(right_edge[:, 0], right_edge[:, 1]),
+            )
+        )
+    return rows
+
+
+# --------------------------------------------------------------------------------------
+# Flat-chord gores with a crest loft
+# --------------------------------------------------------------------------------------
+
+
+def bowed_seam(half_width: float, bow: float, points: int = 65) -> FloatArray:
+    r"""A bowed horizontal seam line from the right corner to the left corner, m.
+
+    .. math:: y(x) = b \left(1 - \left(\frac{x}{w_c}\right)^2\right), \qquad
+              x \in [w_c, -w_c]
+
+    relative to the straight line through the corners (docs/theory/gore-geometry.md).
+
+    Parameters
+    ----------
+    half_width : float
+        Corner half-width :math:`w_c`, m.
+    bow : float
+        Ordinate :math:`b` at the centreline, m (positive up).
+    points : int, optional
+        Number of points (odd, so the centreline is one of them).
+
+    Returns
+    -------
+    ndarray, shape (points, 2)
+        Seam line, m, from (w_c, 0) to (-w_c, 0).
+    """
+    x = np.linspace(half_width, -half_width, points)
+    if half_width == 0.0:
+        return _as_array(np.column_stack((x, np.zeros_like(x))))
+    return _as_array(np.column_stack((x, bow * (1.0 - (x / half_width) ** 2))))
+
+
+@dataclass(frozen=True)
+class CrestLoft:
+    r"""Lengthwise loft of a flat-chord gore: the crest offset along the tape.
+
+    Each gore is cut as flat tape-to-tape trapezoids (corner widths
+    :math:`2 r \sin(\pi/N)`), and its centreline is made longer than the flat strip so the
+    fabric between two tapes stands out as a crest. The crest stands
+    :math:`\delta(s) = \lambda\, \tau(f)\, r(s)` outside the flat chord, with
+    :math:`\lambda` the loft fraction and :math:`\tau(f)` a taper (0 to 1) given at
+    stations :math:`f = s / L_t` (fraction of the tape length from the mouth),
+    interpolated linearly and held beyond the first and last station.
+
+    Attributes
+    ----------
+    fraction : float
+        Loft fraction :math:`\lambda`: crest offset over tape radius where the taper is 1,
+        dimensionless (0.02 = "2 % of radius").
+    stations : tuple of float
+        Fractions of the tape length, dimensionless, strictly increasing in [0, 1].
+    taper : tuple of float
+        Taper :math:`\tau` at each station, dimensionless, >= 0.
+    """
+
+    fraction: float
+    stations: tuple[float, ...] = (0.0,)
+    taper: tuple[float, ...] = (1.0,)
+
+    def __post_init__(self) -> None:
+        f = np.asarray(self.stations, dtype=np.float64)
+        tau = np.asarray(self.taper, dtype=np.float64)
+        if f.ndim != 1 or f.size < 1 or f.shape != tau.shape:
+            raise ValueError("a crest loft needs one or more stations, each with a taper")
+        if np.any(f < 0.0) or np.any(f > 1.0):
+            raise ValueError("crest-loft stations are fractions of the tape length (0..1)")
+        if np.any(np.diff(f) <= 0.0):
+            raise ValueError("crest-loft stations must be strictly increasing")
+        if not np.all(np.isfinite(tau)) or np.any(tau < 0.0):
+            raise ValueError("crest-loft taper values must be finite and >= 0")
+        if not math.isfinite(self.fraction) or self.fraction < 0.0:
+            raise ValueError("the crest-loft fraction must be finite and >= 0")
+        object.__setattr__(self, "fraction", float(self.fraction))
+        object.__setattr__(self, "stations", tuple(float(v) for v in f))
+        object.__setattr__(self, "taper", tuple(float(v) for v in tau))
+
+    def offset(self, fraction: npt.ArrayLike, radius: npt.ArrayLike) -> FloatArray:
+        """Crest offset :math:`\\delta`, m, at fractions of the tape length and tape radii, m."""
+        tau = np.interp(_as_array(fraction), np.array(self.stations), np.array(self.taper))
+        return _as_array(self.fraction * tau * _as_array(radius))
+
+
+def _turning_angles(profile: MeridianProfile) -> FloatArray:
+    """Signed turning angle of the tape at every profile node, rad (+ towards the axis)."""
+    d = np.column_stack((np.diff(profile.r), np.diff(profile.z)))
+    cross = d[:-1, 0] * d[1:, 1] - d[:-1, 1] * d[1:, 0]
+    dot = np.einsum("ij,ij->i", d[:-1], d[1:])
+    return _as_array(np.concatenate(([0.0], np.arctan2(cross, dot), [0.0])))
+
+
+def crest_bows(
+    profile: MeridianProfile, boundaries: npt.ArrayLike, crest: CrestLoft
+) -> list[tuple[float, float]]:
+    r"""Seam bows of a crest-lofted flat-chord gore, m, one (bottom, top) pair per row.
+
+    Offsetting the tape outward by :math:`\delta` lengthens it by
+    :math:`2\delta\tan(\varphi/2)` at a node where it turns by :math:`\varphi`
+    (:math:`\int \delta\kappa\, ds` for a smooth profile). Each node's excess goes to the
+    nearest row boundary between two rows, and a boundary that collects an excess
+    :math:`e_j` bows both seam lines that meet there by :math:`\beta_j = e_j/2`, so the two
+    sides of every horizontal seam have the same shape. The mouth and the top opening stay
+    straight; excess next to them goes to the first interior boundary.
+
+    Parameters
+    ----------
+    profile : MeridianProfile
+        Tape profile, m.
+    boundaries : array_like
+        Row boundaries along the tape, m, mouth first (rows + 1 values).
+    crest : CrestLoft
+        Crest offset along the tape.
+
+    Returns
+    -------
+    list of (float, float)
+        (bottom bow, top bow) of each row, m, positive outward.
+    """
+    b = np.asarray(boundaries, dtype=np.float64)
+    rows = len(b) - 1
+    if rows < 1:
+        raise ValueError("a gore needs at least one row")
+    beta = np.zeros(rows + 1)
+    if rows >= 2:
+        phi = _turning_angles(profile)
+        inside = (profile.s > b[0]) & (profile.s < b[-1]) & (phi != 0.0)
+        s = profile.s[inside]
+        delta = crest.offset(s / profile.meridian_length, profile.r[inside])
+        excess = 2.0 * delta * np.tan(phi[inside] / 2.0)
+        row = np.clip(np.searchsorted(b, s, side="right") - 1, 0, rows - 1)
+        upper = (s - b[row]) > (b[row + 1] - s)
+        nearest = np.clip(row + upper.astype(np.int64), 1, rows - 1)
+        np.add.at(beta, nearest, 0.5 * excess)
+    return [(float(beta[k]), float(beta[k + 1])) for k in range(rows)]
+
+
+def _boundary_weights(profile: MeridianProfile, b: FloatArray) -> FloatArray:
+    r"""Sum of :math:`2\tan(\varphi_i/2)` over the profile nodes that :func:`crest_bows`
+    gives to each row boundary (zero at the mouth and the top opening)."""
+    rows = len(b) - 1
+    weight = np.zeros(rows + 1)
+    if rows >= 2:
+        phi = _turning_angles(profile)
+        inside = (profile.s > b[0]) & (profile.s < b[-1]) & (phi != 0.0)
+        s = profile.s[inside]
+        row = np.clip(np.searchsorted(b, s, side="right") - 1, 0, rows - 1)
+        upper = (s - b[row]) > (b[row + 1] - s)
+        nearest = np.clip(row + upper.astype(np.int64), 1, rows - 1)
+        np.add.at(weight, nearest, 2.0 * np.tan(phi[inside] / 2.0))
+    return weight
+
+
+def crest_offsets_from_bows(
+    profile: MeridianProfile,
+    boundaries: npt.ArrayLike,
+    bows: Sequence[tuple[float, float]],
+    min_turn: float = 1e-3,
+) -> FloatArray:
+    r"""Crest offset at each row boundary implied by seam bows, m (inverse of
+    :func:`crest_bows`).
+
+    :func:`crest_bows` gives boundary :math:`j` the bow
+    :math:`\beta_j = \tfrac12\sum_i 2\delta_i\tan(\varphi_i/2)` over the profile nodes
+    nearest to it. Taking :math:`\delta` constant over those nodes,
+
+    .. math:: \delta_j = \frac{2\beta_j}{\sum_i 2\tan(\varphi_i/2)},
+
+    with :math:`\beta_j` the mean of the two seam lines that meet there (they differ for a
+    measured pattern). It reproduces the crest offset of a crest loft at the boundaries to
+    first order in the variation of :math:`\delta` between them.
+
+    Parameters
+    ----------
+    profile : MeridianProfile
+        Tape profile, m.
+    boundaries : array_like
+        Row boundaries along the tape, m, mouth first (rows + 1 values).
+    bows : sequence of (float, float)
+        (bottom, top) bow of each row, m, positive outward.
+    min_turn : float
+        Smallest total tape turn at a boundary, rad, that carries an offset: where the
+        tape is straight (a cylinder), seam bows cannot be shown as an offset and the
+        offset is 0.
+
+    Returns
+    -------
+    ndarray, shape (rows + 1,)
+        Crest offset :math:`\delta_j`, m, positive outward; 0 at the mouth and the top
+        opening, which stay straight.
+    """
+    b = np.asarray(boundaries, dtype=np.float64)
+    rows = len(b) - 1
+    if len(bows) != rows:
+        raise ValueError("one (bottom, top) bow pair per row")
+    weight = _boundary_weights(profile, b)
+    delta = np.zeros(rows + 1)
+    for j in range(1, rows):
+        beta = 0.5 * (bows[j - 1][1] + bows[j][0])
+        if abs(weight[j]) >= min_turn:
+            delta[j] = 2.0 * beta / weight[j]
+    return _as_array(delta)
+
+
+def _line_intersection(p: FloatArray, d: FloatArray, q: FloatArray, e: FloatArray) -> FloatArray:
+    """Intersection of the lines p + t d and q + u e (m)."""
+    det = d[0] * (-e[1]) - d[1] * (-e[0])
+    if abs(det) < 1e-12 * float(np.linalg.norm(d) * np.linalg.norm(e)):
+        raise ValueError("panel side is parallel to its seam line; cannot mitre")
+    t = ((q[0] - p[0]) * (-e[1]) - (q[1] - p[1]) * (-e[0])) / det
+    return _as_array(p + t * d)
+
+
+def bowed_cut_outline(
+    right_edge: FloatArray, bottom_bow: float, top_bow: float, allowance: SeamAllowance
+) -> FloatArray:
+    """Cut outline of a symmetric panel with bowed horizontal seams, mitred corners.
+
+    Each finished edge (bottom seam, right side, top seam, left side) is offset outward by
+    its allowance (mitred joints within the edge) and neighbouring offset edges are
+    extended along their end segments to meet at the corners.
+
+    Parameters
+    ----------
+    right_edge : ndarray, shape (n, 2)
+        Finished right-hand side from the bottom corner to the top corner, m.
+    bottom_bow, top_bow : float
+        Outward seam bows at the centreline, m (see :class:`PanelRow`).
+    allowance : SeamAllowance
+        Side, bottom and top allowances, m.
+
+    Returns
+    -------
+    ndarray, shape (m, 2)
+        Counter-clockwise cut polygon, m, starting at the bottom-left corner.
+    """
+    w0, y0 = float(right_edge[0, 0]), float(right_edge[0, 1])
+    w1, y1 = float(right_edge[-1, 0]), float(right_edge[-1, 1])
+    bottom = bowed_seam(w0, -bottom_bow)[::-1] + [0.0, y0]
+    top = bowed_seam(w1, top_bow) + [0.0, y1]
+    left = right_edge[::-1] * np.array([-1.0, 1.0])
+    edges = [
+        (bottom, allowance.bottom),
+        (right_edge, allowance.side),
+        (top, allowance.top),
+        (left, allowance.side),
+    ]
+    offset = [_offset_polyline(pts, a) if a > 0.0 else pts.copy() for pts, a in edges]
+    corners = []
+    for i in range(4):
+        a, b = offset[i], offset[(i + 1) % 4]
+        corners.append(_line_intersection(a[-1], a[-1] - a[-2], b[0], b[1] - b[0]))
+    parts = []
+    for i in range(4):
+        parts.append(corners[i - 1][None, :])
+        parts.append(offset[i][1:-1])
+    return _as_array(np.vstack(parts))
+
+
+def flat_chord_rows(
+    profile: MeridianProfile,
+    n_gores: int,
+    row_heights: Sequence[float],
+    labels: Sequence[str] | None = None,
+    bows: Sequence[tuple[float, float]] | None = None,
+    crest: CrestLoft | None = None,
+    allowance: SeamAllowance | None = None,
+    start: float = 0.0,
+    require_full_coverage: bool = True,
+    loft_fractions: Sequence[float] = DEFAULT_LOFT_FRACTIONS,
+    min_edge_points: int = 65,
+) -> list[PanelRow]:
+    r"""Split a flat-chord gore into rows: straight-sided trapezoids with bowed seams.
+
+    Row :math:`k` runs along the tape from :math:`s_k` to :math:`s_{k+1}`. Its corners lie
+    a flat chord apart, :math:`w_j = r(s_j)\sin(\pi/N)` either side of the centreline, and
+    its sides are straight lines of the tape length
+    :math:`L_k = s_{k+1} - s_k` (the tape is sewn along them), so the top corners stand
+    :math:`h_k = \sqrt{L_k^2 - (w_{k+1} - w_k)^2}` above the bottom ones. The bottom and
+    top seams bow outward by the given ordinates (:func:`bowed_seam`), measured or from a
+    crest loft (:func:`crest_bows`); the centreline is then
+    :math:`h_k + b_{bottom} + b_{top}` long.
+
+    Parameters
+    ----------
+    profile : MeridianProfile
+        Tape profile, m (straight segments between row corners for an exact match with
+        straight panel sides, :meth:`MeridianProfile.from_control_points` ``"linear"``).
+    n_gores : int
+        Number of gores N (>= 3).
+    row_heights : sequence of float
+        Tape length of each row, m, from the mouth upward.
+    labels : sequence of str, optional
+        Row labels; default ``"A"``, ``"B"``, ...
+    bows : sequence of (float, float), optional
+        Measured (bottom, top) seam bows of each row, m, positive outward.
+    crest : CrestLoft, optional
+        Crest loft the bows are computed from (not with ``bows``). Neither: straight seams.
+    allowance : SeamAllowance, optional
+        Seam allowances, m; default none.
+    start : float, optional
+        Tape arc length of the bottom of the first row, m.
+    require_full_coverage : bool, optional
+        If true, the rows must end at the top of the profile within 1 mm.
+    loft_fractions : sequence of float, optional
+        Fractions of each row's corner height for the loft table, dimensionless.
+    min_edge_points : int, optional
+        Number of points on each finished side edge.
+
+    Returns
+    -------
+    list of PanelRow
+        Rows from the mouth upward; ``s_bottom``/``s_top`` are the corner stations.
+    """
+    _check_gores(n_gores)
+    heights = [float(h) for h in row_heights]
+    if not heights or min(heights) <= 0.0:
+        raise ValueError("row heights must be positive")
+    if labels is None:
+        labels = [_default_label(i) for i in range(len(heights))]
+    if len(labels) != len(heights):
+        raise ValueError("labels and row_heights differ in length")
+    if bows is not None and crest is not None:
+        raise ValueError("give measured bows or a crest loft, not both")
+    if bows is not None and len(bows) != len(heights):
+        raise ValueError("bows and row_heights differ in length")
+    end = start + sum(heights)
+    if end > profile.meridian_length + LENGTH_TOLERANCE:
+        raise ValueError(
+            f"rows end at {end:.4f} m, beyond the meridian length {profile.meridian_length:.4f} m"
+        )
+    if require_full_coverage and abs(end - profile.meridian_length) > LENGTH_TOLERANCE:
+        raise ValueError(
+            f"rows cover {start:.4f}-{end:.4f} m but the meridian is "
+            f"{profile.meridian_length:.4f} m long"
+        )
+    allowance = allowance or SeamAllowance()
+    boundaries = np.minimum(
+        np.concatenate(([start], start + np.cumsum(heights))), profile.meridian_length
+    )
+    half = profile.radius_at(boundaries) * math.sin(math.pi / n_gores)
+    if crest is not None:
+        bows = crest_bows(profile, boundaries, crest)
+    bow_pairs = list(bows) if bows is not None else [(0.0, 0.0)] * len(heights)
+    rows: list[PanelRow] = []
+    for k, label in enumerate(labels):
+        s0, s1 = float(boundaries[k]), float(boundaries[k + 1])
+        w0, w1 = float(half[k]), float(half[k + 1])
+        length = s1 - s0
+        # |w1 - w0| = |r1 - r0| sin(pi/N) <= length on any tape profile.
+        rise = math.sqrt(length * length - (w1 - w0) ** 2)
+        t = np.linspace(0.0, 1.0, max(min_edge_points, 2))
+        right_edge = _as_array(np.column_stack((w0 + t * (w1 - w0), t * rise)))
+        bottom_bow, top_bow = (float(v) for v in bow_pairs[k])
+        loft = tuple(
+            LoftStation(
+                fraction=float(f), y=float(f) * rise, width=2.0 * (w0 + float(f) * (w1 - w0))
+            )
+            for f in loft_fractions
+        )
+        if bottom_bow == 0.0 and top_bow == 0.0:
+            outline = cut_outline(right_edge, allowance)
+        else:
+            outline = bowed_cut_outline(right_edge, bottom_bow, top_bow, allowance)
+        rows.append(
+            PanelRow(
+                label=str(label),
+                s_bottom=s0,
+                s_top=s1,
+                right_edge=right_edge,
+                cut_outline=outline,
+                loft=loft,
+                side_length=length,
+                bottom_bow=bottom_bow,
+                top_bow=top_bow,
             )
         )
     return rows

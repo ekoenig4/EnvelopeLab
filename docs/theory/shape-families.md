@@ -60,6 +60,28 @@ A shape family may carry a loft: the lobe-radius ratio \( k = \rho/r \) at stati
 (`NormalizedShape.design_loft`), so the editor shows the same lofted volume as the shape
 solve.
 
+## Measured pattern sets: cut span, straight tape, flat-chord gores
+
+A shape file can describe a pattern set measured from its panels rather than a published
+table (format version 2):
+
+* **Cut span.** The table runs from the mouth (\( s = 0 \)) to the top opening
+  (\( s = 1 \)), with \( L \) the tape length; the closed shape beyond the cuts is not
+  known. The cut stations are held at 0 and 1, so one more held value fixes the design,
+  and the nominal volume is not defined.
+* **Straight tape.** With straight panel sides between row corners, the tape is the
+  polyline through the corners. The height then gains
+  \( \Delta z = \sqrt{\Delta s^2 - \Delta r^2} \) per interval, exactly, instead of the
+  quadrature of the spline. The design keeps the polyline (`profile_interpolation:
+  linear`), so a row's corners and its side length are those of the pattern.
+* **Flat-chord gores.** The width model is the flat chord, so volumes are those of the
+  flat-gore polygon, \( N\sin(2\pi/N)/(2\pi) \) of the volume through the tapes. The
+  lengthwise loft (seam bows, crest loft) does not change the computed quantities; it
+  shapes the panels ([flat-chord gores](gore-geometry.md#flat-chord-gores-and-the-crest-loft-flat_chord_rows-crestloft)).
+
+Measured seam bows are lengths at the file's own size. A variant (another held value)
+scales them by \( L/L_{file} \), as it scales every other length of the shape.
+
 ## Solving
 
 With one free variable, Brent's method searches its whole range: \( L/1000 \) to

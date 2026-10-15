@@ -179,8 +179,13 @@ def test_internal_temperature_marks_simulation_results_stale(gore_window: MainWi
     assert table_column(w, 1) == ["CURRENT"]
 
 
-def test_run_calculix_is_disabled_without_ccx(gore_window: MainWindow, tmp_path: Path) -> None:
+def test_run_calculix_is_disabled_without_ccx(
+    gore_window: MainWindow, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     w = gore_window
+    # No ccx anywhere: a broken preference falls back to $ENVELOPELAB_CCX and PATH.
+    monkeypatch.delenv("ENVELOPELAB_CCX", raising=False)
+    monkeypatch.setenv("PATH", str(tmp_path))
     prefs = load_preferences(w.settings)
     prefs.ccx_path = str(tmp_path / "no-such-ccx")
     w.apply_preferences(prefs)
@@ -188,12 +193,14 @@ def test_run_calculix_is_disabled_without_ccx(gore_window: MainWindow, tmp_path:
     assert not w.calculix_action.isEnabled()
     assert not w.runs.run_calculix.isEnabled()
     assert w.preview_action.isEnabled() and w.runs.run_preview.isEnabled()
-    assert "not installed" in w.ccx_label.text()
+    assert "not found" in w.ccx_label.text()
     w.show_panel("runs")
     assert w.runs.calculix_label.isVisible()
     message = w.runs.calculix_label.text()
-    assert "not installed" in message and "calculix-installation.md" in message
-    assert "not installed" in w.runs.run_calculix.toolTip()
+    assert "not found" in message and "calculix-installation.md" in message
+    # The message says where it looked and why each place failed.
+    assert "no-such-ccx" in message and "does not exist" in message
+    assert "not found" in w.runs.run_calculix.toolTip()
     assert w.simulation.start(CALCULIX) is False
 
 
@@ -357,6 +364,50 @@ def test_shape_file_wizard_holds_mouth_and_solves_the_rest(
     assert "NOT CONVERGED" in wizard.error.text()
 
 
+def test_shape_file_wizard_builds_the_whole_pattern_set(qtbot: QtBot, window: MainWindow) -> None:
+    wizard = NewDesignWizard(window.controller.fabrics, window)
+    qtbot.addWidget(wizard)
+    wizard.tabs.setCurrentWidget(wizard.shape_tab)
+    tab = wizard.shape_tab
+    assert tab.load(str(FIXTURES / "flat_chord_pattern" / "shape.yaml")), tab.status.text()
+    # A cut-span file holds its mouth and top stations itself; the tape length sets the size.
+    assert tab.held_names() == ["mouth_station", "top_station", "tape_length"]
+    # The file's 10 rows and zones are used, so the row count and fabric choices are off.
+    assert not tab.rows.isEnabled() and tab.rows.value() == 10
+    assert not tab.fabric.isEnabled()
+    wizard.create_design()
+    design = wizard.design
+    assert design is not None, wizard.error.text()
+    assert design.gores is not None
+    assert design.gores.construction == "flat_chord"
+    assert design.gores.panel_rows[0].letter == "SKIRT"
+    assert design.gores.panel_rows[0].zone == "mouth"
+    assert [v.seam for v in design.turning_vents] == [4, 12]
+    window.new_project(design)
+    assert window.gore_editor.isEnabled()
+    # Loading a version-1 file afterwards gives the choices back.
+    assert tab.load(str(FIXTURES / "smalley_90k" / "shape.yaml"))
+    assert tab.rows.isEnabled() and tab.fabric.isEnabled()
+
+
+def test_shape_file_wizard_brings_the_special_shapes(qtbot: QtBot, window: MainWindow) -> None:
+    wizard = NewDesignWizard(window.controller.fabrics, window)
+    qtbot.addWidget(wizard)
+    wizard.tabs.setCurrentWidget(wizard.shape_tab)
+    tab = wizard.shape_tab
+    assert tab.load(str(FIXTURES / "flat_chord_pattern" / "special.yaml")), tab.status.text()
+    wizard.create_design()
+    assert wizard.design is not None, wizard.error.text()
+    assert [s.name for s in wizard.shapes] == ["dome", "horn", "blister"]
+    session = window.new_project(wizard.design, wizard.shapes)
+    assert [s.name for s in session.project.state.shapes] == [s.name for s in wizard.shapes]
+    assert wizard.design.gores is not None and len(wizard.design.gores.panel_zones) == 2
+    # Another tab afterwards makes a design without the file's shapes.
+    wizard.tabs.setCurrentIndex(0)
+    wizard.create_design()
+    assert wizard.shapes == []
+
+
 def test_refused_edit_is_reported(gore_window: MainWindow) -> None:
     w = gore_window
     w.gore_editor.locks["gore_count"].setChecked(True)
@@ -430,6 +481,82 @@ def test_layer_list_without_renderer_names_every_source(gore_window: MainWindow)
     }
     item = gore_window.view3d.layer_list.item(0)
     assert item is not None and item.checkState() == Qt.CheckState.Checked
+
+
+def test_flat_chord_construction_crest_loft_and_bows(gore_window: MainWindow) -> None:
+    w = gore_window
+    editor = w.gore_editor
+    session = w.controller.session
+    assert session is not None
+    original = session.design
+    assert editor.crest_box.isHidden() and not editor.lobe_box.isHidden()
+    assert editor.rows_table.isColumnHidden(3)
+    editor.construction.setCurrentIndex(editor.construction.findData("flat_chord"))
+    editor.construction.activated.emit(editor.construction.currentIndex())
+    gores = session.design.gores
+    assert gores is not None and gores.construction == "flat_chord"
+    assert editor.lobe_box.isHidden() and not editor.crest_box.isHidden()
+    assert editor.crest_table.rowCount() == 3 and editor.crest_fraction.value() == 2.0
+    assert "to the gore centreline" in editor.crest_status.text()
+    assert not editor.rows_table.isColumnHidden(3)
+    bow = editor.rows_table.item(2, 4)
+    assert bow is not None and not bow.flags() & Qt.ItemFlag.ItemIsEditable
+    # Fraction and taper edits.
+    editor.crest_fraction.setValue(3.0)
+    editor.crest_fraction.editingFinished.emit()
+    taper = editor.crest_table.item(1, 1)
+    assert taper is not None
+    taper.setText("0.8")
+    gores = session.design.gores
+    assert gores is not None and gores.crest_loft is not None
+    assert gores.crest_loft.fraction == pytest.approx(0.03)
+    assert gores.crest_loft.taper[1].taper == 0.8
+    editor._add_crest_station()
+    gores = session.design.gores
+    assert gores is not None and gores.crest_loft is not None
+    assert len(gores.crest_loft.taper) == 4
+    # Freeze, then edit one measured bow (mm).
+    editor.freeze_crest.click()
+    gores = session.design.gores
+    assert gores is not None and gores.crest_loft is None
+    assert gores.panel_rows[2].bow_top is not None
+    bow = editor.rows_table.item(2, 4)
+    assert bow is not None and bow.flags() & Qt.ItemFlag.ItemIsEditable
+    bow.setText("12.5")
+    gores = session.design.gores
+    assert gores is not None and gores.panel_rows[2].bow_top == pytest.approx(0.0125)
+    assert "Measured seam bows" in editor.crest_status.text()
+    editor.straight_seams.click()
+    gores = session.design.gores
+    assert gores is not None and all(r.bow_top is None for r in gores.panel_rows)
+    assert "Straight seams" in editor.crest_status.text()
+    editor.use_crest.click()
+    gores = session.design.gores
+    assert gores is not None and gores.crest_loft is not None
+    # Straight segments between control points.
+    editor.interpolation.setCurrentIndex(editor.interpolation.findData("linear"))
+    editor.interpolation.activated.emit(editor.interpolation.currentIndex())
+    gores = session.design.gores
+    assert gores is not None and gores.profile_interpolation == "linear"
+    while session.stack.can_undo:
+        session.undo()
+    assert session.design == original
+    assert editor.crest_box.isHidden()
+
+
+def test_wizard_makes_a_flat_chord_design(qtbot: QtBot, window: MainWindow) -> None:
+    wizard = NewDesignWizard(window.controller.fabrics, window)
+    qtbot.addWidget(wizard)
+    wizard.construction.setCurrentIndex(wizard.construction.findData("flat_chord"))
+    assert not wizard.loft_ratio.isEnabled()
+    wizard.interpolation.setCurrentIndex(wizard.interpolation.findData("linear"))
+    wizard.create_design()
+    design = wizard.design
+    assert design is not None, wizard.error.text()
+    assert design.gores is not None
+    assert design.gores.construction == "flat_chord"
+    assert design.gores.profile_interpolation == "linear"
+    assert design.gores.crest_loft is not None
 
 
 def test_gore_loft_table_edits_are_undoable(gore_window: MainWindow) -> None:

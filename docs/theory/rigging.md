@@ -37,6 +37,17 @@ then a spherical cap with rise \(h = 2 b\, r_h\) (billow \(b\)), sphere radius
 cut with the envelope's small-bulge width model ([gore geometry](gore-geometry.md)) as one
 panel row from the edge (wide end) to the apex, with the design's seam allowance.
 
+*Centre panel* (`parachute.centre_panel_diameter` \(D_c = 2 r_c\), optional). The radial
+panels end at the circle of radius \(r_c\) on the cap, so each is a trapezoid, and a flat
+circular panel of diameter \(D_c\) closes the centre. Its edge \(\pi D_c\) is sewn to the
+radial panels' top edges, which together are \(N \cdot 2\pi r_c / N = 2\pi r_c\) in the
+small-bulge width model; a mismatch over 3 mm is an error. The disc is cut flat, so the
+cap's rise inside the seam, \(\rho - \sqrt{\rho^2 - r_c^2}\), is not in the pattern. The
+fabric is pressed into that rise by the internal pressure. The parachute area is
+\(A = A_{radial} + \pi r_c^2\). Crown pressure and shroud-line load use the full cap rise
+\(h\) (conservative). Valid for \(a < r_c < r_h\), with \(a\) the centre-ring radius. Without a
+centre panel the radial panels run to the centre ring or the apex (wedges).
+
 *Lines.* One shroud line and one centralising line leave each radial seam. The shroud line
 runs from \(E\) to the load tape at \(s_A = s_E - a\) (\(a\) = shroud attachment),
 \(L_s = |E - A|\); the centralising line runs from \(E\) to the confluence
@@ -89,8 +100,9 @@ isotropic resultant \(n = p\rho/2\), so
 \[ H_{centre} = \frac{p\,\rho\,a}{2}. \]
 
 A flat parachute cannot carry pressure as a membrane, so its centre-ring load is not
-assessed (warning). The parachute panels end at the centre ring (the cap meridian runs
-from the rim to radius \(a\)). The crown-line load is not computed. Both rings are
+assessed (warning). Without a centre panel the parachute panels end at the centre ring
+(the cap meridian runs from the rim to radius \(a\)); with one, the ring is sewn to the
+centre panel. The crown-line load is not computed. Both rings are
 checked against their own required factor of safety (default 1.5 for a metal part,
 14 CFR 31.25(a); `assumed`), at the limit load. References: W. C. Young, R. Budynas,
 *Roark's Formulas for Stress and Strain*, ch. 9 and 13.

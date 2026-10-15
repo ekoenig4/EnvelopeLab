@@ -162,7 +162,7 @@ class SimulationManager(QObject):
     def detect_calculix(self) -> bool:
         """Look for ``ccx`` (preferences path, ``$ENVELOPELAB_CCX``, then ``PATH``)."""
         try:
-            from calculix_adapter import SETUP_MESSAGE, find_calculix
+            from calculix_adapter import SETUP_MESSAGE, calculix_report, find_calculix
         except ImportError:  # the adapter is part of this project but optional
             self.calculix_version = None
             self.calculix_message = "CalculiX adapter is not installed."
@@ -172,7 +172,10 @@ class SimulationManager(QObject):
         if found is None:
             self.calculix_version = None
             self.calculix_message = (
-                "CalculiX (ccx) is not installed, so 'Run CalculiX' is disabled.\n" + SETUP_MESSAGE
+                "CalculiX (ccx) was not found, so 'Run CalculiX' is disabled.\n\n"
+                + calculix_report(self.controller.prefs.ccx_path or None)
+                + "\n\n"
+                + SETUP_MESSAGE
             )
         else:
             self.calculix_version = found.version

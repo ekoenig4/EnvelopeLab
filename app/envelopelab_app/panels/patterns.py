@@ -38,6 +38,8 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QScrollArea,
     QSplitter,
@@ -54,6 +56,7 @@ from envelopelab.project.gore_design import (
     row_zone,
 )
 from envelopelab.project.model import RowPattern
+from envelopelab.rigging.parachute import CentrePanel
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.refresh import Refresher
 
@@ -246,6 +249,13 @@ class PatternPanel(QWidget):
             feature_row.addWidget(w)
         form.addRow("Feature (radius)", feature_row)
 
+        self.marks = QListWidget()
+        self.marks.setObjectName("rowMarks")
+        self.marks.setMaximumHeight(110)
+        remove_mark = QPushButton("Remove selected mark")
+        remove_mark.clicked.connect(self._remove_mark)
+        form.addRow("Marks on this row", self.marks)
+        form.addRow(remove_mark)
         clear_ann = QPushButton("Clear notches, tapes and features")
         clear_ann.clicked.connect(self._clear_annotations)
         self.clear_override = QPushButton("Remove manual override")
@@ -339,6 +349,7 @@ class PatternPanel(QWidget):
         self.view.handles = []
         self.view.offsets = {}
         self.parachute_item: QGraphicsPolygonItem | None = None
+        self.centre_item: QGraphicsPolygonItem | None = None
         self.scoop_item: QGraphicsPolygonItem | None = None
         first = self.view.content_rect.isEmpty()
         self.view.content_rect = QRectF()
@@ -518,30 +529,46 @@ class PatternPanel(QWidget):
         self.view.content_rect = self.view.content_rect.united(bounds)
 
     def _draw_parachute(self, y: float, stale: bool) -> None:
-        """The parachute panel on top of the rows (read-only; placed from the Rigging
-        panel)."""
+        """The parachute's radial panel on top of the rows and its centre panel above it
+        (read-only; placed from the Rigging panel)."""
         rigging = self.controller.rigging
         session = self.controller.session
         if rigging is None or session is None:
             return
         design = session.design
         pr = rigging.parachute
-        if pr is not None and pr.panel is not None and design.parachute is not None:
-            zone = design.parachute.zone or next(iter(design.zones), "")
-            self.parachute_item = self._piece(
-                pr.panel,
-                f"PARACHUTE x{pr.panel_count}",
+        if pr is None or pr.panel is None or design.parachute is None:
+            return
+        zone = design.parachute.zone or next(iter(design.zones), "")
+        centre = pr.centre_panel
+        top = "the centre panel" if centre is not None else "the centre ring or apex"
+        self.parachute_item = self._piece(
+            pr.panel,
+            f"PARACHUTE x{pr.panel_count}",
+            zone,
+            y,
+            stale,
+            f"edge at the bottom, {top} at the top; shroud and centralising lines at each "
+            "side seam's bottom end",
+        )
+        if centre is not None:
+            radius = 0.5 * centre.diameter + centre.allowance
+            above = float(pr.panel.cut_outline[:, 1].max()) + GAP + radius
+            self.centre_item = self._piece(
+                centre,
+                "PARACHUTE CENTRE x1",
                 zone,
-                y,
+                y + above,
                 stale,
-                "edge at the bottom, centre ring at the top; shroud and centralising lines "
-                "at each side seam's bottom end",
+                f"sewn round its edge ({centre.seam_length:.3f} m) to the tops of the "
+                f"{pr.panel_count} radial panels",
             )
 
     def _piece(
-        self, panel: PanelRow, text: str, zone: str, y: float, stale: bool, note: str
+        self, panel: PanelRow | CentrePanel, text: str, zone: str, y: float, stale: bool, note: str
     ) -> QGraphicsPolygonItem:
-        """Draw a read-only piece with its finished bottom seam at height ``y`` (m)."""
+        """Draw a read-only piece with its origin (a panel's finished bottom seam, the centre
+        panel's centre) at height ``y`` (m)."""
         origin = QPointF(0.0, -y)
         drawn: list[QGraphicsPolygonItem] = []
         self._in_container(
@@ -551,7 +578,7 @@ class PatternPanel(QWidget):
         return drawn[0]
 
     def _draw_piece(
-        self, panel: PanelRow, text: str, zone: str, stale: bool, note: str
+        self, panel: PanelRow | CentrePanel, text: str, zone: str, stale: bool, note: str
     ) -> QGraphicsPolygonItem:
         scene = self.view.scene()
         grey = QColor("#9e9e9e")
@@ -570,7 +597,10 @@ class PatternPanel(QWidget):
         font.setPointSizeF(7.5)
         label.setFont(font)
         label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-        label.setPos(-0.25 * panel.bottom_width, -panel.finished_height * 0.4)
+        if isinstance(panel, PanelRow):
+            label.setPos(-0.25 * panel.bottom_width, -panel.finished_height * 0.4)
+        else:
+            label.setPos(-0.3 * panel.diameter, 0.0)
         label.setToolTip(finished.toolTip())
         scene.addItem(label)
         return finished
@@ -605,8 +635,14 @@ class PatternPanel(QWidget):
         self.label_text.setText(ann.label_text or "")
         self.grain.setValue(ann.grain_angle_deg)
         self.zone.clear()
-        self.zone.addItems(list(design.zones))
-        self.zone.setCurrentText(row_zone(design, session.patterns, letter))
+        self.zone.addItem(f"(design default: {next(iter(design.zones), '-')})", None)
+        for zone in design.zones:
+            self.zone.addItem(zone, zone)
+        # The row's own zone (None: it uses the design's first zone).
+        own = ann.zone
+        if own is None and design.gores is not None:
+            own = next((r.zone for r in design.gores.panel_rows if r.letter == letter), None)
+        self.zone.setCurrentIndex(max(0, self.zone.findData(own)))
         self.default_allowance.setValue(default_allowance(design) * 1000)
         self.row_allowance.setValue(
             -1.0 if ann.seam_allowance is None else ann.seam_allowance * 1000
@@ -615,6 +651,22 @@ class PatternPanel(QWidget):
         for i, f in enumerate(design.features):
             self.feature.addItem(f"{i}: {f.type}", i)
         self.clear_override.setEnabled(ann.manual_outline is not None)
+        self.marks.clear()
+        entries = [
+            *(
+                ("notches", i, f"notch {n.edge} at {n.position:.2f}")
+                for i, n in enumerate(ann.notches)
+            ),
+            *(("tape_paths", i, f"tape path {p.name}") for i, p in enumerate(ann.tape_paths)),
+            *(
+                ("feature_locations", i, f"feature {f.feature}, radius {f.radius:g} m")
+                for i, f in enumerate(ann.feature_locations)
+            ),
+        ]
+        for kind, index, text in entries:
+            item = QListWidgetItem(text)
+            item.setData(Qt.ItemDataRole.UserRole, (kind, index))
+            self.marks.addItem(item)
         row = self.rows_by_letter().get(letter)
         if row is not None:
             self.tape_y.setMaximum(row.finished_height)
@@ -631,7 +683,9 @@ class PatternPanel(QWidget):
         self._row_edit({"grain_angle_deg": float(self.grain.value())}, "grain direction")
 
     def _zone_edited(self) -> None:
-        self._row_edit({"zone": self.zone.currentText() or None}, "fabric zone")
+        letter = self.selected_letter()
+        if letter is not None and not self._updating:
+            self.controller.edit("set_row_zone", letter, self.zone.currentData())
 
     def _default_allowance_edited(self) -> None:
         if not self._updating:
@@ -689,6 +743,24 @@ class PatternPanel(QWidget):
             }
         )
         self._row_edit({"feature_locations": feats}, "place feature")
+
+    def _remove_mark(self) -> None:
+        session = self.controller.session
+        letter = self.selected_letter()
+        item = self.marks.currentItem()
+        if session is None or letter is None or item is None:
+            return
+        self.remove_mark(*item.data(Qt.ItemDataRole.UserRole))
+
+    def remove_mark(self, kind: str, index: int) -> None:
+        """Remove one notch, tape path or feature location of the selected row."""
+        session = self.controller.session
+        letter = self.selected_letter()
+        if session is None or letter is None:
+            return
+        marks = [m.model_dump() for m in getattr(session.patterns.row(letter), kind)]
+        del marks[index]
+        self._row_edit({kind: marks}, f"remove {kind.replace('_', ' ')} entry")
 
     def _clear_annotations(self) -> None:
         self._row_edit({"notches": [], "tape_paths": [], "feature_locations": []}, "clear marks")

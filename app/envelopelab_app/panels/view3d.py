@@ -41,12 +41,15 @@ from envelopelab.project.gore_design import (
     DisplaySurface,
     control_arrays,
     display_surface,
-    row_zone,
+    envelope_marks,
+    panel_zone,
 )
 from envelopelab.project.model import SOLVER_LABELS, RunRecord
 from envelopelab.project.shapes import (
     ShapePlacement,
     base_radius,
+    display_offset,
+    feed_hole_rings,
     footprint_preview,
     placement_at,
 )
@@ -63,6 +66,7 @@ LAYER_COLORS = {
     "rigging": "#9467bd",
     "shape": "#e7298a",
     "shape-simulated": "#7570b3",
+    "marks": "#2b8cbe",
 }
 #: Line colours of the rigging layer, per element kind.
 RIGGING_COLORS = {
@@ -75,6 +79,10 @@ RIGGING_COLORS = {
     "scoop": "#843c39",
     "vertical_seams": "#1a1a1a",
     "horizontal_seams": "#4d4d4d",
+    "panel_zones": "#2b8cbe",
+    "tape_paths": "#1a1a1a",
+    "feature_locations": "#e6550d",
+    "feed_holes": "#ff00ff",
 }
 #: Layers drawn without mesh edges: display meshes (the design surface and the designed
 #: shapes, whose dense grids would render as solid black with edges), not solver meshes.
@@ -83,7 +91,14 @@ SMOOTH_KINDS = ("design", "shape")
 DRAG_COLOR = "#ff00ff"
 DRAG_ACTOR = "shape-drag-outline"
 #: Line widths of polyline kinds (pixels); default 2.
-LINE_WIDTHS = {"red_line": 4, "vertical_seams": 3, "horizontal_seams": 2}
+LINE_WIDTHS = {
+    "red_line": 4,
+    "vertical_seams": 3,
+    "horizontal_seams": 2,
+    "panel_zones": 3,
+    "tape_paths": 3,
+    "feed_holes": 3,
+}
 #: Brightness of every second gore, so that neighbouring gores are told apart.
 ALTERNATE_GORE_SHADE = 0.8
 
@@ -118,7 +133,8 @@ class Layer:
         Unique id.
     kind : str
         ``design``, ``rest``, ``envelopelab-preview``, ``calculix``, ``reference``,
-        ``rigging``, ``shape`` (a special shape as designed) or ``shape-simulated``.
+        ``rigging``, ``marks`` (panel zones, tape paths, feature locations), ``shape``
+        (a special shape as designed) or ``shape-simulated``.
     label : str
         Text shown in the list and the scene legend.
     points : ndarray, shape (n, 3)
@@ -311,10 +327,22 @@ class View3DPanel(QWidget):
             try:
                 surface = display_surface(session.design)
                 n = session.design.gores.count
+                gores = session.design.gores
+                what = "profile"
+                if gores.construction == "flat_chord":
+                    what = "profile, flat-chord gores with " + (
+                        "crest loft"
+                        if gores.crest_loft is not None
+                        else "crest from the seam bows"
+                        if any(r.bow_top for r in gores.panel_rows)
+                        else "straight seams"
+                    )
+                elif gores.loft is not None:
+                    what = "profile, lobe loft"
                 self.layers["design"] = Layer(
                     "design",
                     "design",
-                    f"Design surface (profile, current): {n} gores x "
+                    f"Design surface ({what}, current): {n} gores x "
                     f"{len(surface.row_letters)} panel rows, seams dark",
                     surface.points,
                     surface.faces,
@@ -326,6 +354,20 @@ class View3DPanel(QWidget):
                 )
             except ValueError:
                 pass
+            try:
+                marks = envelope_marks(session.design, session.patterns, self.controller.rows())
+            except ValueError:
+                marks = {}
+            if marks:
+                parts = ", ".join(k.replace("_", " ") for k in marks)
+                self.layers["marks"] = Layer(
+                    "marks",
+                    "marks",
+                    f"Panel details (design, current): {parts}",
+                    np.zeros((0, 3)),
+                    np.zeros((0, 3), dtype=np.int64),
+                    polylines=marks,
+                )
             lines = self.controller.rigging_polylines()
             if lines:
                 parts = ", ".join(k.replace("_", " ") for k in lines)
@@ -391,22 +433,30 @@ class View3DPanel(QWidget):
         from envelopelab.features.scene import designed_object, simulated_object
 
         service = self.controller.shapes
+        design = self.controller.design
+        host = design if design is not None and design.gores is not None else None
         for name in service.keys:
             result = service.result(name)
             if result is None or result.design is None:
                 continue
             obj = designed_object(result.design)
+            # Sit the shape and its feed holes on the drawn envelope (display only).
+            shift = display_offset(host, result.design) if host else np.zeros(3)
+            holes = feed_hole_rings(host, result.design) if host else []
             self.layers[f"shape:{name}"] = Layer(
                 f"shape:{name}",
                 "shape",
-                f"Special shape {name} (as designed, current)",
-                obj.vertices,
+                f"Special shape {name} (as designed, current)"
+                + (f", {len(holes)} feed hole(s)" if holes else ""),
+                obj.vertices + shift,
                 obj.triangles,
+                polylines={"feed_holes": holes} if holes else {},
             )
         for name, sim in service.simulations.items():
             if name not in service.keys:
                 continue
             obj = simulated_object(sim.design, sim.appendage, sim.result)
+            shift = display_offset(host, sim.design) if host else np.zeros(3)
             stale = service.simulation_status(name) != "current"
             converged = bool(sim.result.converged)
             label = f"Special shape {name}, preview solver result"
@@ -418,26 +468,31 @@ class View3DPanel(QWidget):
                 f"shape-sim:{name}",
                 "shape-simulated",
                 label,
-                obj.vertices,
+                obj.vertices + shift,
                 obj.triangles,
                 stale,
                 converged,
             )
 
     def _face_colors(self, surface: DisplaySurface) -> np.ndarray:
-        """Row fabric colour per triangle, every second gore darker (display only)."""
+        """Fabric colour per triangle: the panel's zone (a panel zone, else its row's),
+        every second gore darker (display only)."""
         session = self.controller.session
         assert session is not None
         design = session.design
-        palette = []
-        for letter in surface.row_letters:
-            fabric_id = design.zones.get(row_zone(design, session.patterns, letter), "")
-            fabric = self.controller.fabrics.fabric(fabric_id) if fabric_id else None
-            color = QColor(fabric.color) if fabric is not None else QColor("#d9e7f5")
-            if not color.isValid():
-                color = QColor("#d9e7f5")
-            palette.append((color.red(), color.green(), color.blue()))
-        rgb = np.array(palette, dtype=np.float64)[surface.face_row]
+        assert design.gores is not None
+        n = design.gores.count
+        palette = np.zeros((len(surface.row_letters), n, 3))
+        for i, letter in enumerate(surface.row_letters):
+            for g in range(1, n + 1):
+                zone = panel_zone(design, session.patterns, letter, g)
+                fabric_id = design.zones.get(zone, "")
+                fabric = self.controller.fabrics.fabric(fabric_id) if fabric_id else None
+                color = QColor(fabric.color) if fabric is not None else QColor("#d9e7f5")
+                if not color.isValid():
+                    color = QColor("#d9e7f5")
+                palette[i, g - 1] = (color.red(), color.green(), color.blue())
+        rgb = palette[surface.face_row, surface.face_gore - 1]
         rgb[surface.face_gore % 2 == 0] *= ALTERNATE_GORE_SHADE
         return np.asarray(rgb.astype(np.uint8))
 

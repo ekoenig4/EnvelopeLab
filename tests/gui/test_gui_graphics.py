@@ -36,3 +36,19 @@ def test_flags_and_the_users_setting_win() -> None:
     env = {SOFTWARE_GL: "0"}  # set by the user: never overridden
     assert configure_graphics(env, platform="linux", proc_version=WSL_KERNEL) is None
     assert env[SOFTWARE_GL] == "0"
+
+
+def test_wayland_sessions_use_the_x11_platform_the_3d_view_needs() -> None:
+    from envelopelab_app.graphics import QT_PLATFORM, select_qt_platform
+
+    # WSLg sets both: Qt would pick Wayland, where the VTK window crashes.
+    env = {"WAYLAND_DISPLAY": "wayland-0", "DISPLAY": ":0"}
+    reason = select_qt_platform(env, platform="linux")
+    assert env[QT_PLATFORM] == "xcb" and reason is not None and "xcb" in reason
+    # A choice the user made is kept; no X server, no change; not on other systems.
+    kept = {"WAYLAND_DISPLAY": "wayland-0", "DISPLAY": ":0", QT_PLATFORM: "wayland"}
+    assert select_qt_platform(kept, platform="linux") is None and kept[QT_PLATFORM] == "wayland"
+    only_wayland = {"WAYLAND_DISPLAY": "wayland-0"}
+    assert select_qt_platform(only_wayland, platform="linux") is None
+    assert QT_PLATFORM not in only_wayland
+    assert select_qt_platform({"WAYLAND_DISPLAY": "w", "DISPLAY": ":0"}, platform="win32") is None

@@ -25,6 +25,7 @@ from envelopelab.design.model import DesignDocument
 from envelopelab.geometry.gore import GoreLoft
 from envelopelab.materials.repository import FabricLibraryRepository
 from envelopelab.project.gore_design import standard_gore_design
+from envelopelab.project.shapes import ShapeSpec
 from envelopelab.project.templates import (
     MEASUREMENTS_NOT_IMPLEMENTED,
     special_design_from_mesh,
@@ -64,6 +65,8 @@ class NewDesignWizard(QDialog):
         self.settings = settings
         self.setWindowTitle("New design")
         self.design: DesignDocument | None = None
+        #: Special shapes of the new design (from a shape file's ``special_shapes``).
+        self.shapes: list[ShapeSpec] = []
         self.tabs = QTabWidget()
 
         gore = QWidget()
@@ -99,6 +102,17 @@ class NewDesignWizard(QDialog):
             "Lobe-radius ratio k = ρ/r of the fabric bulge between load tapes "
             "(1 = small bulge; larger = flatter). Vary it along the gore in the editor."
         )
+        self.construction = QComboBox()
+        self.construction.addItem("Lobe (straight seams)", "lobe")
+        self.construction.addItem("Flat chord (bowed seams, crest loft)", "flat_chord")
+        self.construction.setToolTip(
+            "Flat chord: flat tape-to-tape panels lofted lengthwise by bowed seams; the "
+            "design gets a default crest loft to edit in the gore editor."
+        )
+        self.construction.currentIndexChanged.connect(self._construction_changed)
+        self.interpolation = QComboBox()
+        self.interpolation.addItem("Spline", "spline")
+        self.interpolation.addItem("Straight segments", "linear")
         for label, widget in (
             ("Name", self.name),
             ("Target volume", self.volume),
@@ -114,7 +128,9 @@ class NewDesignWizard(QDialog):
             ("Seam allowance", self.allowance),
             ("Internal temperature", self.internal),
             ("Ambient temperature", self.ambient),
+            ("Gore construction", self.construction),
             ("Gore loft, lobe ratio k = ρ/r", self.loft_ratio),
+            ("Profile between control points", self.interpolation),
         ):
             form.addRow(label, widget)
         self.save_defaults = QPushButton("Save as my defaults")
@@ -243,6 +259,10 @@ class NewDesignWizard(QDialog):
         if path:
             self.mesh_path.setText(path)
 
+    def _construction_changed(self, _index: int) -> None:
+        # A flat-chord gore is lofted by its seams, not by a lobe ratio.
+        self.loft_ratio.setEnabled(self.construction.currentData() != "flat_chord")
+
     def _tab_changed(self, index: int) -> None:
         ok = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
         ok.setEnabled(self.tabs.widget(index) is not self.measure_tab)
@@ -251,10 +271,12 @@ class NewDesignWizard(QDialog):
     def create_design(self) -> None:
         """Build the design from the current tab; errors are shown in the dialog."""
         current = self.tabs.currentWidget()
+        self.shapes = []
         try:
             if self.tabs.currentIndex() == 0:
                 w = self.target_width.value()
                 mouth = self.mouth_fabric.currentText()
+                flat = self.construction.currentData() == "flat_chord"
                 self.design = standard_gore_design(
                     name=self.name.text().strip() or "New envelope",
                     target_volume=self.volume.value(),
@@ -271,11 +293,14 @@ class NewDesignWizard(QDialog):
                     mouth_fabric_id=None if mouth == NO_MOUTH_ROW else mouth,
                     mouth_row_height=self.mouth_height.value() or None,
                     loft=None
-                    if self.loft_ratio.value() == 1.0
+                    if flat or self.loft_ratio.value() == 1.0
                     else GoreLoft.constant(self.loft_ratio.value()),
+                    construction="flat_chord" if flat else "lobe",
+                    interpolation=self.interpolation.currentData(),
                 )
             elif current is self.shape_tab:
                 self.design = self.shape_tab.design()
+                self.shapes = self.shape_tab.shapes(self.design)
             elif current is not self.measure_tab:
                 self.design = special_design_from_mesh(
                     self.special_name.text().strip() or "Special shape",

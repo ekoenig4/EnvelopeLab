@@ -14,8 +14,10 @@ from envelopelab.project import edits
 from envelopelab.project.gore_design import (
     LockError,
     apply_locks,
+    check_locks,
     control_arrays,
     design_findings,
+    design_volume,
     editable_outline,
     fit_row_heights,
     gore_outputs,
@@ -117,6 +119,10 @@ def test_fit_row_heights_covers_exactly() -> None:
         {"volume": True, "height": True},
         {"volume": True, "max_diameter": True},
         {"volume": True, "height": True, "max_diameter": True},
+        {"mouth_diameter": True},
+        {"top_diameter": True, "volume": True},
+        {"mouth_diameter": True, "top_diameter": True, "volume": True, "height": True},
+        {"mouth_diameter": True, "top_diameter": True, "max_diameter": True},
     ],
 )
 def test_locks_hold_after_an_edit(locks: dict[str, bool]) -> None:
@@ -126,7 +132,16 @@ def test_locks_hold_after_an_edit(locks: dict[str, bool]) -> None:
         edits.set_lock(s, name, True)
     pts = s.design.gores.meridian_profile_control_points  # type: ignore[union-attr]
     edits.move_control_point(s, 2, pts[2].x + 0.4, pts[2].y + 0.3)
+    r0, _ = control_arrays(s.design)
+    edits.move_control_point(s, len(pts) - 1, pts[-1].x + 0.3, pts[-1].y)
+    edits.move_control_point(s, 0, pts[0].x - 0.2, pts[0].y)
     after = profile_from_arrays(*control_arrays(s.design))
+    r1, _ = control_arrays(s.design)
+    if "mouth_diameter" in locks:
+        assert r1[0] == pytest.approx(pts[0].x, abs=1e-12)
+    if "top_diameter" in locks:
+        assert r1[-1] == pytest.approx(pts[-1].x, abs=1e-12)
+    assert check_locks(s.design, s.project.locks) == []
     if "height" in locks:
         assert after.height == pytest.approx(before.height, abs=1e-3)
     if "max_diameter" in locks:
@@ -137,8 +152,30 @@ def test_locks_hold_after_an_edit(locks: dict[str, bool]) -> None:
     assert s.design.gores is not None
     total = sum(r.finished_height for r in s.design.gores.panel_rows)
     assert total == pytest.approx(after.meridian_length, abs=1e-3)
-    s.undo()
+    while s.stack.can_undo:
+        s.undo()
     assert profile_from_arrays(*control_arrays(s.design)).volume == pytest.approx(before.volume)
+
+
+def test_opening_locks_set_the_stated_diameters() -> None:
+    s = ProjectSession.open(FIXTURE)
+    edits.set_lock(s, "volume", True)
+    volume = design_volume(s.design)
+    r, _ = control_arrays(s.design)
+    top = round(2.0 * float(r[-1]) + 0.2, 3)
+    assert edits.set_lock_target(s, "top_diameter", top)
+    r, _ = control_arrays(s.design)
+    assert 2.0 * r[-1] == pytest.approx(top, abs=1e-12)
+    gores = s.design.gores
+    assert gores is not None
+    assert gores.parachute_hole_diameter == top and gores.crown_ring == top
+    assert design_volume(s.design) == pytest.approx(volume, rel=1e-3)
+    mouth = round(2.0 * float(r[0]) - 0.3, 3)
+    assert edits.set_lock_target(s, "mouth_diameter", mouth)
+    assert s.design.gores is not None and s.design.gores.mouth_diameter == mouth
+    assert check_locks(s.design, s.project.locks) == []
+    # Nothing in the design names the hole any more but the locked value.
+    assert not [f for f in design_findings(s.design, PatternSet()) if f.code in ("mouth", "crown")]
 
 
 def test_gore_count_lock_refuses_changes() -> None:
@@ -206,3 +243,44 @@ def test_display_surface_follows_gores_and_rows() -> None:
     radii = [float(np.hypot(*ring[0, :2])) for ring in ds.horizontal_seams]
     assert radii[0] == pytest.approx(design.gores.mouth_diameter / 2, abs=1e-3)  # type: ignore[union-attr]
     assert len(ds.horizontal_seams) == 7
+
+
+def test_the_equator_is_the_widest_point() -> None:
+    from envelopelab.geometry.gore import MeridianProfile
+    from envelopelab.project.gore_design import profile_equator
+
+    # Sphere zone -60..70 degrees, R = 8 m: the equator is at z = 0.
+    theta = np.linspace(math.radians(-60.0), math.radians(70.0), 4001)
+    sphere = MeridianProfile.from_points(8.0 * np.cos(theta), 8.0 * np.sin(theta))
+    eq = profile_equator(sphere)
+    assert eq.r == pytest.approx(8.0, abs=1e-6) and eq.z == pytest.approx(0.0, abs=1e-4)
+    assert eq.s == pytest.approx(8.0 * math.radians(60.0), abs=1e-4)
+    assert eq.height_above_mouth == pytest.approx(8.0 * math.sin(math.radians(60.0)), abs=1e-4)
+    assert eq.fraction == pytest.approx(60.0 / 130.0, abs=1e-5)
+    # A cylinder: the middle of the straight widest stretch.
+    cylinder = MeridianProfile.from_points([1.0, 3.0, 3.0, 1.0], [0.0, 1.0, 5.0, 6.0])
+    assert profile_equator(cylinder).z == pytest.approx(3.0, abs=0.01)
+
+
+def test_seam_fractions_follow_the_row_heights() -> None:
+    from envelopelab.project.gore_design import seam_fractions
+
+    design = standard_gore_design("w", 2200.0, 17.0, 16.0, 12, 4)
+    assert design.gores is not None
+    heights = [row.finished_height for row in design.gores.panel_rows]
+    fractions = seam_fractions(design)
+    assert len(fractions) == 5 and fractions[0] == 0.0 and fractions[-1] == pytest.approx(1.0)
+    assert fractions[2] == pytest.approx(sum(heights[:2]) / sum(heights))
+    out = gore_outputs(design, PatternSet())
+    assert out.equator is not None and 2.0 * out.equator.r == pytest.approx(16.0, abs=1e-3)
+
+
+@pytest.mark.parametrize(("lock", "index"), [("mouth_diameter", 0), ("top_diameter", -1)])
+def test_a_locked_opening_point_cannot_be_deleted(lock: str, index: int) -> None:
+    s = ProjectSession.open(FIXTURE)
+    edits.set_lock(s, lock, True)
+    before = s.design
+    r, _ = control_arrays(s.design)
+    with pytest.raises(LockError, match="unlock"):
+        edits.delete_control_point(s, index % r.size)
+    assert s.design == before

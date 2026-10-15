@@ -1,0 +1,50 @@
+# EnvelopeLab shape file: special shapes on the synthetic flat-chord pattern set.
+#
+# SYNTHETIC test data (README.md). It `extends` shape.yaml and adds zones, panel zones and
+# one shape of each kind placed by gore and row; the blister mesh is made by
+# make_fixture.py.
+
+format: envelopelab.shape
+format_version: 2
+extends: shape.yaml
+name: Flat-chord pattern with shapes (synthetic)
+
+zones:
+  accent: ripstop_nylon
+  doubled: ripstop_nylon
+
+panel_zones:
+  - {name: badge, row: C, gores: [16, 1], zone: accent}
+  - {name: doubler, row: G, gores: [5], zone: doubled}
+
+special_shapes:
+  - name: dome
+    kind: dome
+    placement: {gore: 9, row: E, at: 0.5}
+    base_radius: 800 mm
+    height: 600 mm
+    gores: 12
+    feed_hole_radius: 250 mm
+    zone: accent
+    seam_allowance: 25 mm
+  - name: horn
+    kind: tube
+    placement: {gore: 5, row: G, above: 600 mm, lean_deg: 30, lean_toward_deg: 90}
+    base_radius: 400 mm
+    tip_radius: 150 mm
+    length: 2 m
+    panels: 2
+    marks_per_piece: 4
+    feed_hole_radius: 300 mm
+    zone: accent
+    seam_allowance: 25 mm
+  - name: blister
+    kind: mesh
+    mesh: {file: shapes/blister.obj, up: Z}
+    placement: {gore: 13, row: D, at: 0.5}
+    panels: 8
+    zone: accent
+    seam_allowance: 25 mm
+    feed_holes:
+      - {gore: 13, row: D, at: 0.42, across: 0.15, radius: 150 mm}
+      - {gore: 13, row: D, at: 0.58, across: -0.15, radius: 150 mm}

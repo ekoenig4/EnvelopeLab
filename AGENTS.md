@@ -217,7 +217,8 @@ The commit body must state, when they apply:
   allowed as-is; keep the assigned name rather than renaming it. The commit and PR rules
   below apply to them unchanged.
 - Keep `main` green. Merge only through a pull request with CI passing on every OS and
-  Python version in the matrix.
+  Python version in the matrix (Linux, macOS, Windows, and Windows with WSL 2 Ubuntu
+  24.04).
 - PR description: what changed and why, the commands run and their results (§5 step 6),
   what is unfinished, known limitations, and links to issues for pending or skipped tests.
 - A `physics` PR lists every affected benchmark with its before/after values, and must

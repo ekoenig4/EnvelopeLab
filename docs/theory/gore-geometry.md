@@ -151,6 +151,103 @@ meridian within 1 mm (unless `require_full_coverage=False`).
 Check: with the small-bulge form, \(N \sum A_{finished} = \int 2\pi r\,ds = A\) exactly; with a
 loft, \(N \sum A_{finished}\) equals the lofted area \(A\) above.
 
+## Flat-chord gores and the crest loft — `flat_chord_rows`, `CrestLoft`
+
+A design with `construction: flat_chord` is cut the way many horizontal-cut patterns are
+drawn:
+every row is a flat tape-to-tape trapezoid, and the gore is lofted **lengthwise** by
+making its centreline longer than its sides.
+
+**Rows.** Row \(k\) runs along the tape from \(s_k\) to \(s_{k+1}\) (its tape length
+\(L_k\)). Its corners lie a flat chord apart,
+
+\[
+w_j = r(s_j)\sin\frac{\pi}{N},
+\]
+
+either side of the centreline, and its sides are straight lines of length \(L_k\), since
+the load tape is sewn along them. The top corners therefore stand
+
+\[
+h_k = \sqrt{L_k^2 - (w_{k+1} - w_k)^2}
+\]
+
+above the bottom ones. With straight tape segments between row corners
+(`profile_interpolation: linear`) the panel side and the tape agree exactly. A profile can
+also be built from lines, arcs and smooth curves span by span
+(`profile_interpolation: segments`; [profile editing](profile-editing.md#segment-profiles)).
+
+**Bowed seams.** The bottom and top seam lines bow outward from the straight corner line
+as parabolas
+
+\[
+d(x) = b\left(1 - \left(\frac{x}{w_c}\right)^2\right),
+\]
+
+so the centreline is \(h_k + b_{bottom} + b_{top}\) long. The seam is taken to be this
+parabola. The bows are given per row (`bow_bottom`, `bow_top`; a
+measured table) or come from a crest loft.
+
+**Crest loft.** The crest of the fabric between two tapes is meant to stand
+
+\[
+\delta(s) = \lambda\,\tau(f)\,r(s), \qquad f = s/L_t,
+\]
+
+outside the flat chord: \(\lambda\) is the loft fraction ("2 % of radius") and
+\(\tau\) a taper interpolated linearly between stations (0 at the mouth and the
+opening for a loft that tapers to zero there). Offsetting a curve outward by \(\delta\)
+lengthens it by \(\int \delta\kappa\,ds\), with \(\kappa\) the curvature of the
+meridian. On the polyline profile the tape turns by \(\varphi_i\) at node \(i\), and the
+offset gains \(2\delta_i\tan(\varphi_i/2)\) there. Each node's gain goes to the nearest
+boundary between two rows. A boundary that collects \(e_j\) bows both seam lines that
+meet there by \(\beta_j = e_j/2\), so the two sides of a seam have the same shape and
+length. The mouth and the top opening stay straight; gains next to them go to the first
+interior boundary.
+
+**Volume and area.** The width model of a flat-chord gore is the flat chord
+(\(k = \infty\)), so the design volume is that of the flat-gore polygon,
+\(N\sin(2\pi/N)/(2\pi)\) times the volume through the tapes (98.4 % for 20 gores). The
+crest is not added: how far it stands out under pressure is a result of the preview and
+CalculiX solvers, which sew the bowed panels. The fabric area of the rows includes the
+parabolic segments, \(\tfrac{2}{3}\,2w_c\,b\) per bowed seam.
+
+**Display surface.** The 3D view draws a flat-chord gore as the flat chord between the
+tapes moved by \(\delta(s)(1 - u^2)\) along the outward normal of the meridian,
+\(u \in [-1, 1]\) across the gore (`crest_section`). With measured bows the offset at
+seam \(j\) is taken from the bows by inverting the crest-loft relation above,
+
+\[
+\delta_j = \frac{2\beta_j}{\sum_i 2\tan(\varphi_i/2)},
+\]
+
+over the nodes the crest loft gives to that seam, with \(\beta_j\) the mean of the two
+seam lines (`crest_offsets_from_bows`). It is linear between seams and 0 at the mouth and
+the opening. Where the tape is straight (a total turn below \(10^{-3}\) rad) bows cannot be
+shown as an offset and the offset is 0. This is a display of the cut shape, not the
+inflated shape.
+
+**Cut outline.** Each finished edge (bottom seam, side, top seam, side) is offset outward
+by its allowance, with mitred joints, and the offset edges are extended along their end
+segments to meet at the corners (`bowed_cut_outline`). Straight-seam rows keep the
+cut outline above.
+
+**Assumptions and valid range.** The fabric does not stretch. The crest offset is
+measured normal to the tape and is small compared with the meridian radius of curvature.
+The crest loft is a generator: it gives both sides of a seam the same bow, so it cannot
+reproduce a pattern whose two sides differ; use measured bows to reproduce a pattern.
+
+**Benchmarks** (`docs/validation/analytic-geometry.md`):
+* a crest of 2 % of \(r\) on a spherical zone of radius \(R\) from latitude
+  \(\theta_0\) to \(\theta_1\), against \(\lambda R(\sin\theta_1 - \sin\theta_0)\);
+* no bows on a cylinder;
+* a bowed cone row against the trapezoid plus two parabolic segments.
+
+References: curves parallel to a plane curve (offset length \(\int\delta\kappa\,ds\)),
+do Carmo, *Differential Geometry of Curves and Surfaces* (1976), sec. 1-7; area of a
+parabolic segment (Archimedes' quadrature), CRC Standard Mathematical Tables, 31st ed.
+(2003), sec. 4.5.
+
 ## Inverse: measured widths → profile — `profile_from_gore_widths`
 
 1. Radius from the measured full width: \(r_i = N\,w_{full,i}/(2\pi)\) (small bulge) or the

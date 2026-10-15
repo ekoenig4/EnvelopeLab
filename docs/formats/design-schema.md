@@ -5,6 +5,31 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
 ```json
 {
   "$defs": {
+    "CrestLoftSpec": {
+      "additionalProperties": false,
+      "description": "Lengthwise loft of a flat-chord gore (``envelopelab.geometry.gore.CrestLoft``).\n\nAttributes\n----------\nfraction : float\n    Crest offset over tape radius where the taper is 1, dimensionless (0.02 = 2 %).\ntaper : list of TaperPoint\n    Taper along the tape, interpolated linearly, held beyond the ends.",
+      "properties": {
+        "fraction": {
+          "minimum": 0,
+          "title": "Fraction",
+          "type": "number"
+        },
+        "taper": {
+          "items": {
+            "$ref": "#/$defs/TaperPoint"
+          },
+          "minItems": 1,
+          "title": "Taper",
+          "type": "array"
+        }
+      },
+      "required": [
+        "fraction",
+        "taper"
+      ],
+      "title": "CrestLoftSpec",
+      "type": "object"
+    },
     "DesignMeta": {
       "additionalProperties": false,
       "properties": {
@@ -166,12 +191,32 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
     },
     "GoreSpec": {
       "additionalProperties": false,
-      "description": "Standard-gore envelope: meridian, gores, panel rows and openings (m).\n\n``loft`` sets the lobe bulge of every gore (:class:`LoftPoint`), interpolated linearly\nbetween stations and constant beyond the first and last; ``None`` is the small-bulge\ngore (ratio 1 everywhere).",
+      "description": "Standard-gore envelope: meridian, gores, panel rows and openings (m).\n\n``construction`` says how a gore is cut:\n\n* ``\"lobe\"`` (default): the flat gore follows the width model, with a circular lobe\n  between tapes set by ``loft`` (:class:`LoftPoint`), interpolated linearly between\n  stations and constant beyond the first and last; ``None`` is the small-bulge gore\n  (ratio 1 everywhere). Horizontal seams are straight.\n* ``\"flat_chord\"``: every row is a flat tape-to-tape trapezoid with straight sides of\n  the row's tape length; the gore is lofted lengthwise by bowed horizontal seams, given\n  per row (``PanelRow.bow_bottom``/``bow_top``) or from ``crest_loft``\n  (``docs/theory/gore-geometry.md``). Panel-row heights are tape lengths.\n\n``profile_interpolation`` is ``\"segments\"`` when ``profile_segments`` gives, for every\nspan between consecutive control points, a line, an arc or a smooth curve and whether\nthe joint at its start is smooth (:mod:`envelopelab.geometry.profile_segments`), or\n``profile_interpolation`` is ``\"spline\"`` (parametric cubic spline through the control\npoints) or ``\"linear\"`` (straight tape segments). ``panel_zones`` gives single panels\n(row and gores) their own material zone, e.g. an applique or a doubled panel.",
       "properties": {
+        "construction": {
+          "default": "lobe",
+          "enum": [
+            "lobe",
+            "flat_chord"
+          ],
+          "title": "Construction",
+          "type": "string"
+        },
         "count": {
           "minimum": 3,
           "title": "Count",
           "type": "integer"
+        },
+        "crest_loft": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CrestLoftSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "crown_ring": {
           "exclusiveMinimum": 0,
@@ -212,10 +257,42 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
           "title": "Panel Rows",
           "type": "array"
         },
+        "panel_zones": {
+          "items": {
+            "$ref": "#/$defs/PanelZone"
+          },
+          "title": "Panel Zones",
+          "type": "array"
+        },
         "parachute_hole_diameter": {
           "exclusiveMinimum": 0,
           "title": "Parachute Hole Diameter",
           "type": "number"
+        },
+        "profile_interpolation": {
+          "default": "spline",
+          "enum": [
+            "spline",
+            "linear",
+            "segments"
+          ],
+          "title": "Profile Interpolation",
+          "type": "string"
+        },
+        "profile_segments": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ProfileSegment"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Profile Segments"
         },
         "seal_overlap": {
           "minimum": 0,
@@ -338,15 +415,39 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
     },
     "PanelRow": {
       "additionalProperties": false,
-      "description": "One horizontal panel row of every gore.\n\nAttributes\n----------\nletter : str\n    Row letter (mouth first).\nfinished_height : float\n    Finished height along the tape, m.\nzone : str, optional\n    Material zone (key of ``zones``), e.g. ``mouth`` for a Nomex row; a pattern\n    annotation of the row overrides it; default the first zone.",
+      "description": "One horizontal panel row of every gore.\n\nAttributes\n----------\nletter : str\n    Row letter (mouth first).\nfinished_height : float\n    Finished height along the tape, m.\nzone : str, optional\n    Material zone (key of ``zones``), e.g. ``mouth`` for a Nomex row; a pattern\n    annotation of the row overrides it; default the first zone.\nbow_bottom, bow_top : float, optional\n    Flat-chord gores only: measured outward bow of the bottom and top seam lines at\n    the centreline, m (a parabola through the corners). Given for every row or for\n    none; none means the crest loft (or straight seams) sets them.",
       "properties": {
+        "bow_bottom": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bow Bottom"
+        },
+        "bow_top": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Bow Top"
+        },
         "finished_height": {
           "exclusiveMinimum": 0,
           "title": "Finished Height",
           "type": "number"
         },
         "letter": {
-          "maxLength": 4,
+          "maxLength": 8,
           "minLength": 1,
           "title": "Letter",
           "type": "string"
@@ -371,9 +472,46 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
       "title": "PanelRow",
       "type": "object"
     },
+    "PanelZone": {
+      "additionalProperties": false,
+      "description": "A material zone for single panels (one row, some gores): appliques, doublers.\n\nAttributes\n----------\nname : str\n    Name of the assignment (unique in the design).\nrow : str\n    Row letter.\ngores : list of int\n    Gore numbers, from 1.\nzone : str\n    Material zone (key of ``zones``) of those panels; it overrides the row's zone.",
+      "properties": {
+        "gores": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Gores",
+          "type": "array"
+        },
+        "name": {
+          "minLength": 1,
+          "title": "Name",
+          "type": "string"
+        },
+        "row": {
+          "minLength": 1,
+          "title": "Row",
+          "type": "string"
+        },
+        "zone": {
+          "minLength": 1,
+          "title": "Zone",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "row",
+        "gores",
+        "zone"
+      ],
+      "title": "PanelZone",
+      "type": "object"
+    },
     "ParachuteSpec": {
       "additionalProperties": false,
-      "description": "The parachute (deflation port) that closes the crown opening from inside.\n\nThe parachute's diameter follows from the envelope: it covers the parachute hole\n(``gores.parachute_hole_diameter``) and overlaps the envelope by ``gores.seal_overlap``\nmeasured along the fabric. One shroud line and one centralising line leave each\nradial seam of the parachute.\n\nAttributes\n----------\npanel_count : int\n    Radial parachute panels (and shroud lines), >= 3.\nbillow : float\n    Rise of the inflated cap over the hole, as a fraction of the hole diameter\n    (0 = flat), dimensionless.\nzone : str, optional\n    Material zone of the parachute fabric; default the design's first zone.\nshroud_attachment : float\n    Distance along the envelope load tape from the parachute edge down to where each\n    shroud line is attached, m.\ncentralizing_depth : float\n    Depth of the centralising-line confluence (red-line attachment) below the crown\n    opening, m.\nshroud_line, centralizing_line : LineSpec\n    Line classes.\ncrown_ring : RingSpec, optional\n    Ring sewn into the rim of the crown opening (its diameter is the opening's).\ncentre_ring : RingSpec, optional\n    Ring at the parachute apex where the radial tapes meet and the crown line is\n    attached; the parachute panels end at it.\ncentre_ring_diameter : float, optional\n    m; required with ``centre_ring``.",
+      "description": "The parachute (deflation port) that closes the crown opening from inside.\n\nThe parachute's diameter follows from the envelope: it covers the parachute hole\n(``gores.parachute_hole_diameter``) and overlaps the envelope by ``gores.seal_overlap``\nmeasured along the fabric. One shroud line and one centralising line leave each\nradial seam of the parachute.\n\nAttributes\n----------\npanel_count : int\n    Radial parachute panels (and shroud lines), >= 3.\nbillow : float\n    Rise of the inflated cap over the hole, as a fraction of the hole diameter\n    (0 = flat), dimensionless.\nzone : str, optional\n    Material zone of the parachute fabric; default the design's first zone.\nshroud_attachment : float\n    Distance along the envelope load tape from the parachute edge down to where each\n    shroud line is attached, m.\ncentralizing_depth : float\n    Depth of the centralising-line confluence (red-line attachment) below the crown\n    opening, m.\nshroud_line, centralizing_line : LineSpec\n    Line classes.\ncrown_ring : RingSpec, optional\n    Ring sewn into the rim of the crown opening (its diameter is the opening's).\ncentre_ring : RingSpec, optional\n    Ring at the parachute apex where the radial tapes meet and the crown line is\n    attached; the parachute panels end at it.\ncentre_ring_diameter : float, optional\n    m; required with ``centre_ring``.\ncentre_panel_diameter : float, optional\n    Diameter of a flat circular centre panel, m: the radial panels end at this circle\n    on the parachute (trapezoids) and the centre panel closes it. Larger than the\n    centre ring, smaller than the parachute hole. None: the radial panels run to the\n    centre ring or the apex (triangular wedges).",
       "properties": {
         "billow": {
           "maximum": 0.5,
@@ -388,6 +526,19 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
         },
         "centralizing_line": {
           "$ref": "#/$defs/LineSpec"
+        },
+        "centre_panel_diameter": {
+          "anyOf": [
+            {
+              "exclusiveMinimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Centre Panel Diameter"
         },
         "centre_ring": {
           "anyOf": [
@@ -459,6 +610,36 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
         "centralizing_line"
       ],
       "title": "ParachuteSpec",
+      "type": "object"
+    },
+    "ProfileSegment": {
+      "additionalProperties": false,
+      "description": "How one span between consecutive profile control points is drawn\n(``profile_interpolation: segments``; :mod:`envelopelab.geometry.profile_segments`).\n\nAttributes\n----------\nkind : {\"line\", \"arc\", \"curve\"}\n    Straight line, circular arc, or part of a smooth spline run.\nbulge : float\n    Arc: tan of a quarter of the included angle, positive counter-clockwise in\n    (r, z) (outward going up the profile), dimensionless; 0 is straight, 1 a half\n    circle. Ignored when the arc is made tangent to a neighbour.\nsmooth : bool\n    The joint at the span's start point is tangent-continuous (G1).",
+      "properties": {
+        "bulge": {
+          "default": 0.0,
+          "maximum": 5.0,
+          "minimum": -5.0,
+          "title": "Bulge",
+          "type": "number"
+        },
+        "kind": {
+          "default": "curve",
+          "enum": [
+            "line",
+            "arc",
+            "curve"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "smooth": {
+          "default": true,
+          "title": "Smooth",
+          "type": "boolean"
+        }
+      },
+      "title": "ProfileSegment",
       "type": "object"
     },
     "RedLineSpec": {
@@ -811,6 +992,43 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
       "title": "TapeSpec",
       "type": "object"
     },
+    "TaperPoint": {
+      "additionalProperties": false,
+      "description": "One station of a crest-loft taper.\n\nAttributes\n----------\nstation : float\n    Fraction of the tape length from the mouth (0) to the top opening (1).\ntaper : float\n    Taper of the crest offset at the station, dimensionless (1: the full loft fraction).\nat_row : str, optional\n    The station is the bottom seam of this panel row, and follows it when rows are\n    resized; ``station`` then holds that seam's fraction (kept in step by every edit,\n    :func:`sync_taper_anchors`). None: a free station.",
+      "properties": {
+        "at_row": {
+          "anyOf": [
+            {
+              "maxLength": 8,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "At Row"
+        },
+        "station": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Station",
+          "type": "number"
+        },
+        "taper": {
+          "minimum": 0,
+          "title": "Taper",
+          "type": "number"
+        }
+      },
+      "required": [
+        "station",
+        "taper"
+      ],
+      "title": "TaperPoint",
+      "type": "object"
+    },
     "TurningVentSpec": {
       "additionalProperties": false,
       "description": "A turning (rotation) vent: a vertical seam left open over some rows.\n\nAttributes\n----------\nname : str\n    Vent name.\nseam : int\n    Vertical seam number (1..N); seam k joins gore k and gore k+1.\nrows : list of str\n    Consecutive panel rows over which the seam is open.\ndirection : {\"clockwise\", \"counterclockwise\"}\n    Rotation the vent's jet gives the balloon, seen from above.\nopening_width : float\n    Gap width when the vent is pulled fully open, m.\ndischarge_coefficient : TaggedValue\n    Orifice discharge coefficient, dimensionless.\ncontrol_line : LineSpec\n    Line from the vent to the basket.\nsimulate_open : bool\n    Leave the seam open in the structural model (vent open); default closed.",
@@ -926,7 +1144,7 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
       "type": "array"
     },
     "schema_version": {
-      "default": 3,
+      "default": 7,
       "title": "Schema Version",
       "type": "integer"
     },

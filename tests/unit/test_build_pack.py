@@ -65,9 +65,9 @@ def test_exported_pack_passes_the_output_qa(pack: Path) -> None:
     assert ear["fabric"] == "ripstop red"
     piece = SHAPES[0].pieces[0]
     assert ear["finished_width_mm"] == pytest.approx(piece.size[0] * 1000, abs=1e-3)
-    # Every skin seam, the tip seam, every envelope seam and each shape's rim to its
-    # marked footprint lines is listed as a sewn pair.
-    assert len(index["seam_pairs"]) == 16 + 4 + 1 + 6 + 5 + 2
+    # Every skin seam, the tip seam, every envelope seam, the parachute's radial seams and
+    # centre seam, and each shape's rim to its marked footprint lines is a sewn pair.
+    assert len(index["seam_pairs"]) == 16 + 4 + 1 + 6 + 5 + 2 + 2
     assert index["roll_width_mm"] == pytest.approx(60 * 25.4)
 
 
@@ -176,3 +176,58 @@ def test_qa_catches_a_moved_footprint_line(pack: Path, tmp_path: Path) -> None:
     findings = [f for f in check_pack(p) if f.check == "seam"]
     assert len(findings) == 1 and "ear-G1.dxf:rim" in findings[0].file
     assert "planned ease" in findings[0].message
+
+
+def test_parachute_panels_and_centre_panel_are_in_the_pack(pack: Path) -> None:
+    from envelopelab.rigging import rigging_outputs
+
+    index = json.loads((pack / "index.json").read_text(encoding="utf-8"))
+    sheets = {s["file"]: s for s in index["sheets"]}
+    pr = rigging_outputs(DESIGN).parachute
+    assert pr is not None and pr.panel is not None and pr.centre_panel is not None
+    radial = sheets["parachute-panel.dxf"]
+    assert radial["kind"] == "parachute panel" and radial["cut_count"] == pr.panel_count
+    assert radial["finished_width_mm"] == pytest.approx(pr.panel.bottom_width * 1000, abs=1e-3)
+    centre = sheets["parachute-centre.dxf"]
+    assert centre["cut_count"] == 1
+    assert centre["finished_width_mm"] == pytest.approx(pr.centre_panel.diameter * 1000, abs=0.5)
+    # All radial tops are sewn to the centre panel's edge, and the QA measured it.
+    pair = next(p for p in index["seam_pairs"] if p["b"][0]["file"] == "parachute-centre.dxf")
+    assert len(pair["a"]) == pr.panel_count and pair["ease_mm"] == 0.0
+    assert {r["edge"] for r in pair["a"]} == {"top"} and pair["b"][0]["edge"] == "rim"
+
+
+def test_qa_catches_a_parachute_centre_panel_of_the_wrong_size(pack: Path, tmp_path: Path) -> None:
+    p = _copy(pack, tmp_path)
+    doc = readfile(p / "parachute-centre.dxf")
+    for e in doc.modelspace():
+        if e.dxf.layer == "EDGE_RIM" and isinstance(e, LWPolyline):
+            e.set_points([(x * 1.01, y * 1.01) for x, y, *_ in e.get_points()])
+    doc.saveas(p / "parachute-centre.dxf")
+    assert any(f.check == "seam" and "parachute-centre.dxf" in f.message for f in check_pack(p))
+
+
+def test_wedge_parachute_and_no_parachute(tmp_path: Path) -> None:
+    wedges = DESIGN.model_copy(deep=True)
+    assert wedges.parachute is not None
+    wedges.parachute.centre_panel_diameter = None
+    export_build_pack(wedges, [], tmp_path / "wedges")
+    files = {
+        s["file"] for s in json.loads((tmp_path / "wedges" / "index.json").read_text())["sheets"]
+    }
+    assert "parachute-panel.dxf" in files and "parachute-centre.dxf" not in files
+    assert check_pack(tmp_path / "wedges") == []
+    bare = DESIGN.model_copy(update={"parachute": None})
+    export_build_pack(bare, [], tmp_path / "bare")
+    files = {
+        s["file"] for s in json.loads((tmp_path / "bare" / "index.json").read_text())["sheets"]
+    }
+    assert not {f for f in files if f.startswith("parachute")}
+
+
+def test_a_parachute_that_cannot_be_cut_stops_the_export(tmp_path: Path) -> None:
+    broken = DESIGN.model_copy(deep=True)
+    assert broken.parachute is not None and broken.gores is not None
+    broken.parachute.centre_panel_diameter = 2.0 * broken.gores.parachute_hole_diameter
+    with pytest.raises(BuildPackError, match="parachute pattern cannot be made"):
+        export_build_pack(broken, [], tmp_path / "broken")

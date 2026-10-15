@@ -30,6 +30,19 @@ width model. This is exact on the centreline and on the load tapes; across the l
 lofted gore a mark is placed in proportion to the flat width (the lobe bulge between the
 tapes is not part of the host surface here).
 
+**Flat-chord rows** ([flat-chord gores](gore-geometry.md#flat-chord-gores-and-the-crest-loft-flat_chord_rows-crestloft))
+are trapezoids with straight sides and bowed seams. The point a fraction
+\(f = (s - s_{row})/L_{row}\) up the row's tape and \(\tau\) across the gore sits on the
+straight line between the sides at \(f\), blended between the two bowed seams:
+
+\[
+x = 2\tau\,w(f), \qquad y = (1-f)(-b_b\,q) + f\,(h + b_t\,q), \qquad q = 1 - (2\tau)^2,
+\]
+
+with \(w(f)\) the corner half-width interpolated along the side, \(h\) the corner height
+and \(b_b, b_t\) the seam bows. A point on a row seam therefore lands on the seam as cut,
+and a hole a distance up the panel centreline is where the builder measures it.
+
 ## Skin
 
 The axis passes through the base point \( \mathbf{P}_0 = \mathbf{X}(s_0, \theta_0) \)
@@ -117,7 +130,7 @@ gores (see [Special-shape primitives](../validation/special-shape-primitives.md)
 | skin seam match | largest length difference of the two sides of a seam, m | 3 mm (assumed) |
 | seam flattening | largest relative difference of a flat seam edge from its 3D seam | 2 % (assumed) |
 | area distortion | largest relative difference of a piece's flat and designed area | 1 % (assumed) |
-| feed hole inside footprint | — | inside |
+| feed hole inside footprint | — | inside (every hole: the centred one and each extra one) |
 
 ### Attachment ease
 
@@ -206,6 +219,12 @@ and the host footprint therefore have the same length. The load tapes on the gor
 and optionally the row seams, cross the patch. The far-field prestress of the patch uses
 the local radii at the base point (\(R_1\) from the meridian's curvature over
 \( \pm 0.25 \) m, \( R_2 = r/\cos\beta \)) in the membrane theory of shells of revolution.
+
+**Feed holes.** A shape is fed through a hole under its base point
+(`feed_hole_radius`) and any number of extra holes anywhere inside the footprint
+(`feed_holes`, each given by its tape position, azimuth and radius). Every hole is a hemmed
+opening of the host patch at its chart position and feeds the chamber. A fed shape needs
+at least one hole.
 
 **Assumptions.** Seam allowances, stitching and tape widths are not modelled as material.
 The patch edge is held on the designed envelope (keep the margin at least half the

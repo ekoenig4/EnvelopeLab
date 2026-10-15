@@ -15,8 +15,11 @@ from calculix_adapter.analysis import (
 )
 from calculix_adapter.detect import (
     SETUP_MESSAGE,
+    CalculixCheck,
     CalculixInstallation,
     CalculixNotFoundError,
+    calculix_report,
+    check_calculix,
     find_calculix,
     require_calculix,
 )
@@ -24,11 +27,14 @@ from calculix_adapter.detect import (
 __all__ = [
     "SETUP_MESSAGE",
     "CalculixCancelledError",
+    "CalculixCheck",
     "CalculixInstallation",
     "CalculixNotFoundError",
     "CalculixProgress",
     "CalculixRunError",
     "CalculixSettings",
+    "calculix_report",
+    "check_calculix",
     "find_calculix",
     "require_calculix",
     "run_calculix",

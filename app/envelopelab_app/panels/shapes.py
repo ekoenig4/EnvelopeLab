@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -678,6 +679,19 @@ class ShapesPanel(QWidget):
             box.blockSignals(True)
             box.setValue(_get(data, path))
             box.blockSignals(False)
+        self.holes_table.blockSignals(True)
+        self.holes_table.setRowCount(len(spec.feed_holes))
+        for i, hole in enumerate(spec.feed_holes):
+            for j, text in enumerate(
+                (
+                    str(hole.gore),
+                    f"{hole.tape_position:.4f}",
+                    f"{hole.across:.3f}",
+                    f"{hole.radius:.4f}",
+                )
+            ):
+                self.holes_table.setItem(i, j, QTableWidgetItem(text))
+        self.holes_table.blockSignals(False)
         self.feed_check.blockSignals(True)
         self.feed_check.setChecked(spec.feed_hole_radius is not None)
         self.feed_check.blockSignals(False)
@@ -755,6 +769,29 @@ class ShapesPanel(QWidget):
         feed_row.addWidget(self.feed_check)
         feed_row.addWidget(self.feed_radius)
         self.form.addRow("Feed hole radius (m)", feed_row)
+        self.holes_table = QTableWidget(0, 4)
+        self.holes_table.setObjectName("extraFeedHoles")
+        self.holes_table.setHorizontalHeaderLabels(
+            ["gore", "tape position (m)", "across (−0.5–0.5)", "radius (m)"]
+        )
+        self.holes_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.holes_table.setMaximumHeight(130)
+        self.holes_table.setToolTip(
+            "More feed holes inside the footprint: gore number, tape length from the mouth, "
+            "fraction of the gore width from its centreline, finished radius."
+        )
+        self.holes_table.itemChanged.connect(self._hole_edited)
+        add_hole = QPushButton("Add feed hole")
+        add_hole.clicked.connect(self.add_feed_hole)
+        remove_hole = QPushButton("Remove feed hole")
+        remove_hole.clicked.connect(self._remove_feed_hole)
+        holes_buttons = QHBoxLayout()
+        holes_buttons.addWidget(add_hole)
+        holes_buttons.addWidget(remove_hole)
+        holes = QVBoxLayout()
+        holes.addWidget(self.holes_table)
+        holes.addLayout(holes_buttons)
+        self.form.addRow("More feed holes", holes)
         self.fabric_combo = QComboBox()
         self.fabric_combo.addItem("Same as the envelope row", "")
         for fabric in self.controller.fabrics.fabrics():
@@ -767,6 +804,51 @@ class ShapesPanel(QWidget):
             self.smooth_check = QCheckBox("Smooth profile (spline through the points)")
             self.smooth_check.toggled.connect(lambda on: self.set_value(("smooth",), bool(on)))
             self.form.addRow("", self.smooth_check)
+
+    def _holes(self) -> list[dict[str, Any]]:
+        spec = self.spec()
+        return [] if spec is None else [h.model_dump(mode="json") for h in spec.feed_holes]
+
+    def add_feed_hole(self) -> bool:
+        """Add a feed hole at the shape's base point (100 mm radius) to edit."""
+        spec = self.spec()
+        if spec is None:
+            return False
+        hole = {
+            "gore": spec.placement.gore,
+            "tape_position": spec.placement.tape_position,
+            "across": spec.placement.across,
+            "radius": 0.1,
+        }
+        return self.set_value(("feed_holes",), [*self._holes(), hole])
+
+    def remove_feed_hole(self, index: int) -> bool:
+        """Remove extra feed hole ``index``."""
+        holes = self._holes()
+        if not 0 <= index < len(holes):
+            return False
+        del holes[index]
+        return self.set_value(("feed_holes",), holes)
+
+    def _remove_feed_hole(self) -> None:
+        rows = self.holes_table.selectionModel().selectedRows()
+        if rows:
+            self.remove_feed_hole(rows[0].row())
+
+    def _hole_edited(self, item: QTableWidgetItem) -> None:
+        holes = self._holes()
+        if item.row() >= len(holes):
+            return
+        key = ("gore", "tape_position", "across", "radius")[item.column()]
+        try:
+            value: float | int = int(item.text()) if key == "gore" else float(item.text())
+        except ValueError:
+            self.controller.editRejected.emit(f"{key}: not a number: {item.text()!r}")
+            self._update_form(self.spec())
+            return
+        holes[item.row()][key] = value
+        if not self.set_value(("feed_holes",), holes):
+            self._update_form(self.spec())
 
     def _feed_toggled(self, on: bool) -> None:
         spec = self.spec()

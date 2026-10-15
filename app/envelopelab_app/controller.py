@@ -274,7 +274,19 @@ class WorkspaceController(QObject):
             "move_control_point",
             "insert_control_point",
             "delete_control_point",
+            "move_points",
+            "scale_points",
+            "rotate_points",
+            "straighten_points",
+            "smooth_points",
+            "simplify_profile",
             "set_loft",
+            "set_construction",
+            "set_profile_interpolation",
+            "set_profile_segment",
+            "set_profile_from_design",
+            "set_profile_from_file",
+            "set_profile_from_reference",
         ):
             kwargs.setdefault("keep_rows_fitted", self.prefs.keep_rows_fitted)
         result = self.attempt(func, self.session, *args, **kwargs)

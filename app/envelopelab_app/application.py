@@ -9,7 +9,8 @@ import sys
 from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
-from envelopelab_app.graphics import configure_graphics
+from envelopelab_app.diagnostics import environment_report, install_crash_log, opengl_report
+from envelopelab_app.graphics import configure_graphics, select_qt_platform
 from envelopelab_app.main_window import MainWindow
 
 ORGANIZATION = "EnvelopeLab"
@@ -45,11 +46,25 @@ def main(argv: list[str] | None = None) -> int:
     gl.add_argument(
         "--hardware-gl", action="store_true", help="use the GPU OpenGL driver even under WSL"
     )
+    parser.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="print versions, display and OpenGL settings and the crash-log path, then exit",
+    )
     options, qt_args = parser.parse_known_args(args[1:])
-    # Before any OpenGL context exists: Mesa reads the variable when the first one is made.
-    reason = configure_graphics(os.environ, options.software_gl, options.hardware_gl)
-    if reason:
-        print(f"envelopelab: {reason}", file=sys.stderr)
+    # Before any OpenGL context exists: Mesa reads the variable when the first one is made,
+    # and Qt reads its platform when the QApplication is created.
+    for reason in (
+        configure_graphics(os.environ, options.software_gl, options.hardware_gl),
+        select_qt_platform(os.environ),
+    ):
+        if reason:
+            print(f"envelopelab: {reason}", file=sys.stderr)
+    if options.diagnose:
+        return diagnose([args[0], *qt_args])
+    log = install_crash_log(argv=args)
+    if log is not None:
+        print(f"envelopelab: crash log: {log}", file=sys.stderr)
     app = create_application([args[0], *qt_args])
     window = MainWindow(
         QSettings(ORGANIZATION, APPLICATION), enable_3d=False if options.no_3d else None
@@ -57,7 +72,23 @@ def main(argv: list[str] | None = None) -> int:
     if options.project:
         window.open_project(options.project)
     window.show()
+    quit_after = os.environ.get("ENVELOPELAB_QUIT_AFTER_MS")
+    if quit_after:  # start-up smoke tests: run the event loop this long, then quit
+        from PySide6.QtCore import QTimer
+
+        QTimer.singleShot(int(quit_after), app.quit)
     return int(app.exec())
+
+
+def diagnose(qt_argv: list[str]) -> int:
+    """``--diagnose``: the environment report, an OpenGL context's renderer, the log path."""
+    from envelopelab_app.diagnostics import crash_log_path
+
+    print(environment_report())
+    create_application(qt_argv)
+    print(opengl_report())
+    print(f"crash log: {crash_log_path()}")
+    return 0
 
 
 if __name__ == "__main__":

@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts" / "install_env.sh"
@@ -68,3 +71,34 @@ def test_dry_run_prints_the_install_commands() -> None:
         check=True,
     ).stdout
     assert "apt-get" not in minimal and "-m pip install -e .[gui]" in minimal
+
+
+WINDOWS_SCRIPT = ROOT / "scripts" / "install_env.ps1"
+WINDOWS_WRAPPER = ROOT / "scripts" / "install_env.cmd"
+
+
+def test_windows_wrapper_bypasses_the_execution_policy_for_the_script() -> None:
+    wrapper = WINDOWS_WRAPPER.read_text(encoding="utf-8")
+    assert "-ExecutionPolicy Bypass" in wrapper and "install_env.ps1" in wrapper
+
+
+def test_windows_script_dry_run_prints_the_install_commands(tmp_path: Path) -> None:
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if pwsh is None:
+        pytest.skip("PowerShell is not installed")
+    venv = tmp_path / "venv"
+    out = subprocess.run(
+        [pwsh, "-NoProfile", "-File", str(WINDOWS_SCRIPT), "-DryRun", "-Venv", str(venv)],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert f"-m venv {venv}" in out
+    assert "-m pip install -e .[gui,fast]" in out
+    dev = subprocess.run(
+        [pwsh, "-NoProfile", "-File", str(WINDOWS_SCRIPT), "-DryRun", "-Dev", "-Venv", str(venv)],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert "-m pip install -e .[dev,docs,gui,fast]" in dev

@@ -131,6 +131,7 @@ from envelopelab.features.builder import (
 from envelopelab.geometry.gore import (
     GoreWidthModel,
     MeridianProfile,
+    bowed_seam,
     gore_half_widths,
     polygon_area,
 )
@@ -186,11 +187,22 @@ class PrimitiveError(ValueError):
 
 @dataclass(frozen=True)
 class RowBand:
-    """A horizontal panel row: label and finished tape positions (m) of its seams."""
+    """A horizontal panel row: label and finished tape positions (m) of its seams.
+
+    A row of a flat-chord gore also carries its panel geometry, so points on the envelope
+    map onto the cut panel (:func:`_panel_xy`): ``rise`` (corner height, m), the corner
+    half-widths ``half_bottom`` and ``half_top`` (m) and the seam bows (m, outward;
+    :class:`~envelopelab.geometry.gore.PanelRow`). ``rise`` is None for a lobe gore.
+    """
 
     label: str
     s_bottom: float
     s_top: float
+    rise: float | None = None
+    half_bottom: float = 0.0
+    half_top: float = 0.0
+    bow_bottom: float = 0.0
+    bow_top: float = 0.0
 
 
 class EnvelopeSurface:
@@ -260,11 +272,24 @@ class EnvelopeSurface:
             raise PrimitiveError("primitives are placed on a standard-gore design")
         profile = design_profile(design)
         rows = panel_rows(design, patterns or PatternSet(), profile)
+        flat = design.gores.construction == "flat_chord"
         return cls(
             profile,
             design.gores.count,
             design_width_model(design),
-            [RowBand(r.label, r.s_bottom, r.s_top) for r in rows],
+            [
+                RowBand(
+                    r.label,
+                    r.s_bottom,
+                    r.s_top,
+                    rise=r.corner_height if flat else None,
+                    half_bottom=r.bottom_width / 2.0,
+                    half_top=r.top_width / 2.0,
+                    bow_bottom=r.bottom_bow,
+                    bow_top=r.top_bow,
+                )
+                for r in rows
+            ],
         )
 
     @property
@@ -738,12 +763,28 @@ class MatchMark:
 
 @dataclass(frozen=True)
 class FeedHoleMark:
-    """A hole cut in the envelope under the feature (centre in panel coordinates, m)."""
+    """A hole cut in the envelope under the feature.
+
+    Attributes
+    ----------
+    gore : int
+        Gore of the host panel, from 1.
+    row : str
+        Row of the host panel.
+    centre_xy : (float, float)
+        Centre in the host panel's pattern coordinates, m.
+    radius : float
+        Finished radius, m.
+    chart_xy : (float, float)
+        Centre in the host chart round the base point (hoop arc, tape arc), m; (0, 0) for
+        the hole centred under the base point.
+    """
 
     gore: int
     row: str
     centre_xy: tuple[float, float]
     radius: float
+    chart_xy: tuple[float, float] = (0.0, 0.0)
 
 
 @dataclass(frozen=True)
@@ -849,12 +890,14 @@ class PrimitiveDesign:
     marks : list of MatchMark
         Numbered match marks.
     feed_hole : FeedHoleMark or None
-        Hole cut in the envelope under the feature.
+        Hole cut in the envelope under the feature, centred on the base point.
     checks : list of DesignCheck
         Pattern checks.
     mark_ease : ndarray
         Skin rim length minus marked attachment-line length (on the flat envelope
         panels) between match mark ``j`` and the next one, m (see :func:`_mark_ease`).
+    extra_feed_holes : tuple of FeedHoleMark
+        More holes cut in the envelope under the feature, anywhere inside the footprint.
     """
 
     primitive: Primitive
@@ -876,6 +919,13 @@ class PrimitiveDesign:
     checks: list[DesignCheck]
     _skin: Any = field(repr=False)
     mark_ease: FloatArray = field(default_factory=lambda: np.zeros(0), repr=False)
+    extra_feed_holes: tuple[FeedHoleMark, ...] = ()
+
+    @property
+    def feed_holes(self) -> tuple[FeedHoleMark, ...]:
+        """Every feed hole: the centred one (if any) first, then the extra ones."""
+        centred = () if self.feed_hole is None else (self.feed_hole,)
+        return centred + self.extra_feed_holes
 
     @property
     def footprint_length(self) -> float:
@@ -945,6 +995,15 @@ class PrimitiveDesign:
                 "centre_xy_m": list(self.feed_hole.centre_xy),
                 "radius_m": self.feed_hole.radius,
             },
+            "extra_feed_holes": [
+                {
+                    "gore": h.gore,
+                    "row": h.row,
+                    "centre_xy_m": list(h.centre_xy),
+                    "radius_m": h.radius,
+                }
+                for h in self.extra_feed_holes
+            ],
             "mark_ease_m": self.mark_ease.tolist(),
             "checks": [
                 {
@@ -1303,12 +1362,44 @@ def _length(points: FloatArray) -> float:
     return float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
 
 
+def band_outline(surface: EnvelopeSurface, row: int, samples: int = 97) -> FloatArray:
+    """Finished outline of the panel of a row (any gore), m, counter-clockwise.
+
+    Lobe gores: the flat gore between the row's seams. Flat-chord rows: the cut panel,
+    straight sides with the bowed seams (:class:`~envelopelab.geometry.gore.PanelRow`).
+    """
+    band = surface.rows[row]
+    if band.rise is None:
+        s = np.linspace(band.s_bottom, band.s_top, samples)
+        right = np.column_stack([surface.half_width(s), s - band.s_bottom])
+        return np.vstack([right, right[::-1] * np.array([-1.0, 1.0])])
+    right = np.array([[band.half_bottom, 0.0], [band.half_top, band.rise]])
+    top = bowed_seam(band.half_top, band.bow_top) + [0.0, band.rise]
+    bottom = bowed_seam(band.half_bottom, -band.bow_bottom)[::-1]
+    return np.vstack([right, top[1:-1], right[::-1] * np.array([-1.0, 1.0]), bottom[1:-1]])
+
+
 def _panel_xy(
     surface: EnvelopeSurface, s: FloatArray, g: FloatArray, cell: int, row: int
 ) -> FloatArray:
+    r"""Panel-pattern coordinates (m) of envelope points (tape position m, gore position).
+
+    Lobe gores: :math:`x = 2\tau w(s)`, :math:`y = s - s_{row}`. Flat-chord rows: the
+    point a fraction :math:`f` of the row's tape length up and :math:`\tau` across lies
+    on the straight line between the sides at :math:`f`, blended between the bowed seams,
+    :math:`y = (1-f)(-b_b q) + f(h + b_t q)`, :math:`q = 1 - (2\tau)^2`, so a point on
+    a seam lands on the seam as cut.
+    """
     across = g - cell - 0.5
-    x = 2.0 * across * surface.half_width(s)
-    return np.column_stack([x, s - surface.rows[row].s_bottom])
+    band = surface.rows[row]
+    if band.rise is None:
+        x = 2.0 * across * surface.half_width(s)
+        return np.column_stack([x, s - band.s_bottom])
+    f = np.clip((np.asarray(s, float) - band.s_bottom) / (band.s_top - band.s_bottom), 0.0, 1.0)
+    half = band.half_bottom + f * (band.half_top - band.half_bottom)
+    q = 1.0 - (2.0 * across) ** 2
+    y = (1.0 - f) * (-band.bow_bottom * q) + f * (band.rise + band.bow_top * q)
+    return np.column_stack([2.0 * across * half, y])
 
 
 def _mark_ease(
@@ -1474,6 +1565,7 @@ def design_primitive(
     feed_hole_radius: float | None = None,
     tolerance: float = DEFAULT_TOLERANCE,
     samples: int = 720,
+    feed_holes: Sequence[tuple[float, float, float]] = (),
 ) -> PrimitiveDesign:
     """Place a primitive on the envelope and derive its attachment and cutting pattern.
 
@@ -1491,6 +1583,9 @@ def design_primitive(
         Length tolerance of the pattern checks, m.
     samples : int
         Footprint samples round the axis.
+    feed_holes : sequence of (float, float, float)
+        More holes cut in the envelope inside the footprint: tape position (m), azimuth
+        (rad) and finished radius (m) of each.
 
     Returns
     -------
@@ -1525,6 +1620,7 @@ def design_primitive(
             seam_allowance,
             feed_hole_radius,
             tolerance,
+            feed_holes,
         )
     skin = _Skin(primitive, surface, base, axis, b1, b2, samples)
     fp = skin.at(np.zeros(samples), skin.phi)
@@ -1629,8 +1725,25 @@ def design_primitive(
         lambda phi: skin.at(np.zeros(len(phi)), phi),
         rim_flat,
     )
+    design.extra_feed_holes = _extra_feed_holes(design, feed_holes, g_centre)
     design.checks = _checks(design, pieces, tolerance)
     return design
+
+
+def _extra_feed_holes(
+    design: PrimitiveDesign, holes: Sequence[tuple[float, float, float]], g_centre: float
+) -> tuple[FeedHoleMark, ...]:
+    """Feed holes at envelope points (tape position m, azimuth rad, radius m)."""
+    out = []
+    for s, theta, radius in holes:
+        if radius <= 0.0:
+            raise PrimitiveError(f"{design.primitive.name}: feed hole radius must be positive")
+        gore, row, centre = _host_location(design.surface, float(s), float(theta), g_centre)
+        chart = _chart(design, np.array([float(s)]), np.array([float(theta)]))[0]
+        out.append(
+            FeedHoleMark(gore, row, centre, float(radius), (float(chart[0]), float(chart[1])))
+        )
+    return tuple(out)
 
 
 def _checks(design: PrimitiveDesign, pieces: list[_Piece], tol: float) -> list[DesignCheck]:
@@ -1763,6 +1876,24 @@ def _checks(design: PrimitiveDesign, pieces: list[_Piece], tol: float) -> list[D
                 f"feed hole of radius {hole.radius:.3f} m at the base point",
             )
         )
+    if design.extra_feed_holes:
+        loop = _chart(design, design.footprint_s, design.footprint_theta)
+        ang = np.linspace(0.0, 2.0 * math.pi, 64, endpoint=False)
+        for hole in design.extra_feed_holes:
+            ring = np.asarray(hole.chart_xy) + hole.radius * np.column_stack(
+                [np.cos(ang), np.sin(ang)]
+            )
+            inside = bool(points_in_polygon(ring, loop).all())
+            out.append(
+                DesignCheck(
+                    "feed hole inside footprint",
+                    0.0 if inside else 1.0,
+                    0.0,
+                    "-",
+                    "info" if inside else "error",
+                    f"feed hole of radius {hole.radius:.3f} m in gore {hole.gore} row {hole.row}",
+                )
+            )
     return out
 
 
@@ -2205,6 +2336,8 @@ def primitive_appendage(
     holes = []
     if design.feed_hole is not None:
         holes.append(ChartHole("feed", (0.0, 0.0), design.feed_hole.radius, hem_tape))
+    for i, extra in enumerate(design.extra_feed_holes):
+        holes.append(ChartHole(f"feed {i + 2}", extra.chart_xy, extra.radius, hem_tape))
     if pressure is None:
         if not holes:
             raise PrimitiveError(
@@ -2244,6 +2377,7 @@ def _design_freeform(
     seam_allowance: float,
     feed_hole_radius: float | None,
     tolerance: float,
+    feed_holes: Sequence[tuple[float, float, float]] = (),
 ) -> PrimitiveDesign:
     """:func:`design_primitive` for a free-form mesh shape."""
     from envelopelab.features.freeform import (
@@ -2348,6 +2482,7 @@ def _design_freeform(
         rim_flat,
         corners=skin.rim_phi,
     )
+    design.extra_feed_holes = _extra_feed_holes(design, feed_holes, g_centre)
     checks = _checks(design, skin.panels, tolerance)  # type: ignore[arg-type]
     checks.append(
         DesignCheck(

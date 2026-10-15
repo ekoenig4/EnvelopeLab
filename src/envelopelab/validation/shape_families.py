@@ -2,7 +2,8 @@
 
 The sphere family :math:`r(s) = \\sin(\\pi s)/\\pi` (tape length :math:`L = \\pi R`) has
 closed-form volume, height, diameters and tape length. Fixtures compare a solved shape
-file with the values its source spreadsheet computes (the file's ``published`` block).
+file with the values its source computes (the file's ``published`` block) and check
+the design document a file makes.
 """
 
 from __future__ import annotations
@@ -13,19 +14,21 @@ from pathlib import Path
 import numpy as np
 
 from envelopelab.io.shape_file import ShapeFile, load_shape_file, parse_quantity
-from envelopelab.project.gore_design import design_profile as document_profile
+from envelopelab.project.gore_design import design_volume
 from envelopelab.project.shape_family import (
     NormalizedShape,
     ShapeParameters,
     evaluate,
-    shape_design,
     solve_shape,
     station_points,
 )
 from envelopelab.validation.analytic_geometry import BenchmarkResult, _fmt, _fmt_error
 
 #: Shape-file fixtures (name, path relative to the repository root).
-FIXTURES: tuple[tuple[str, str], ...] = (("smalley_90k", "tests/fixtures/smalley_90k/shape.yaml"),)
+FIXTURES: tuple[tuple[str, str], ...] = (
+    ("smalley_90k", "tests/fixtures/smalley_90k/shape.yaml"),
+    ("flat_chord_pattern", "tests/fixtures/flat_chord_pattern/shape.yaml"),
+)
 #: Tolerance on the comparison of the spline volume coefficient with a published one.
 #: The published coefficient comes from the source's own (undocumented) integration; the
 #: inscribed polygon through the same stations is a lower bound and lies 0.05 % above the
@@ -186,11 +189,11 @@ def fixture_benchmarks(name: str, shape_file: ShapeFile) -> list[BenchmarkResult
                     )
                 )
     if solution.converged:
-        document = shape_design(shape_file.name, shape, solution, row_count=10)
+        document = shape_file.design(solution, row_count=10)
         out.append(
             BenchmarkResult(
                 f"{name}: design document volume = solved envelope volume",
-                document_profile(document).volume,
+                design_volume(document),
                 solution.values["envelope_volume"],
                 "m^3",
                 "relative",
@@ -265,6 +268,11 @@ def render_markdown(results: list[BenchmarkResult]) -> str:
         "computed from the held volume therefore differ from the spreadsheet by about a",
         "third of the coefficient difference (0.05 % for `smalley_90k`); hold",
         "`gore_length` instead to cut exactly the spreadsheet's gores.",
+        "",
+        "`flat_chord_pattern` is a synthetic flat-chord pattern set (no published",
+        "values): its rows check that the file's design solves, that the design document",
+        "(rows, measured seam bows and zones from the file) has the solved volume, and",
+        "that it scales to another mouth.",
         "",
     ]
     return "\n".join(lines)

@@ -36,7 +36,10 @@ shapes**, or its tab).
    mouth in m, position across the gore, lean and lean direction in degrees), sizes in m,
    number of skin gores or panels, match marks per piece, seam allowance, an optional
    feed hole in the envelope, and the skin fabric (by default the fabric of the envelope
-   row the shape sits on). A revolved shape's profile is edited in its table (radius and
+   row the shape sits on). *More feed holes* lists extra holes inside the footprint (gore,
+   tape position from the mouth in m, position across the gore, radius in m). *Add feed
+   hole* puts one at the base point to edit; *Remove feed hole* deletes the selected
+   one. A revolved shape's profile is edited in its table (radius and
    height in m, base first, axis last). Every change is one undo step.
 3. The shape is placed in the background while you keep editing; the list says
    **being placed…** until it is done (usually under a second). The right-hand side then
@@ -58,8 +61,9 @@ shapes**, or its tab).
    convergence status, iterations, final residual, mesh size, heights above the envelope
    as designed and inflated, chamber pressure, wrinkled fraction, rim tape tension and
    the factor of safety of each region. It is drawn in the 3D View as a separate layer.
-6. **Export build pack…** writes the envelope rows and every shape's pieces and marking
-   sheets (DXF, PDF and `index.json`, section 4). **Export to Blender (OBJ)…** writes the
+6. **Export build pack…** writes the envelope rows, the parachute (radial panel and
+   centre panel) and every shape's pieces and marking sheets (DXF, PDF and `index.json`,
+   section 4). **Export to Blender (OBJ)…** writes the
    envelope, every shape and every current shape simulation (section 5).
 
 Nothing is hidden. A shape that cannot be placed (for example a base too large for the
@@ -204,8 +208,11 @@ partner on a skin piece's rim edge (`piece`, `piece_xy`).
   Above 1 % the check warns. Use more gores: the distortion drops about four times when
   you double them (3.7 % at 8, 0.9 % at 16, 0.2 % at 32 gores for a hemisphere).
 * *host panels*: the gores and rows the footprint crosses. Mark it on all of them.
-* *feed hole inside footprint*: the hole cut in the envelope to inflate the shape must
-  lie inside the footprint.
+* *feed hole inside footprint*: every hole cut in the envelope to inflate the shape must
+  lie inside the footprint. Besides the hole under the base point, a shape can have extra
+  holes anywhere under it (`feed_holes`; in a shape file, placed by gore and row). The
+  build pack draws each on the panel it is cut in, and adds a marking sheet for a panel
+  that only has a hole.
 
 A shape is rejected if it does not fit: a base too large for the local envelope
 curvature, a lean that brings the skin back onto the envelope, or a footprint that would
