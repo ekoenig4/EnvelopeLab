@@ -71,6 +71,11 @@ from envelopelab.project.profile_match import (
     station_points,
     target_profile,
 )
+from envelopelab.project.profile_physics import (
+    check_design,
+    design_load,
+    natural_design_shape,
+)
 from envelopelab.project.references import (
     add_reference,
     reference_deviation,
@@ -80,6 +85,7 @@ from envelopelab.project.references import (
     snapshot_reference,
     update_reference,
 )
+from envelopelab.solvers.axisymmetric import AxisymmetricLoad, MembraneCheck, membrane_check
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.refresh import Refresher
 
@@ -239,6 +245,19 @@ class ProfileCanvas(QGraphicsView):
         self.labels: list[QGraphicsSimpleTextItem] = []
         #: Ghost lines (solved tape lines, compensation target) by key: (line, mirror).
         self.ghosts: dict[str, tuple[QGraphicsPathItem, QGraphicsPathItem]] = {}
+        self._ghost_data: dict[str, tuple[np.ndarray, np.ndarray, QPen]] = {}
+        self._ghost_group: dict[str, str] = {}
+        #: Load of the live membrane check (None: off); compressed spans are drawn red.
+        self.stress_load: AxisymmetricLoad | None = None
+        self.compression = QGraphicsPathItem()
+        red = QPen(QColor("#d62728"), 5.0)
+        red.setCosmetic(True)
+        self.compression.setPen(red)
+        self.compression.setZValue(5)
+        self.compression.setToolTip(
+            "Needs compression under load: the fabric cannot hold this part of the shape"
+        )
+        self.scene().addItem(self.compression)
         self._extent = (0.0, 0.0, 0.0)  # largest r, lowest and highest z of the ghosts, m
         # A bound slot: Qt drops it when the view is destroyed, before the scene's items.
         self.scene().selectionChanged.connect(self._scene_selection)
@@ -302,14 +321,23 @@ class ProfileCanvas(QGraphicsView):
         self.scene().setSceneRect(rect)
         self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
 
-    def set_ghosts(self, ghosts: dict[str, tuple[np.ndarray, np.ndarray, QPen]]) -> None:
-        """Show ghost lines ``{key: (r, z, pen)}`` (m) behind the profile, mirrored."""
+    def set_ghosts(
+        self, ghosts: dict[str, tuple[np.ndarray, np.ndarray, QPen]], group: str = "solved"
+    ) -> None:
+        """Show ghost lines ``{key: (r, z, pen)}`` (m) behind the profile, mirrored. Each
+        ``group`` (solved runs, natural shape) replaces only its own lines."""
+        self._ghost_data = {
+            k: v for k, v in self._ghost_data.items() if self._ghost_group.get(k) != group
+        }
+        for key, value in ghosts.items():
+            self._ghost_data[key] = value
+            self._ghost_group[key] = group
         for line, mirror in self.ghosts.values():
             self.scene().removeItem(line)
             self.scene().removeItem(mirror)
         self.ghosts = {}
         extent = [0.0, math.inf, -math.inf]
-        for key, (r, z, pen) in ghosts.items():
+        for key, (r, z, pen) in self._ghost_data.items():
             path, flipped = QPainterPath(), QPainterPath()
             path.moveTo(float(r[0]), float(-z[0]))
             flipped.moveTo(float(-r[0]), float(-z[0]))
@@ -332,6 +360,29 @@ class ProfileCanvas(QGraphicsView):
         if self.handles:
             self._fit()
 
+    def set_stress_load(self, load: AxisymmetricLoad | None) -> None:
+        """Check the profile under ``load`` while it is drawn (None: no check)."""
+        self.stress_load = load
+        if self.handles:
+            self.preview()
+        else:
+            self.compression.setPath(QPainterPath())
+
+    def _draw_compression(self, profile: MeridianProfile) -> None:
+        """Spans that need hoop or meridional compression, thick red over the curve."""
+        path = QPainterPath()
+        if self.stress_load is not None:
+            try:
+                bad = ~membrane_check(profile, self.stress_load).holds
+            except ValueError:
+                bad = np.zeros(profile.r.size, dtype=bool)
+            for i in range(1, profile.r.size):
+                if bad[i] or bad[i - 1]:
+                    if i == 1 or not (bad[i - 1] or (i >= 2 and bad[i - 2])):
+                        path.moveTo(float(profile.r[i - 1]), float(-profile.z[i - 1]))
+                    path.lineTo(float(profile.r[i]), float(-profile.z[i]))
+        self.compression.setPath(path)
+
     def clear(self) -> None:
         """No design."""
         for handle in self.handles:
@@ -353,7 +404,9 @@ class ProfileCanvas(QGraphicsView):
             self.scene().removeItem(item)
         self.reference_items = []
         self._clear_labels()
+        self._ghost_data, self._ghost_group = {}, {}
         self.set_ghosts({})
+        self.compression.setPath(QPainterPath())
 
     def current_points(self) -> tuple[np.ndarray, np.ndarray]:
         """Positions of the handles (m)."""
@@ -468,6 +521,7 @@ class ProfileCanvas(QGraphicsView):
         self._draw_equator(profile)
         self._draw_openings(profile)
         self._draw_references()
+        self._draw_compression(profile)
 
     def _label(
         self, text: str, r: float, z: float, colour: str, tip: str, above: bool = False
@@ -638,6 +692,154 @@ class ProfileCanvas(QGraphicsView):
     def resizeEvent(self, event: object) -> None:  # noqa: N802
         super().resizeEvent(event)  # type: ignore[arg-type]
         self.fitInView(self.scene().sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
+
+NATURAL_COLOUR = "#17becf"
+
+
+class ShapePhysicsPanel(QGroupBox):
+    """Whether the drawn profile can keep its shape under load, and the snap to one that
+    can (:mod:`envelopelab.solvers.axisymmetric`, :mod:`envelopelab.project.profile_physics`).
+
+    With the check on, the canvas draws in thick red every span whose shape would need
+    hoop or meridional compression, live while points are dragged; the status gives how
+    much of the tape that is. *Show natural shape* draws the zero-hoop-stress shape with
+    the same mouth, top opening and tape length. *Snap to a shape that holds* limits the
+    curvature of the failing spans only (one undoable edit).
+    """
+
+    def __init__(self, controller: WorkspaceController, canvas: ProfileCanvas) -> None:
+        super().__init__("Shape under load")
+        self.setObjectName("shapePhysicsBox")
+        self.controller = controller
+        self.canvas = canvas
+        layout = QVBoxLayout(self)
+        self.check_on = QCheckBox("Check the shape under load")
+        self.check_on.setObjectName("checkShape")
+        self.check_on.setChecked(True)
+        self.check_on.setToolTip(
+            "Membrane statics of the drawn profile at the operating conditions: spans "
+            "that would need compression (red) cannot keep their shape."
+        )
+        self.check_on.toggled.connect(lambda _on: self.refresh())
+        self.natural_on = QCheckBox("Show natural shape (zero hoop stress)")
+        self.natural_on.setObjectName("showNatural")
+        self.natural_on.setStyleSheet(f"color: {NATURAL_COLOUR}; font-weight: bold;")
+        self.natural_on.setToolTip(
+            "The shape whose load the tapes carry alone, with the same mouth, top opening "
+            "and tape length."
+        )
+        self.natural_on.toggled.connect(lambda _on: self.refresh())
+        self.status = QLabel()
+        self.status.setObjectName("shapeStatus")
+        self.status.setWordWrap(True)
+        self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.tolerance = QDoubleSpinBox()
+        self.tolerance.setObjectName("snapTolerance")
+        self.tolerance.setRange(0.5, 50.0)
+        self.tolerance.setDecimals(1)
+        self.tolerance.setValue(5.0)
+        self.tolerance.setSuffix(" mm")
+        self.tolerance.setToolTip("Control points follow the shape that holds within this.")
+        self.snap = QPushButton("Snap to a shape that holds")
+        self.snap.setObjectName("snapToHold")
+        self.snap.setToolTip(
+            "Limit the curvature where the drawn shape needs compression, keep it elsewhere "
+            "(mouth, top opening and tape length stay). One undoable edit."
+        )
+        self.snap.clicked.connect(self._snap)
+        form = QFormLayout()
+        form.addRow("Fit tolerance", self.tolerance)
+        for widget in (self.check_on, self.natural_on, self.status):
+            layout.addWidget(widget)
+        layout.addLayout(form)
+        layout.addWidget(self.snap)
+        self.result = QLabel()
+        self.result.setObjectName("snapResult")
+        self.result.setWordWrap(True)
+        layout.addWidget(self.result)
+
+    def refresh(self) -> None:
+        """Check the current design and draw what the check found."""
+        session = self.controller.session
+        design = self.controller.design
+        if session is None or design is None or design.gores is None:
+            self.canvas.set_stress_load(None)
+            self.canvas.set_ghosts({}, "natural")
+            return
+        try:
+            loaded = design_load(design, session.patterns, self.controller.fabrics)
+            check = check_design(design, session.patterns, self.controller.fabrics)
+        except ValueError as exc:
+            self.canvas.set_stress_load(None)
+            self.status.setText(f"No check: {exc}")
+            self.snap.setEnabled(False)
+            return
+        on = self.check_on.isChecked()
+        self.canvas.set_stress_load(loaded.load if on else None)
+        self.status.setText(_check_text(check, loaded.note) if on else "Check off.")
+        self.status.setStyleSheet(
+            "color: #b00020; font-weight: bold;" if on and check.compressed_fraction else ""
+        )
+        self.snap.setEnabled(bool(check.compressed_fraction or check.compressed_kinks))
+        ghosts: dict[str, tuple[np.ndarray, np.ndarray, QPen]] = {}
+        if self.natural_on.isChecked():
+            shape = natural_design_shape(design, session.patterns, self.controller.fabrics)
+            if shape.converged:
+                pen = QPen(QColor(NATURAL_COLOUR), 0, Qt.PenStyle.DashLine)
+                ghosts["natural"] = (np.asarray(shape.profile.r), np.asarray(shape.profile.z), pen)
+            else:
+                self.status.setText(
+                    self.status.text() + "\nNo natural shape found for these ends and length."
+                )
+        self.canvas.set_ghosts(ghosts, "natural")
+
+    def _snap(self) -> None:
+        result = self.controller.edit(
+            "snap_profile_to_hold", self.controller.fabrics, self.tolerance.value() / 1e3
+        )
+        if result is None:
+            return
+        self.controller.bump()
+        self.controller.stateChanged.emit()
+        if result.changed == 0.0:
+            self.result.setText("The drawn shape already holds: nothing changed.")
+            return
+        self.result.setText(
+            f"Snapped: {result.changed:.0%} of the tape changed, {result.points} control "
+            f"points within {result.fit_distance * 1e3:.1f} mm. Tape stretch and fabric "
+            "strain still grow the inflated shape slightly: run a solve and compensate."
+        )
+
+
+def _check_text(check: MembraneCheck, note: str) -> str:
+    """Status line of a membrane check (units in the text)."""
+    bad = ~check.holds
+    lines = []
+    if check.compressed_fraction > 0.0:
+        s = check.s[bad]
+        lines.append(
+            f"{check.compressed_fraction:.0%} of the tape (from {s.min():.2f} m to "
+            f"{s.max():.2f} m along it) needs compression under load: that part will not "
+            f"keep this shape (largest hoop compression {-np.nanmin(check.hoop):.0f} N/m, "
+            f"meridional {check.scale:.0f} N/m)."
+        )
+    else:
+        lines.append(
+            "The shape holds: hoop and meridional tension everywhere "
+            f"(meridional up to {check.scale:.0f} N/m)."
+        )
+    kinks = check.compressed_kinks
+    if kinks:
+        lines.append(
+            f"{len(kinks)} kink(s) would compress their horizontal tape (largest "
+            f"{-min(k.ring_force for k in kinks):.0f} N)."
+        )
+    if not np.all(check.evaluated):
+        lines.append("Near-horizontal spans are not checked.")
+    if note:
+        lines.append(note[0].upper() + note[1:] + ".")
+    return "\n".join(lines)
 
 
 #: Ghost line colours (Tableau palette, as the rest of the editor).
@@ -1166,6 +1368,8 @@ class GoreEditor(QWidget):
         lobe_layout.addLayout(loft_buttons)
         side_layout.addWidget(self.lobe_box)
         side_layout.addWidget(self.crest_box)
+        self.shape_physics = ShapePhysicsPanel(controller, self.canvas)
+        side_layout.addWidget(self.shape_physics)
         self.solved_shape = SolvedShapePanel(controller, self.canvas)
         side_layout.addWidget(self.solved_shape)
         side_layout.addWidget(locks_box)
@@ -1302,6 +1506,7 @@ class GoreEditor(QWidget):
                 self.lock_values[name].setText(current[name])
             self.gore_count.setEnabled(locks.gore_count is None)
             self._show_outputs()
+            self.shape_physics.refresh()
             self.solved_shape.refresh()
         finally:
             self._updating = False

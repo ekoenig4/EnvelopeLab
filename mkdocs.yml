@@ -28,6 +28,7 @@ nav:
       - Design editing and staleness: theory/design-editing.md
       - Profile editing, segments and simplify: theory/profile-editing.md
       - Solved shape vs drawn profile: theory/profile-matching.md
+      - Profile under load: theory/profile-physics.md
       - Shape families: theory/shape-families.md
       - Parachute and rigging: theory/rigging.md
   - Validation:

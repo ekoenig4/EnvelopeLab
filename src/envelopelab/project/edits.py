@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -28,6 +29,7 @@ from envelopelab.geometry.profile_segments import (
     resolve_segments,
     split_segment,
 )
+from envelopelab.materials.repository import FabricCatalog, FabricLibraryRepository
 from envelopelab.project.dependencies import canonical_hash
 from envelopelab.project.gore_design import (
     DEFAULT_CREST_LOFT,
@@ -66,6 +68,7 @@ from envelopelab.project.profile_match import (
 )
 from envelopelab.project.session import ProjectSession
 from envelopelab.project.shapes import ShapeSpec
+from envelopelab.solvers.axisymmetric import hold_shape
 
 LOCKABLE = (
     "height",
@@ -548,6 +551,16 @@ def delete_control_point(
     )
 
 
+@dataclass(frozen=True)
+class HoldSnap:
+    """Result of :func:`snap_profile_to_hold`: control points, fit distance (m) and the
+    changed fraction of the tape (0 when the drawn shape already holds)."""
+
+    points: int
+    fit_distance: float
+    changed: float
+
+
 #: Locks that a profile update from a solved shape would fight (it moves these on purpose).
 SHAPE_LOCKS = ("height", "volume", "max_diameter", "mouth_diameter", "top_diameter")
 
@@ -579,6 +592,77 @@ def _with_target(
     if target != previous:
         session.mark_aux_dirty()
     return changed
+
+
+def snap_profile_to_hold(
+    session: ProjectSession,
+    fabrics: FabricLibraryRepository | FabricCatalog | None = None,
+    tolerance: float = 0.005,
+    keep_rows_fitted: bool = True,
+) -> HoldSnap:
+    """Move the profile to the nearest shape its load can hold: no hoop compression.
+
+    See :func:`envelopelab.solvers.axisymmetric.hold_shape`: the curvature is limited to
+    the zero-hoop value where the drawn profile would need hoop compression, and kept
+    elsewhere; mouth, top opening and tape length stay. The shape is fitted with control
+    points within ``tolerance`` (m; spline, or straight segments for a straight-segment
+    profile). One undoable command.
+
+    Returns
+    -------
+    HoldSnap
+        The fit's control-point count and distance (m), and the fraction of the tape that
+        was changed.
+
+    Raises
+    ------
+    LockError
+        When height, volume or maximum diameter is locked.
+    ValueError
+        When the shape does not converge, the fit misses the tolerance, or the result is
+        not a valid design; nothing is changed.
+    """
+    from envelopelab.project.profile_physics import design_load
+
+    locked = [n for n in SHAPE_LOCKS[:3] if getattr(session.project.locks, n) is not None]
+    if locked:
+        raise LockError(
+            f"unlock {', '.join(n.replace('_', ' ') for n in locked)} first: the shape "
+            "that holds has its own height, volume and diameter"
+        )
+    design = session.design
+    assert design.gores is not None
+    load = design_load(design, session.patterns, fabrics).load
+    held = hold_shape(design_profile(design), load)
+    if not held.converged:
+        raise ValueError(
+            f"no shape that holds was found ({held.iterations} passes; the load may not "
+            "keep the envelope taut)"
+        )
+    if held.changed == 0.0:
+        return HoldSnap(0, 0.0, 0.0)
+    interpolation: Literal["spline", "linear"] = (
+        "linear" if design.gores.profile_interpolation == "linear" else "spline"
+    )
+    s = np.linspace(0.0, held.profile.meridian_length, 401)
+    fit = profile_editing.simplify_profile(
+        held.profile.radius_at(s), held.profile.height_at(s), tolerance, interpolation, 60
+    )
+    if not fit.within_tolerance:
+        raise ValueError(
+            f"no profile within {tolerance * 1e3:g} mm of the shape that holds "
+            f"(best {fit.deviation * 1e3:.1f} mm)"
+        )
+    _replace_profile(
+        session,
+        fit.r,
+        fit.z,
+        interpolation,
+        None,
+        "Snap profile to a shape that holds",
+        keep_rows_fitted,
+    )
+    return HoldSnap(len(fit.r), float(fit.deviation), held.changed)
 
 
 def compensate_profile(

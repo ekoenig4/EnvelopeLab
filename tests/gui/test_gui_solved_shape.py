@@ -129,3 +129,42 @@ def test_adopt_from_the_editor_is_one_undo(gore_window: MainWindow) -> None:
     assert float(after[:, 0].max()) > float(before[:, 0].max())
     assert session.undo()
     assert np.allclose(np.column_stack(control_arrays(session.design)), before)
+
+
+def test_the_shape_check_marks_compression_and_the_snap_removes_it(
+    gore_window: MainWindow,
+) -> None:
+    editor = gore_window.gore_editor
+    panel = editor.shape_physics
+    session = gore_window.controller.session
+    assert session is not None
+    assert "needs compression" in panel.status.text()
+    assert not editor.canvas.compression.path().isEmpty()
+    assert panel.snap.isEnabled()
+    # The natural shape and the solved runs are drawn side by side.
+    stretched_run(session, "calculix")
+    panel.natural_on.setChecked(True)
+    assert {"natural", "calculix"} <= set(editor.canvas.ghosts)
+    panel.check_on.setChecked(False)
+    assert editor.canvas.compression.path().isEmpty()
+    panel.check_on.setChecked(True)
+    before = np.column_stack(control_arrays(session.design))
+    panel.snap.click()
+    assert "Snapped" in panel.result.text()
+    assert "The shape holds" in panel.status.text()
+    assert editor.canvas.compression.path().isEmpty()
+    assert not panel.snap.isEnabled()
+    assert session.undo()
+    assert np.allclose(np.column_stack(control_arrays(session.design)), before)
+    assert "needs compression" in panel.status.text()
+
+
+def test_dragging_a_point_rechecks_the_shape_live(gore_window: MainWindow) -> None:
+    canvas = gore_window.gore_editor.canvas
+    assert canvas.stress_load is not None
+    drawn = canvas.compression.path().length()
+    handle = canvas.handles[1]
+    # Pull the low point outward: more curvature low down, more compression.
+    handle.setPos(handle.pos().x() + 0.4, handle.pos().y())
+    canvas.preview()  # what a drag calls on every move
+    assert canvas.compression.path().length() != drawn

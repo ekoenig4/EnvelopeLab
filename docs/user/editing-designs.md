@@ -182,6 +182,32 @@ in the undo history. Nothing is edited by hand in JSON.
   locks; a target that cannot be met is refused. See
   [theory](../theory/design-editing.md).
 
+### Shape under load
+
+The **Shape under load** box checks the drawn profile at the design's operating
+conditions while you edit it. It takes milliseconds and needs no simulation. A span drawn
+in **thick red** would need the fabric to be compressed around the envelope (or along
+it). Fabric cannot take compression, so that part will not keep the drawn shape. The
+status line says how much of the tape that is and where along it. Everything not red is
+held by fabric tension. The check redraws while you drag a point, so you can watch a span
+turn red as you over-curve it.
+
+* **Show natural shape** draws (dashed, cyan) the shape whose whole load the tapes
+  carry, with your mouth, top opening and tape length. Most good gore designs are far
+  from it, because their fabric carries tension around the envelope. It is shown for
+  comparison.
+* **Snap to a shape that holds** changes only the red spans. Each is given the most
+  curvature the load can hold there, and everything else keeps its curvature. Mouth, top
+  opening and tape length stay. The profile is refitted within the *Fit tolerance*
+  (5 mm). One undoable edit. Unlock *Fixed height*, *Fixed volume* and *Fixed maximum
+  diameter* first.
+
+A snapped shape still grows a few centimetres when inflated, from tape and fabric
+stretch. Run a solve and use *Compensate* below for that. On the generic fixture the
+drawn profile's lowest quarter collapses inward by 62 mm when solved; snapped, it does
+not, and the largest deviation halves (103 → 48 mm). See
+[theory](../theory/profile-physics.md).
+
 ### Solved shape vs profile
 
 The patterns cut from a profile do not inflate exactly onto it. Tapes stretch, gores

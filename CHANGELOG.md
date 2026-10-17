@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: the gore editor checks the profile under load while it is edited (membrane
+  statics, milliseconds). Spans that would need hoop or meridional compression, which
+  fabric cannot carry and which therefore do not keep their shape, are drawn red, live
+  while dragging. *Show natural shape* draws the zero-hoop-stress shape for comparison.
+  *Snap to a shape that holds* limits the curvature of the red spans only. Generic
+  fixture, converged previews at 800 mm: drawn, 23 % of the tape fails the check, the
+  lowest quarter collapses inward by 62 mm, largest deviation 103 mm; snapped, no
+  compression, no collapse, largest deviation 48 mm. The snapped preview needs 211k
+  iterations, above the default limit of 200k.
 - CalculiX runs converge. A CalculiX run now always starts from a preview equilibrium of
   the same mesh. Without a current one it solves the preview first and keeps it as a
   run. From that start the tension-field states and wrinkle directions stay frozen until

@@ -290,6 +290,7 @@ class WorkspaceController(QObject):
             "compensate_profile",
             "adopt_solved_profile",
             "restore_profile_target",
+            "snap_profile_to_hold",
         ):
             kwargs.setdefault("keep_rows_fitted", self.prefs.keep_rows_fitted)
         result = self.attempt(func, self.session, *args, **kwargs)
