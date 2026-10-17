@@ -7,7 +7,9 @@ the result becomes *stale* as soon as a relevant input changes.
 
 CalculiX (``ccx``) runs as an external process through ``calculix_adapter``; it is
 detected at start and when the preferences change, and *Run CalculiX* is disabled with an
-explanation when it is missing.
+explanation when it is missing. CalculiX starts from a preview equilibrium of the same
+model: a current converged preview run of the same mesh when there is one, else a preview
+solved first in the same run (and kept as its own run record).
 """
 
 from __future__ import annotations
@@ -84,7 +86,12 @@ class SolveWorker(QThread):
                 if req.solver == PREVIEW:
                     result = self._preview(built)
                 else:
-                    result = self._calculix(built, Path(tmp) / "ccx")
+                    start = req.start_positions
+                    if start is None:
+                        start = self._form_finding(built)
+                        if start is None:
+                            return
+                    result = self._calculix(built, Path(tmp) / "ccx", start)
                 if result is None:
                     return
                 record, arrays = run_record(result, built, req.fingerprints["simulation"])
@@ -105,7 +112,30 @@ class SolveWorker(QThread):
 
         return solve_preview(built, progress=report, cancel=self.token)
 
-    def _calculix(self, built: BuiltModel, workdir: Path) -> Any:
+    def _form_finding(self, built: BuiltModel) -> np.ndarray | None:
+        """Preview solve of the model CalculiX will verify, kept as its own run.
+
+        CalculiX's tension-field passes converge from an equilibrium but not from the
+        initial shape (``calculix_adapter.analysis``, *Warm start*), so a CalculiX run
+        without a current preview of the same mesh starts with one. Returns its positions
+        (m), or None (with the reason reported) when it did not converge.
+        """
+        result = self._preview(built)
+        record, arrays = run_record(result, built, self.request.fingerprints["simulation"])
+        record.findings = [*built.findings, *record.findings]
+        self.finished_run.emit(record, arrays)
+        if self.token.cancelled:
+            self.failed.emit("CalculiX run cancelled during the preview form finding")
+            return None
+        if not result.converged:
+            self.failed.emit(
+                "CalculiX run not started: the preview that finds its starting shape did "
+                f"not converge ({result.status}); see that run's findings"
+            )
+            return None
+        return np.asarray(result.positions, dtype=np.float64)
+
+    def _calculix(self, built: BuiltModel, workdir: Path, start: np.ndarray) -> Any:
         from calculix_adapter import (
             CalculixCancelledError,
             CalculixProgress,
@@ -127,7 +157,7 @@ class SolveWorker(QThread):
                 CalculixSettings(executable=self.request.ccx_path),
                 workdir=workdir,
                 mesh_options={"target_edge_length_mm": built.mesh_mm},
-                start_positions=self.request.start_positions,
+                start_positions=start,
                 progress=report,
                 cancel=self.token,
             )

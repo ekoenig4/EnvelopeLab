@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- CalculiX runs converge. A CalculiX run now always starts from a preview equilibrium of
+  the same mesh. Without a current one it solves the preview first and keeps it as a
+  run. From that start the tension-field states and wrinkle directions stay frozen until
+  the passes settle, and are then checked against the tension-field law (new acceptance
+  criterion, within 0.2 %). Generic 8-gore fixture, 800 mm mesh: before, 60 passes in
+  147 s (cold) or 129 s (warm), not converged; now 1 pass in 4.4 s after an 18 s
+  preview, converged, with height and volume equal to the preview's. Validation envelope
+  (`docs/validation/preview-vs-calculix.md`): CalculiX 30–35 % faster (35.1 → 23.5 s on
+  the finest level). Its results are unchanged within 1e-7 relative; preview values on
+  that page moved by up to 5e-8 relative from earlier solver commits now regenerated.
+  Cold starts are unchanged.
 - The gore editor draws the solved tape line of the latest preview and CalculiX run over
   the profile, with its deviation from the intended profile (largest and RMS distance,
   height and diameter change). Stale and unconverged runs are drawn dotted and flagged.

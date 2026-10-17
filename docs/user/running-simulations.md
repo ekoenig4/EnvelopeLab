@@ -51,10 +51,16 @@ CalculiX again**.
 
 A CalculiX run launches `ccx` as a separate process for each job of the staged solve; the
 progress monitor shows the pass, the job (held or release) and the latest out-of-balance
-force. **Cancel** stops `ccx`; a cancelled CalculiX run leaves no result. When a current,
-converged preview of the same mesh exists, CalculiX starts from its shape (it is still
-accepted only on its own convergence criteria). CalculiX can take minutes where the
-preview takes seconds; coarse meshes may not converge and are reported so.
+force. **Cancel** stops `ccx`; a cancelled CalculiX run leaves no result.
+
+CalculiX checks a preview's equilibrium with its own elements; it does not find the shape
+itself. When a current, converged preview of the same mesh exists, CalculiX starts from
+its shape. Otherwise **Run CalculiX** first solves a preview, which appears in the runs
+list as its own run, and then starts CalculiX from it. If that preview does not converge,
+CalculiX is not started and the message says why. Either way, the CalculiX result is
+accepted only on its own convergence criteria. Started from a preview, it usually needs
+one pass: seconds rather than minutes (4 s on the generic 8-gore fixture at 800 mm, after
+an 18 s preview).
 
 ## Saved results
 
