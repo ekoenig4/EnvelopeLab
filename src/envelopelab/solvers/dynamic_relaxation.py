@@ -146,7 +146,9 @@ class SolverProgress:
 
     @property
     def fraction(self) -> float:
-        """Rough progress estimate in [0, 1] from the residual decade reached."""
+        """Rough progress estimate in [0, 1] from the residual decade reached (it moves
+        back when the residual rises; displays use
+        :class:`envelopelab.solvers.progress.ConvergenceEstimator`)."""
         if self.residual <= self.tolerance:
             return 1.0
         if not math.isfinite(self.residual) or self.residual >= 1.0:

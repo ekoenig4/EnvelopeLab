@@ -18,7 +18,7 @@ from envelopelab.project.shape_family import QUANTITIES
 from envelopelab.project.simulation import build_solver_model
 from envelopelab_app.main_window import MainWindow, panel_titles
 from envelopelab_app.settings import load_preferences, recent_projects
-from envelopelab_app.simulation import CALCULIX
+from envelopelab_app.simulation import CALCULIX, PREVIEW
 from envelopelab_app.wizard import NewDesignWizard
 
 from .gui_support import FIXTURES, GORE_PROJECT, make_window
@@ -615,3 +615,25 @@ def test_calculix_starts_from_a_preview_it_solves_first(
     assert ccx.converged, [f.message for f in ccx.findings]
     assert ccx.input_fingerprint == preview.input_fingerprint
     assert abs(ccx.height - preview.height) <= 0.05 * preview.height
+
+
+@pytest.mark.slow
+def test_preview_progress_moves_forward_and_tells_the_time(
+    gore_window: MainWindow, qtbot: QtBot
+) -> None:
+    """The bar never goes back and ends full; the text gives elapsed time, and the time
+    to the iteration limit once a rate is known."""
+    w = gore_window
+    session = w.controller.session
+    assert session is not None
+    reports: list[tuple[str, float]] = []
+    w.simulation.progress.connect(lambda message, fraction: reports.append((message, fraction)))
+    assert w.simulation.start(PREVIEW)
+    assert w.simulation.wait(600_000)
+    qtbot.waitUntil(lambda: len(session.project.runs) == 1, timeout=10_000)
+    fractions = [f for _, f in reports]
+    assert len(fractions) > 3
+    assert all(b >= a - 1e-12 for a, b in zip(fractions, fractions[1:], strict=False))
+    assert fractions[0] == 0.0 and fractions[-1] == pytest.approx(1.0)
+    assert any("elapsed" in m for m, _ in reports)
+    assert any("limit in" in m for m, _ in reports)

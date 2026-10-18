@@ -98,6 +98,7 @@ import numpy as np
 from calculix_adapter.deck import DeckInput, FloatArray, IntArray, LoadStep, write_deck
 from calculix_adapter.detect import CalculixInstallation, require_calculix
 from calculix_adapter.results import (
+    job_fraction,
     read_cvg,
     read_displacements,
     read_element_stress,
@@ -124,6 +125,8 @@ from envelopelab.solvers.simulation import (
 )
 
 JOB = "job"
+#: Seconds between progress reports while a ``ccx`` job runs.
+POLL_REPORT_S = 0.5
 log = logging.getLogger(__name__)
 
 
@@ -226,7 +229,9 @@ class CalculixSettings:
 
 @dataclass(frozen=True)
 class CalculixProgress:
-    """Progress of a verification solve, reported before and after every ``ccx`` job.
+    """Progress of a verification solve: reported before every ``ccx`` job, while it runs,
+    after every pass and at the end (``envelopelab.solvers.progress.PassProgress`` turns
+    the reports into a progress estimate).
 
     Attributes
     ----------
@@ -240,6 +245,12 @@ class CalculixProgress:
         Latest relative out-of-balance, dimensionless (``inf`` before the first).
     elapsed : float
         Wall time since the start, s.
+    job_fraction : float
+        Progress of the running job in [0, 1] (from its ``.sta`` file; reported about
+        every :data:`POLL_REPORT_S` seconds while the job runs).
+    pass_ended : bool
+        ``residual`` is the out-of-balance at the end of pass ``pass_no`` (the report
+        right after its release job).
     """
 
     pass_no: int
@@ -247,10 +258,13 @@ class CalculixProgress:
     job: str
     residual: float
     elapsed: float
+    job_fraction: float = 0.0
+    pass_ended: bool = False
 
     @property
     def fraction(self) -> float:
-        """Rough progress in [0, 1] from the residual decade reached (1 when done)."""
+        """Rough progress in [0, 1] from the residual decade reached (1 when done;
+        displays use :class:`envelopelab.solvers.progress.PassProgress`)."""
         if self.job == "done":
             return 1.0
         if not math.isfinite(self.residual) or self.residual >= 1.0:
@@ -548,7 +562,10 @@ def _run_job(
     workdir: Path,
     threads: int,
     cancel: CancelToken | None = None,
+    on_poll: Callable[[float], None] | None = None,
 ) -> bool:
+    """Run one ``ccx`` job; ``on_poll`` gets the job's progress in [0, 1] from its
+    ``.sta`` file about every :data:`POLL_REPORT_S` seconds while it runs."""
     write_deck(deck, workdir / f"{JOB}.inp")
     for suffix in (".dat", ".sta", ".cvg", ".frd"):
         (workdir / f"{JOB}{suffix}").unlink(missing_ok=True)
@@ -570,7 +587,11 @@ def _run_job(
         ) as proc,
     ):
         # Poll so that a cancel request stops ccx instead of waiting for the job to end.
+        last_report = time.perf_counter()
         while proc.poll() is None:
+            if on_poll is not None and time.perf_counter() - last_report >= POLL_REPORT_S:
+                last_report = time.perf_counter()
+                on_poll(job_fraction(workdir / f"{JOB}.sta", deck.n_steps))
             if cancel is not None and cancel.cancelled:
                 proc.kill()
                 proc.wait()
@@ -719,11 +740,17 @@ def _solve(
     total_iterations = tf_pass = pass_no = 0
     last_residual = math.inf
 
-    def report(job: str) -> None:
+    def report(job: str, job_done: float = 0.0, pass_ended: bool = False) -> None:
         if progress is not None:
             progress(
                 CalculixProgress(
-                    pass_no, s.max_passes, job, last_residual, time.perf_counter() - start
+                    pass_no,
+                    s.max_passes,
+                    job,
+                    last_residual,
+                    time.perf_counter() - start,
+                    job_done,
+                    pass_ended,
                 )
             )
 
@@ -741,7 +768,7 @@ def _solve(
         f_ext = prob.external(x)
         held = prob.deck(x, axes, mats, sig0, [LoadStep("held", f_ext)], True, 0.0, 1.0)
         report("held")
-        if not _run_job(inst, held, work, s.threads, cancel):
+        if not _run_job(inst, held, work, s.threads, cancel, lambda f: report("held", f)):
             raise CalculixRunError("CalculiX failed on a held (fully fixed) job")
         f_int = read_reactions(work / f"{JOB}.dat", prob.n) + prob.tape_forces(x)
         balance = f_int - f_ext
@@ -774,7 +801,7 @@ def _solve(
             ]
             deck = prob.deck(x, axes, mats, sig0, steps, False, stab, inc)
             report("release")
-            ok = _run_job(inst, deck, work, s.threads, cancel)
+            ok = _run_job(inst, deck, work, s.threads, cancel, lambda f: report("release", f))
             if ok:
                 break
             if ramp * 2 <= s.max_ramp_steps:
@@ -815,6 +842,7 @@ def _solve(
             break
         _update(prob, ps, work, axes, f_ext, mats)
         last_residual = ps.residual
+        report("release", 1.0, pass_ended=True)
         history.append(IterationRecord("pass: largest node movement (m)", pass_no, 0, 0, ps.moved))
         history.append(IterationRecord("pass: relative out-of-balance", pass_no, 0, 0, ps.residual))
         if ps.frozen:

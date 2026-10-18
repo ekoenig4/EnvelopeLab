@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: the progress bar of preview and CalculiX runs stayed near the start until the
+  very end. It now follows the best residual so far and the share of the iteration
+  limit, so it never moves backwards and fills by the time the run ends, converged or
+  stopped at its limit. CalculiX moves during each `ccx` job. The text gives the
+  elapsed time, the time to the iteration limit, and *about N s left* once the residual
+  is clearly falling (or a warning that it may not converge in time).
 - Added: the gore editor checks the profile under load while it is edited (membrane
   statics, milliseconds). Spans that would need hoop or meridional compression, which
   fabric cannot carry and which therefore do not keep their shape, are drawn red, live

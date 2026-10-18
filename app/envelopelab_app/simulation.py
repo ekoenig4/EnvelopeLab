@@ -33,9 +33,15 @@ from envelopelab.project.simulation import (
     solve_preview,
 )
 from envelopelab.solvers.dynamic_relaxation import CancellationToken, SolverProgress
+from envelopelab.solvers.progress import ConvergenceEstimator, PassProgress, format_duration
 from envelopelab_app.controller import WorkspaceController
 
 PREVIEW = "envelopelab-preview"
+#: Share of the progress bar for building the model, and where a CalculiX run's own
+#: preview (form finding) ends. Measured on the generic fixture at 800 mm: build 3 s,
+#: preview 18 s, CalculiX 4 s.
+BUILD_SHARE = 0.1
+FORM_FINDING_END = 0.75
 CALCULIX = "calculix"
 
 
@@ -75,7 +81,11 @@ class SolveWorker(QThread):
         label = "Preview" if req.solver == PREVIEW else "CalculiX"
         try:
             with tempfile.TemporaryDirectory(prefix="envelopelab-run-") as tmp:
-                self.progress.emit(f"{label}: building model ({req.mesh_mm:g} mm mesh)", 0.0)
+                self.progress.emit(
+                    f"{label}: building the model ({req.mesh_mm:g} mm mesh: import, seam "
+                    "audit, meshing, sewing)",
+                    0.0,
+                )
                 built = build_solver_model(
                     req.design, req.patterns, Path(tmp) / "pack", req.mesh_mm, self.fabrics
                 )
@@ -84,14 +94,17 @@ class SolveWorker(QThread):
                     self.failed.emit(f"{label} run cancelled")
                     return
                 if req.solver == PREVIEW:
-                    result = self._preview(built)
+                    result = self._preview(built, (BUILD_SHARE, 1.0))
                 else:
                     start = req.start_positions
                     if start is None:
                         start = self._form_finding(built)
                         if start is None:
                             return
-                    result = self._calculix(built, Path(tmp) / "ccx", start)
+                        span = (FORM_FINDING_END, 1.0)
+                    else:
+                        span = (BUILD_SHARE, 1.0)
+                    result = self._calculix(built, Path(tmp) / "ccx", start, span)
                 if result is None:
                     return
                 record, arrays = run_record(result, built, req.fingerprints["simulation"])
@@ -102,12 +115,22 @@ class SolveWorker(QThread):
         except Exception as exc:  # the thread must report every failure to the GUI
             self.failed.emit(f"{label} run failed: {type(exc).__name__}: {exc}")
 
-    def _preview(self, built: BuiltModel) -> Any:
+    def _preview(
+        self, built: BuiltModel, span: tuple[float, float], prefix: str = "Preview"
+    ) -> Any:
+        """Preview solve; its progress fills ``span`` of the bar."""
+        estimator: ConvergenceEstimator | None = None
+
         def report(p: SolverProgress) -> None:
+            nonlocal estimator
+            if estimator is None:
+                estimator = ConvergenceEstimator(p.tolerance)
+            est = estimator.update(p.elapsed, p.residual, p.iteration, p.max_iterations)
+            when = est.describe()
             self.progress.emit(
-                f"Preview: iteration {p.iteration}, residual {p.residual:.2e} "
-                f"(target {p.tolerance:.0e}), {p.elapsed:.0f} s",
-                p.fraction,
+                f"{prefix}: residual {p.residual:.1e} (target {p.tolerance:.0e}), "
+                f"{format_duration(p.elapsed)} elapsed" + (f", {when}" if when else ""),
+                span[0] + (span[1] - span[0]) * est.fraction,
             )
 
         return solve_preview(built, progress=report, cancel=self.token)
@@ -120,7 +143,9 @@ class SolveWorker(QThread):
         without a current preview of the same mesh starts with one. Returns its positions
         (m), or None (with the reason reported) when it did not converge.
         """
-        result = self._preview(built)
+        result = self._preview(
+            built, (BUILD_SHARE, FORM_FINDING_END), "Step 1 of 2, preview for the start"
+        )
         record, arrays = run_record(result, built, self.request.fingerprints["simulation"])
         record.findings = [*built.findings, *record.findings]
         self.finished_run.emit(record, arrays)
@@ -135,7 +160,9 @@ class SolveWorker(QThread):
             return None
         return np.asarray(result.positions, dtype=np.float64)
 
-    def _calculix(self, built: BuiltModel, workdir: Path, start: np.ndarray) -> Any:
+    def _calculix(
+        self, built: BuiltModel, workdir: Path, start: np.ndarray, span: tuple[float, float]
+    ) -> Any:
         from calculix_adapter import (
             CalculixCancelledError,
             CalculixProgress,
@@ -143,18 +170,28 @@ class SolveWorker(QThread):
             run_calculix,
         )
 
+        settings = CalculixSettings(executable=self.request.ccx_path)
+        estimator = PassProgress(settings.residual_target, settings.max_passes)
+        prefix = "Step 2 of 2, CalculiX" if span[0] >= FORM_FINDING_END else "CalculiX"
+
         def report(p: CalculixProgress) -> None:
-            residual = "-" if p.residual == float("inf") else f"{p.residual:.2e}"
+            est = estimator.update(
+                p.elapsed, p.pass_no, p.job, p.job_fraction, p.residual, p.pass_ended
+            )
+            residual = "-" if p.residual == float("inf") else f"{p.residual:.1e}"
+            job = "done" if p.job == "done" else f"{p.job} job {p.job_fraction:.0%}"
+            when = est.describe()
             self.progress.emit(
-                f"CalculiX (ccx): pass {p.pass_no}/{p.max_passes}, {p.job} job, "
-                f"out-of-balance {residual}, {p.elapsed:.0f} s",
-                p.fraction,
+                f"{prefix} (ccx): pass {p.pass_no}, {job}, out-of-balance {residual} "
+                f"(target {settings.residual_target:.0e}), {format_duration(p.elapsed)} "
+                "elapsed" + (f", {when}" if when else ""),
+                span[0] + (span[1] - span[0]) * est.fraction,
             )
 
         try:
             return run_calculix(
                 built.model,
-                CalculixSettings(executable=self.request.ccx_path),
+                settings,
                 workdir=workdir,
                 mesh_options={"target_edge_length_mm": built.mesh_mm},
                 start_positions=start,
