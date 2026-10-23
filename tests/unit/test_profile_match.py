@@ -23,6 +23,7 @@ from envelopelab.project.profile_match import (
     latest_run_shape,
     solved_deviation,
     solved_meridian,
+    usable_run_shape,
 )
 from envelopelab.project.session import ProjectSession
 from envelopelab.project.simulation import build_solver_model, run_record, solve_preview
@@ -74,11 +75,16 @@ def scaled(arrays: dict[str, np.ndarray], radial: float, vertical: float) -> dic
     return out
 
 
-def add_run(session: ProjectSession, arrays: dict[str, np.ndarray], converged: bool = True) -> None:
+def add_run(
+    session: ProjectSession,
+    arrays: dict[str, np.ndarray],
+    converged: bool = True,
+    solver: str = "calculix",
+) -> None:
     record = RunRecord(
         run_id=f"run-{len(session.project.runs)}",
         created=utc_now(),
-        solver="calculix",
+        solver=solver,  # type: ignore[arg-type]
         solver_version="test",
         status="converged" if converged else "max_iterations",
         converged=converged,
@@ -267,9 +273,48 @@ def test_opening_locks_and_segment_profiles_refuse_a_profile_update() -> None:
     assert segments.deviation is not None
     with pytest.raises(ValueError, match="segment profile"):
         edits.compensate_profile(s, segments.solved)
-    with pytest.raises(ValueError, match="segment profile"):
-        edits.adopt_solved_profile(s, segments.solved)
     assert s.project.profile_target is None
+
+
+def test_adopting_on_a_segment_profile_makes_it_a_spline_in_one_undo() -> None:
+    s = ProjectSession.open(FIXTURE)
+    edits.set_profile_interpolation(s, "segments")
+    before = np.column_stack(control_arrays(s.design))
+    add_run(s, scaled(revolution_arrays(s), 1.02, 1.01))
+    shape = latest_run_shape(s, "calculix")
+    assert shape is not None and shape.solved is not None
+    update = edits.adopt_solved_profile(s, shape.solved, tolerance=5e-3)
+    assert update.fit_error <= 5e-3
+    gores = s.design.gores
+    assert gores is not None
+    assert gores.profile_interpolation == "spline"
+    assert gores.profile_segments is None
+    after = np.column_stack(control_arrays(s.design))
+    assert float(after[:, 0].max()) == pytest.approx(1.02 * float(before[:, 0].max()), rel=5e-3)
+    assert s.undo()
+    assert s.design.gores is not None
+    assert s.design.gores.profile_interpolation == "segments"
+    assert np.allclose(np.column_stack(control_arrays(s.design)), before)
+
+
+def test_the_usable_run_prefers_the_chosen_solver_and_skips_unusable_runs() -> None:
+    s = ProjectSession.open(FIXTURE)
+    arrays = scaled(revolution_arrays(s), 1.02, 1.01)
+    assert usable_run_shape(s, "calculix") is None
+    add_run(s, arrays, solver="envelopelab-preview")
+    add_run(s, arrays, converged=False)
+    # CalculiX's latest run is not converged: the converged preview is used.
+    shape = usable_run_shape(s, "calculix")
+    assert shape is not None and shape.record.solver == "envelopelab-preview"
+    add_run(s, arrays)
+    preferred = usable_run_shape(s, "calculix")
+    assert preferred is not None and preferred.record.solver == "calculix"
+    other = usable_run_shape(s, "envelopelab-preview")
+    assert other is not None and other.record.solver == "envelopelab-preview"
+    # Stale runs (the design changed since) are never used.
+    assert shape.solved is not None
+    edits.adopt_solved_profile(s, shape.solved)
+    assert usable_run_shape(s, "calculix") is None
 
 
 def test_the_target_is_saved_with_the_project_and_absent_without_one() -> None:

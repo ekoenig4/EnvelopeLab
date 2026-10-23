@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 
 import numpy as np
+import pytest
+from pytestqt.qtbot import QtBot
 
 from envelopelab.project.gore_design import control_arrays, design_profile
 from envelopelab.project.model import RunRecord, utc_now
@@ -168,3 +170,73 @@ def test_dragging_a_point_rechecks_the_shape_live(gore_window: MainWindow) -> No
     handle.setPos(handle.pos().x() + 0.4, handle.pos().y())
     canvas.preview()  # what a drag calls on every move
     assert canvas.compression.path().length() != drawn
+
+
+def test_fit_adopts_the_latest_usable_run_in_one_click(gore_window: MainWindow) -> None:
+    panel = gore_window.gore_editor.solved_shape
+    session = gore_window.controller.session
+    assert session is not None
+    before = np.column_stack(control_arrays(session.design))
+    # CalculiX is the chosen source, but its run is not converged: the preview is used.
+    stretched_run(session, "envelopelab-preview")
+    stretched_run(session, "calculix", converged=False)
+    assert panel.fit.isEnabled()
+    panel.fit.click()
+    assert "Fitted to the Preview run" in panel.update_status.text()
+    after = np.column_stack(control_arrays(session.design))
+    assert float(after[:, 0].max()) == pytest.approx(1.02 * float(before[:, 0].max()), rel=5e-3)
+    assert not gore_window.simulation.running  # no run was needed
+    assert session.undo()
+    assert np.allclose(np.column_stack(control_arrays(session.design)), before)
+
+
+def test_fit_on_a_segment_profile_makes_it_a_spline(gore_window: MainWindow) -> None:
+    panel = gore_window.gore_editor.solved_shape
+    controller = gore_window.controller
+    session = controller.session
+    assert session is not None
+    controller.edit("set_profile_interpolation", "segments")
+    stretched_run(session, "calculix")
+    panel.refresh()
+    assert not panel.compensate.isEnabled()
+    assert panel.adopt.isEnabled() and panel.fit.isEnabled()
+    assert "make the profile a spline" in panel.update_status.text()
+    panel.fit.click()
+    assert session.design.gores is not None
+    assert session.design.gores.profile_interpolation == "spline"
+    assert "Fitted to the CalculiX run" in panel.update_status.text()
+
+
+@pytest.mark.slow
+def test_fit_without_a_run_solves_the_preview_first(gore_window: MainWindow, qtbot: QtBot) -> None:
+    panel = gore_window.gore_editor.solved_shape
+    session = gore_window.controller.session
+    assert session is not None
+    before = np.column_stack(control_arrays(session.design))
+    assert panel.fit.isEnabled()
+    panel.fit.click()
+    assert panel.fit_pending and gore_window.simulation.running
+    assert not panel.fit.isEnabled()
+    assert "Running the preview" in panel.update_status.text()
+    assert gore_window.simulation.wait(600_000)
+    qtbot.waitUntil(lambda: not panel.fit_pending, timeout=10_000)
+    run = session.project.runs[-1]
+    assert run.solver == "envelopelab-preview" and run.converged
+    assert "Fitted to the Preview run" in panel.update_status.text()
+    after = np.column_stack(control_arrays(session.design))
+    assert after.shape != before.shape or not np.allclose(after, before)
+    # The run solved the drawn profile, which has changed: it is stale now.
+    assert session.run_status(run) == "stale"
+
+
+def test_an_unconverged_preview_does_not_change_the_profile(gore_window: MainWindow) -> None:
+    panel = gore_window.gore_editor.solved_shape
+    session = gore_window.controller.session
+    assert session is not None
+    before = np.column_stack(control_arrays(session.design))
+    panel.fit_pending = True  # as after a click that started the preview
+    stretched_run(session, "envelopelab-preview", converged=False)
+    panel._run_finished(session.project.runs[-1])
+    assert not panel.fit_pending
+    assert "NOT CONVERGED" in panel.update_status.text()
+    assert np.allclose(np.column_stack(control_arrays(session.design)), before)

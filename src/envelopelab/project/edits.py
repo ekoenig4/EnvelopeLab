@@ -738,11 +738,29 @@ def adopt_solved_profile(
     """Replace the profile by the solved tape line; any compensation target is dropped
     (the solved line becomes the intent).
 
-    See :func:`envelopelab.project.profile_match.adopted_control_points`; parameters,
-    return value and errors as :func:`compensate_profile`.
+    A segment profile becomes a spline: its lines, arcs and curves cannot follow a solved
+    line. See :func:`envelopelab.project.profile_match.adopted_control_points`;
+    parameters, return value and lock errors as :func:`compensate_profile`.
     """
     _check_shape_locks(session)
-    update = adopted_control_points(session.design, solved, tolerance, MAX_CONTROL_POINTS)
+    design = session.design
+    update = adopted_control_points(design, solved, tolerance, MAX_CONTROL_POINTS)
+    if design.gores is not None and design.gores.profile_interpolation == "segments":
+        pts = np.asarray(update.points, dtype=np.float64)
+        _with_target(
+            session,
+            None,
+            lambda: _replace_profile(
+                session,
+                pts[:, 0],
+                pts[:, 1],
+                "spline",
+                None,
+                "Adopt solved profile (as a spline)",
+                keep_rows_fitted,
+            ),
+        )
+        return update
     _with_target(
         session,
         None,

@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: *Fit profile to simulated shape* in the gore editor replaces the drawn profile
+  with the simulated tape line in one click. It uses the latest current, converged run
+  (CalculiX or preview). Without one, it runs the preview first. An unconverged run
+  never changes the profile. *Adopt solved shape* (and the fit) now also work on a
+  *Segments* profile, which becomes a spline in the same undoable edit.
 - Faster preview solves: with the `fast` extra (Numba) the whole dynamic-relaxation
   iteration now runs compiled, not just the element forces. Generic 8-gore fixture:
   800 mm mesh 24.2 → 6.1 s, 1600 mm 2.9 → 0.7 s. Results agree with the Python loop to

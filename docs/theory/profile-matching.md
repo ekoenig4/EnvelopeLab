@@ -109,8 +109,8 @@ intended shape is not kept.
 ## Control points of an updated profile
 
 Both updates keep the existing control points, moved to their new place, and the
-design's interpolation. Then, while the new profile is more than the fit tolerance from
-the line it was built from, a control point is inserted at the station of largest error,
+design's interpolation (a spline for an adopted segment profile). Then, while the new
+profile is more than the fit tolerance from the line it was built from, a control point is inserted at the station of largest error,
 up to 40 points. A solved line usually has features that the few points of a drawn
 profile cannot follow, such as the steeper rise off the fixed mouth.
 
@@ -126,8 +126,12 @@ update.
   are still drawn, dotted, and flagged in the editor.
 * *Fixed height*, *Fixed volume*, *Fixed maximum diameter* and the mouth and top-hole
   diameter locks refuse an update. The update changes these quantities on purpose.
-* A segment profile (lines, arcs and curves) refuses an update, because a solved line is
-  none of these. Spline and straight-segment profiles are updated.
+* A segment profile (lines, arcs and curves) refuses compensation, because a solved line
+  is none of these. Adoption makes it a spline, in the same command. Spline and
+  straight-segment profiles keep their interpolation.
+* *Fit profile to simulated shape* adopts from the latest current, converged run, the
+  chosen solver first (`profile_match.usable_run_shape`). Without one, it adopts from
+  a preview run it starts. An unconverged preview changes nothing.
 * Each update is one undoable command. The target is an editor setting, like the locks.
   It is saved with the project but is not part of the undo history. *Restore intended
   profile* sets the drawn profile back to the target in one command.

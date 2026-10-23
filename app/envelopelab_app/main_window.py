@@ -96,6 +96,7 @@ class MainWindow(QMainWindow):
         self.resize(1500, 950)
 
         self.gore_editor = GoreEditor(self.controller)
+        self.gore_editor.solved_shape.attach_simulation(self.simulation)
         use_3d = self.prefs.enable_3d if enable_3d is None else enable_3d
         self.design_tree = DesignTreePanel(self.controller)
         self.properties = PropertiesPanel(self.controller)

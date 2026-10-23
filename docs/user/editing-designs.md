@@ -243,9 +243,22 @@ solved line needs them, until the new profile follows it within the *Fit toleran
 (5 mm by default; the solved line is only known to about the mesh size). Each is one
 undoable edit. Unlock *Fixed height*, *Fixed volume*, *Fixed maximum diameter* and the
 mouth and top-hole diameter locks first, because the update changes them on purpose. A
-*Segments* profile (lines and arcs) cannot follow a solved line. Switch *Profile between
-points* to *Spline* or *Straight segments* to update it; its ghost lines are shown
+*Segments* profile (lines and arcs) cannot follow a solved line. *Compensate* needs
+*Profile between points* set to *Spline* or *Straight segments*. *Adopt* turns a
+*Segments* profile into a spline in the same undoable edit. The ghost lines are shown
 either way.
+
+**Fit profile to simulated shape** does the whole of *Adopt* in one click:
+
+* If there is a current, converged run, it fits the profile to that run. It tries the
+  solver under *Update from* first, then the other one.
+* If there is none, it starts a preview run (progress in the status bar). When that run
+  has converged, it fits the profile to it.
+* If the preview does not converge, the profile is not changed, and the box says so in
+  red capitals.
+
+The button is unavailable while another run is in progress. Undo takes the fit back in
+one step. Afterwards every run is stale, because the profile they solved has changed.
 
 A practical loop: compensate from fast **Preview** runs until the deviation is small,
 then run **CalculiX** once to verify, and compensate from it if needed. See

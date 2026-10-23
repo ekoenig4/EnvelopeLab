@@ -62,6 +62,7 @@ from envelopelab.project.gore_design import (
     row_zone,
     seam_fractions,
 )
+from envelopelab.project.model import RunRecord
 from envelopelab.project.profile_match import (
     SEGMENTS_REFUSAL,
     ProfileUpdate,
@@ -70,6 +71,7 @@ from envelopelab.project.profile_match import (
     latest_run_shape,
     station_points,
     target_profile,
+    usable_run_shape,
 )
 from envelopelab.project.profile_physics import (
     check_design,
@@ -88,6 +90,7 @@ from envelopelab.project.references import (
 from envelopelab.solvers.axisymmetric import AxisymmetricLoad, MembraneCheck, membrane_check
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.refresh import Refresher
+from envelopelab_app.simulation import PREVIEW, SimulationManager
 
 HANDLE_RADIUS = 6.0  # px
 
@@ -855,6 +858,10 @@ class SolvedShapePanel(QGroupBox):
     one, else the drawn profile), and offers *Compensate* and *Adopt*
     (:mod:`envelopelab.project.profile_match`). Updates are allowed only from a current,
     converged run; a stale or unconverged run is still drawn, flagged as such.
+
+    *Fit profile to simulated shape* is Adopt in one click: from the latest current,
+    converged run (the chosen solver first), or, without one, from a preview run it
+    starts (:meth:`attach_simulation`). An unconverged preview changes nothing.
     """
 
     def __init__(self, controller: WorkspaceController, canvas: ProfileCanvas) -> None:
@@ -862,6 +869,9 @@ class SolvedShapePanel(QGroupBox):
         self.setObjectName("solvedShapeBox")
         self.controller = controller
         self.canvas = canvas
+        self.simulation: SimulationManager | None = None
+        self.fit_pending = False
+        self.result: tuple[str, str] | None = None  # message, design hash it belongs to
         self.shapes: dict[str, RunShape | None] = {}
         self.show_ghost: dict[str, QCheckBox] = {}
         self.status: dict[str, QLabel] = {}
@@ -958,6 +968,16 @@ class SolvedShapePanel(QGroupBox):
         update_buttons.addWidget(self.compensate)
         update_buttons.addWidget(self.adopt)
         layout.addLayout(update_buttons)
+        self.fit = QPushButton("Fit profile to simulated shape")
+        self.fit.setObjectName("fitProfile")
+        self.fit.setStyleSheet("font-weight: bold;")
+        self.fit.setToolTip(
+            "Replace the drawn profile by the inflated tape line in one step (undoable). "
+            "Uses the latest current, converged run; without one, runs the preview first. "
+            "A segment profile becomes a spline."
+        )
+        self.fit.clicked.connect(self.fit_to_simulation)
+        layout.addWidget(self.fit)
         self.update_status = QLabel()
         self.update_status.setObjectName("updateStatus")
         self.update_status.setWordWrap(True)
@@ -1020,11 +1040,92 @@ class SolvedShapePanel(QGroupBox):
             if shape is None
             else shape.refusal
         )
-        if not refusal and design.gores.profile_interpolation == "segments":
-            refusal = SEGMENTS_REFUSAL[0].upper() + SEGMENTS_REFUSAL[1:] + "."
-        for button in (self.compensate, self.adopt):
-            button.setEnabled(not refusal)
-        self.update_status.setText(refusal)
+        segments = design.gores.profile_interpolation == "segments"
+        self.adopt.setEnabled(not refusal)
+        if not refusal and segments:
+            refusal = (
+                "Compensate: " + SEGMENTS_REFUSAL + ". Adopt and Fit make the profile a spline."
+            )
+            self.compensate.setEnabled(False)
+        else:
+            self.compensate.setEnabled(not refusal)
+        running = self.simulation is not None and self.simulation.running
+        can_run = self.simulation is not None and not running
+        usable = usable_run_shape(session, self.source.currentData()) is not None
+        self.fit.setEnabled(not self.fit_pending and (usable or can_run))
+        if self.fit_pending:
+            return
+        if self.result is not None and self.result[1] == session.content_hash():
+            self.update_status.setText(self.result[0])
+        else:
+            self.result = None
+            self.update_status.setText(refusal)
+
+    def attach_simulation(self, simulation: SimulationManager) -> None:
+        """Let *Fit profile to simulated shape* start a preview run when it has no
+        current converged run to fit to."""
+        self.simulation = simulation
+        simulation.finished.connect(self._run_finished)
+        simulation.failed.connect(self._run_failed)
+        simulation.started.connect(lambda _solver: self.refresh())
+        simulation.idle.connect(self.refresh)
+
+    def fit_to_simulation(self) -> None:
+        """Adopt the latest usable run's tape line; without one, run the preview first."""
+        session = self.controller.session
+        if session is None or self.fit_pending:
+            return
+        shape = usable_run_shape(session, self.source.currentData())
+        if shape is not None:
+            self._adopt_shape(shape)
+            return
+        if self.simulation is None:
+            self.update_status.setText("No current converged run to fit to: run one first.")
+            return
+        if self.simulation.running:
+            self.update_status.setText("A run is in progress: fit again when it has ended.")
+            return
+        if not self.simulation.start(PREVIEW):
+            self.update_status.setText(
+                f"The preview could not be started. {self.simulation.last_message}".strip()
+            )
+            return
+        self.fit_pending = True
+        self.fit.setEnabled(False)
+        self.update_status.setText(
+            "Running the preview to fit the profile to (progress in the status bar)…"
+        )
+
+    def _run_finished(self, record: RunRecord) -> None:
+        if not self.fit_pending:
+            return
+        self.fit_pending = False
+        session = self.controller.session
+        shape = None if session is None else latest_run_shape(session, record.solver)
+        if shape is None or not shape.usable:
+            why = shape.refusal if shape is not None else "its result could not be read"
+            self._show_result(
+                f"Preview NOT CONVERGED or unusable ({why}): the profile was not changed."
+            )
+            self.refresh()
+            return
+        self._adopt_shape(shape)
+
+    def _run_failed(self, message: str) -> None:
+        if not self.fit_pending:
+            return
+        self.fit_pending = False
+        self._show_result(f"Fit stopped, the profile was not changed: {message}")
+        self.refresh()
+
+    def _adopt_shape(self, shape: RunShape) -> None:
+        if shape.solved is None:
+            return
+        name = dict(SOLVERS).get(shape.record.solver, shape.record.solver)
+        update = self.controller.edit(
+            "adopt_solved_profile", shape.solved, self.tolerance.value() / 1e3
+        )
+        self._report(update, f"Fitted to the {name} run")
 
     def _solved(self) -> SolvedMeridian | None:
         shape = self.shapes.get(self.source.currentData())
@@ -1055,12 +1156,19 @@ class SolvedShapePanel(QGroupBox):
         if update is None:
             return
         self.controller.bump()
-        self.controller.stateChanged.emit()
-        self.update_status.setText(
+        self._show_result(
             f"{what}: {len(update.points)} control points, within "
             f"{update.fit_error * 1e3:.1f} mm of the target line. The runs are now stale: "
             "run the solver again to see the new shape."
         )
+        self.controller.stateChanged.emit()
+
+    def _show_result(self, message: str) -> None:
+        """Show the outcome of an update until the design changes again (later refreshes,
+        such as the one when a run's thread ends, keep it)."""
+        session = self.controller.session
+        self.result = (message, session.content_hash() if session is not None else "")
+        self.update_status.setText(message)
 
 
 #: Default fit tolerance of profile updates, mm.

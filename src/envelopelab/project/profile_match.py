@@ -367,17 +367,35 @@ def updatable_interpolation(design: DesignDocument) -> Literal["spline", "linear
     return "linear" if interpolation == "linear" else "spline"
 
 
+def adopted_interpolation(design: DesignDocument) -> Literal["spline", "linear"]:
+    """How an adopted solved line runs between its control points: the design's own
+    interpolation, or a spline for a segment profile (whose lines, arcs and curves cannot
+    follow a solved line).
+
+    Raises
+    ------
+    ValueError
+        For a special-shape design.
+    """
+    if design.gores is None:
+        raise ValueError("not a standard-gore design")
+    return "linear" if design.gores.profile_interpolation == "linear" else "spline"
+
+
 def _fit(
     design: DesignDocument,
     stations: FloatArray,
     target: FloatArray,
     tolerance: float,
     max_points: int,
+    interpolation: Literal["spline", "linear"] | None = None,
 ) -> ProfileUpdate:
     """Control points on ``target`` (points at :attr:`SolvedMeridian.station`), adding
     points at the station of largest error until the profile follows it within
-    ``tolerance`` (m) or there are ``max_points``."""
-    interpolation = updatable_interpolation(design)
+    ``tolerance`` (m) or there are ``max_points``. The interpolation defaults to
+    :func:`updatable_interpolation`."""
+    if interpolation is None:
+        interpolation = updatable_interpolation(design)
     dense = np.linspace(0.0, 1.0, target.shape[0])
     chosen = sorted({float(v) for v in stations})
 
@@ -451,7 +469,8 @@ def adopted_control_points(
     tolerance: float = FIT_TOLERANCE,
     max_points: int = MAX_CONTROL_POINTS,
 ) -> ProfileUpdate:
-    """Control points moved onto the solved tape line at their own stations.
+    """Control points moved onto the solved tape line at their own stations, for the
+    interpolation of :func:`adopted_interpolation` (a spline for a segment profile).
 
     Parameters
     ----------
@@ -470,7 +489,14 @@ def adopted_control_points(
         New control points, m, and the fit error against the solved line, m.
     """
     target = np.column_stack((solved.r, solved.z))
-    return _fit(design, control_point_stations(design), target, tolerance, max_points)
+    return _fit(
+        design,
+        control_point_stations(design),
+        target,
+        tolerance,
+        max_points,
+        adopted_interpolation(design),
+    )
 
 
 @dataclass(frozen=True)
@@ -549,3 +575,22 @@ def latest_run_shape(session: ProjectSession, solver: str) -> RunShape | None:
     except (ProfileMatchError, ValueError) as exc:
         return RunShape(record, current, None, None, str(exc))
     return RunShape(record, current, solved, deviation)
+
+
+def usable_run_shape(session: ProjectSession, preferred: str) -> RunShape | None:
+    """The latest run that may drive a profile update: of ``preferred`` when its latest
+    run is usable (:attr:`RunShape.usable`), else of the other solver, else None.
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Open project with a standard-gore design.
+    preferred : str
+        ``envelopelab-preview`` or ``calculix``.
+    """
+    others = [s for s in ("calculix", "envelopelab-preview") if s != preferred]
+    for solver in (preferred, *others):
+        shape = latest_run_shape(session, solver)
+        if shape is not None and shape.usable:
+            return shape
+    return None
