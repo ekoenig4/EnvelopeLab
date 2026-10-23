@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Faster preview solves: with the `fast` extra (Numba) the whole dynamic-relaxation
+  iteration now runs compiled, not just the element forces. Generic 8-gore fixture:
+  800 mm mesh 24.2 → 6.1 s, 1600 mm 2.9 → 0.7 s. Results agree with the Python loop to
+  round-off: equilibrium positions within 0.21 µm, volume identical, iteration counts
+  within a few percent (39,829 against 37,620 at 800 mm). No benchmark or golden value
+  moved.
+- Known limitation: on a snapped profile (spans at zero hoop stress) kinetic damping is
+  sensitive to round-off. The same preview can converge or run to its iteration limit
+  on either loop. Viscous damping (`damping="viscous"`, 0.05) converges it reliably
+  (71k iterations on the fixture).
 - Fixed: the progress bar of preview and CalculiX runs stayed near the start until the
   very end. It now follows the best residual so far and the share of the iteration
   limit, so it never moves backwards and fills by the time the run ends, converged or

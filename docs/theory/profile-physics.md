@@ -105,6 +105,12 @@ needs 211k iterations at 800 mm, just above the default limit of 200k. A 10 % ho
 margin (\(N_h \ge 0.1 N_m\)) reduced the deviation only to 43 mm and doubled the
 iterations, so the snap uses none.
 
+On these zero-hoop spans kinetic damping resets thousands of times, and its path depends
+on round-off. From starts perturbed by \(10^{-15}\) relative, the same solve converged in
+82k–211k iterations or wandered past 600k. Viscous damping (`damping="viscous"`,
+\(c = 0.05\)) converges the snapped fixture in 71k iterations from every such start. The
+end-to-end test uses it.
+
 ## Assumptions and valid range
 
 * Axisymmetric, quasi-static membrane without bending.

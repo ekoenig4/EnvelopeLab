@@ -88,7 +88,12 @@ def _solved_lower_offset(session: ProjectSession) -> tuple[float, float]:
     of a converged preview of the session's design."""
     with tempfile.TemporaryDirectory() as tmp:
         built = build_solver_model(session.design, session.patterns, Path(tmp) / "p", 800.0)
-        result = solve_preview(built, SolverSettings(max_iterations=600_000))
+        # Viscous damping: on the snapped shape's zero-hoop-stress spans, kinetic damping
+        # keeps resetting and its path depends on round-off (from starts perturbed by
+        # 1e-15 it converges or wanders past 600k iterations); viscous damping converges
+        # in 71k iterations from any of them.
+        settings = SolverSettings(max_iterations=600_000, damping="viscous", viscous_damping=0.05)
+        result = solve_preview(built, settings)
     assert result.converged
     _, arrays = run_record(result, built, "test")
     profile = design_profile(session.design)

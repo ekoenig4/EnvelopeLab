@@ -154,6 +154,14 @@ functions of `envelopelab.solvers.membrane` are used. The two give the same forc
 round-off (relative 1e-12, `tests/unit/test_solver_kernels.py`), so the choice changes
 only run time.
 
+With Numba the whole iteration also runs compiled (ADR-0028). That includes the step,
+kinetic-energy resets with their new masses, tapes, closures, the projection and the
+residual. It returns to Python every `progress_interval` iterations for the progress
+report, cancellation and time limit. The Python loop is the reference. Forces and masses
+agree to 1e-12 relative and short runs follow the same trajectory
+(`tests/unit/test_compiled_iterations.py`). Over a long solve, round-off can change the
+iteration count by a few percent, but not the equilibrium.
+
 ## Convergence criteria
 
 | Status | Meaning |
