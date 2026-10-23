@@ -1,0 +1,460 @@
+{
+  "format": "envelopelab.project",
+  "format_version": 2,
+  "locks": {
+    "gore_count": null,
+    "height": null,
+    "max_diameter": null,
+    "mouth_diameter": null,
+    "top_diameter": null,
+    "volume": null
+  },
+  "provenance": [],
+  "references": [],
+  "runs": [],
+  "snapshots": [],
+  "state": {
+    "design": {
+      "envelope_type": "gore",
+      "features": [],
+      "gores": {
+        "construction": "lobe",
+        "count": 20,
+        "crest_loft": null,
+        "crown_ring": 5.495735212345756,
+        "loft": null,
+        "meridian_profile_control_points": [
+          {
+            "x": 2.947857570101968,
+            "y": 0.0
+          },
+          {
+            "x": 3.3637926807770495,
+            "y": 0.3601294866161699
+          },
+          {
+            "x": 3.7769768978630105,
+            "y": 0.7234109728011248
+          },
+          {
+            "x": 4.186309863924202,
+            "y": 1.091024492510226
+          },
+          {
+            "x": 4.590966310883888,
+            "y": 1.4637776288091244
+          },
+          {
+            "x": 4.98984588130642,
+            "y": 1.8427033046703185
+          },
+          {
+            "x": 5.38184821775615,
+            "y": 2.2287361772466023
+          },
+          {
+            "x": 5.765597873438517,
+            "y": 2.622968308811337
+          },
+          {
+            "x": 6.1391692228411365,
+            "y": 3.026852836812574
+          },
+          {
+            "x": 6.501186819169448,
+            "y": 3.4411200961510455
+          },
+          {
+            "x": 6.849725036911067,
+            "y": 3.866781556838535
+          },
+          {
+            "x": 7.182308071835785,
+            "y": 4.305012649774523
+          },
+          {
+            "x": 7.496460119713393,
+            "y": 4.756628008127507
+          },
+          {
+            "x": 7.789430286954771,
+            "y": 5.22225356409369
+          },
+          {
+            "x": 8.058742769329708,
+            "y": 5.701937503320538
+          },
+          {
+            "x": 8.300821405172348,
+            "y": 6.195910318453579
+          },
+          {
+            "x": 8.512640211534658,
+            "y": 6.703580174366858
+          },
+          {
+            "x": 8.69034793739187,
+            "y": 7.224152787332031
+          },
+          {
+            "x": 8.830368421078123,
+            "y": 7.7560868083386225
+          },
+          {
+            "x": 8.929675679645388,
+            "y": 8.297086418875484
+          },
+          {
+            "x": 8.984968640786718,
+            "y": 8.844318392649228
+          },
+          {
+            "x": 8.992946232195168,
+            "y": 9.39426052610021
+          },
+          {
+            "x": 8.951407738999444,
+            "y": 9.942674462133901
+          },
+          {
+            "x": 8.858702625046067,
+            "y": 10.484775124205038
+          },
+          {
+            "x": 8.714005622258309,
+            "y": 11.015354923107914
+          },
+          {
+            "x": 8.517316730636164,
+            "y": 11.528929628851332
+          },
+          {
+            "x": 8.270286486333106,
+            "y": 12.020269259701914
+          },
+          {
+            "x": 7.9745654255026075,
+            "y": 12.483935839212956
+          },
+          {
+            "x": 7.634004799169438,
+            "y": 12.91575352278698
+          },
+          {
+            "x": 7.252455858358368,
+            "y": 13.311825629936495
+          },
+          {
+            "x": 6.83432003281199,
+            "y": 13.669080205616817
+          },
+          {
+            "x": 6.384824020349633,
+            "y": 13.986003754123882
+          },
+          {
+            "x": 5.908919429431716,
+            "y": 14.261729067884003
+          },
+          {
+            "x": 5.411832957877567,
+            "y": 14.49718585065296
+          },
+          {
+            "x": 4.897966035429782,
+            "y": 14.693391136620335
+          },
+          {
+            "x": 4.371445002472039,
+            "y": 14.852631983126484
+          },
+          {
+            "x": 3.835846020670198,
+            "y": 14.97808735905136
+          },
+          {
+            "x": 3.293919983613378,
+            "y": 15.072612166872212
+          },
+          {
+            "x": 2.747867606172878,
+            "y": 15.139544086834292
+          }
+        ],
+        "mouth_diameter": 5.895715140203936,
+        "panel_rows": [
+          {
+            "bow_bottom": null,
+            "bow_top": null,
+            "finished_height": 1.7422,
+            "letter": "A",
+            "zone": null
+          },
+          {
+            "bow_bottom": null,
+            "bow_top": null,
+            "finished_height": 1.7422,
+            "letter": "B",
+            "zone": null
+          },
+          {
+            "bow_bottom": null,
+            "bow_top": null,
+            "finished_height": 1.7422,
+            "letter": "C",
+            "zone": null
+          },
+          {
+            "bow_bottom": null,
+            "bow_top": null,
+            "finished_height": 1.7422,
+            "letter": "D",
+            "zone": null
+          },
+          {
+            "bow_bottom": null,
+            "bow_top": null,
+            "finished_height": 1.7422,
+            "letter": "E",
+            "zone": null
+          },
+          {
+            "bow_bottom": null,
+            "bow_top": null,
+            "finished_height": 1.7422,
+            "letter": "F",
+            "zone": null
+          },
+          {
+            "bow_bottom": null,
+            "bow_top": null,
+            "finished_height": 1.7422,
+            "letter": "G",
+            "zone": null
+          },
+          {
+            "bow_bottom": null,
+            "bow_top": null,
+            "finished_height": 1.7422,
+            "letter": "H",
+            "zone": null
+          },
+          {
+            "bow_bottom": null,
+            "bow_top": null,
+            "finished_height": 1.7422,
+            "letter": "I",
+            "zone": null
+          },
+          {
+            "bow_bottom": null,
+            "bow_top": null,
+            "finished_height": 1.7422,
+            "letter": "J",
+            "zone": null
+          },
+          {
+            "bow_bottom": null,
+            "bow_top": null,
+            "finished_height": 1.7422,
+            "letter": "K",
+            "zone": null
+          },
+          {
+            "bow_bottom": null,
+            "bow_top": null,
+            "finished_height": 1.742596918883443,
+            "letter": "L",
+            "zone": null
+          }
+        ],
+        "panel_zones": [],
+        "parachute_hole_diameter": 5.495735212345756,
+        "profile_interpolation": "spline",
+        "profile_segments": null,
+        "seal_overlap": 0.5501787178241826
+      },
+      "meta": {
+        "content_hash": "c980e44becfb1adb48e002d0fc9a723868b0ad566e4b741e126bd37928af5872",
+        "created": "2026-10-23T00:00:00Z",
+        "modified": "2026-10-23T00:00:00Z",
+        "name": "generic full-size gore fixture (2600 m^3)",
+        "parent_id": null,
+        "version_id": "v1-fixture"
+      },
+      "operating": {
+        "altitude": 0.0,
+        "ambient_pressure": 101325.0,
+        "ambient_temperature": 288.15,
+        "internal_temperature": 373.15,
+        "payload_mass": 400.0
+      },
+      "parachute": {
+        "billow": 0.1,
+        "centralizing_depth": 5.4957,
+        "centralizing_line": {
+          "class": "centralising line",
+          "linear_mass": {
+            "note": "generic value; replace with the datasheet of the line used",
+            "source": "assumed",
+            "value": 0.008
+          },
+          "strength": {
+            "note": "generic value; replace with the datasheet of the line used",
+            "source": "assumed",
+            "value": 2500.0
+          }
+        },
+        "centre_panel_diameter": 1.3739,
+        "centre_ring": {
+          "class": "stainless rod ring 6 mm",
+          "linear_mass": {
+            "note": "generic value; replace with the datasheet of the ring used",
+            "source": "assumed",
+            "value": 0.226
+          },
+          "required_safety_factor": {
+            "note": "14 CFR 31.25(a), metal part",
+            "source": "assumed",
+            "value": 1.5
+          },
+          "strength": {
+            "note": "generic value; replace with the datasheet of the ring used",
+            "source": "assumed",
+            "value": 5600.0
+          }
+        },
+        "centre_ring_diameter": 0.2748,
+        "crown_ring": {
+          "class": "aluminium rod ring 8 mm",
+          "linear_mass": {
+            "note": "generic value; replace with the datasheet of the ring used",
+            "source": "assumed",
+            "value": 0.136
+          },
+          "required_safety_factor": {
+            "note": "14 CFR 31.25(a), metal part",
+            "source": "assumed",
+            "value": 1.5
+          },
+          "strength": {
+            "note": "generic value; replace with the datasheet of the ring used",
+            "source": "assumed",
+            "value": 13900.0
+          }
+        },
+        "panel_count": 20,
+        "shroud_attachment": 2.7479,
+        "shroud_line": {
+          "class": "shroud line",
+          "linear_mass": {
+            "note": "generic value; replace with the datasheet of the line used",
+            "source": "assumed",
+            "value": 0.012
+          },
+          "strength": {
+            "note": "generic value; replace with the datasheet of the line used",
+            "source": "assumed",
+            "value": 4500.0
+          }
+        },
+        "zone": null
+      },
+      "rigging": {
+        "crown_line": "crown line",
+        "flying_wires": {
+          "count": 4,
+          "crows_foot_drop": 0.5896,
+          "frame_azimuth_deg": 45.0,
+          "frame_drop": 3.5374,
+          "frame_points": 4,
+          "frame_radius": 1.0612,
+          "wire": {
+            "class": "flying wire",
+            "linear_mass": {
+              "note": "generic value; replace with the datasheet of the line used",
+              "source": "assumed",
+              "value": 0.062
+            },
+            "strength": {
+              "note": "generic value; replace with the datasheet of the line used",
+              "source": "assumed",
+              "value": 8900.0
+            }
+          }
+        },
+        "load_factor": {
+          "note": "minimum limit flight load factor, 14 CFR 31.23(b)",
+          "source": "assumed",
+          "value": 1.4
+        },
+        "red_line": {
+          "guide_seam": 1,
+          "line": {
+            "class": "red line",
+            "linear_mass": {
+              "note": "generic value; replace with the datasheet of the line used",
+              "source": "assumed",
+              "value": 0.025
+            },
+            "strength": {
+              "note": "generic value; replace with the datasheet of the line used",
+              "source": "assumed",
+              "value": 8000.0
+            }
+          },
+          "name": "red line",
+          "spare_length": 2.3583
+        },
+        "required_safety_factor": {
+          "note": "fibrous rigging factor of safety, 14 CFR 31.25(b)",
+          "source": "assumed",
+          "value": 5.0
+        }
+      },
+      "scale_variants": [],
+      "schema_version": 7,
+      "scoop": null,
+      "seam_types": [
+        {
+          "allowance": 0.0508,
+          "efficiency": 0.8,
+          "name": "flat felled",
+          "rows_of_stitching": 2
+        }
+      ],
+      "special": null,
+      "tapes": {
+        "hole": {
+          "class": "crown ring tape",
+          "strength": 7000.0,
+          "width": 0.025
+        },
+        "horizontal": {
+          "class": "horizontal tape",
+          "strength": 7000.0,
+          "width": 0.025
+        },
+        "rim": {
+          "class": "mouth webbing",
+          "strength": 20000.0,
+          "width": 0.05
+        },
+        "vertical": {
+          "class": "vertical load tape",
+          "strength": 7000.0,
+          "width": 0.025
+        }
+      },
+      "turning_vents": [],
+      "zones": {
+        "body": "ripstop_nylon"
+      }
+    },
+    "patterns": {
+      "rows": {}
+    },
+    "shapes": []
+  },
+  "versions": []
+}
