@@ -76,6 +76,7 @@ nav:
       - ADR-0026: adr/ADR-0026-profile-compensation-target.md
       - ADR-0027: adr/ADR-0027-calculix-frozen-warm-start.md
       - ADR-0028: adr/ADR-0028-compiled-relaxation-iterations.md
+      - ADR-0029: adr/ADR-0029-vertical-tape-length.md
 theme:
   name: material
 markdown_extensions:

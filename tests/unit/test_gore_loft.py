@@ -198,7 +198,7 @@ def test_version_2_documents_migrate_to_no_loft_and_keep_their_hash() -> None:
     raw["meta"]["content_hash"] = None
     text = json.dumps(raw)
     loaded = load_design_document(text)
-    assert loaded.schema_version == CURRENT_SCHEMA_VERSION == 7
+    assert loaded.schema_version == CURRENT_SCHEMA_VERSION == 8
     assert loaded.gores is not None and loaded.gores.loft is None
     raw["meta"]["name"] = "tampered"
     raw["meta"]["content_hash"] = "0" * 64

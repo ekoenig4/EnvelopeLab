@@ -775,6 +775,62 @@ def edge_rest_lengths(edges: IntArray, triangles: IntArray, rest_uv: FloatArray)
     return out
 
 
+def tape_line_rest_lengths(
+    edges: IntArray, triangles: IntArray, rest_uv: FloatArray, scale: float = 1.0
+) -> FloatArray:
+    r"""Rest lengths of vertical-tape edges cut to the tape line, m.
+
+    A gore pattern is drawn with tape arc length :math:`s` on its flat :math:`y` axis
+    (``docs/theory/gore-geometry.md``), so a tape cut to the design's meridian has, along a
+    seam edge between flat points :math:`a` and :math:`b`, the length
+
+    .. math::
+        \ell_0 = |y_b - y_a| / \lambda
+
+    with :math:`\lambda` the panel's lengthwise scale (1 for a pattern cut to the tape
+    length). The flat edge itself, :math:`\sqrt{\Delta x^2 + \Delta y^2}`, is longer
+    wherever the gore width changes; that excess is fabric eased onto the tape.
+
+    Parameters
+    ----------
+    edges : ndarray of int, shape (e, 2)
+        Node pairs of the tape.
+    triangles : ndarray of int, shape (m, 3)
+        Mesh triangles.
+    rest_uv : ndarray, shape (m, 3, 2)
+        Flat corner coordinates in panel axes (``y`` along the gore), m.
+    scale : float
+        Lengthwise scale :math:`\lambda` of the cut panels (> 0), dimensionless.
+
+    Returns
+    -------
+    ndarray, shape (e,)
+        Rest lengths, m, averaged over the triangles sharing each edge (both sides of
+        a seam).
+
+    Raises
+    ------
+    ModelError
+        If an edge is not an edge of any triangle or has no length along the gore.
+    """
+    if not scale > 0.0:
+        raise ModelError("the lengthwise scale must be positive")
+    total: dict[tuple[int, int], list[float]] = {}
+    for t, tri in enumerate(triangles):
+        for a, b in ((0, 1), (1, 2), (2, 0)):
+            key = (int(min(tri[a], tri[b])), int(max(tri[a], tri[b])))
+            total.setdefault(key, []).append(abs(float(rest_uv[t, a, 1] - rest_uv[t, b, 1])))
+    out = np.empty(len(edges))
+    for k, (i, j) in enumerate(edges):
+        key = (int(min(i, j)), int(max(i, j)))
+        if key not in total:
+            raise ModelError(f"edge ({i}, {j}) is not a mesh edge")
+        out[k] = float(np.mean(total[key])) / scale
+    if np.any(out <= 0.0):
+        raise ModelError("a tape edge runs across the gore (no length along the tape)")
+    return out
+
+
 def model_from_rest_model(
     rest: RestModel,
     materials: Mapping[str, MembraneMaterial],

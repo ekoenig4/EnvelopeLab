@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: vertical load tapes can be cut to the design's tape line (`tapes.vertical_length:
+  tape_line`) instead of to the gore edge they are sewn to (`fabric_edge`, the default and
+  the behaviour until now). The simulation then models the tapes at the tape length, with
+  the longer gore edge eased onto them, so the tapes carry the vertical load. Full-size
+  fixture (2600 m³, 20 gores), 800 mm mesh: the bottom and top tapes carry 327 and 321 N
+  against 205 and 76 N, and the height error falls from +507 to +483 mm. The solve takes
+  29.6k iterations (38 s) instead of 17.0k (21 s). The middle rows' tapes still carry
+  37–60 N of about 450 N, because the fabric there is not cut longer than the tape.
+  Design schema version 8; earlier designs migrate as `fabric_edge`, and their results are
+  unchanged.
 - Added: *Fit profile to simulated shape* in the gore editor replaces the drawn profile
   with the simulated tape line in one click. It uses the latest current, converged run
   (CalculiX or preview). Without one, it runs the preview first. An unconverged run

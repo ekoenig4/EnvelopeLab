@@ -272,6 +272,18 @@ parachute, red line, flying wires and turning vents are added and checked in the
 **Rigging** panel ([guide](rigging.md)). Values are SI: lengths m, temperatures K (°C shown
 beside), pressure Pa, masses kg.
 
+The **tapes** section sets the tape classes and **vertical_length**, the way the vertical
+load tapes are cut:
+
+* *fabric_edge* (default): each tape is as long as the gore edge it is sewn to. A flat
+  gore's edge is longer than the design's tape line near the mouth and the top, so these
+  tapes hang partly slack and the fabric carries much of the vertical load.
+* *tape_line*: each tape is cut to the row's tape length and the gore edge is eased onto
+  it, so the tapes carry the vertical load. The simulation models the tapes at that length
+  ([theory](../theory/gore-geometry.md#vertical-tape-length)). With few gores (8 or fewer)
+  the eased fabric just above the mouth can keep the preview from converging. The result
+  then says NOT CONVERGED; a coarser mesh or more gores help.
+
 Each field gets the editor its value needs:
 
 * **Numbers and text** are typed. **Lists** are separated by commas (`E, F`), and

@@ -42,7 +42,7 @@ from envelopelab.assembly.pipeline import BuildPackResult, import_build_pack
 from envelopelab.assembly.spec import MeshOptions
 from envelopelab.atmosphere import gas_density
 from envelopelab.design.model import DesignDocument
-from envelopelab.geometry.gore import PanelRow
+from envelopelab.geometry.gore import LENGTH_TOLERANCE, PanelRow
 from envelopelab.geometry.polygon import offset_polygon
 from envelopelab.materials.membrane import MaterialValue, MembraneMaterial, TapeMaterial
 from envelopelab.materials.repository import (
@@ -63,6 +63,7 @@ from envelopelab.solvers.model import (
     SolverModel,
     SolverSettings,
     model_from_rest_model,
+    tape_line_rest_lengths,
 )
 from envelopelab.solvers.simulation import SimulationResult, from_preview
 
@@ -359,6 +360,51 @@ class BuiltModel:
         return sorted(tags)
 
 
+def cut_tapes_to_tape_line(
+    model: SolverModel, build: BuildPackResult, design: DesignDocument
+) -> None:
+    """Set the rest length of every vertical load tape to the design's tape line.
+
+    Each tape edge gets its length along the gore axis of the flat pattern
+    (:func:`~envelopelab.solvers.model.tape_line_rest_lengths`); the gore edge it is sewn
+    to is longer by the fabric eased onto it. A row's tape must then total the row's
+    finished height (its tape length) within 1 mm.
+
+    Parameters
+    ----------
+    model : SolverModel
+        Model of the design's build pack; its vertical-tape cables are changed in place.
+    build : BuildPackResult
+        The build pack (its seam graph names the vertical gore seams).
+    design : DesignDocument
+        Standard-gore design, m.
+
+    Raises
+    ------
+    BuildError
+        When a row's tape does not total the row's tape length (the pattern is not drawn
+        with the tape length along its axis, e.g. a rotated or hand-made pattern).
+    """
+    assert design.gores is not None and build.rest_model is not None
+    rest = build.rest_model
+    vertical = {s.seam_id for s in rest.assembly.graph.seams if s.seam_type == "vertical_gore"}
+    heights = {row.letter: row.finished_height for row in design.gores.panel_rows}
+    mesh = rest.mesh
+    for cable in model.cables:
+        if cable.name not in vertical:
+            continue
+        lengths = tape_line_rest_lengths(cable.edges, mesh.triangles, mesh.rest_uv)
+        row = cable.name.rsplit(":", 1)[-1]
+        expected = heights.get(row)
+        if expected is None or abs(float(lengths.sum()) - expected) > LENGTH_TOLERANCE:
+            raise BuildError(
+                f"tape {cable.name}: the pattern gives {float(lengths.sum()):.4f} m of tape "
+                f"line, the row's tape length is {expected} m; tapes cut to the tape line "
+                "need a pattern drawn with the tape length along its axis"
+            )
+        cable.rest_lengths = lengths
+
+
 def build_solver_model(
     design: DesignDocument,
     patterns: PatternSet,
@@ -447,6 +493,8 @@ def build_solver_model(
         )
     except ValueError as exc:
         raise BuildError(str(exc)) from exc
+    if t.vertical_length == "tape_line":
+        cut_tapes_to_tape_line(model, build, design)
     design_hash = design.compute_content_hash()
     model.source_hash = design_hash
     return BuiltModel(model, build, mesh_mm, design_hash, findings)

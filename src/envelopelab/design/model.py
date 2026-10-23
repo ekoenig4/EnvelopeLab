@@ -26,7 +26,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-CURRENT_SCHEMA_VERSION = 7
+CURRENT_SCHEMA_VERSION = 8
 
 SourceTagName = Literal["datasheet", "measured", "assumed"]
 
@@ -383,12 +383,26 @@ class TapeSpec(BaseModel):
 
 
 class TapeSet(BaseModel):
+    """Tape classes of the envelope, and how long the vertical load tapes are cut.
+
+    ``vertical_length`` is how a vertical load tape's length is set when it is sewn:
+
+    * ``"fabric_edge"`` (default): the tape is cut as long as the gore edge it is sewn to.
+      A flat gore's side edge is longer than the tape line wherever the gore narrows or
+      widens (``docs/theory/gore-geometry.md``), so such a tape is longer than the
+      design's meridian and the fabric carries much of the vertical load.
+    * ``"tape_line"``: the tape is cut to the design's tape line (the meridian length of
+      each row) and the longer gore edge is eased onto it, so the tapes carry the vertical
+      load.
+    """
+
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     vertical: TapeSpec
     horizontal: TapeSpec
     rim: TapeSpec
     hole: TapeSpec
+    vertical_length: Literal["fabric_edge", "tape_line"] = "fabric_edge"
 
 
 class SeamType(BaseModel):
@@ -873,6 +887,15 @@ def _upgrade_v6_to_v7(raw: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_v7_to_v8(raw: dict[str, Any]) -> dict[str, Any]:
+    """Version 8 adds how the vertical load tapes are cut (``tapes.vertical_length``);
+    version-7 tapes are as long as the gore edge they are sewn to (``"fabric_edge"``, the
+    default), as the solvers modelled them before."""
+    upgraded = dict(raw)
+    upgraded["schema_version"] = 8
+    return upgraded
+
+
 def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
     """Upgrade raw design data to :data:`CURRENT_SCHEMA_VERSION`, one version at a time."""
     version = int(raw.get("schema_version", 0))
@@ -892,6 +915,8 @@ def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
             upgraded = _upgrade_v5_to_v6(upgraded)
         elif version == 6:
             upgraded = _upgrade_v6_to_v7(upgraded)
+        elif version == 7:
+            upgraded = _upgrade_v7_to_v8(upgraded)
         else:
             raise ValueError(f"unsupported schema version: {version}")
         version += 1
