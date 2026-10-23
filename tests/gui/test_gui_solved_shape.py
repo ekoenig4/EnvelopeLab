@@ -240,3 +240,30 @@ def test_an_unconverged_preview_does_not_change_the_profile(gore_window: MainWin
     assert not panel.fit_pending
     assert "NOT CONVERGED" in panel.update_status.text()
     assert np.allclose(np.column_stack(control_arrays(session.design)), before)
+
+
+def test_refreshes_reuse_the_runs_solved_lines(
+    gore_window: MainWindow, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import envelopelab_app.gore_editor as ge
+    from envelopelab.project.profile_match import RunShape, latest_run_shape
+
+    panel = gore_window.gore_editor.solved_shape
+    session = gore_window.controller.session
+    assert session is not None
+    stretched_run(session, "envelopelab-preview")
+    calls: list[str] = []
+
+    def counted(s: ProjectSession, solver: str) -> RunShape | None:
+        calls.append(solver)
+        return latest_run_shape(s, solver)
+
+    monkeypatch.setattr(ge, "latest_run_shape", counted)
+    panel.refresh()
+    panel.refresh()
+    # Runs starting and ending only re-check Fit.
+    gore_window.simulation.started.emit("envelopelab-preview")
+    gore_window.simulation.idle.emit()
+    assert calls == []  # the shapes were read when the run was added
+    stretched_run(session, "calculix")
+    assert calls == ["calculix"]

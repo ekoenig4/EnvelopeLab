@@ -71,7 +71,6 @@ from envelopelab.project.profile_match import (
     latest_run_shape,
     station_points,
     target_profile,
-    usable_run_shape,
 )
 from envelopelab.project.profile_physics import (
     check_design,
@@ -87,6 +86,7 @@ from envelopelab.project.references import (
     snapshot_reference,
     update_reference,
 )
+from envelopelab.project.session import ProjectSession
 from envelopelab.solvers.axisymmetric import AxisymmetricLoad, MembraneCheck, membrane_check
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.refresh import Refresher
@@ -872,6 +872,7 @@ class SolvedShapePanel(QGroupBox):
         self.simulation: SimulationManager | None = None
         self.fit_pending = False
         self.result: tuple[str, str] | None = None  # message, design hash it belongs to
+        self._shape_cache: dict[str, tuple[tuple[object, ...], RunShape | None]] = {}
         self.shapes: dict[str, RunShape | None] = {}
         self.show_ghost: dict[str, QCheckBox] = {}
         self.status: dict[str, QLabel] = {}
@@ -996,7 +997,7 @@ class SolvedShapePanel(QGroupBox):
         intended = design_profile(design) if target is None else target_profile(target)
         scale = self.magnify.value()
         for solver, text in SOLVERS:
-            shape = latest_run_shape(session, solver)
+            shape = self._run_shape(session, solver)
             self.shapes[solver] = shape
             self.status[solver].setText(_shape_text(text, shape, reference))
             self.status[solver].setStyleSheet(_shape_style(shape))
@@ -1049,10 +1050,7 @@ class SolvedShapePanel(QGroupBox):
             self.compensate.setEnabled(False)
         else:
             self.compensate.setEnabled(not refusal)
-        running = self.simulation is not None and self.simulation.running
-        can_run = self.simulation is not None and not running
-        usable = usable_run_shape(session, self.source.currentData()) is not None
-        self.fit.setEnabled(not self.fit_pending and (usable or can_run))
+        self._update_fit()
         if self.fit_pending:
             return
         if self.result is not None and self.result[1] == session.content_hash():
@@ -1061,21 +1059,59 @@ class SolvedShapePanel(QGroupBox):
             self.result = None
             self.update_status.setText(refusal)
 
+    def _run_shape(self, session: ProjectSession, solver: str) -> RunShape | None:
+        """:func:`latest_run_shape`, kept while the run, the design and the target are
+        unchanged (reading a run's tape line and its deviation takes tens of ms on a
+        full-size mesh, and the panel refreshes on every edit and run event)."""
+        record = next((r for r in reversed(session.project.runs) if r.solver == solver), None)
+        if record is None:
+            return None
+        target = session.project.profile_target
+        key = (
+            record.run_id,
+            session.run_status(record),
+            session.content_hash(),
+            None if target is None else target.model_dump_json(),
+        )
+        cached = self._shape_cache.get(solver)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        shape = latest_run_shape(session, solver)
+        self._shape_cache[solver] = (key, shape)
+        return shape
+
+    def _usable_shape(self) -> RunShape | None:
+        """The run Fit adopts: the chosen solver's latest run if usable, else the other's."""
+        preferred = self.source.currentData()
+        for solver in (preferred, *(s for s, _ in SOLVERS if s != preferred)):
+            shape = self.shapes.get(solver)
+            if shape is not None and shape.usable:
+                return shape
+        return None
+
+    def _update_fit(self) -> None:
+        """Enable *Fit* when there is a run to adopt or a preview can be started."""
+        running = self.simulation is not None and self.simulation.running
+        can_run = self.simulation is not None and not running
+        usable = self._usable_shape() is not None
+        self.fit.setEnabled(not self.fit_pending and (usable or can_run))
+
     def attach_simulation(self, simulation: SimulationManager) -> None:
         """Let *Fit profile to simulated shape* start a preview run when it has no
         current converged run to fit to."""
         self.simulation = simulation
         simulation.finished.connect(self._run_finished)
         simulation.failed.connect(self._run_failed)
-        simulation.started.connect(lambda _solver: self.refresh())
-        simulation.idle.connect(self.refresh)
+        # A run starting or ending changes only whether Fit can start one.
+        simulation.started.connect(lambda _solver: self._update_fit())
+        simulation.idle.connect(self._update_fit)
 
     def fit_to_simulation(self) -> None:
         """Adopt the latest usable run's tape line; without one, run the preview first."""
         session = self.controller.session
         if session is None or self.fit_pending:
             return
-        shape = usable_run_shape(session, self.source.currentData())
+        shape = self._usable_shape()
         if shape is not None:
             self._adopt_shape(shape)
             return
@@ -1101,7 +1137,7 @@ class SolvedShapePanel(QGroupBox):
             return
         self.fit_pending = False
         session = self.controller.session
-        shape = None if session is None else latest_run_shape(session, record.solver)
+        shape = None if session is None else self._run_shape(session, record.solver)
         if shape is None or not shape.usable:
             why = shape.refusal if shape is not None else "its result could not be read"
             self._show_result(

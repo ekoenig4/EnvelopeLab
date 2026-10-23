@@ -124,3 +124,33 @@ def test_full_size_tapes_cut_to_the_tape_line_carry_more_of_the_load() -> None:
     # The bottom and top rows, where the gore edge is longest against the tape.
     for row in ("A", "L"):
         assert row_max(cut, row) > 1.5 * row_max(edge, row)
+
+
+def test_the_edge_table_gives_the_lengths_of_a_loop_over_the_triangles() -> None:
+    from envelopelab.validation.meshes import sphere
+
+    mesh = sphere(2.0, 6, octant=True)
+    tri, uv = mesh.triangles, mesh.rest_uv
+    reference: dict[tuple[int, int], list[float]] = {}
+    for t, corners in enumerate(tri):
+        for a, b in ((0, 1), (1, 2), (2, 0)):
+            key = (int(min(corners[a], corners[b])), int(max(corners[a], corners[b])))
+            reference.setdefault(key, []).append(float(np.linalg.norm(uv[t, a] - uv[t, b])))
+    edges = np.array(sorted(reference))[:, ::-1]  # either node order
+    expected = np.array([np.mean(reference[(int(j), int(i))]) for i, j in edges])
+    assert np.array_equal(edge_rest_lengths(edges, tri, uv), expected)
+
+
+@pytest.mark.slow
+def test_a_full_size_model_builds_in_seconds() -> None:
+    import time
+
+    session = ProjectSession.open(FULL)
+    with tempfile.TemporaryDirectory() as tmp:
+        start = time.perf_counter()
+        built = build_solver_model(session.design, session.patterns, Path(tmp) / "a", 800.0)
+        elapsed = time.perf_counter() - start
+    # 4320 nodes, 462 tapes: 3.5 s on the development container (88 s when every tape
+    # scanned the whole mesh); the bound leaves room for slow CI machines.
+    assert len(built.model.positions) > 4000
+    assert elapsed < 30.0

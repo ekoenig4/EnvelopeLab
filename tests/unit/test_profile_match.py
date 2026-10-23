@@ -350,3 +350,18 @@ def test_a_compensation_step_brings_the_preview_shape_closer(tmp_path: Path) -> 
             edits.compensate_profile(s, shape.solved)
     # The intended line is the original drawn profile; the second cut lands closer to it.
     assert deviations[1] < 0.7 * deviations[0]
+
+
+def test_the_polyline_distance_is_the_one_over_every_segment() -> None:
+    from envelopelab.project.profile_match import _distance_to_polyline, _segment_distance
+
+    rng = np.random.default_rng(1)
+    t = np.linspace(0.0, math.pi, 4001)
+    curve = np.column_stack((3.0 * np.sin(t) + 0.3 * np.sin(5.0 * t), 4.0 - 4.0 * np.cos(t)))
+    points = curve[rng.integers(0, len(curve), 2000)] + rng.normal(scale=0.5, size=(2000, 2))
+    every = _segment_distance(points[:, None, :], curve[None, :-1], curve[None, 1:])
+    assert _distance_to_polyline(points, curve) == pytest.approx(every.min(axis=1), abs=1e-12)
+    # A short polyline (here a straight-segment outline) is measured against every segment.
+    coarse = curve[::500]
+    every = _segment_distance(points[:, None, :], coarse[None, :-1], coarse[None, 1:])
+    assert _distance_to_polyline(points, coarse) == pytest.approx(every.min(axis=1), abs=1e-12)

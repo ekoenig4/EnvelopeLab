@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: the window froze around runs of large designs. Building the solver model scanned
+  the whole mesh once per tape: 88 s on the 2600 m³ full-size fixture at 800 mm, in a
+  worker thread that held the interpreter lock and could not be stopped, so *Stop*
+  waited up to a minute. Each edge length is now looked up in one table per mesh: 3.5 s,
+  results bit-identical. The gore editor's solved-shape panel re-read every run's tape
+  line on every refresh, including when a run started or ended (0.5 s each on that
+  fixture). It now keeps them until the run, the design or the target changes, and it
+  measures deviations with a k-d tree (16 ms instead of 4.4 s for 3000 points, same
+  values). Headless measurement on that fixture: the longest freeze is 0.15 s, against
+  81 s (Stop) and about 1 s (Start, run finished) before.
 - Added: vertical load tapes can be cut to the design's tape line (`tapes.vertical_length:
   tape_line`) instead of to the gore edge they are sewn to (`fabric_edge`, the default and
   the behaviour until now). The simulation then models the tapes at the tape length, with

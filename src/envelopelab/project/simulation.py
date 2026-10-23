@@ -59,6 +59,7 @@ from envelopelab.solvers.dynamic_relaxation import (
     solve,
 )
 from envelopelab.solvers.model import (
+    EdgeTable,
     OperatingConditions,
     SolverModel,
     SolverSettings,
@@ -390,10 +391,11 @@ def cut_tapes_to_tape_line(
     vertical = {s.seam_id for s in rest.assembly.graph.seams if s.seam_type == "vertical_gore"}
     heights = {row.letter: row.finished_height for row in design.gores.panel_rows}
     mesh = rest.mesh
+    table = EdgeTable(mesh.triangles, mesh.rest_uv)
     for cable in model.cables:
         if cable.name not in vertical:
             continue
-        lengths = tape_line_rest_lengths(cable.edges, mesh.triangles, mesh.rest_uv)
+        lengths = tape_line_rest_lengths(cable.edges, mesh.triangles, mesh.rest_uv, table=table)
         row = cable.name.rsplit(":", 1)[-1]
         expected = heights.get(row)
         if expected is None or abs(float(lengths.sum()) - expected) > LENGTH_TOLERANCE:

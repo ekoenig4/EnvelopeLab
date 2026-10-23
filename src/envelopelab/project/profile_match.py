@@ -292,15 +292,46 @@ def solved_meridian(
     return SolvedMeridian(station, mean[:, 0], mean[:, 1] + shift, len(lines), spread, seam_nodes)
 
 
-def _distance_to_polyline(points: FloatArray, curve: FloatArray) -> FloatArray:
-    """Distance of each point ``(k, 2)`` to the polyline ``(n, 2)``, m."""
-    a, b = curve[:-1], curve[1:]
+#: Nearest curve vertices whose two segments are checked for each point.
+NEAREST_VERTICES = 8
+#: Curves with at most this many vertices are measured against every segment.
+BRUTE_FORCE_VERTICES = 64
+
+
+def _segment_distance(points: FloatArray, a: FloatArray, b: FloatArray) -> FloatArray:
+    """Distance of points ``(..., 2)`` to segments ``a``-``b`` of the same shape, m."""
     ab = b - a
-    length2 = np.maximum(np.einsum("ij,ij->i", ab, ab), 1e-300)
-    ap = points[:, None, :] - a[None, :, :]
-    t = np.clip(np.einsum("kij,ij->ki", ap, ab) / length2, 0.0, 1.0)
-    closest = a[None] + t[..., None] * ab[None]
-    return np.asarray(np.min(np.linalg.norm(points[:, None, :] - closest, axis=2), axis=1))
+    length2 = np.maximum(np.sum(ab * ab, axis=-1), 1e-300)
+    t = np.clip(np.sum((points - a) * ab, axis=-1) / length2, 0.0, 1.0)
+    out: FloatArray = np.linalg.norm(points - (a + t[..., None] * ab), axis=-1)
+    return out
+
+
+def _distance_to_polyline(points: FloatArray, curve: FloatArray) -> FloatArray:
+    """Distance of each point ``(k, 2)`` to the polyline ``(n, 2)``, m.
+
+    Only the segments at a point's :data:`NEAREST_VERTICES` nearest curve vertices are
+    measured (a k-d tree finds them). The nearest segment of a densely sampled curve ends
+    at one of them, so the distance is the one over all segments; against every segment
+    it would cost k n operations (17 million for a full-size run on a 4001-point profile).
+    """
+    from scipy.spatial import cKDTree
+
+    n = len(curve)
+    if n < 2:
+        out: FloatArray = np.linalg.norm(points - curve[:1], axis=1)
+        return out
+    if n <= BRUTE_FORCE_VERTICES:
+        every = _segment_distance(points[:, None, :], curve[None, :-1], curve[None, 1:])
+        result_all: FloatArray = np.min(every, axis=1)
+        return result_all
+    k = min(NEAREST_VERTICES, n)
+    _, near = cKDTree(curve).query(points, k=k)
+    near = np.asarray(near).reshape(len(points), k)
+    seg = np.concatenate((np.maximum(near - 1, 0), np.minimum(near, n - 2)), axis=1)
+    distance = _segment_distance(points[:, None, :], curve[seg], curve[seg + 1])
+    result: FloatArray = np.min(distance, axis=1)
+    return result
 
 
 def station_points(profile: MeridianProfile, station: FloatArray) -> FloatArray:
