@@ -62,6 +62,7 @@ from envelopelab.project.profile_match import (
     SolvedMeridian,
     adopted_control_points,
     compensated_control_points,
+    flight_shape_points,
     solved_deviation,
     target_profile,
     updatable_interpolation,
@@ -743,8 +744,37 @@ def adopt_solved_profile(
     parameters, return value and lock errors as :func:`compensate_profile`.
     """
     _check_shape_locks(session)
+    update = adopted_control_points(session.design, solved, tolerance, MAX_CONTROL_POINTS)
+    _adopt(session, update, "Adopt solved profile", keep_rows_fitted)
+    return update
+
+
+def fit_flight_shape(
+    session: ProjectSession,
+    solved: SolvedMeridian,
+    tolerance: float = FIT_TOLERANCE,
+    keep_rows_fitted: bool = True,
+) -> ProfileUpdate:
+    """Replace the profile by the solved shape with its stretch taken out; any
+    compensation target is dropped.
+
+    See :func:`envelopelab.project.profile_match.flight_shape_points`: the tape length
+    stays, so repeating it settles on the shape the patterns fly in. Parameters, return
+    value and lock errors as :func:`compensate_profile`; a segment profile becomes a
+    spline.
+    """
+    _check_shape_locks(session)
+    update = flight_shape_points(session.design, solved, tolerance, MAX_CONTROL_POINTS)
+    _adopt(session, update, "Fit profile to flight shape", keep_rows_fitted)
+    return update
+
+
+def _adopt(
+    session: ProjectSession, update: ProfileUpdate, description: str, keep_rows_fitted: bool
+) -> None:
+    """Write adopted control points in one command, dropping any compensation target (a
+    segment profile becomes a spline)."""
     design = session.design
-    update = adopted_control_points(design, solved, tolerance, MAX_CONTROL_POINTS)
     if design.gores is not None and design.gores.profile_interpolation == "segments":
         pts = np.asarray(update.points, dtype=np.float64)
         _with_target(
@@ -756,19 +786,16 @@ def adopt_solved_profile(
                 pts[:, 1],
                 "spline",
                 None,
-                "Adopt solved profile (as a spline)",
+                f"{description} (as a spline)",
                 keep_rows_fitted,
             ),
         )
-        return update
+        return
     _with_target(
         session,
         None,
-        lambda: set_control_points(
-            session, update.points, "Adopt solved profile", keep_rows_fitted
-        ),
+        lambda: set_control_points(session, update.points, description, keep_rows_fitted),
     )
-    return update
 
 
 def restore_profile_target(session: ProjectSession, keep_rows_fitted: bool = True) -> bool:

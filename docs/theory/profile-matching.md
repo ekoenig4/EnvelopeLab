@@ -106,6 +106,38 @@ it, so its inflated shape changes again. Repeating adoption after each solve ten
 towards a self-consistent profile whose patterns inflate onto themselves. The originally
 intended shape is not kept.
 
+## Flight shape
+
+Adoption cuts the inflated tape line, and that line is the cut *stretched* by its load. A
+pattern cut to it is longer than the one before, and it stretches again when inflated.
+Repeated adoption therefore grows by the stretch every cycle: on the full-size fixture
+(2600 m³, 20 gores, 1600 mm preview), +0.39 % of tape per cycle with tapes cut to the tape
+line, and +0.67 % with tapes cut to the gore edge
+([gore geometry](gore-geometry.md#vertical-tape-length)).
+
+The flight shape keeps the solved shape and takes the stretch out
+(`profile_match.flight_shape_points`, edit `fit_flight_shape`):
+
+\[
+\mathbf{C}(\sigma) = \mathbf{M} + c\,\bigl(\mathbf{Q}(\sigma) - \mathbf{Q}(0)\bigr)
+  + \sigma^2\,\bigl(r_t - C_r(1)\bigr)\,\mathbf{e}_r ,
+\]
+
+with \(\mathbf{M}\) the drawn mouth point (held by the rigging), \(r_t\) the design
+top-opening radius and \(c \approx L_d / L_s\) corrected until the curve is the design's
+tape length \(L_d\). The top opening is held separately: its ring stretches more than the
+tapes (1.2 % against 0.38 % on that fixture). One factor for the whole line would cut the
+opening 35 mm wider in radius every cycle.
+
+**Measured, full-size fixture, tapes cut to the tape line, 1600 mm preview, 10 cycles.**
+The tape length stays at 20.906 m within 1 mm, and the stretch taken out is 0.38–0.39 %
+each cycle. The shape does not settle. It keeps getting taller and narrower: the height
+gain per cycle falls from +474 mm to +113 mm of solved over drawn, about 3 % less each
+cycle, and the drawn height rises 15.14 → 16.20 m while the volume falls 2600 → 2458 m³.
+The re-cut gore widths follow the narrower profile, which moves the equilibrium again. A
+fixed point, if there is one, lies far from the drawn design. Use the update one or two
+cycles at a time and watch the deviation, or hold the shape with *Compensate* instead.
+
 ## Control points of an updated profile
 
 Both updates keep the existing control points, moved to their new place, and the

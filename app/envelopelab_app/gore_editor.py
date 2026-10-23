@@ -979,6 +979,16 @@ class SolvedShapePanel(QGroupBox):
         )
         self.fit.clicked.connect(self.fit_to_simulation)
         layout.addWidget(self.fit)
+        self.flight = QCheckBox("Take out the stretch (cut the flight shape)")
+        self.flight.setObjectName("fitFlightShape")
+        self.flight.setChecked(True)
+        self.flight.setToolTip(
+            "Fit the inflated shape scaled back to the current tape length, with the mouth "
+            "and top opening kept, so the patterns are cut to the shape they fly in rather "
+            "than to their stretched size. Unticked, Fit adopts the inflated tape line as is "
+            "(like Adopt), and every repeat grows by the stretch."
+        )
+        layout.addWidget(self.flight)
         self.update_status = QLabel()
         self.update_status.setObjectName("updateStatus")
         self.update_status.setWordWrap(True)
@@ -1158,10 +1168,16 @@ class SolvedShapePanel(QGroupBox):
         if shape.solved is None:
             return
         name = dict(SOLVERS).get(shape.record.solver, shape.record.solver)
-        update = self.controller.edit(
-            "adopt_solved_profile", shape.solved, self.tolerance.value() / 1e3
-        )
-        self._report(update, f"Fitted to the {name} run")
+        tolerance = self.tolerance.value() / 1e3
+        if self.flight.isChecked():
+            update = self.controller.edit("fit_flight_shape", shape.solved, tolerance)
+            what = f"Fitted to the {name} run's flight shape"
+            if update is not None:
+                what += f" ({100 * update.stretch:.2f} % stretch taken out)"
+        else:
+            update = self.controller.edit("adopt_solved_profile", shape.solved, tolerance)
+            what = f"Fitted to the {name} run"
+        self._report(update, what)
 
     def _solved(self) -> SolvedMeridian | None:
         shape = self.shapes.get(self.source.currentData())

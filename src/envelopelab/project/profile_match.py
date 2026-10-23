@@ -172,6 +172,9 @@ class ProfileUpdate:
 
     points: list[tuple[float, float]]
     fit_error: float
+    #: Relative stretch of the solved tape line taken out (:func:`flight_shape_points`),
+    #: dimensionless; 0 for the other updates.
+    stretch: float = 0.0
 
 
 def _seam_paths(initial: FloatArray, triangles: np.ndarray, gore_count: int) -> list[np.ndarray]:
@@ -528,6 +531,87 @@ def adopted_control_points(
         max_points,
         adopted_interpolation(design),
     )
+
+
+#: Passes of the flight-shape scale (each corrects the length the top-radius blend adds;
+#: the change falls by about 1000x per pass).
+FLIGHT_PASSES = 4
+
+
+def flight_shape_points(
+    design: DesignDocument,
+    solved: SolvedMeridian,
+    tolerance: float = FIT_TOLERANCE,
+    max_points: int = MAX_CONTROL_POINTS,
+) -> ProfileUpdate:
+    r"""Control points of the solved shape with its stretch taken out (the flight shape).
+
+    The solved tape line :math:`\mathbf{Q}(\sigma)` is the cut stretched by its load. The
+    flight shape keeps the solved shape and the mouth (held by the rigging) and scales it
+    about the mouth point so that its length is the design's tape length :math:`L_d`:
+
+    .. math::
+        \mathbf{C}(\sigma) = \mathbf{M} + c\,\bigl(\mathbf{Q}(\sigma) - \mathbf{Q}(0)\bigr),
+
+    with :math:`\mathbf{M}` the drawn mouth point and :math:`c` close to
+    :math:`L_d / L_s`, :math:`L_s` the length of the solved line. The top opening keeps its
+    design radius :math:`r_t`: its ring stretches more than the tapes, so the radial
+    difference :math:`r_t - C_r(1)` is added as :math:`\sigma^2 (r_t - C_r(1))`, leaving the
+    mouth exact, and :math:`c` is corrected until the curve's length is :math:`L_d`.
+    Repeating the update keeps the tape length, where :func:`adopted_control_points`
+    lengthens it by the stretch every time. The shape itself can still move from one cycle
+    to the next when the re-cut patterns change the equilibrium
+    (``docs/theory/profile-matching.md``). The stretch removed is :math:`L_s / L_d - 1`.
+
+    Parameters
+    ----------
+    design : DesignDocument
+        Gore design that was solved, m.
+    solved : SolvedMeridian
+        Solved tape line of that design, m.
+    tolerance : float
+        Fit tolerance of the new profile, m.
+    max_points : int
+        Largest number of control points.
+
+    Returns
+    -------
+    ProfileUpdate
+        New control points (m), their fit error against the flight shape (m) and the
+        stretch taken out (dimensionless).
+
+    Notes
+    -----
+    Assumes the stretch is about the same along and across the tapes, so that one factor
+    takes it out (on the full-size fixture the tapes stretch 0.14-0.35 %). A segment
+    profile becomes a spline (:func:`adopted_interpolation`).
+    """
+    line = np.column_stack((solved.r, solved.z))
+    solved_length = float(np.sum(np.linalg.norm(np.diff(line, axis=0), axis=1)))
+    if not solved_length > 0.0:
+        raise ProfileMatchError("the solved tape line has no length")
+    drawn = design_profile(design)
+    mouth = np.array([float(drawn.r[0]), float(drawn.z[0])])
+    sigma = np.asarray(solved.station, dtype=np.float64)
+    scale = drawn.meridian_length / solved_length
+    for _ in range(FLIGHT_PASSES):
+        target = mouth + scale * (line - line[0])
+        # The top opening keeps its design radius: its ring stretches more than the tapes
+        # (1.2 % against 0.38 % on the full-size fixture), so one scale factor would cut it
+        # wider every time. The radial difference is blended in as sigma^2 (the mouth stays
+        # exact), and the scale is corrected for the length that adds.
+        target[:, 0] += (float(drawn.r[-1]) - float(target[-1, 0])) * sigma**2
+        length = float(np.sum(np.linalg.norm(np.diff(target, axis=0), axis=1)))
+        scale *= drawn.meridian_length / length
+    update = _fit(
+        design,
+        control_point_stations(design),
+        target,
+        tolerance,
+        max_points,
+        adopted_interpolation(design),
+    )
+    return ProfileUpdate(update.points, update.fit_error, solved_length / drawn.meridian_length - 1)
 
 
 @dataclass(frozen=True)

@@ -181,6 +181,7 @@ def test_fit_adopts_the_latest_usable_run_in_one_click(gore_window: MainWindow) 
     stretched_run(session, "envelopelab-preview")
     stretched_run(session, "calculix", converged=False)
     assert panel.fit.isEnabled()
+    panel.flight.setChecked(False)  # adopt the inflated tape line as it is
     panel.fit.click()
     assert "Fitted to the Preview run" in panel.update_status.text()
     after = np.column_stack(control_arrays(session.design))
@@ -267,3 +268,20 @@ def test_refreshes_reuse_the_runs_solved_lines(
     assert calls == []  # the shapes were read when the run was added
     stretched_run(session, "calculix")
     assert calls == ["calculix"]
+
+
+def test_fit_cuts_the_flight_shape_by_default(gore_window: MainWindow) -> None:
+    panel = gore_window.gore_editor.solved_shape
+    session = gore_window.controller.session
+    assert session is not None
+    before = design_profile(session.design)
+    stretched_run(session, "envelopelab-preview")
+    assert panel.flight.isChecked()
+    panel.fit.click()
+    assert "flight shape" in panel.update_status.text()
+    assert "stretch taken out" in panel.update_status.text()
+    after = design_profile(session.design)
+    # The tape length stays (the stretch is taken out); the openings keep their size.
+    assert after.meridian_length == pytest.approx(before.meridian_length, abs=5e-3)
+    assert after.r[0] == pytest.approx(before.r[0], abs=1e-3)
+    assert after.r[-1] == pytest.approx(before.r[-1], abs=5e-3)

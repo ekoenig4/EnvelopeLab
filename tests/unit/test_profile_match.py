@@ -9,7 +9,12 @@ import numpy as np
 import pytest
 
 from envelopelab.project import edits
-from envelopelab.project.gore_design import LockError, control_arrays, design_profile
+from envelopelab.project.gore_design import (
+    LockError,
+    control_arrays,
+    design_profile,
+    profile_from_arrays,
+)
 from envelopelab.project.model import (
     RunRecord,
     dump_project,
@@ -20,6 +25,7 @@ from envelopelab.project.profile_match import (
     ProfileMatchError,
     adopted_control_points,
     compensated_control_points,
+    flight_shape_points,
     latest_run_shape,
     solved_deviation,
     solved_meridian,
@@ -365,3 +371,55 @@ def test_the_polyline_distance_is_the_one_over_every_segment() -> None:
     coarse = curve[::500]
     every = _segment_distance(points[:, None, :], coarse[None, :-1], coarse[None, 1:])
     assert _distance_to_polyline(points, coarse) == pytest.approx(every.min(axis=1), abs=1e-12)
+
+
+def about_the_mouth(arrays: dict[str, np.ndarray], factor: float) -> dict[str, np.ndarray]:
+    """Solved positions = the initial shape scaled by ``factor`` about the mouth point
+    (r_0, z_0) in every meridian plane: a uniform stretch with the mouth held."""
+    out = dict(arrays)
+    x = arrays["initial_positions"].copy()
+    radius = np.hypot(x[:, 0], x[:, 1])
+    z0 = float(x[:, 2].min())
+    r0 = float(radius[np.isclose(x[:, 2], z0)].mean())
+    scale = (r0 + factor * (radius - r0)) / np.maximum(radius, 1e-12)
+    x[:, :2] *= scale[:, None]
+    x[:, 2] = z0 + factor * (x[:, 2] - z0)
+    out["positions"] = x
+    return out
+
+
+def test_the_flight_shape_of_a_uniform_stretch_is_the_drawn_profile() -> None:
+    s = ProjectSession.open(FIXTURE)
+    drawn = design_profile(s.design)
+    solved = solved_meridian(about_the_mouth(revolution_arrays(s), 1.01), 8, 0.0)
+    update = flight_shape_points(s.design, solved, tolerance=1e-3)
+    assert update.stretch == pytest.approx(0.01, abs=1e-3)
+    pts = np.array(update.points)
+    r, z = control_arrays(s.design)
+    # The original points come back to their places; the tape length and openings stay.
+    assert pts[0] == pytest.approx([r[0], z[0]], abs=1e-9)
+    assert pts[-1] == pytest.approx([r[-1], z[-1]], abs=3e-3)
+    new = profile_from_arrays(pts[:, 0], pts[:, 1])
+    assert new.meridian_length == pytest.approx(drawn.meridian_length, abs=3e-3)
+    assert (
+        solved_deviation(drawn, solved_meridian(revolution_arrays(s), 8, 0.0)).max_distance < 1e-9
+    )
+
+
+def test_fitting_the_flight_shape_keeps_the_tape_length_and_is_one_undo() -> None:
+    s = ProjectSession.open(FIXTURE)
+    before = np.column_stack(control_arrays(s.design))
+    add_run(s, scaled(revolution_arrays(s), 1.02, 1.03))
+    shape = latest_run_shape(s, "calculix")
+    assert shape is not None and shape.solved is not None
+    edits.compensate_profile(s, shape.solved)
+    length = design_profile(s.design).meridian_length  # the compensated cut's tape
+    add_run(s, scaled(revolution_arrays(s), 1.02, 1.03))
+    shape = latest_run_shape(s, "calculix")
+    assert shape is not None and shape.solved is not None
+    update = edits.fit_flight_shape(s, shape.solved, tolerance=2e-3)
+    assert update.stretch > 0.01
+    assert s.project.profile_target is None  # the flight shape becomes the intent
+    assert design_profile(s.design).meridian_length == pytest.approx(length, abs=3e-3)
+    assert s.undo()
+    assert not np.allclose(np.column_stack(control_arrays(s.design)), before)  # compensated

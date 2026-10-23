@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: *Fit profile to simulated shape* takes the stretch out by default (*Take out the
+  stretch (cut the flight shape)*). It cuts the inflated shape at the current tape length,
+  with the mouth and top opening kept, so repeated fits no longer lengthen the tapes by
+  the stretch: +0.39 % (tape-line tapes) or +0.67 % (gore-edge tapes) per cycle on the
+  full-size fixture with plain adoption. The shape itself still drifts, taller and
+  narrower by about 50 mm per cycle after ten cycles there; see
+  `docs/theory/profile-matching.md`. Untick the box for the previous behaviour.
 - Fixed: the window froze around runs of large designs. Building the solver model scanned
   the whole mesh once per tape: 88 s on the 2600 m³ full-size fixture at 800 mm, in a
   worker thread that held the interpreter lock and could not be stopped, so *Stop*

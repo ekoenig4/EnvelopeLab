@@ -289,6 +289,7 @@ class WorkspaceController(QObject):
             "set_profile_from_reference",
             "compensate_profile",
             "adopt_solved_profile",
+            "fit_flight_shape",
             "restore_profile_target",
             "snap_profile_to_hold",
         ):

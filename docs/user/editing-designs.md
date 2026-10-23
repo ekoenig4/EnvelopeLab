@@ -257,6 +257,19 @@ either way.
 * If the preview does not converge, the profile is not changed, and the box says so in
   red capitals.
 
+**Take out the stretch (cut the flight shape)** is ticked by default. Fit then cuts the
+inflated *shape* at the current tape length, with the mouth and the top opening kept at
+their sizes. The inflated tapes are slightly stretched (0.1–0.4 % on a full-size
+envelope), so cutting the inflated line as it is would make the patterns grow by that
+much every time you fit again. The box reports the stretch taken out. Untick it to adopt
+the inflated tape line as it is, like *Adopt*.
+
+Repeated flight-shape fits keep the tape length. The shape can still move a little each
+time, because re-cut patterns change the equilibrium. On the full-size test envelope it
+keeps getting taller and narrower by about 50 mm per fit after ten fits. Check the
+deviation after each fit and stop when it no longer matters for your design
+([theory](../theory/profile-matching.md#flight-shape)).
+
 The button is unavailable while another run is in progress. Undo takes the fit back in
 one step. Afterwards every run is stale, because the profile they solved has changed.
 
