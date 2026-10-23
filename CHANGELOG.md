@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: the 3D view slowed the whole window down, especially on software OpenGL (WSLg,
+  Mesa llvmpipe). The render widget redrew 5 times a second even when nothing changed
+  (about 0.1 s a frame for a large window there). The scene was also rebuilt with one
+  render per added actor, and the rest mesh drew every tape as its own actor (473 actors
+  on the 2600 m³ full-size fixture). The timer is off, a rebuild renders once, and the
+  tapes are one actor (12 actors). Measured under Xvfb with llvmpipe on that fixture:
+  switching to the Simulate tab 22.0 → 0.5 s, a run arriving 24.2 → 0.3 s, and no
+  stalls at all while idle with the 3D view shown.
 - Added: *Fit profile to simulated shape* takes the stretch out by default (*Take out the
   stretch (cut the flight shape)*). It cuts the inflated shape at the current tape length,
   with the mouth and top opening kept, so repeated fits no longer lengthen the tapes by

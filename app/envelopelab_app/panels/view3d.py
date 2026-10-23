@@ -192,6 +192,19 @@ def _merged_lines(polylines: list[Any]) -> Any:
     return pv.PolyData(points, lines=np.concatenate(cells))
 
 
+def _interactor(parent: QWidget) -> Any:
+    """The PyVista Qt render widget, without its auto-update timer.
+
+    pyvistaqt re-renders 5 times a second by default, changed or not. On a software
+    OpenGL renderer (WSLg, Mesa llvmpipe) a frame of a large window takes about 0.1 s, so
+    the timer alone kept the GUI thread half busy while the 3D view was shown. The panel
+    renders after every change itself, and the interactor renders while the view is moved.
+    """
+    from pyvistaqt import QtInteractor
+
+    return QtInteractor(parent, auto_update=False)
+
+
 def pyvista_available() -> bool:
     """PyVista and pyvistaqt can be imported and a 3D view is allowed."""
     if os.environ.get("ENVELOPELAB_NO_3D"):
@@ -255,9 +268,7 @@ class View3DPanel(QWidget):
             self.renderer_widget = QLabel("Loading the 3D view…")
             self.renderer_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
         elif enable_renderer and pyvista_available():
-            from pyvistaqt import QtInteractor
-
-            interactor = QtInteractor(self)
+            interactor = _interactor(self)
             self.plotter = interactor
             self.renderer_widget = interactor
         else:
@@ -303,9 +314,7 @@ class View3DPanel(QWidget):
             )
             label.setWordWrap(True)
             return False
-        from pyvistaqt import QtInteractor
-
-        interactor = QtInteractor(self)
+        interactor = _interactor(self)
         old = self.renderer_widget
         self.splitter.replaceWidget(0, interactor)
         old.deleteLater()
@@ -543,10 +552,24 @@ class View3DPanel(QWidget):
     # -- rendering ----------------------------------------------------------------------
 
     def redraw(self) -> None:
-        """Draw the visible layers (no-op without a renderer)."""
+        """Draw the visible layers (no-op without a renderer).
+
+        The scene is rebuilt with rendering suppressed and rendered once at the end:
+        PyVista renders after every added actor otherwise, which took 22 s for the
+        full-size fixture's 473 actors on a software OpenGL renderer (47 ms a frame).
+        """
         plotter = self.plotter
         if plotter is None:
             return
+        suppressed = plotter.suppress_rendering
+        plotter.suppress_rendering = True
+        try:
+            self._build_scene(plotter)
+        finally:
+            plotter.suppress_rendering = suppressed
+        plotter.render()
+
+    def _build_scene(self, plotter: Any) -> None:
         import pyvista as pv
 
         plotter.clear()
@@ -591,13 +614,15 @@ class View3DPanel(QWidget):
                     name=layer.key,
                 )
             if layer.tapes:
-                for edges in layer.tapes.values():
-                    lines = np.hstack([np.full((len(edges), 1), 2), edges]).ravel()
-                    plotter.add_mesh(
-                        pv.PolyData(np.asarray(layer.points, dtype=float), lines=lines),
-                        color="#d62728",
-                        line_width=3,
-                    )
+                # Every tape in one line actor (one actor per tape was 462 actors on the
+                # full-size fixture, each a draw call in every frame).
+                edges = np.vstack([np.asarray(e).reshape(-1, 2) for e in layer.tapes.values()])
+                lines = np.hstack([np.full((len(edges), 1), 2), edges]).ravel()
+                plotter.add_mesh(
+                    pv.PolyData(np.asarray(layer.points, dtype=float), lines=lines),
+                    color="#d62728",
+                    line_width=3,
+                )
             legend.append([layer.label, layer.color])
         if legend:
             plotter.add_legend(legend, bcolor="white", size=(0.45, 0.2))

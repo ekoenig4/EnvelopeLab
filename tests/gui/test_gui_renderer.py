@@ -181,3 +181,46 @@ def test_the_launcher_starts_with_the_3d_view_in_a_wayland_session(tmp_path: Pat
     assert done.returncode == 0, done.stderr + (log.read_text() if log.exists() else "")
     assert "xcb" in done.stderr and log.exists()
     assert "QT_QPA_PLATFORM: xcb" in log.read_text()
+
+
+def test_a_redraw_renders_once_and_draws_all_tapes_as_one_actor(
+    qtbot: QtBot, settings: QSettings, tmp_path: Path
+) -> None:
+    """Rebuilding the scene renders once (PyVista renders after every added actor
+    otherwise: 22 s for the full-size fixture on a software renderer)."""
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    session = w.open_project(GORE_PROJECT)
+    assert session is not None and w.view3d.plotter is not None
+    built = build_solver_model(session.design, session.patterns, tmp_path, 1600.0)
+    w.controller.store_model(built, session.fingerprints())
+    plotter = w.view3d.plotter
+    renders: list[bool] = []
+    real = plotter.render
+
+    def counted() -> None:
+        renders.append(not plotter.suppress_rendering)
+        real()
+
+    plotter.render = counted  # PyVista's add_mesh calls it after every actor
+    w.view3d.redraw()
+    plotter.render = real
+    assert sum(renders) == 1
+    # 58 tape sets on the rest mesh, one actor for all of them.
+    assert len(built.model.cables) > 50
+    assert len(plotter.renderer.actors) < 15
+    w.close()
+
+
+def test_the_3d_view_does_not_render_on_a_timer(qtbot: QtBot, settings: QSettings) -> None:
+    """pyvistaqt's 5 Hz auto-render is off: an unchanged scene is not redrawn."""
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    assert w.open_project(GORE_PROJECT) is not None
+    plotter = w.view3d.plotter
+    assert plotter is not None
+    timer = getattr(plotter, "render_timer", None)
+    assert timer is None or not timer.isActive()
+    w.close()
