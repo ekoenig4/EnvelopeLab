@@ -41,6 +41,19 @@ options places the camera exactly:
 | **◀ Gore** / **Gore ▶** | 4 / 6 | Turn the view one gore (360° / gore count) about the envelope axis |
 | **Orthographic** | 5 | Parallel projection on or off: no perspective, so profiles and lengths compare directly |
 
+A second row places the camera on a part of the envelope and keeps viewpoints:
+
+* **Face seam** / **Face gore** with the number beside them: look straight at vertical
+  seam *k*, or at the centre of gore *k*, mouth down, with it running up the middle of
+  the view. Seams and gores are numbered as in the Rigging panel (gore *k* lies between
+  seams *k − 1* and *k*).
+* **Zoom to layer**: fit the view to the layer selected in the layer list (the design
+  surface, a run's result, the rest mesh, …), keeping the viewing direction.
+* **Views**: *Save view* remembers the current viewpoint and projection under a name.
+  Choose it in the list to go back there, or *Delete view* to forget it. Saved views
+  belong to the project file and are kept between sessions (in the application settings,
+  not in the project).
+
 The number keys follow the numeric-keypad views of common 3D programs, and they work on
 the number row too. They act when the 3D view or its panel has the keyboard focus (click
 the view first). Stepping by gores keeps a seam or a gore centre in the same place on the

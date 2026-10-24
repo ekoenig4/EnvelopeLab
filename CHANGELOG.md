@@ -9,6 +9,9 @@ All notable changes to this project will be documented in this file.
   draw 2.6 times larger for the 4-row test envelope and 4.1 times for a 12-row full-size
   one. *Layout: Assembled gore* keeps the stacked view. Display only; the cut files are
   unchanged.
+- Added: in the 3D view, *Face seam* / *Face gore* look straight at seam or gore *k*,
+  *Zoom to layer* fits the view to the selected layer, and *Save view* keeps named
+  viewpoints per project file between sessions.
 - Added: viewpoint controls in the 3D view. *Front*, *Back*, *Side*, *Top*, *Into mouth*
   and *Isometric* views fit the whole scene, *◀ Gore* and *Gore ▶* turn the view one gore
   about the envelope axis, and *Orthographic* switches to a parallel projection. Each has

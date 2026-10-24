@@ -66,16 +66,86 @@ def view_pose(
     """
     if view not in VIEWS:
         raise ValueError(f"unknown view {view!r}; one of {', '.join(VIEWS)}")
+    direction, up = VIEWS[view]
+    return pose_from_direction(bounds, direction, up, view_angle_deg)
+
+
+def pose_from_direction(
+    bounds: tuple[float, float, float, float, float, float],
+    direction: npt.ArrayLike,
+    up: npt.ArrayLike,
+    view_angle_deg: float = 30.0,
+) -> CameraPose:
+    """The camera that looks at the centre of ``bounds`` from ``direction`` (centre to
+    camera) with ``up`` as near up as it can be, and shows the whole box."""
     lo = np.array(bounds[0::2], dtype=np.float64)
     hi = np.array(bounds[1::2], dtype=np.float64)
     centre = 0.5 * (lo + hi)
     radius = max(0.5 * float(np.linalg.norm(hi - lo)), 1e-6)
-    direction, up = (np.array(v, dtype=np.float64) for v in VIEWS[view])
-    direction /= np.linalg.norm(direction)
-    up -= float(np.dot(up, direction)) * direction  # square to the line of sight
-    up /= np.linalg.norm(up)
+    d = np.array(direction, dtype=np.float64)
+    d /= np.linalg.norm(d)
+    u = np.array(up, dtype=np.float64)
+    u -= float(np.dot(u, d)) * d  # square to the line of sight
+    u /= np.linalg.norm(u)
     distance = MARGIN * radius / math.sin(math.radians(view_angle_deg) / 2.0)
-    return CameraPose(centre + distance * direction, centre, up, MARGIN * radius)
+    return CameraPose(centre + distance * d, centre, u, MARGIN * radius)
+
+
+def fit_to_bounds(
+    pose: CameraPose,
+    bounds: tuple[float, float, float, float, float, float],
+    view_angle_deg: float = 30.0,
+) -> CameraPose:
+    """``pose`` moved to show just ``bounds`` (a layer), keeping its direction and up."""
+    return pose_from_direction(
+        bounds, pose.position - pose.focal_point, pose.view_up, view_angle_deg
+    )
+
+
+def facing(
+    bounds: tuple[float, float, float, float, float, float],
+    azimuth_rad: float,
+    view_angle_deg: float = 30.0,
+) -> CameraPose:
+    """Looking at the envelope axis from azimuth ``azimuth_rad``, mouth down: a seam or a
+    gore centre at that azimuth runs up the middle of the view."""
+    direction = (math.cos(azimuth_rad), math.sin(azimuth_rad), 0.0)
+    return pose_from_direction(bounds, direction, (0.0, 0.0, 1.0), view_angle_deg)
+
+
+def gore_centre_azimuth(gore: int, gore_count: int) -> float:
+    """Azimuth of the centre of gore ``gore`` (1..N), rad: gore k lies between seams
+    k - 1 and k (``envelopelab.rigging.common.seam_azimuth``), so its centre is at
+    :math:`2\\pi (k - 1/2) / N`."""
+    if not 1 <= gore <= gore_count:
+        raise ValueError(f"gore {gore} is not in 1..{gore_count}")
+    return 2.0 * math.pi * (gore - 0.5) / gore_count
+
+
+def pose_to_dict(pose: CameraPose, parallel: bool) -> dict[str, object]:
+    """JSON-ready camera (scene units) and projection, for saved viewpoints."""
+    return {
+        "position": [float(v) for v in pose.position],
+        "focal_point": [float(v) for v in pose.focal_point],
+        "view_up": [float(v) for v in pose.view_up],
+        "parallel_scale": float(pose.parallel_scale),
+        "parallel": bool(parallel),
+    }
+
+
+def pose_from_dict(data: dict[str, object]) -> tuple[CameraPose, bool]:
+    """The camera and projection of :func:`pose_to_dict` (``ValueError`` if malformed)."""
+    try:
+        position = np.array(data["position"], dtype=np.float64).reshape(3)
+        focal = np.array(data["focal_point"], dtype=np.float64).reshape(3)
+        up = np.array(data["view_up"], dtype=np.float64).reshape(3)
+        scale = float(data["parallel_scale"])  # type: ignore[arg-type]
+        parallel = bool(data.get("parallel", False))
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(f"not a saved view: {exc}") from exc
+    if not (np.all(np.isfinite(position)) and np.all(np.isfinite(focal)) and np.isfinite(scale)):
+        raise ValueError("not a saved view: values must be finite")
+    return CameraPose(position, focal, up, scale), parallel
 
 
 def _rotate_z(v: FloatArray, angle: float) -> FloatArray:

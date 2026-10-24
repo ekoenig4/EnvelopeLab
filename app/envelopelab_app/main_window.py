@@ -106,6 +106,7 @@ class MainWindow(QMainWindow):
         self.view3d = View3DPanel(
             self.controller, enable_renderer=use_3d, defer_renderer=interactive
         )
+        self.view3d.settings = settings  # saved 3D viewpoints, per project
         self.patterns = PatternPanel(self.controller)
         self.history = HistoryPanel(self.controller)
         self.rigging = RiggingPanel(self.controller)

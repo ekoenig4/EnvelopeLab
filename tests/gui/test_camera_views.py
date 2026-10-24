@@ -58,7 +58,60 @@ def test_view_controls_are_there_and_harmless_without_a_renderer(
     view = gore_window.view3d
     assert view.plotter is None
     expected = {"front", "back", "right", "left", "top", "bottom", "iso", "fit"}
-    assert expected | {"gore_prev", "gore_next"} == set(view.view_buttons)
+    assert expected | {"gore_prev", "gore_next"} <= set(view.view_buttons)
     for button in view.view_buttons.values():
         button.click()
     view.orthographic.setChecked(True)
+
+
+def test_facing_a_seam_or_a_gore_centre_looks_at_the_axis_from_its_azimuth() -> None:
+    from envelopelab.rigging.common import seam_azimuth
+    from envelopelab_app.camera import facing, gore_centre_azimuth
+
+    pose = facing(BOUNDS, seam_azimuth(2, 8))
+    sight = pose.position - pose.focal_point
+    assert math.degrees(math.atan2(sight[1], sight[0])) == pytest.approx(90.0)
+    assert abs(sight[2]) < 1e-9 and pose.view_up == pytest.approx([0.0, 0.0, 1.0])
+    # Gore k lies between seams k - 1 and k: gore 1 of 8 is centred at 22.5 deg.
+    assert math.degrees(gore_centre_azimuth(1, 8)) == pytest.approx(22.5)
+    assert math.degrees(gore_centre_azimuth(8, 8)) == pytest.approx(337.5)
+    with pytest.raises(ValueError):
+        gore_centre_azimuth(9, 8)
+
+
+def test_zooming_to_a_box_keeps_the_direction_and_centres_it() -> None:
+    from envelopelab_app.camera import fit_to_bounds
+
+    iso = view_pose(BOUNDS, "iso")
+    small = (2.0, 3.0, -1.0, 0.0, 10.0, 11.0)
+    fitted = fit_to_bounds(iso, small)
+    assert fitted.focal_point == pytest.approx([2.5, -0.5, 10.5])
+    before = (iso.position - iso.focal_point) / np.linalg.norm(iso.position - iso.focal_point)
+    after = fitted.position - fitted.focal_point
+    assert after / np.linalg.norm(after) == pytest.approx(before)
+    assert np.linalg.norm(after) < np.linalg.norm(iso.position - iso.focal_point)
+
+
+def test_saved_views_round_trip_and_reject_damaged_data() -> None:
+    from envelopelab_app.camera import pose_from_dict, pose_to_dict
+
+    pose = view_pose(BOUNDS, "top")
+    data = pose_to_dict(pose, parallel=True)
+    back, parallel = pose_from_dict(data)
+    assert parallel and back.position == pytest.approx(pose.position)
+    assert back.view_up == pytest.approx(pose.view_up)
+    with pytest.raises(ValueError, match="not a saved view"):
+        pose_from_dict({"position": [0, 0]})
+    with pytest.raises(ValueError, match="finite"):
+        pose_from_dict({**data, "parallel_scale": float("nan")})
+
+
+def test_face_zoom_and_saved_view_controls_are_harmless_without_a_renderer(
+    gore_window: MainWindow,
+) -> None:
+    view = gore_window.view3d
+    for key in ("face_seam", "face_gore", "zoom_layer", "save_view", "delete_view"):
+        view.view_buttons[key].click()
+    assert view.seam_number.maximum() == 8  # the fixture's gores
+    assert not view.save_view("somewhere")
+    assert view.saved() == []

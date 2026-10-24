@@ -17,6 +17,7 @@ anywhere else orbits the camera as usual.
 
 from __future__ import annotations
 
+import json
 import math
 import os
 from collections.abc import Callable
@@ -25,15 +26,18 @@ from functools import partial
 from typing import Any
 
 import numpy as np
-from PySide6.QtCore import QEvent, QKeyCombination, QObject, Qt
+from PySide6.QtCore import QEvent, QKeyCombination, QObject, QSettings, Qt
 from PySide6.QtGui import QBrush, QColor, QKeyEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -55,7 +59,18 @@ from envelopelab.project.shapes import (
     footprint_preview,
     placement_at,
 )
-from envelopelab_app.camera import CameraPose, gore_step, turn_about_axis, view_pose
+from envelopelab.rigging.common import seam_azimuth
+from envelopelab_app.camera import (
+    CameraPose,
+    facing,
+    fit_to_bounds,
+    gore_centre_azimuth,
+    gore_step,
+    pose_from_dict,
+    pose_to_dict,
+    turn_about_axis,
+    view_pose,
+)
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.refresh import Refresher
 
@@ -316,6 +331,66 @@ class View3DPanel(QWidget):
                 )
         views.addWidget(self.orthographic)
         views.addStretch(1)
+        # Seams and gores, a layer, and saved viewpoints.
+        places = QHBoxLayout()
+        self.seam_number = QSpinBox()
+        self.seam_number.setObjectName("faceNumber")
+        self.seam_number.setRange(1, 12)
+        self.seam_number.setPrefix("No. ")
+        self.seam_number.setToolTip("Seam or gore to face (numbered as in the rigging)")
+        places.addWidget(QLabel("Seam/gore:"))
+        places.addWidget(self.seam_number)
+        for key, text, tip, action in (
+            (
+                "face_seam",
+                "Face seam",
+                "Look straight at the seam, running up the middle",
+                lambda: self.face_seam(self.seam_number.value()),
+            ),
+            (
+                "face_gore",
+                "Face gore",
+                "Look straight at the centre of the gore",
+                lambda: self.face_gore(self.seam_number.value()),
+            ),
+            (
+                "zoom_layer",
+                "Zoom to layer",
+                "Fit the view to the layer selected in the list",
+                lambda: self.zoom_to_layer(self._selected_layer()),
+            ),
+        ):
+            button = QPushButton(text)
+            button.setObjectName(key)
+            button.setToolTip(tip)
+            button.clicked.connect(lambda _c=False, a=action: a())
+            self.view_buttons[key] = button
+            places.addWidget(button)
+        places.addSpacing(12)
+        self.saved_views = QComboBox()
+        self.saved_views.setObjectName("savedViews")
+        self.saved_views.setMinimumContentsLength(12)
+        self.saved_views.setToolTip("Saved viewpoints of this project; choose one to go there")
+        self.saved_views.activated.connect(
+            lambda i: self.restore_view(self.saved_views.itemText(i))
+        )
+        save = QPushButton("Save view")
+        save.setObjectName("save_view")
+        save.setToolTip("Remember the current viewpoint under a name (kept per project)")
+        save.clicked.connect(self._save_view_clicked)
+        delete = QPushButton("Delete view")
+        delete.setObjectName("delete_view")
+        delete.clicked.connect(lambda: self.delete_view(self.saved_views.currentText()))
+        self.view_buttons["save_view"] = save
+        self.view_buttons["delete_view"] = delete
+        places.addWidget(QLabel("Views:"))
+        for widget in (self.saved_views, save, delete):
+            places.addWidget(widget)
+        places.addStretch(1)
+        #: Where saved viewpoints are kept (the main window's settings); None keeps them
+        #: for this session only.
+        self.settings: QSettings | None = None
+        self._session_views: dict[str, list[dict[str, object]]] = {}
         self.info = QLabel()
         self.info.setWordWrap(True)
         controls = QHBoxLayout()
@@ -353,6 +428,7 @@ class View3DPanel(QWidget):
         layout = QVBoxLayout(self)
         layout.addLayout(controls)
         layout.addLayout(views)
+        layout.addLayout(places)
         layout.addWidget(splitter)
         self.refresher = Refresher(
             self,
@@ -506,6 +582,8 @@ class View3DPanel(QWidget):
             if key in self.layers:
                 self.layers[key].visible = value
         self._fill_list()
+        self.seam_number.setMaximum(self._gore_count())
+        self._fill_saved()
         self.redraw()
 
     def _shape_layers(self) -> None:
@@ -976,6 +1054,127 @@ class View3DPanel(QWidget):
         design = self.controller.design
         count = design.gores.count if design is not None and design.gores is not None else 12
         self._apply_pose(turn_about_axis(self._pose(), gores * gore_step(count)))
+
+    def face_seam(self, seam: int) -> None:
+        """Look straight at vertical seam ``seam`` (1..N), mouth down."""
+        if self.plotter is None:
+            return
+        count = self._gore_count()
+        azimuth = seam_azimuth(min(max(seam, 1), count), count)
+        self._apply_pose(facing(tuple(self.plotter.bounds), azimuth, self._view_angle()))
+
+    def face_gore(self, gore: int) -> None:
+        """Look straight at the centre of gore ``gore`` (1..N), mouth down."""
+        if self.plotter is None:
+            return
+        count = self._gore_count()
+        azimuth = gore_centre_azimuth(min(max(gore, 1), count), count)
+        self._apply_pose(facing(tuple(self.plotter.bounds), azimuth, self._view_angle()))
+
+    def zoom_to_layer(self, key: str | None) -> None:
+        """Fit the view to one layer, keeping the viewing direction."""
+        layer = self.layers.get(key) if key is not None else None
+        if self.plotter is None or layer is None:
+            return
+        parts = [np.asarray(layer.points, dtype=float).reshape(-1, 3)]
+        for lines in layer.polylines.values():
+            parts += [np.asarray(line, dtype=float).reshape(-1, 3) for line in lines]
+        points = np.vstack([p for p in parts if len(p)]) if any(len(p) for p in parts) else None
+        if points is None:
+            return
+        lo, hi = points.min(axis=0), points.max(axis=0)
+        bounds = (lo[0], hi[0], lo[1], hi[1], lo[2], hi[2])
+        self._apply_pose(fit_to_bounds(self._pose(), bounds, self._view_angle()))
+
+    def _selected_layer(self) -> str | None:
+        item = self.layer_list.currentItem()
+        return None if item is None else str(item.data(Qt.ItemDataRole.UserRole))
+
+    def _gore_count(self) -> int:
+        design = self.controller.design
+        return design.gores.count if design is not None and design.gores is not None else 12
+
+    def _view_angle(self) -> float:
+        return float(self.plotter.camera.view_angle)
+
+    # -- saved viewpoints ---------------------------------------------------------------
+
+    def _views_key(self) -> str:
+        session = self.controller.session
+        path = None if session is None else session.path
+        return "view3d/saved/" + (str(path.resolve()) if path is not None else "unsaved")
+
+    def saved(self) -> list[dict[str, object]]:
+        """Saved viewpoints of this project, oldest first (``name`` and the camera)."""
+        key = self._views_key()
+        if self.settings is None:
+            return list(self._session_views.get(key, []))
+        raw = self.settings.value(key)
+        try:
+            views = json.loads(str(raw)) if raw else []
+        except json.JSONDecodeError:
+            views = []
+        return [v for v in views if isinstance(v, dict) and "name" in v]
+
+    def _store(self, views: list[dict[str, object]]) -> None:
+        key = self._views_key()
+        if self.settings is None:
+            self._session_views[key] = views
+        else:
+            self.settings.setValue(key, json.dumps(views))
+            self.settings.sync()
+        self._fill_saved()
+
+    def _fill_saved(self) -> None:
+        self.saved_views.blockSignals(True)
+        self.saved_views.clear()
+        for view in self.saved():
+            self.saved_views.addItem(str(view["name"]))
+        self.saved_views.blockSignals(False)
+
+    def save_view(self, name: str) -> bool:
+        """Remember the current viewpoint as ``name`` (replacing one of that name)."""
+        name = name.strip()
+        if self.plotter is None or not name:
+            return False
+        entry = {"name": name, **pose_to_dict(self._pose(), self.orthographic.isChecked())}
+        views = [v for v in self.saved() if v.get("name") != name] + [entry]
+        self._store(views)
+        self.saved_views.setCurrentText(name)
+        return True
+
+    def restore_view(self, name: str) -> bool:
+        """Go to the saved viewpoint ``name``."""
+        if self.plotter is None:
+            return False
+        for view in self.saved():
+            if view.get("name") == name:
+                try:
+                    pose, parallel = pose_from_dict(view)
+                except ValueError:
+                    return False
+                self.orthographic.setChecked(parallel)
+                self._apply_pose(pose)
+                return True
+        return False
+
+    def delete_view(self, name: str) -> bool:
+        """Forget the saved viewpoint ``name``."""
+        views = self.saved()
+        kept = [v for v in views if v.get("name") != name]
+        if len(kept) == len(views):
+            return False
+        self._store(kept)
+        return True
+
+    def _save_view_clicked(self) -> None:
+        default = f"View {len(self.saved()) + 1}"
+        if not self.controller.defer_hidden:  # scripted window: no dialog
+            self.save_view(default)
+            return
+        name, ok = QInputDialog.getText(self, "Save view", "Name of this viewpoint:", text=default)
+        if ok:
+            self.save_view(name)
 
     def _set_projection(self, parallel: bool) -> None:
         plotter = self.plotter

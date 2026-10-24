@@ -290,3 +290,46 @@ def test_view_keys_over_the_3d_view_choose_views(qtbot: QtBot, settings: QSettin
     sight = np.array(plotter.camera.position) - np.array(plotter.camera.focal_point)
     assert abs(sight[0]) < 1e-6 and abs(sight[1]) < 1e-6 and sight[2] < 0.0
     w.close()
+
+
+def test_face_seams_zoom_to_a_layer_and_keep_saved_views_per_project(
+    qtbot: QtBot, settings: QSettings
+) -> None:
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    assert w.open_project(GORE_PROJECT) is not None
+    view, plotter = w.view3d, w.view3d.plotter
+    assert plotter is not None
+
+    def azimuth() -> float:
+        sight = np.array(plotter.camera.position) - np.array(plotter.camera.focal_point)
+        return float(np.degrees(np.arctan2(sight[1], sight[0])) % 360.0)
+
+    view.face_seam(2)  # 8 gores: seam 2 at 90 deg
+    assert azimuth() == pytest.approx(90.0)
+    view.face_gore(1)
+    assert azimuth() == pytest.approx(22.5)
+    view.view_buttons["iso"].click()
+    far = np.linalg.norm(np.array(plotter.camera.position) - plotter.camera.focal_point)
+    view.layer_list.setCurrentRow(0)  # the design surface
+    view.view_buttons["zoom_layer"].click()
+    near = np.linalg.norm(np.array(plotter.camera.position) - plotter.camera.focal_point)
+    assert near <= far
+    # Save, move away, come back.
+    view.view_buttons["top"].click()
+    top = tuple(plotter.camera.position)
+    assert view.save_view("crown")
+    view.view_buttons["front"].click()
+    assert view.restore_view("crown")
+    assert tuple(plotter.camera.position) == pytest.approx(top)
+    assert view.saved_views.findText("crown") >= 0
+    w.close()
+    # A new window on the same project finds it again (kept in the settings).
+    w2 = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w2)
+    w2.show()
+    assert w2.open_project(GORE_PROJECT) is not None
+    assert [v["name"] for v in w2.view3d.saved()] == ["crown"]
+    assert w2.view3d.delete_view("crown") and w2.view3d.saved() == []
+    w2.close()
