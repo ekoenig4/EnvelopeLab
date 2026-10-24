@@ -66,7 +66,15 @@ import numpy as np
 import numpy.typing as npt
 from scipy.sparse import csr_matrix
 
-from envelopelab.solvers.kernels import ElementForces, element_forces, pressure_corner_forces
+from envelopelab.solvers.kernels import (
+    RELAX_LIMIT,
+    ElementForces,
+    compiled_forces_and_masses,
+    element_forces,
+    jit_enabled,
+    pressure_corner_forces,
+    relax_kernel,
+)
 from envelopelab.solvers.membrane import (
     SLACK,
     TAUT,
@@ -146,7 +154,9 @@ class SolverProgress:
 
     @property
     def fraction(self) -> float:
-        """Rough progress estimate in [0, 1] from the residual decade reached."""
+        """Rough progress estimate in [0, 1] from the residual decade reached (it moves
+        back when the residual rises; displays use
+        :class:`envelopelab.solvers.progress.ConvergenceEstimator`)."""
         if self.residual <= self.tolerance:
             return 1.0
         if not math.isfinite(self.residual) or self.residual >= 1.0:
@@ -593,6 +603,76 @@ class _System:
                     rows = np.flatnonzero(pairs[:, side] == code)
                     self.pressure_groups.append((sign, int(code), rows))
 
+    def compiled_inputs(self) -> dict[str, Any]:
+        """The model as flat arrays for the compiled iterations
+        (:func:`envelopelab.solvers.kernels.relax_kernel`).
+
+        Gas pressures are rows ``[p0, gradient, z_ref, clamp]`` of ``gas``, indexed by
+        chamber code + 2 (ambient, the main envelope, then each chamber); every triangle
+        has its inside and outside gas (``tri_gas``)."""
+        model = self.model
+        cond = model.conditions
+        gas = np.zeros((len(model.chambers) + 2, 4))
+        gas[MAIN_CHAMBER + 2] = (
+            cond.uniform_pressure,
+            cond.pressure_gradient,
+            cond.mouth_height,
+            1.0,
+        )
+        for k, chamber in enumerate(model.chambers):
+            gas[k + 2] = (
+                chamber.reference_pressure,
+                chamber.gradient,
+                chamber.reference_height,
+                0.0,
+            )
+        if model.tri_chambers is None:
+            tri_gas = np.empty((len(self.tri), 2), dtype=np.int64)
+            tri_gas[:, 0] = MAIN_CHAMBER + 2
+            tri_gas[:, 1] = AMBIENT + 2
+        else:
+            tri_gas = np.asarray(model.tri_chambers, dtype=np.int64) + 2
+        edges = [e for _, e in self.closures]
+        nodes = list(self.closure_nodes)
+        return {
+            "tri_gas": np.ascontiguousarray(tri_gas),
+            "gas": gas,
+            "fixed": np.ascontiguousarray(self.weight_nodes + self.dead, dtype=np.float64),
+            "cable_edges": np.ascontiguousarray(self.cable_edges, dtype=np.int64).reshape(-1, 2),
+            "cable_l0": np.ascontiguousarray(self.cable_l0, dtype=np.float64),
+            "cable_ea": np.ascontiguousarray(self.cable_ea, dtype=np.float64),
+            "cl_edges": np.ascontiguousarray(
+                np.concatenate(edges) if edges else np.zeros((0, 2)), dtype=np.int64
+            ).reshape(-1, 2),
+            "cl_edge_ptr": np.concatenate(([0], np.cumsum([len(e) for e in edges]))).astype(
+                np.int64
+            ),
+            "cl_nodes": np.ascontiguousarray(
+                np.concatenate(nodes) if nodes else np.zeros(0), dtype=np.int64
+            ),
+            "cl_node_ptr": np.concatenate(([0], np.cumsum([len(q) for q in nodes]))).astype(
+                np.int64
+            ),
+            "cl_gas": np.asarray([code + 2 for code in self.closure_codes], dtype=np.int64),
+            "constrained": np.ascontiguousarray(self.constrained, dtype=np.int64),
+            "proj": np.ascontiguousarray(self.proj, dtype=np.float64).reshape(-1, 3, 3),
+        }
+
+    def compiled_forces(self, x: FloatArray) -> tuple[FloatArray, FloatArray, FloatArray]:
+        """Residual, external force (N) and fictitious masses at ``x`` from the compiled
+        iteration functions (the reference is :meth:`forces` and :meth:`masses`)."""
+        return compiled_forces_and_masses(
+            x,
+            self.tri,
+            self.rest,
+            self.c,
+            self.c_inv,
+            self.settings.slack_stiffness_ratio,
+            self.settings.tension_field,
+            self.compiled_inputs(),
+            self.settings.mass_factor,
+        )
+
     def triangle_pressure(self, z: FloatArray) -> FloatArray:
         """Net corner pressure of every triangle, Pa (as ``SolverModel.triangle_pressure``)."""
         if self.pressure_groups is None:
@@ -860,6 +940,107 @@ def _relative(r_free: FloatArray, ext: FloatArray) -> float:
     return norm / scale if scale > 0.0 else norm
 
 
+def use_compiled_iterations() -> bool:
+    """Whether :func:`solve` runs its iterations compiled (Numba installed and not disabled
+    by ``ENVELOPELAB_NO_JIT``; ADR-0028)."""
+    return jit_enabled()
+
+
+def _compiled_iterations(
+    system: _System,
+    x: FloatArray,
+    r_free: FloatArray,
+    mass: FloatArray,
+    residual: float,
+    checkpoint: Callable[[int, float, float], SolveStatus | None],
+) -> tuple[int, SolveStatus, float, float, int, FloatArray, FloatArray, FloatArray, dict[str, Any]]:
+    """The iteration loop of :func:`solve` in compiled chunks.
+
+    A chunk runs until a progress report is due (every ``progress_interval`` iterations,
+    ``checkpoint``) or the solve stops; kinetic-energy resets and their new fictitious
+    masses are computed inside it, with the same arithmetic as the Python loop.
+    Returns the iteration, status, residual, kinetic energy, reset count, positions, and
+    the final residual, external force and intermediate data.
+    """
+    settings = system.settings
+    kernel = relax_kernel()
+    inputs = system.compiled_inputs()
+    rest = system.rest
+    x = np.ascontiguousarray(x, dtype=np.float64)
+    r_free = np.ascontiguousarray(r_free, dtype=np.float64)
+    mass = np.ascontiguousarray(mass, dtype=np.float64).copy()
+    v = np.zeros_like(x)
+    v_prev = np.zeros_like(x)
+    # ke_prev, fresh, ke, residual, resets
+    scalars = np.array([0.0, 1.0, 0.0, residual, 0.0])
+    status: SolveStatus = "max_iterations"
+    iteration = 0
+    first = 1
+    while first <= settings.max_iterations:
+        code, iteration = kernel(
+            x,
+            v,
+            v_prev,
+            r_free,
+            mass,
+            scalars,
+            first,
+            settings.max_iterations,
+            settings.progress_interval,
+            settings.tolerance,
+            settings.damping == "kinetic",
+            settings.viscous_damping,
+            system.tri,
+            rest.grad_n,
+            rest.area,
+            system.c,
+            system.c_inv,
+            float(settings.slack_stiffness_ratio),
+            bool(settings.tension_field),
+            inputs["tri_gas"],
+            inputs["gas"],
+            inputs["fixed"],
+            inputs["cable_edges"],
+            inputs["cable_l0"],
+            inputs["cable_ea"],
+            inputs["cl_edges"],
+            inputs["cl_edge_ptr"],
+            inputs["cl_nodes"],
+            inputs["cl_node_ptr"],
+            inputs["cl_gas"],
+            inputs["constrained"],
+            inputs["proj"],
+            float(settings.mass_factor),
+        )
+        residual = float(scalars[3])
+        if code == RELAX_LIMIT:
+            break
+        if not math.isfinite(residual) or residual > 1e8:
+            status = "diverged"
+            break
+        if residual < settings.tolerance:
+            status = "converged"
+            break
+        if iteration % settings.progress_interval == 0:
+            stop = checkpoint(iteration, residual, float(scalars[2]))
+            if stop is not None:
+                status = stop
+                break
+        first = iteration + 1
+    r, ext, data = system.forces(x)
+    return (
+        iteration,
+        status,
+        residual,
+        float(scalars[2]),
+        int(scalars[4]),
+        x,
+        r,
+        ext,
+        data,
+    )
+
+
 def solve(
     model: SolverModel,
     settings: SolverSettings | None = None,
@@ -926,8 +1107,30 @@ def solve(
     kinetic = settings.damping == "kinetic"
     c = settings.viscous_damping
     ke = 0.0
+
+    def checkpoint(iteration: int, residual: float, ke: float) -> SolveStatus | None:
+        """History, progress report, cancellation and time limit (every
+        ``progress_interval`` iterations); a status when the solve must stop."""
+        elapsed = time.perf_counter() - t_start
+        history.append((iteration, residual))
+        if progress is not None:
+            progress(
+                SolverProgress(
+                    iteration, settings.max_iterations, residual, ke, elapsed, settings.tolerance
+                )
+            )
+        if cancel is not None and cancel.cancelled:
+            return "cancelled"
+        if settings.time_limit is not None and elapsed > settings.time_limit:
+            return "time_limit"
+        return None
+
     if residual < settings.tolerance:
         status = "converged"
+    elif use_compiled_iterations():
+        iteration, status, residual, ke, resets, x, r, ext, data = _compiled_iterations(
+            system, x, r_free, mass, residual, checkpoint
+        )
     else:
         for iteration in range(1, settings.max_iterations + 1):
             accel = r_free / mass[:, None]
@@ -960,24 +1163,9 @@ def solve(
                 status = "converged"
                 break
             if iteration % settings.progress_interval == 0:
-                elapsed = time.perf_counter() - t_start
-                history.append((iteration, residual))
-                if progress is not None:
-                    progress(
-                        SolverProgress(
-                            iteration,
-                            settings.max_iterations,
-                            residual,
-                            ke,
-                            elapsed,
-                            settings.tolerance,
-                        )
-                    )
-                if cancel is not None and cancel.cancelled:
-                    status = "cancelled"
-                    break
-                if settings.time_limit is not None and elapsed > settings.time_limit:
-                    status = "time_limit"
+                stop = checkpoint(iteration, residual, ke)
+                if stop is not None:
+                    status = stop
                     break
     run_time = time.perf_counter() - t_start
     history.append((iteration, residual))

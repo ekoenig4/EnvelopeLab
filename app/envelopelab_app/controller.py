@@ -287,10 +287,15 @@ class WorkspaceController(QObject):
             "set_profile_from_design",
             "set_profile_from_file",
             "set_profile_from_reference",
+            "compensate_profile",
+            "adopt_solved_profile",
+            "fit_flight_shape",
+            "restore_profile_target",
+            "snap_profile_to_hold",
         ):
             kwargs.setdefault("keep_rows_fitted", self.prefs.keep_rows_fitted)
         result = self.attempt(func, self.session, *args, **kwargs)
-        if name == "set_lock":
+        if name in ("set_lock", "clear_profile_target"):
             self.bump()
             self.stateChanged.emit()
         return result

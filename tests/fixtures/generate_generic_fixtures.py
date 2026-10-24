@@ -17,12 +17,16 @@ with $INSUNITS = 4:
 * ``standard_gore/design.elproj``: the same 8-gore design as an EnvelopeLab project (design
   document with the control points below, rows fitted to its meridian, 25 mm allowance,
   100 degC internal at ISA sea level), used by the GUI workflow tests.
+* ``full_size_gore/design.elproj``: a full-size envelope as an EnvelopeLab project: the
+  ``smalley_90k`` natural shape (20 gores, cut between its mouth and vent stations) held at
+  2600 m^3 envelope volume, 12 equal rows, 100 degC internal at ISA sea level, 400 kg
+  payload. Test data only: nothing here says the design is airworthy.
 * ``spherical_envelope/gores.dxf``: 12 gores x 5 rows of a sphere of radius 7 m between
   latitudes -72 deg (mouth) and +78 deg (crown ring), CUT and SEW outlines. Used for the
   preview-solver smoke solve and mesh-refinement study.
 
-Pass fixture names (``standard_gore``, ``standard_gore_project``, ``special_shape``,
-``spherical_envelope``) to
+Pass fixture names (``standard_gore``, ``standard_gore_project``, ``full_size_gore``,
+``special_shape``, ``spherical_envelope``) to
 regenerate only those; the default regenerates all.
 """
 
@@ -129,6 +133,30 @@ def standard_gore_project() -> None:
     save_project(project, HERE / "standard_gore" / "design.elproj")
 
 
+FULL_SIZE_VOLUME = 2600.0  # m^3, envelope volume from the mouth to the top opening
+
+
+def full_size_gore() -> None:
+    from envelopelab.io.shape_file import load_shape_file
+    from envelopelab.project.model import DesignState, Project, save_project
+
+    shape = load_shape_file(HERE / "smalley_90k" / "shape.yaml")
+    hold = {k: v for k, v in shape.hold.items() if k != "nominal_volume"}
+    hold["envelope_volume"] = FULL_SIZE_VOLUME
+    solution = shape.solve(hold)
+    design = shape.design(
+        solution,
+        name="generic full-size gore fixture (2600 m^3)",
+        row_count=12,
+        payload_mass=400.0,
+    )
+    # Fixed metadata so that regenerating the fixture gives an identical file.
+    design.meta.version_id = "v1-fixture"
+    design.meta.created = design.meta.modified = datetime(2026, 10, 23, tzinfo=UTC)
+    project = Project(state=DesignState(design=design.with_updated_hash()))
+    save_project(project, HERE / "full_size_gore" / "design.elproj")
+
+
 def _circle(radius: float, n: int = 128) -> FloatArray:
     a = np.linspace(0.0, 2 * math.pi, n, endpoint=False)
     return np.column_stack([radius * np.cos(a), radius * np.sin(a)])
@@ -218,6 +246,7 @@ def spherical_envelope() -> None:
 FIXTURES = {
     "standard_gore": standard_gore,
     "standard_gore_project": standard_gore_project,
+    "full_size_gore": full_size_gore,
     "special_shape": special_shape,
     "spherical_envelope": spherical_envelope,
 }

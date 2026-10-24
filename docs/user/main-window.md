@@ -25,6 +25,41 @@ Mode tabs repeat the indicators of the panels they hold: **●** for unsaved cha
 changing the seam allowance, until you press **Regenerate patterns**). A stale panel's
 title is drawn in red.
 
+## Moving around the 3D view
+
+Drag with the left mouse button to orbit, the right button or the wheel to zoom, and the
+middle button (or Shift and the left button) to pan. The row of buttons under the 3D
+options places the camera exactly:
+
+| Button | Key | View |
+|---|---|---|
+| **Front** / **Back** | 1 / Ctrl+1 | From the front or back, mouth down |
+| **Side** / **Other side** | 3 / Ctrl+3 | From either side, mouth down |
+| **Top** / **Into mouth** | 7 / Ctrl+7 | Down onto the crown, or up into the mouth |
+| **Isometric** | 0 | Three-quarter view from above |
+| **Fit** | Home | The whole scene, keeping the current direction |
+| **◀ Gore** / **Gore ▶** | 4 / 6 | Turn the view one gore (360° / gore count) about the envelope axis |
+| **Orthographic** | 5 | Parallel projection on or off: no perspective, so profiles and lengths compare directly |
+
+A second row places the camera on a part of the envelope and keeps viewpoints:
+
+* **Face seam** / **Face gore** with the number beside them: look straight at vertical
+  seam *k*, or at the centre of gore *k*, mouth down, with it running up the middle of
+  the view. Seams and gores are numbered as in the Rigging panel (gore *k* lies between
+  seams *k − 1* and *k*).
+* **Zoom to layer**: fit the view to the layer selected in the layer list (the design
+  surface, a run's result, the rest mesh, …), keeping the viewing direction.
+* **Views**: *Save view* remembers the current viewpoint and projection under a name.
+  Choose it in the list to go back there, or *Delete view* to forget it. Saved views
+  belong to the project file and are kept between sessions (in the application settings,
+  not in the project).
+
+The number keys follow the numeric-keypad views of common 3D programs, and they work on
+the number row too. They act when the 3D view or its panel has the keyboard focus (click
+the view first). Stepping by gores keeps a seam or a gore centre in the same place on the
+screen, so the gores can be checked one by one. The chosen view stays when the scene
+changes, for example when a run finishes.
+
 ## Resizing
 
 Every divider between areas can be dragged. A mode page or form that needs more space

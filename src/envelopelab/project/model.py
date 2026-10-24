@@ -12,7 +12,8 @@ JSON file that wraps one design document (unchanged, in the design schema) with
   mesh size, material sources, load case, design hash and the input fingerprint that
   decides whether the result is still current). Result arrays are kept next to the
   project in ``<name>.elproj.runs/<run_id>.npz``.
-* **constraint locks** of the standard-gore editor;
+* **constraint locks** of the standard-gore editor, and the **profile target** (the
+  intended inflated tape line) while the profile is compensated for the solved shape;
 * the **special shapes** placed on the envelope (domes, tubes, revolved and mesh shapes,
   :mod:`envelopelab.project.shapes`), part of the design state since version 2.
 
@@ -195,6 +196,35 @@ class ConstraintLocks(BaseModel):
     mouth_diameter: float | None = Field(default=None, gt=0.0)
     top_diameter: float | None = Field(default=None, gt=0.0)
     gore_count: int | None = Field(default=None, ge=3)
+
+
+class ProfileTarget(BaseModel):
+    """Intended inflated tape line of a standard-gore design under profile compensation.
+
+    While a design's profile is compensated for the solved shape
+    (:func:`envelopelab.project.edits.compensate_profile`), the drawn control points are
+    the *cut* line and this is the line the builder wants to fly. Like the locks it is an
+    editor setting, not part of the design state.
+
+    Attributes
+    ----------
+    control_points : list of (float, float)
+        Radius and height, m, mouth first (at least two).
+    interpolation : {"spline", "linear"}
+        How the points are joined.
+    created : datetime
+        When compensation started (UTC).
+    step_deviations : list of float
+        Largest distance of the solved tape line from this target before each
+        compensation step, m (oldest first): the convergence history of the compensation.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    control_points: list[tuple[float, float]] = Field(min_length=2)
+    interpolation: Literal["spline", "linear"] = "spline"
+    created: datetime = Field(default_factory=lambda: utc_now())
+    step_deviations: list[float] = Field(default_factory=list)
 
 
 class DesignState(BaseModel):
@@ -391,6 +421,7 @@ class Project(BaseModel):
     format_version: Literal[2] = PROJECT_FORMAT_VERSION
     state: DesignState
     locks: ConstraintLocks = Field(default_factory=ConstraintLocks)
+    profile_target: ProfileTarget | None = None
     snapshots: list[Snapshot] = Field(default_factory=list)
     versions: list[DesignVersion] = Field(default_factory=list)
     provenance: list[ProvenanceEntry] = Field(default_factory=list)
@@ -444,6 +475,9 @@ def migrate_project_data(raw: dict[str, Any]) -> dict[str, Any]:
 
 def _project_to_data(project: Project) -> dict[str, Any]:
     data = project.model_dump(mode="json", by_alias=True)
+    if data.get("profile_target") is None:
+        # Files without compensation stay as they were before the key existed.
+        data.pop("profile_target", None)
     data["state"] = state_to_data(project.state)
     for snap, raw in zip(project.snapshots, data["snapshots"], strict=True):
         raw["state"] = state_to_data(snap.state)

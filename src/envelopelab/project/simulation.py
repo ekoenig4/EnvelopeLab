@@ -42,7 +42,7 @@ from envelopelab.assembly.pipeline import BuildPackResult, import_build_pack
 from envelopelab.assembly.spec import MeshOptions
 from envelopelab.atmosphere import gas_density
 from envelopelab.design.model import DesignDocument
-from envelopelab.geometry.gore import PanelRow
+from envelopelab.geometry.gore import LENGTH_TOLERANCE, PanelRow
 from envelopelab.geometry.polygon import offset_polygon
 from envelopelab.materials.membrane import MaterialValue, MembraneMaterial, TapeMaterial
 from envelopelab.materials.repository import (
@@ -59,10 +59,12 @@ from envelopelab.solvers.dynamic_relaxation import (
     solve,
 )
 from envelopelab.solvers.model import (
+    EdgeTable,
     OperatingConditions,
     SolverModel,
     SolverSettings,
     model_from_rest_model,
+    tape_line_rest_lengths,
 )
 from envelopelab.solvers.simulation import SimulationResult, from_preview
 
@@ -359,6 +361,52 @@ class BuiltModel:
         return sorted(tags)
 
 
+def cut_tapes_to_tape_line(
+    model: SolverModel, build: BuildPackResult, design: DesignDocument
+) -> None:
+    """Set the rest length of every vertical load tape to the design's tape line.
+
+    Each tape edge gets its length along the gore axis of the flat pattern
+    (:func:`~envelopelab.solvers.model.tape_line_rest_lengths`); the gore edge it is sewn
+    to is longer by the fabric eased onto it. A row's tape must then total the row's
+    finished height (its tape length) within 1 mm.
+
+    Parameters
+    ----------
+    model : SolverModel
+        Model of the design's build pack; its vertical-tape cables are changed in place.
+    build : BuildPackResult
+        The build pack (its seam graph names the vertical gore seams).
+    design : DesignDocument
+        Standard-gore design, m.
+
+    Raises
+    ------
+    BuildError
+        When a row's tape does not total the row's tape length (the pattern is not drawn
+        with the tape length along its axis, e.g. a rotated or hand-made pattern).
+    """
+    assert design.gores is not None and build.rest_model is not None
+    rest = build.rest_model
+    vertical = {s.seam_id for s in rest.assembly.graph.seams if s.seam_type == "vertical_gore"}
+    heights = {row.letter: row.finished_height for row in design.gores.panel_rows}
+    mesh = rest.mesh
+    table = EdgeTable(mesh.triangles, mesh.rest_uv)
+    for cable in model.cables:
+        if cable.name not in vertical:
+            continue
+        lengths = tape_line_rest_lengths(cable.edges, mesh.triangles, mesh.rest_uv, table=table)
+        row = cable.name.rsplit(":", 1)[-1]
+        expected = heights.get(row)
+        if expected is None or abs(float(lengths.sum()) - expected) > LENGTH_TOLERANCE:
+            raise BuildError(
+                f"tape {cable.name}: the pattern gives {float(lengths.sum()):.4f} m of tape "
+                f"line, the row's tape length is {expected} m; tapes cut to the tape line "
+                "need a pattern drawn with the tape length along its axis"
+            )
+        cable.rest_lengths = lengths
+
+
 def build_solver_model(
     design: DesignDocument,
     patterns: PatternSet,
@@ -447,6 +495,8 @@ def build_solver_model(
         )
     except ValueError as exc:
         raise BuildError(str(exc)) from exc
+    if t.vertical_length == "tape_line":
+        cut_tapes_to_tape_line(model, build, design)
     design_hash = design.compute_content_hash()
     model.source_hash = design_hash
     return BuiltModel(model, build, mesh_mm, design_hash, findings)
@@ -512,7 +562,8 @@ def run_record(
     -------
     (RunRecord, dict of str to ndarray)
         Record, and positions / initial positions (m), triangles, principal resultants
-        (N/m) and wrinkle state for the 3D view.
+        (N/m) and wrinkle state for the 3D view, and the gore count of a ring design (for
+        :func:`envelopelab.project.profile_match.solved_meridian`).
     """
     iterations = (
         int(result.residual_history[-1][0])
@@ -561,6 +612,10 @@ def run_record(
         "triangles": np.asarray(result.triangles, dtype=np.int64),
         "principal": np.asarray(result.principal, dtype=np.float64),
     }
+    rings = built.build.spec.rings
+    if rings:
+        # Lets the editor find the load tapes of a run after the gore count was edited.
+        arrays["gore_count"] = np.array([rings[0].gore_count], dtype=np.int64)
     if result.wrinkle_state is not None:
         arrays["wrinkle_state"] = np.asarray(result.wrinkle_state, dtype=np.int8)
     return record, arrays

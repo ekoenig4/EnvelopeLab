@@ -48,6 +48,9 @@ def test_progress_reports_every_job_without_changing_results(ccx: CalculixInstal
     assert reports[-1].job == "done" and reports[-1].fraction == 1.0
     assert {r.job for r in reports} == {"held", "release", "done"}
     assert all(0.0 <= r.fraction <= 1.0 for r in reports)
+    # Every pass ends with a report of its out-of-balance, and job progress is in [0, 1].
+    assert any(r.pass_ended for r in reports)
+    assert all(0.0 <= r.job_fraction <= 1.0 for r in reports)
     np.testing.assert_array_equal(with_progress.positions, plain.positions)
     assert with_progress.converged == plain.converged
 

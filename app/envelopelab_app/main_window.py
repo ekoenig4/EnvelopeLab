@@ -96,6 +96,7 @@ class MainWindow(QMainWindow):
         self.resize(1500, 950)
 
         self.gore_editor = GoreEditor(self.controller)
+        self.gore_editor.solved_shape.attach_simulation(self.simulation)
         use_3d = self.prefs.enable_3d if enable_3d is None else enable_3d
         self.design_tree = DesignTreePanel(self.controller)
         self.properties = PropertiesPanel(self.controller)
@@ -105,6 +106,7 @@ class MainWindow(QMainWindow):
         self.view3d = View3DPanel(
             self.controller, enable_renderer=use_3d, defer_renderer=interactive
         )
+        self.view3d.settings = settings  # saved 3D viewpoints, per project
         self.patterns = PatternPanel(self.controller)
         self.history = HistoryPanel(self.controller)
         self.rigging = RiggingPanel(self.controller)

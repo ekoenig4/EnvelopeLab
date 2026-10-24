@@ -54,12 +54,28 @@ from envelopelab.project.gore_design import (
     Interpolation,
     SegmentLayout,
     control_arrays,
+    design_profile,
     design_seam_bows,
     profile_equator,
     profile_from_arrays,
     profile_layout,
     row_zone,
     seam_fractions,
+)
+from envelopelab.project.model import RunRecord
+from envelopelab.project.profile_match import (
+    SEGMENTS_REFUSAL,
+    ProfileUpdate,
+    RunShape,
+    SolvedMeridian,
+    latest_run_shape,
+    station_points,
+    target_profile,
+)
+from envelopelab.project.profile_physics import (
+    check_design,
+    design_load,
+    natural_design_shape,
 )
 from envelopelab.project.references import (
     add_reference,
@@ -70,8 +86,11 @@ from envelopelab.project.references import (
     snapshot_reference,
     update_reference,
 )
+from envelopelab.project.session import ProjectSession
+from envelopelab.solvers.axisymmetric import AxisymmetricLoad, MembraneCheck, membrane_check
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.refresh import Refresher
+from envelopelab_app.simulation import PREVIEW, SimulationManager
 
 HANDLE_RADIUS = 6.0  # px
 
@@ -180,6 +199,7 @@ class ProfileCanvas(QGraphicsView):
         self._drag_start: QPointF | None = None
         self._drag_points: tuple[np.ndarray, np.ndarray] | None = None
         self._drag_delta = (0.0, 0.0)
+        self._points_extent = (1.0, 0.0, 1.0)
         self._curve = QGraphicsPathItem()
         self._curve.setPen(QPen(QColor(HANDLE_COLOR), 0))
         self._mirror = QGraphicsPathItem()
@@ -226,6 +246,22 @@ class ProfileCanvas(QGraphicsView):
         #: Parachute overlap along the tape below the top opening, m (None: no parachute).
         self.seal_overlap: float | None = None
         self.labels: list[QGraphicsSimpleTextItem] = []
+        #: Ghost lines (solved tape lines, compensation target) by key: (line, mirror).
+        self.ghosts: dict[str, tuple[QGraphicsPathItem, QGraphicsPathItem]] = {}
+        self._ghost_data: dict[str, tuple[np.ndarray, np.ndarray, QPen]] = {}
+        self._ghost_group: dict[str, str] = {}
+        #: Load of the live membrane check (None: off); compressed spans are drawn red.
+        self.stress_load: AxisymmetricLoad | None = None
+        self.compression = QGraphicsPathItem()
+        red = QPen(QColor("#d62728"), 5.0)
+        red.setCosmetic(True)
+        self.compression.setPen(red)
+        self.compression.setZValue(5)
+        self.compression.setToolTip(
+            "Needs compression under load: the fabric cannot hold this part of the shape"
+        )
+        self.scene().addItem(self.compression)
+        self._extent = (0.0, 0.0, 0.0)  # largest r, lowest and highest z of the ghosts, m
         # A bound slot: Qt drops it when the view is destroyed, before the scene's items.
         self.scene().selectionChanged.connect(self._scene_selection)
 
@@ -270,18 +306,85 @@ class ProfileCanvas(QGraphicsView):
         self.scene().blockSignals(blocker)
         self.pointsSelected.emit()
         self._draw(r, z)
-        # The view holds the design and every visible reference.
+        # The view holds the design, every visible reference and the ghost lines.
         all_r = np.concatenate([r, *(ref[1] for ref in self.references)])
         all_z = np.concatenate([z, *(ref[2] for ref in self.references)])
-        span = max(float(np.max(all_r)), float(np.ptp(all_z)), 1e-3)
+        self._points_extent = (float(np.max(all_r)), float(np.min(all_z)), float(np.max(all_z)))
+        self._fit()
+
+    def _fit(self) -> None:
+        r_pts, z_lo, z_hi = self._points_extent
+        r_max = max(r_pts, self._extent[0]) if self.ghosts else r_pts
+        if self.ghosts:
+            z_lo, z_hi = min(z_lo, self._extent[1]), max(z_hi, self._extent[2])
+        span = max(r_max, z_hi - z_lo, 1e-3)
         rect = QRectF(
-            -1.1 * float(np.max(all_r)),
-            -float(np.max(all_z)) - 0.1 * span,
-            2.2 * float(np.max(all_r)) + 1e-3,
-            float(np.ptp(all_z)) + 0.2 * span,
+            -1.1 * r_max, -z_hi - 0.1 * span, 2.2 * r_max + 1e-3, (z_hi - z_lo) + 0.2 * span
         )
         self.scene().setSceneRect(rect)
         self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+
+    def set_ghosts(
+        self, ghosts: dict[str, tuple[np.ndarray, np.ndarray, QPen]], group: str = "solved"
+    ) -> None:
+        """Show ghost lines ``{key: (r, z, pen)}`` (m) behind the profile, mirrored. Each
+        ``group`` (solved runs, natural shape) replaces only its own lines."""
+        self._ghost_data = {
+            k: v for k, v in self._ghost_data.items() if self._ghost_group.get(k) != group
+        }
+        for key, value in ghosts.items():
+            self._ghost_data[key] = value
+            self._ghost_group[key] = group
+        for line, mirror in self.ghosts.values():
+            self.scene().removeItem(line)
+            self.scene().removeItem(mirror)
+        self.ghosts = {}
+        extent = [0.0, math.inf, -math.inf]
+        for key, (r, z, pen) in self._ghost_data.items():
+            path, flipped = QPainterPath(), QPainterPath()
+            path.moveTo(float(r[0]), float(-z[0]))
+            flipped.moveTo(float(-r[0]), float(-z[0]))
+            for a, b in zip(r[1:], z[1:], strict=True):
+                path.lineTo(float(a), float(-b))
+                flipped.lineTo(float(-a), float(-b))
+            items = (QGraphicsPathItem(path), QGraphicsPathItem(flipped))
+            for item in items:
+                item.setPen(pen)
+                item.setZValue(-1)
+                self.scene().addItem(item)
+            self.ghosts[key] = items
+            extent = [
+                max(extent[0], float(np.max(r))),
+                min(extent[1], float(np.min(z))),
+                max(extent[2], float(np.max(z))),
+            ]
+        if self.ghosts:
+            self._extent = (extent[0], extent[1], extent[2])
+        if self.handles:
+            self._fit()
+
+    def set_stress_load(self, load: AxisymmetricLoad | None) -> None:
+        """Check the profile under ``load`` while it is drawn (None: no check)."""
+        self.stress_load = load
+        if self.handles:
+            self.preview()
+        else:
+            self.compression.setPath(QPainterPath())
+
+    def _draw_compression(self, profile: MeridianProfile) -> None:
+        """Spans that need hoop or meridional compression, thick red over the curve."""
+        path = QPainterPath()
+        if self.stress_load is not None:
+            try:
+                bad = ~membrane_check(profile, self.stress_load).holds
+            except ValueError:
+                bad = np.zeros(profile.r.size, dtype=bool)
+            for i in range(1, profile.r.size):
+                if bad[i] or bad[i - 1]:
+                    if i == 1 or not (bad[i - 1] or (i >= 2 and bad[i - 2])):
+                        path.moveTo(float(profile.r[i - 1]), float(-profile.z[i - 1]))
+                    path.lineTo(float(profile.r[i]), float(-profile.z[i]))
+        self.compression.setPath(path)
 
     def clear(self) -> None:
         """No design."""
@@ -304,6 +407,9 @@ class ProfileCanvas(QGraphicsView):
             self.scene().removeItem(item)
         self.reference_items = []
         self._clear_labels()
+        self._ghost_data, self._ghost_group = {}, {}
+        self.set_ghosts({})
+        self.compression.setPath(QPainterPath())
 
     def current_points(self) -> tuple[np.ndarray, np.ndarray]:
         """Positions of the handles (m)."""
@@ -418,6 +524,7 @@ class ProfileCanvas(QGraphicsView):
         self._draw_equator(profile)
         self._draw_openings(profile)
         self._draw_references()
+        self._draw_compression(profile)
 
     def _label(
         self, text: str, r: float, z: float, colour: str, tip: str, above: bool = False
@@ -588,6 +695,569 @@ class ProfileCanvas(QGraphicsView):
     def resizeEvent(self, event: object) -> None:  # noqa: N802
         super().resizeEvent(event)  # type: ignore[arg-type]
         self.fitInView(self.scene().sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
+
+NATURAL_COLOUR = "#17becf"
+
+
+class ShapePhysicsPanel(QGroupBox):
+    """Whether the drawn profile can keep its shape under load, and the snap to one that
+    can (:mod:`envelopelab.solvers.axisymmetric`, :mod:`envelopelab.project.profile_physics`).
+
+    With the check on, the canvas draws in thick red every span whose shape would need
+    hoop or meridional compression, live while points are dragged; the status gives how
+    much of the tape that is. *Show natural shape* draws the zero-hoop-stress shape with
+    the same mouth, top opening and tape length. *Snap to a shape that holds* limits the
+    curvature of the failing spans only (one undoable edit).
+    """
+
+    def __init__(self, controller: WorkspaceController, canvas: ProfileCanvas) -> None:
+        super().__init__("Shape under load")
+        self.setObjectName("shapePhysicsBox")
+        self.controller = controller
+        self.canvas = canvas
+        layout = QVBoxLayout(self)
+        self.check_on = QCheckBox("Check the shape under load")
+        self.check_on.setObjectName("checkShape")
+        self.check_on.setChecked(True)
+        self.check_on.setToolTip(
+            "Membrane statics of the drawn profile at the operating conditions: spans "
+            "that would need compression (red) cannot keep their shape."
+        )
+        self.check_on.toggled.connect(lambda _on: self.refresh())
+        self.natural_on = QCheckBox("Show natural shape (zero hoop stress)")
+        self.natural_on.setObjectName("showNatural")
+        self.natural_on.setStyleSheet(f"color: {NATURAL_COLOUR}; font-weight: bold;")
+        self.natural_on.setToolTip(
+            "The shape whose load the tapes carry alone, with the same mouth, top opening "
+            "and tape length."
+        )
+        self.natural_on.toggled.connect(lambda _on: self.refresh())
+        self.status = QLabel()
+        self.status.setObjectName("shapeStatus")
+        self.status.setWordWrap(True)
+        self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self.tolerance = QDoubleSpinBox()
+        self.tolerance.setObjectName("snapTolerance")
+        self.tolerance.setRange(0.5, 50.0)
+        self.tolerance.setDecimals(1)
+        self.tolerance.setValue(5.0)
+        self.tolerance.setSuffix(" mm")
+        self.tolerance.setToolTip("Control points follow the shape that holds within this.")
+        self.snap = QPushButton("Snap to a shape that holds")
+        self.snap.setObjectName("snapToHold")
+        self.snap.setToolTip(
+            "Limit the curvature where the drawn shape needs compression, keep it elsewhere "
+            "(mouth, top opening and tape length stay). One undoable edit."
+        )
+        self.snap.clicked.connect(self._snap)
+        form = QFormLayout()
+        form.addRow("Fit tolerance", self.tolerance)
+        for widget in (self.check_on, self.natural_on, self.status):
+            layout.addWidget(widget)
+        layout.addLayout(form)
+        layout.addWidget(self.snap)
+        self.result = QLabel()
+        self.result.setObjectName("snapResult")
+        self.result.setWordWrap(True)
+        layout.addWidget(self.result)
+
+    def refresh(self) -> None:
+        """Check the current design and draw what the check found."""
+        session = self.controller.session
+        design = self.controller.design
+        if session is None or design is None or design.gores is None:
+            self.canvas.set_stress_load(None)
+            self.canvas.set_ghosts({}, "natural")
+            return
+        try:
+            loaded = design_load(design, session.patterns, self.controller.fabrics)
+            check = check_design(design, session.patterns, self.controller.fabrics)
+        except ValueError as exc:
+            self.canvas.set_stress_load(None)
+            self.status.setText(f"No check: {exc}")
+            self.snap.setEnabled(False)
+            return
+        on = self.check_on.isChecked()
+        self.canvas.set_stress_load(loaded.load if on else None)
+        self.status.setText(_check_text(check, loaded.note) if on else "Check off.")
+        self.status.setStyleSheet(
+            "color: #b00020; font-weight: bold;" if on and check.compressed_fraction else ""
+        )
+        self.snap.setEnabled(bool(check.compressed_fraction or check.compressed_kinks))
+        ghosts: dict[str, tuple[np.ndarray, np.ndarray, QPen]] = {}
+        if self.natural_on.isChecked():
+            shape = natural_design_shape(design, session.patterns, self.controller.fabrics)
+            if shape.converged:
+                pen = QPen(QColor(NATURAL_COLOUR), 0, Qt.PenStyle.DashLine)
+                ghosts["natural"] = (np.asarray(shape.profile.r), np.asarray(shape.profile.z), pen)
+            else:
+                self.status.setText(
+                    self.status.text() + "\nNo natural shape found for these ends and length."
+                )
+        self.canvas.set_ghosts(ghosts, "natural")
+
+    def _snap(self) -> None:
+        result = self.controller.edit(
+            "snap_profile_to_hold", self.controller.fabrics, self.tolerance.value() / 1e3
+        )
+        if result is None:
+            return
+        self.controller.bump()
+        self.controller.stateChanged.emit()
+        if result.changed == 0.0:
+            self.result.setText("The drawn shape already holds: nothing changed.")
+            return
+        self.result.setText(
+            f"Snapped: {result.changed:.0%} of the tape changed, {result.points} control "
+            f"points within {result.fit_distance * 1e3:.1f} mm. Tape stretch and fabric "
+            "strain still grow the inflated shape slightly: run a solve and compensate."
+        )
+
+
+def _check_text(check: MembraneCheck, note: str) -> str:
+    """Status line of a membrane check (units in the text)."""
+    bad = ~check.holds
+    lines = []
+    if check.compressed_fraction > 0.0:
+        s = check.s[bad]
+        lines.append(
+            f"{check.compressed_fraction:.0%} of the tape (from {s.min():.2f} m to "
+            f"{s.max():.2f} m along it) needs compression under load: that part will not "
+            f"keep this shape (largest hoop compression {-np.nanmin(check.hoop):.0f} N/m, "
+            f"meridional {check.scale:.0f} N/m)."
+        )
+    else:
+        lines.append(
+            "The shape holds: hoop and meridional tension everywhere "
+            f"(meridional up to {check.scale:.0f} N/m)."
+        )
+    kinks = check.compressed_kinks
+    if kinks:
+        lines.append(
+            f"{len(kinks)} kink(s) would compress their horizontal tape (largest "
+            f"{-min(k.ring_force for k in kinks):.0f} N)."
+        )
+    if not np.all(check.evaluated):
+        lines.append("Near-horizontal spans are not checked.")
+    if note:
+        lines.append(note[0].upper() + note[1:] + ".")
+    return "\n".join(lines)
+
+
+#: Ghost line colours (Tableau palette, as the rest of the editor).
+GHOST_COLORS = {"envelopelab-preview": "#ff7f0e", "calculix": "#2ca02c", "target": "#9467bd"}
+SOLVERS = (("calculix", "CalculiX"), ("envelopelab-preview", "Preview"))
+
+
+class SolvedShapePanel(QGroupBox):
+    """Solved tape lines over the drawn profile, and the profile updates made from them.
+
+    Shows the latest preview and CalculiX run of the design as ghost lines on the canvas
+    with their deviation from the intended profile (the compensation target when there is
+    one, else the drawn profile), and offers *Compensate* and *Adopt*
+    (:mod:`envelopelab.project.profile_match`). Updates are allowed only from a current,
+    converged run; a stale or unconverged run is still drawn, flagged as such.
+
+    *Fit profile to simulated shape* is Adopt in one click: from the latest current,
+    converged run (the chosen solver first), or, without one, from a preview run it
+    starts (:meth:`attach_simulation`). An unconverged preview changes nothing.
+    """
+
+    def __init__(self, controller: WorkspaceController, canvas: ProfileCanvas) -> None:
+        super().__init__("Solved shape vs profile")
+        self.setObjectName("solvedShapeBox")
+        self.controller = controller
+        self.canvas = canvas
+        self.simulation: SimulationManager | None = None
+        self.fit_pending = False
+        self.result: tuple[str, str] | None = None  # message, design hash it belongs to
+        self._shape_cache: dict[str, tuple[tuple[object, ...], RunShape | None]] = {}
+        self.shapes: dict[str, RunShape | None] = {}
+        self.show_ghost: dict[str, QCheckBox] = {}
+        self.status: dict[str, QLabel] = {}
+        layout = QVBoxLayout(self)
+        for solver, text in SOLVERS:
+            box = QCheckBox(f"{text} tape line")
+            box.setObjectName(f"ghost_{solver}")
+            box.setChecked(True)
+            box.setStyleSheet(f"color: {GHOST_COLORS[solver]}; font-weight: bold;")
+            box.toggled.connect(lambda _on: self.refresh())
+            label = QLabel()
+            label.setObjectName(f"ghostStatus_{solver}")
+            label.setWordWrap(True)
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            self.show_ghost[solver], self.status[solver] = box, label
+            layout.addWidget(box)
+            layout.addWidget(label)
+        self.magnify = QSpinBox()
+        self.magnify.setObjectName("deviationScale")
+        self.magnify.setRange(1, 50)
+        self.magnify.setValue(1)
+        self.magnify.setPrefix("× ")
+        self.magnify.setToolTip(
+            "Draw the solved lines this many times further from the intended profile, to "
+            "see small deviations. The numbers are never scaled."
+        )
+        self.magnify.valueChanged.connect(lambda _v: self.refresh())
+        magnify_form = QFormLayout()
+        magnify_form.addRow("Show deviation", self.magnify)
+        layout.addLayout(magnify_form)
+        self.target_status = QLabel()
+        self.target_status.setObjectName("targetStatus")
+        self.target_status.setWordWrap(True)
+        self.target_status.setStyleSheet(f"color: {GHOST_COLORS['target']};")
+        layout.addWidget(self.target_status)
+        self.restore = QPushButton("Restore intended profile")
+        self.restore.setToolTip(
+            "Set the drawn profile back to the compensation target and stop compensating."
+        )
+        self.restore.clicked.connect(lambda: self.controller.edit("restore_profile_target"))
+        self.clear = QPushButton("Keep cut, clear target")
+        self.clear.setToolTip("Forget the compensation target; the drawn profile stays.")
+        self.clear.clicked.connect(lambda: self.controller.edit("clear_profile_target"))
+        target_buttons = QHBoxLayout()
+        target_buttons.addWidget(self.restore)
+        target_buttons.addWidget(self.clear)
+        layout.addLayout(target_buttons)
+
+        self.source = QComboBox()
+        self.source.setObjectName("updateSource")
+        for solver, text in SOLVERS:
+            self.source.addItem(text, solver)
+        self.source.setToolTip(
+            "Run whose tape line drives the update. Preview runs are much faster for the "
+            "first steps; verify the result with CalculiX."
+        )
+        self.source.activated.connect(lambda _i: self.refresh())
+        self.relaxation = QDoubleSpinBox()
+        self.relaxation.setObjectName("relaxation")
+        self.relaxation.setRange(0.1, 1.0)
+        self.relaxation.setSingleStep(0.1)
+        self.relaxation.setValue(1.0)
+        self.relaxation.setToolTip(
+            "Fraction of the measured offset corrected per compensation step; lower it if "
+            "a step does not reduce the deviation."
+        )
+        self.tolerance = QDoubleSpinBox()
+        self.tolerance.setObjectName("fitTolerance")
+        self.tolerance.setRange(0.5, 50.0)
+        self.tolerance.setDecimals(1)
+        self.tolerance.setValue(DEFAULT_FIT_TOLERANCE_MM)
+        self.tolerance.setSuffix(" mm")
+        self.tolerance.setToolTip(
+            "Control points are added until the new profile follows its target line within "
+            "this distance (the solved line is only known to about the mesh resolution)."
+        )
+        form = QFormLayout()
+        form.addRow("Update from", self.source)
+        form.addRow("Step factor", self.relaxation)
+        form.addRow("Fit tolerance", self.tolerance)
+        layout.addLayout(form)
+        self.compensate = QPushButton("Compensate towards intended profile")
+        self.compensate.setObjectName("compensateProfile")
+        self.compensate.setToolTip(
+            "Pre-distort the cut so the inflated tapes land on the intended profile (one "
+            "step; run the solver again and repeat until the deviation is small)."
+        )
+        self.compensate.clicked.connect(self._compensate)
+        self.adopt = QPushButton("Adopt solved shape")
+        self.adopt.setObjectName("adoptProfile")
+        self.adopt.setToolTip("Replace the drawn profile by the solved tape line.")
+        self.adopt.clicked.connect(self._adopt)
+        update_buttons = QHBoxLayout()
+        update_buttons.addWidget(self.compensate)
+        update_buttons.addWidget(self.adopt)
+        layout.addLayout(update_buttons)
+        self.fit = QPushButton("Fit profile to simulated shape")
+        self.fit.setObjectName("fitProfile")
+        self.fit.setStyleSheet("font-weight: bold;")
+        self.fit.setToolTip(
+            "Replace the drawn profile by the inflated tape line in one step (undoable). "
+            "Uses the latest current, converged run; without one, runs the preview first. "
+            "A segment profile becomes a spline."
+        )
+        self.fit.clicked.connect(self.fit_to_simulation)
+        layout.addWidget(self.fit)
+        self.flight = QCheckBox("Take out the stretch (cut the flight shape)")
+        self.flight.setObjectName("fitFlightShape")
+        self.flight.setChecked(True)
+        self.flight.setToolTip(
+            "Fit the inflated shape scaled back to the current tape length, with the mouth "
+            "and top opening kept, so the patterns are cut to the shape they fly in rather "
+            "than to their stretched size. Unticked, Fit adopts the inflated tape line as is "
+            "(like Adopt), and every repeat grows by the stretch."
+        )
+        layout.addWidget(self.flight)
+        self.update_status = QLabel()
+        self.update_status.setObjectName("updateStatus")
+        self.update_status.setWordWrap(True)
+        layout.addWidget(self.update_status)
+
+    def refresh(self) -> None:
+        """Read the latest runs, draw their ghosts and state what may be done."""
+        session = self.controller.session
+        design = self.controller.design
+        if session is None or design is None or design.gores is None:
+            self.canvas.set_ghosts({})
+            return
+        ghosts: dict[str, tuple[np.ndarray, np.ndarray, QPen]] = {}
+        target = session.project.profile_target
+        reference = "intended profile" if target is not None else "drawn profile"
+        intended = design_profile(design) if target is None else target_profile(target)
+        scale = self.magnify.value()
+        for solver, text in SOLVERS:
+            shape = self._run_shape(session, solver)
+            self.shapes[solver] = shape
+            self.status[solver].setText(_shape_text(text, shape, reference))
+            self.status[solver].setStyleSheet(_shape_style(shape))
+            if (
+                shape is not None
+                and shape.solved is not None
+                and self.show_ghost[solver].isChecked()
+            ):
+                pen = QPen(QColor(GHOST_COLORS[solver]), 0, Qt.PenStyle.DashLine)
+                if not (shape.record.converged and shape.current):
+                    pen.setStyle(Qt.PenStyle.DotLine)
+                r, z = shape.solved.r, shape.solved.z
+                if scale > 1:
+                    base = station_points(intended, shape.solved.station)
+                    r = base[:, 0] + scale * (r - base[:, 0])
+                    z = base[:, 1] + scale * (z - base[:, 1])
+                ghosts[solver] = (r, z, pen)
+        if target is not None:
+            line = target_profile(target)
+            ghosts["target"] = (
+                np.asarray(line.r),
+                np.asarray(line.z),
+                QPen(QColor(GHOST_COLORS["target"]), 0, Qt.PenStyle.DashDotLine),
+            )
+            history = " → ".join(f"{d * 1e3:.0f}" for d in target.step_deviations)
+            self.target_status.setText(
+                "Compensating: the drawn points are the cut line; the dash-dot line is the "
+                f"intended profile (set {target.created:%Y-%m-%d %H:%M} UTC). Largest "
+                f"deviation before each step: {history} mm."
+            )
+        else:
+            self.target_status.setText(
+                "No compensation target: the drawn profile is the intended shape."
+            )
+        self.restore.setEnabled(target is not None)
+        self.clear.setEnabled(target is not None)
+        self.canvas.set_ghosts(ghosts)
+        shape = self.shapes.get(self.source.currentData())
+        refusal = (
+            f"No {self.source.currentText()} run yet: run one to compare."
+            if shape is None
+            else shape.refusal
+        )
+        segments = design.gores.profile_interpolation == "segments"
+        self.adopt.setEnabled(not refusal)
+        if not refusal and segments:
+            refusal = (
+                "Compensate: " + SEGMENTS_REFUSAL + ". Adopt and Fit make the profile a spline."
+            )
+            self.compensate.setEnabled(False)
+        else:
+            self.compensate.setEnabled(not refusal)
+        self._update_fit()
+        if self.fit_pending:
+            return
+        if self.result is not None and self.result[1] == session.content_hash():
+            self.update_status.setText(self.result[0])
+        else:
+            self.result = None
+            self.update_status.setText(refusal)
+
+    def _run_shape(self, session: ProjectSession, solver: str) -> RunShape | None:
+        """:func:`latest_run_shape`, kept while the run, the design and the target are
+        unchanged (reading a run's tape line and its deviation takes tens of ms on a
+        full-size mesh, and the panel refreshes on every edit and run event)."""
+        record = next((r for r in reversed(session.project.runs) if r.solver == solver), None)
+        if record is None:
+            return None
+        target = session.project.profile_target
+        key = (
+            record.run_id,
+            session.run_status(record),
+            session.content_hash(),
+            None if target is None else target.model_dump_json(),
+        )
+        cached = self._shape_cache.get(solver)
+        if cached is not None and cached[0] == key:
+            return cached[1]
+        shape = latest_run_shape(session, solver)
+        self._shape_cache[solver] = (key, shape)
+        return shape
+
+    def _usable_shape(self) -> RunShape | None:
+        """The run Fit adopts: the chosen solver's latest run if usable, else the other's."""
+        preferred = self.source.currentData()
+        for solver in (preferred, *(s for s, _ in SOLVERS if s != preferred)):
+            shape = self.shapes.get(solver)
+            if shape is not None and shape.usable:
+                return shape
+        return None
+
+    def _update_fit(self) -> None:
+        """Enable *Fit* when there is a run to adopt or a preview can be started."""
+        running = self.simulation is not None and self.simulation.running
+        can_run = self.simulation is not None and not running
+        usable = self._usable_shape() is not None
+        self.fit.setEnabled(not self.fit_pending and (usable or can_run))
+
+    def attach_simulation(self, simulation: SimulationManager) -> None:
+        """Let *Fit profile to simulated shape* start a preview run when it has no
+        current converged run to fit to."""
+        self.simulation = simulation
+        simulation.finished.connect(self._run_finished)
+        simulation.failed.connect(self._run_failed)
+        # A run starting or ending changes only whether Fit can start one.
+        simulation.started.connect(lambda _solver: self._update_fit())
+        simulation.idle.connect(self._update_fit)
+
+    def fit_to_simulation(self) -> None:
+        """Adopt the latest usable run's tape line; without one, run the preview first."""
+        session = self.controller.session
+        if session is None or self.fit_pending:
+            return
+        shape = self._usable_shape()
+        if shape is not None:
+            self._adopt_shape(shape)
+            return
+        if self.simulation is None:
+            self.update_status.setText("No current converged run to fit to: run one first.")
+            return
+        if self.simulation.running:
+            self.update_status.setText("A run is in progress: fit again when it has ended.")
+            return
+        if not self.simulation.start(PREVIEW):
+            self.update_status.setText(
+                f"The preview could not be started. {self.simulation.last_message}".strip()
+            )
+            return
+        self.fit_pending = True
+        self.fit.setEnabled(False)
+        self.update_status.setText(
+            "Running the preview to fit the profile to (progress in the status bar)…"
+        )
+
+    def _run_finished(self, record: RunRecord) -> None:
+        if not self.fit_pending:
+            return
+        self.fit_pending = False
+        session = self.controller.session
+        shape = None if session is None else self._run_shape(session, record.solver)
+        if shape is None or not shape.usable:
+            why = shape.refusal if shape is not None else "its result could not be read"
+            self._show_result(
+                f"Preview NOT CONVERGED or unusable ({why}): the profile was not changed."
+            )
+            self.refresh()
+            return
+        self._adopt_shape(shape)
+
+    def _run_failed(self, message: str) -> None:
+        if not self.fit_pending:
+            return
+        self.fit_pending = False
+        self._show_result(f"Fit stopped, the profile was not changed: {message}")
+        self.refresh()
+
+    def _adopt_shape(self, shape: RunShape) -> None:
+        if shape.solved is None:
+            return
+        name = dict(SOLVERS).get(shape.record.solver, shape.record.solver)
+        tolerance = self.tolerance.value() / 1e3
+        if self.flight.isChecked():
+            update = self.controller.edit("fit_flight_shape", shape.solved, tolerance)
+            what = f"Fitted to the {name} run's flight shape"
+            if update is not None:
+                what += f" ({100 * update.stretch:.2f} % stretch taken out)"
+        else:
+            update = self.controller.edit("adopt_solved_profile", shape.solved, tolerance)
+            what = f"Fitted to the {name} run"
+        self._report(update, what)
+
+    def _solved(self) -> SolvedMeridian | None:
+        shape = self.shapes.get(self.source.currentData())
+        if shape is None or not shape.usable:
+            return None
+        return shape.solved
+
+    def _compensate(self) -> None:
+        solved = self._solved()
+        if solved is None:
+            return
+        update = self.controller.edit(
+            "compensate_profile",
+            solved,
+            self.relaxation.value(),
+            self.tolerance.value() / 1e3,
+        )
+        self._report(update, "Compensated")
+
+    def _adopt(self) -> None:
+        solved = self._solved()
+        if solved is None:
+            return
+        update = self.controller.edit("adopt_solved_profile", solved, self.tolerance.value() / 1e3)
+        self._report(update, "Adopted")
+
+    def _report(self, update: ProfileUpdate | None, what: str) -> None:
+        if update is None:
+            return
+        self.controller.bump()
+        self._show_result(
+            f"{what}: {len(update.points)} control points, within "
+            f"{update.fit_error * 1e3:.1f} mm of the target line. The runs are now stale: "
+            "run the solver again to see the new shape."
+        )
+        self.controller.stateChanged.emit()
+
+    def _show_result(self, message: str) -> None:
+        """Show the outcome of an update until the design changes again (later refreshes,
+        such as the one when a run's thread ends, keep it)."""
+        session = self.controller.session
+        self.result = (message, session.content_hash() if session is not None else "")
+        self.update_status.setText(message)
+
+
+#: Default fit tolerance of profile updates, mm.
+DEFAULT_FIT_TOLERANCE_MM = 5.0
+
+
+def _shape_text(name: str, shape: RunShape | None, reference: str) -> str:
+    if shape is None:
+        return f"No {name} run."
+    rec = shape.record
+    head = f"{rec.created:%Y-%m-%d %H:%M}, {rec.mesh_target_mm:g} mm mesh"
+    flags = []
+    if not rec.converged:
+        flags.append(f"NOT CONVERGED ({rec.status}): shape not final")
+    if not shape.current:
+        flags.append("Stale: the design changed since this run")
+    if shape.solved is None or shape.deviation is None:
+        return f"{head}. Tape line not available: {shape.message}"
+    d = shape.deviation
+    text = (
+        f"{head}: max {d.max_distance * 1e3:.0f} mm from the {reference} "
+        f"(RMS {d.rms_distance * 1e3:.0f} mm), height {d.height_change * 1e3:+.0f} mm, "
+        f"max diameter {d.max_diameter_change * 1e3:+.0f} mm"
+    )
+    if shape.solved.seams > 1 and shape.solved.spread > 1e-3:
+        text += f"; seams differ by up to {shape.solved.spread * 1e3:.0f} mm (not axisymmetric)"
+    return text + "." + "".join(f"\n{f}." for f in flags)
+
+
+def _shape_style(shape: RunShape | None) -> str:
+    if shape is None:
+        return ""
+    if not shape.record.converged or shape.solved is None:
+        return "color: #b00020; font-weight: bold;"
+    if not shape.current:
+        return "color: #a05a00;"
+    return ""
 
 
 def _item(text: str, editable: bool = True) -> QTableWidgetItem:
@@ -858,6 +1528,10 @@ class GoreEditor(QWidget):
         lobe_layout.addLayout(loft_buttons)
         side_layout.addWidget(self.lobe_box)
         side_layout.addWidget(self.crest_box)
+        self.shape_physics = ShapePhysicsPanel(controller, self.canvas)
+        side_layout.addWidget(self.shape_physics)
+        self.solved_shape = SolvedShapePanel(controller, self.canvas)
+        side_layout.addWidget(self.solved_shape)
         side_layout.addWidget(locks_box)
         side_layout.addWidget(outputs_box)
 
@@ -881,7 +1555,7 @@ class GoreEditor(QWidget):
             self,
             self.refresh,
             lambda: controller.revision,
-            (controller.stateChanged, controller.sessionChanged),
+            (controller.stateChanged, controller.sessionChanged, controller.runsChanged),
             defer_hidden=lambda: controller.defer_hidden,
         )
         controller.fileChanged.connect(self._update_header)
@@ -992,6 +1666,8 @@ class GoreEditor(QWidget):
                 self.lock_values[name].setText(current[name])
             self.gore_count.setEnabled(locks.gore_count is None)
             self._show_outputs()
+            self.shape_physics.refresh()
+            self.solved_shape.refresh()
         finally:
             self._updating = False
 

@@ -241,7 +241,15 @@ def input_groups(
         },
         "tape_paths": per_row("tape_paths"),
         "feature_locations": per_row("feature_locations"),
-        "tapes": design.get("tapes"),
+        # The tape cut enters only when set, so designs at the default keep their
+        # fingerprints.
+        "tapes": {
+            k: v
+            for k, v in (design.get("tapes") or {}).items()
+            if not (k == "vertical_length" and v == "fabric_edge")
+        }
+        if design.get("tapes") is not None
+        else None,
         "materials": design.get("zones"),
         "operating": design.get("operating"),
         "features": design.get("features"),

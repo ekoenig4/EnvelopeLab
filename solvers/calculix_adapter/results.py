@@ -148,3 +148,19 @@ def steps_completed(path: Path, n_steps: int, tol: float = 1e-9) -> bool:
     """True when every step 1..n_steps reached step time 1 in the ``.sta`` file."""
     done = {r.step for r in read_sta(path) if r.step_time >= 1.0 - tol}
     return all(s in done for s in range(1, n_steps + 1))
+
+
+def job_fraction(path: Path, n_steps: int) -> float:
+    """Progress of a running job in [0, 1] from its ``.sta`` file: completed steps plus
+    the step time of the latest converged increment, over ``n_steps`` (each step runs from
+    step time 0 to 1). A file being written may end in a partial line; it is skipped."""
+    if n_steps <= 0:
+        return 0.0
+    try:
+        rows = read_sta(path)
+    except (OSError, ValueError):
+        return 0.0
+    if not rows:
+        return 0.0
+    last = max(rows, key=lambda r: (r.step, r.step_time))
+    return max(0.0, min(1.0, (last.step - 1 + min(last.step_time, 1.0)) / n_steps))

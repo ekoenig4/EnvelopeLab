@@ -151,6 +151,28 @@ meridian within 1 mm (unless `require_full_coverage=False`).
 Check: with the small-bulge form, \(N \sum A_{finished} = \int 2\pi r\,ds = A\) exactly; with a
 loft, \(N \sum A_{finished}\) equals the lofted area \(A\) above.
 
+## Vertical tape length
+
+The flat gore is drawn with the tape arc length on its axis, so its side edge is longer
+than the tape line by
+
+\[
+\Delta\ell = \int \left(\sqrt{1 + w'(s)^2} - 1\right) ds ,
+\]
+
+concentrated where the gore narrows or widens quickly (near the mouth and the top
+opening). For the generic 8-gore fixture the excess is 189 mm on 9.673 m of tape
+(1.96 %; 4.3 % over the lowest tenth). For the 20-gore full-size fixture it is 108 mm on
+20.907 m (0.51 %; 0.7 % over the lowest tenth). It falls roughly as \(1/N^2\) with the gore
+count \(N\), since \(w \approx \pi r / N\).
+
+`tapes.vertical_length` says how the tape is cut when it is sewn on:
+
+| Value | Tape length | Who carries the vertical load |
+|---|---|---|
+| `fabric_edge` (default) | the gore edge, \(\ell_{side}\) per row | mostly the fabric: the tape is longer than the meridian |
+| `tape_line` | the row's tape length \(s_{top} - s_{bottom}\), the gore edge eased onto it | the tapes, where the eased fabric is slack along the tape |
+
 ## Flat-chord gores and the crest loft — `flat_chord_rows`, `CrestLoft`
 
 A design with `construction: flat_chord` is cut the way many horizontal-cut patterns are

@@ -106,7 +106,11 @@ cap over the mouth carries zero pressure), so the pressure resultant equals the 
 
 Tension-only bars: \(T = EA\,\max(L/L_0 - 1, 0)\) with \(EA\) in N. Tapes from a build pack
 use the flat seam length as \(L_0\) (averaged over both sides), so a tape is exactly as
-long as the fabric edge it is sewn to.
+long as the fabric edge it is sewn to. The exception is a design whose vertical load tapes
+are cut to the tape line (`tapes.vertical_length: tape_line`). There each vertical tape edge
+gets its length along the gore axis, \(L_0 = |\Delta y|\), and every row's tape totals
+the row's tape length within 1 mm. The longer gore edge is fabric eased onto the tape
+([gore geometry](gore-geometry.md#vertical-tape-length)).
 
 ## Boundary conditions and reactions
 
@@ -153,6 +157,14 @@ nodes (`envelopelab.solvers.kernels.element_forces`). With the optional `fast` e
 functions of `envelopelab.solvers.membrane` are used. The two give the same forces to
 round-off (relative 1e-12, `tests/unit/test_solver_kernels.py`), so the choice changes
 only run time.
+
+With Numba the whole iteration also runs compiled (ADR-0028). That includes the step,
+kinetic-energy resets with their new masses, tapes, closures, the projection and the
+residual. It returns to Python every `progress_interval` iterations for the progress
+report, cancellation and time limit. The Python loop is the reference. Forces and masses
+agree to 1e-12 relative and short runs follow the same trajectory
+(`tests/unit/test_compiled_iterations.py`). Over a long solve, round-off can change the
+iteration count by a few percent, but not the equilibrium.
 
 ## Convergence criteria
 
@@ -215,6 +227,11 @@ factor defaults to 5 (tagged *assumed*: take it from the applicable airworthines
   [preview solver benchmarks](../validation/preview-solver-benchmarks.md)).
 - Fine meshes with large wrinkled regions converge slowly: the 425 mm mesh (5 028 nodes)
   needed about 90 000 iterations (25 min) against about 10 000 at 600 mm.
+- Fabric eased onto tapes cut to the tape line is slack along the tape. Where it is also
+  without hoop tension and nearly without pressure, just above the mouth, it has no
+  determinate position. The 8-gore generic fixture (up to 4.5 % ease there) does not
+  converge at 800 mm with such tapes. The 20-gore full-size fixture (0.7 %) converges at
+  800 and 1600 mm.
 - Wrinkle direction is approximate for strongly orthotropic fabric.
 - Explicit iterations grow roughly linearly with the number of elements across the
   envelope; very fine meshes are slow in pure NumPy.

@@ -738,6 +738,62 @@ class SolverModel:
         return out
 
 
+class EdgeTable:
+    """Flat lengths of every mesh edge, averaged over the triangles that share it.
+
+    Built once per mesh (vectorized), so that tapes and seams look their edges up instead
+    of each scanning the whole mesh.
+
+    Parameters
+    ----------
+    triangles : ndarray of int, shape (m, 3)
+        Mesh triangles.
+    rest_uv : ndarray, shape (m, 3, 2)
+        Flat corner coordinates in panel axes (``y`` along the gore), m.
+    """
+
+    def __init__(self, triangles: IntArray, rest_uv: FloatArray) -> None:
+        tri = np.asarray(triangles, dtype=np.int64).reshape(-1, 3)
+        uv = np.asarray(rest_uv, dtype=np.float64).reshape(-1, 3, 2)
+        first, second = [0, 1, 2], [1, 2, 0]
+        lo = np.minimum(tri[:, first], tri[:, second]).ravel()
+        hi = np.maximum(tri[:, first], tri[:, second]).ravel()
+        d = (uv[:, first] - uv[:, second]).reshape(-1, 2)
+        self._n = int(tri.max()) + 1 if tri.size else 0
+        keys, inverse = np.unique(lo * self._n + hi, return_inverse=True)
+        count = np.bincount(inverse)
+        self._keys = keys
+        # Each length as np.linalg.norm of its own vector (a whole-array norm rounds some
+        # differently), summed in triangle order: the lengths are bit-identical to a loop
+        # over the triangles.
+        length = np.fromiter((np.linalg.norm(v) for v in d), dtype=np.float64, count=len(d))
+        self._length = np.bincount(inverse, length) / count
+        self._axial = np.bincount(inverse, np.abs(d[:, 1])) / count
+
+    def _index(self, edges: IntArray) -> IntArray:
+        e = np.asarray(edges, dtype=np.int64).reshape(-1, 2)
+        lo, hi = e.min(axis=1), e.max(axis=1)
+        keys = lo * self._n + hi
+        idx = np.searchsorted(self._keys, keys)
+        found = (hi < self._n) & (idx < len(self._keys))
+        found[found] = self._keys[idx[found]] == keys[found]
+        if not np.all(found):
+            i, j = e[int(np.flatnonzero(~found)[0])]
+            raise ModelError(f"edge ({i}, {j}) is not a mesh edge")
+        out: IntArray = idx
+        return out
+
+    def lengths(self, edges: IntArray) -> FloatArray:
+        """Flat (as-cut) lengths of ``edges`` (node pairs), m."""
+        out: FloatArray = self._length[self._index(edges)]
+        return out
+
+    def axial(self, edges: IntArray) -> FloatArray:
+        """Flat lengths of ``edges`` along the gore axis (``|dy|``), m."""
+        out: FloatArray = self._axial[self._index(edges)]
+        return out
+
+
 def edge_rest_lengths(edges: IntArray, triangles: IntArray, rest_uv: FloatArray) -> FloatArray:
     """Flat (as-cut) length of mesh edges, averaged over the triangles that share them.
 
@@ -760,18 +816,58 @@ def edge_rest_lengths(edges: IntArray, triangles: IntArray, rest_uv: FloatArray)
     ModelError
         If an edge is not an edge of any triangle.
     """
-    total: dict[tuple[int, int], list[float]] = {}
-    for t, tri in enumerate(triangles):
-        for a, b in ((0, 1), (1, 2), (2, 0)):
-            key = (min(tri[a], tri[b]), max(tri[a], tri[b]))
-            length = float(np.linalg.norm(rest_uv[t, a] - rest_uv[t, b]))
-            total.setdefault((int(key[0]), int(key[1])), []).append(length)
-    out = np.empty(len(edges))
-    for k, (i, j) in enumerate(edges):
-        key = (int(min(i, j)), int(max(i, j)))
-        if key not in total:
-            raise ModelError(f"edge ({i}, {j}) is not a mesh edge")
-        out[k] = float(np.mean(total[key]))
+    return EdgeTable(triangles, rest_uv).lengths(edges)
+
+
+def tape_line_rest_lengths(
+    edges: IntArray,
+    triangles: IntArray,
+    rest_uv: FloatArray,
+    scale: float = 1.0,
+    table: EdgeTable | None = None,
+) -> FloatArray:
+    r"""Rest lengths of vertical-tape edges cut to the tape line, m.
+
+    A gore pattern is drawn with tape arc length :math:`s` on its flat :math:`y` axis
+    (``docs/theory/gore-geometry.md``), so a tape cut to the design's meridian has, along a
+    seam edge between flat points :math:`a` and :math:`b`, the length
+
+    .. math::
+        \ell_0 = |y_b - y_a| / \lambda
+
+    with :math:`\lambda` the panel's lengthwise scale (1 for a pattern cut to the tape
+    length). The flat edge itself, :math:`\sqrt{\Delta x^2 + \Delta y^2}`, is longer
+    wherever the gore width changes; that excess is fabric eased onto the tape.
+
+    Parameters
+    ----------
+    edges : ndarray of int, shape (e, 2)
+        Node pairs of the tape.
+    triangles : ndarray of int, shape (m, 3)
+        Mesh triangles.
+    rest_uv : ndarray, shape (m, 3, 2)
+        Flat corner coordinates in panel axes (``y`` along the gore), m.
+    scale : float
+        Lengthwise scale :math:`\lambda` of the cut panels (> 0), dimensionless.
+    table : EdgeTable, optional
+        Edge table of ``triangles`` and ``rest_uv``, when one is already built.
+
+    Returns
+    -------
+    ndarray, shape (e,)
+        Rest lengths, m, averaged over the triangles sharing each edge (both sides of
+        a seam).
+
+    Raises
+    ------
+    ModelError
+        If an edge is not an edge of any triangle or has no length along the gore.
+    """
+    if not scale > 0.0:
+        raise ModelError("the lengthwise scale must be positive")
+    out = (table or EdgeTable(triangles, rest_uv)).axial(edges) / scale
+    if np.any(out <= 0.0):
+        raise ModelError("a tape edge runs across the gore (no length along the tape)")
     return out
 
 
@@ -827,6 +923,7 @@ def model_from_rest_model(
     zone_of_inst = np.array([zone_names.index(z) for z in mesh.instance_zones], dtype=np.int64)
     tapes = tapes or {}
     cables: list[CableSet] = []
+    table = EdgeTable(mesh.triangles, mesh.rest_uv)
     seams: list[SeamLine] = []
     missing: list[str] = []
     for seam in rest.assembly.graph.seams:
@@ -840,7 +937,7 @@ def model_from_rest_model(
         if tape not in tapes:
             missing.append(tape)
             continue
-        lengths = edge_rest_lengths(edges, mesh.triangles, mesh.rest_uv)
+        lengths = table.lengths(edges)
         cables.append(CableSet(seam.seam_id, edges, tapes[tape], lengths))
     if missing:
         raise ModelError(f"no tape material for: {', '.join(sorted(set(missing)))}")

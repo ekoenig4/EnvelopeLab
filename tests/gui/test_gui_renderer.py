@@ -181,3 +181,155 @@ def test_the_launcher_starts_with_the_3d_view_in_a_wayland_session(tmp_path: Pat
     assert done.returncode == 0, done.stderr + (log.read_text() if log.exists() else "")
     assert "xcb" in done.stderr and log.exists()
     assert "QT_QPA_PLATFORM: xcb" in log.read_text()
+
+
+def test_a_redraw_renders_once_and_draws_all_tapes_as_one_actor(
+    qtbot: QtBot, settings: QSettings, tmp_path: Path
+) -> None:
+    """Rebuilding the scene renders once (PyVista renders after every added actor
+    otherwise: 22 s for the full-size fixture on a software renderer)."""
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    session = w.open_project(GORE_PROJECT)
+    assert session is not None and w.view3d.plotter is not None
+    built = build_solver_model(session.design, session.patterns, tmp_path, 1600.0)
+    w.controller.store_model(built, session.fingerprints())
+    plotter = w.view3d.plotter
+    renders: list[bool] = []
+    real = plotter.render
+
+    def counted() -> None:
+        renders.append(not plotter.suppress_rendering)
+        real()
+
+    plotter.render = counted  # PyVista's add_mesh calls it after every actor
+    w.view3d.redraw()
+    plotter.render = real
+    assert sum(renders) == 1
+    # 58 tape sets on the rest mesh, one actor for all of them.
+    assert len(built.model.cables) > 50
+    assert len(plotter.renderer.actors) < 15
+    w.close()
+
+
+def test_the_3d_view_does_not_render_on_a_timer(qtbot: QtBot, settings: QSettings) -> None:
+    """pyvistaqt's 5 Hz auto-render is off: an unchanged scene is not redrawn."""
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    assert w.open_project(GORE_PROJECT) is not None
+    plotter = w.view3d.plotter
+    assert plotter is not None
+    timer = getattr(plotter, "render_timer", None)
+    assert timer is None or not timer.isActive()
+    w.close()
+
+
+def test_view_buttons_place_the_camera_and_survive_a_redraw(
+    qtbot: QtBot, settings: QSettings
+) -> None:
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    session = w.open_project(GORE_PROJECT)
+    assert session is not None and session.design.gores is not None
+    view, plotter = w.view3d, w.view3d.plotter
+    assert plotter is not None
+    view.view_buttons["top"].click()
+    position = np.array(plotter.camera.position)
+    focal = np.array(plotter.camera.focal_point)
+    assert position[:2] == pytest.approx(focal[:2], abs=1e-6) and position[2] > focal[2]
+    view.view_buttons["front"].click()
+    front = np.array(plotter.camera.position) - np.array(plotter.camera.focal_point)
+    assert front[1] < 0.0 and abs(front[0]) < 1e-6 and abs(front[2]) < 1e-6
+    # One gore: 360 / 8 = 45 deg about the axis.
+    view.view_buttons["gore_next"].click()
+    turned = np.array(plotter.camera.position) - np.array(plotter.camera.focal_point)
+    angle = np.degrees(np.arctan2(turned[1], turned[0]) - np.arctan2(front[1], front[0]))
+    assert angle == pytest.approx(360.0 / session.design.gores.count)
+    view.orthographic.setChecked(True)
+    assert plotter.camera.parallel_projection
+    view.orthographic.setChecked(False)
+    assert not plotter.camera.parallel_projection
+    # A redraw (any edit, a run arriving) keeps the chosen view.
+    before = tuple(plotter.camera.position)
+    view.redraw()
+    assert tuple(plotter.camera.position) == pytest.approx(before)
+    w.close()
+
+
+def test_view_keys_over_the_3d_view_choose_views(qtbot: QtBot, settings: QSettings) -> None:
+    """The number keys reach the view shortcuts, not VTK's own key bindings (VTK's 3
+    would turn stereo rendering on)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    assert w.open_project(GORE_PROJECT) is not None
+    plotter = w.view3d.plotter
+    assert plotter is not None
+    plotter.setFocus()
+    QTest.keyClick(plotter, Qt.Key.Key_7)
+    sight = np.array(plotter.camera.position) - np.array(plotter.camera.focal_point)
+    assert abs(sight[0]) < 1e-6 and abs(sight[1]) < 1e-6 and sight[2] > 0.0
+    QTest.keyClick(plotter, Qt.Key.Key_3)
+    sight = np.array(plotter.camera.position) - np.array(plotter.camera.focal_point)
+    assert sight[0] > 0.0 and abs(sight[2]) < 1e-6
+    assert not plotter.ren_win.GetStereoRender()
+    QTest.keyClick(plotter, Qt.Key.Key_5)
+    assert w.view3d.orthographic.isChecked() and plotter.camera.parallel_projection
+    # The numeric keypad works as the number row does (Ctrl+keypad 7: into the mouth).
+    QTest.keyClick(
+        plotter,
+        Qt.Key.Key_7,
+        Qt.KeyboardModifier.KeypadModifier | Qt.KeyboardModifier.ControlModifier,
+    )
+    sight = np.array(plotter.camera.position) - np.array(plotter.camera.focal_point)
+    assert abs(sight[0]) < 1e-6 and abs(sight[1]) < 1e-6 and sight[2] < 0.0
+    w.close()
+
+
+def test_face_seams_zoom_to_a_layer_and_keep_saved_views_per_project(
+    qtbot: QtBot, settings: QSettings
+) -> None:
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    assert w.open_project(GORE_PROJECT) is not None
+    view, plotter = w.view3d, w.view3d.plotter
+    assert plotter is not None
+
+    def azimuth() -> float:
+        sight = np.array(plotter.camera.position) - np.array(plotter.camera.focal_point)
+        return float(np.degrees(np.arctan2(sight[1], sight[0])) % 360.0)
+
+    view.face_seam(2)  # 8 gores: seam 2 at 90 deg
+    assert azimuth() == pytest.approx(90.0)
+    view.face_gore(1)
+    assert azimuth() == pytest.approx(22.5)
+    view.view_buttons["iso"].click()
+    far = np.linalg.norm(np.array(plotter.camera.position) - plotter.camera.focal_point)
+    view.layer_list.setCurrentRow(0)  # the design surface
+    view.view_buttons["zoom_layer"].click()
+    near = np.linalg.norm(np.array(plotter.camera.position) - plotter.camera.focal_point)
+    assert near <= far
+    # Save, move away, come back.
+    view.view_buttons["top"].click()
+    top = tuple(plotter.camera.position)
+    assert view.save_view("crown")
+    view.view_buttons["front"].click()
+    assert view.restore_view("crown")
+    assert tuple(plotter.camera.position) == pytest.approx(top)
+    assert view.saved_views.findText("crown") >= 0
+    w.close()
+    # A new window on the same project finds it again (kept in the settings).
+    w2 = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w2)
+    w2.show()
+    assert w2.open_project(GORE_PROJECT) is not None
+    assert [v["name"] for v in w2.view3d.saved()] == ["crown"]
+    assert w2.view3d.delete_view("crown") and w2.view3d.saved() == []
+    w2.close()

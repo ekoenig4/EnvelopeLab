@@ -3,6 +3,104 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the 2D pattern view puts the pieces side by side on shelves that fill the view
+  (*Layout: Side by side*, the new default), re-arranged when the view is resized,
+  instead of one tall column with empty space on both sides. In a wide window the pieces
+  draw 2.6 times larger for the 4-row test envelope and 4.1 times for a 12-row full-size
+  one. *Layout: Assembled gore* keeps the stacked view. Display only; the cut files are
+  unchanged.
+- Added: in the 3D view, *Face seam* / *Face gore* look straight at seam or gore *k*,
+  *Zoom to layer* fits the view to the selected layer, and *Save view* keeps named
+  viewpoints per project file between sessions.
+- Added: viewpoint controls in the 3D view. *Front*, *Back*, *Side*, *Top*, *Into mouth*
+  and *Isometric* views fit the whole scene, *◀ Gore* and *Gore ▶* turn the view one gore
+  about the envelope axis, and *Orthographic* switches to a parallel projection. Each has
+  a key (1, 3, 7 with Ctrl for the opposite side, 0, Home, 4/6, 5) that works over the 3D
+  view itself, where VTK's own keys used to take them (its 3 turned on stereo rendering).
+- Fixed: the 3D view slowed the whole window down, especially on software OpenGL (WSLg,
+  Mesa llvmpipe). The render widget redrew 5 times a second even when nothing changed
+  (about 0.1 s a frame for a large window there). The scene was also rebuilt with one
+  render per added actor, and the rest mesh drew every tape as its own actor (473 actors
+  on the 2600 m³ full-size fixture). The timer is off, a rebuild renders once, and the
+  tapes are one actor (12 actors). Measured under Xvfb with llvmpipe on that fixture:
+  switching to the Simulate tab 22.0 → 0.5 s, a run arriving 24.2 → 0.3 s, and no
+  stalls at all while idle with the 3D view shown.
+- Added: *Fit profile to simulated shape* takes the stretch out by default (*Take out the
+  stretch (cut the flight shape)*). It cuts the inflated shape at the current tape length,
+  with the mouth and top opening kept, so repeated fits no longer lengthen the tapes by
+  the stretch: +0.39 % (tape-line tapes) or +0.67 % (gore-edge tapes) per cycle on the
+  full-size fixture with plain adoption. The shape itself still drifts, taller and
+  narrower by about 50 mm per cycle after ten cycles there; see
+  `docs/theory/profile-matching.md`. Untick the box for the previous behaviour.
+- Fixed: the window froze around runs of large designs. Building the solver model scanned
+  the whole mesh once per tape: 88 s on the 2600 m³ full-size fixture at 800 mm, in a
+  worker thread that held the interpreter lock and could not be stopped, so *Stop*
+  waited up to a minute. Each edge length is now looked up in one table per mesh: 3.5 s,
+  results bit-identical. The gore editor's solved-shape panel re-read every run's tape
+  line on every refresh, including when a run started or ended (0.5 s each on that
+  fixture). It now keeps them until the run, the design or the target changes, and it
+  measures deviations with a k-d tree (16 ms instead of 4.4 s for 3000 points, same
+  values). Headless measurement on that fixture: the longest freeze is 0.15 s, against
+  81 s (Stop) and about 1 s (Start, run finished) before.
+- Added: vertical load tapes can be cut to the design's tape line (`tapes.vertical_length:
+  tape_line`) instead of to the gore edge they are sewn to (`fabric_edge`, the default and
+  the behaviour until now). The simulation then models the tapes at the tape length, with
+  the longer gore edge eased onto them, so the tapes carry the vertical load. Full-size
+  fixture (2600 m³, 20 gores), 800 mm mesh: the bottom and top tapes carry 327 and 321 N
+  against 205 and 76 N, and the height error falls from +507 to +483 mm. The solve takes
+  29.6k iterations (38 s) instead of 17.0k (21 s). The middle rows' tapes still carry
+  37–60 N of about 450 N, because the fabric there is not cut longer than the tape.
+  Design schema version 8; earlier designs migrate as `fabric_edge`, and their results are
+  unchanged.
+- Added: *Fit profile to simulated shape* in the gore editor replaces the drawn profile
+  with the simulated tape line in one click. It uses the latest current, converged run
+  (CalculiX or preview). Without one, it runs the preview first. An unconverged run
+  never changes the profile. *Adopt solved shape* (and the fit) now also work on a
+  *Segments* profile, which becomes a spline in the same undoable edit.
+- Faster preview solves: with the `fast` extra (Numba) the whole dynamic-relaxation
+  iteration now runs compiled, not just the element forces. Generic 8-gore fixture:
+  800 mm mesh 24.2 → 6.1 s, 1600 mm 2.9 → 0.7 s. Results agree with the Python loop to
+  round-off: equilibrium positions within 0.21 µm, volume identical, iteration counts
+  within a few percent (39,829 against 37,620 at 800 mm). No benchmark or golden value
+  moved.
+- Known limitation: on a snapped profile (spans at zero hoop stress) kinetic damping is
+  sensitive to round-off. The same preview can converge or run to its iteration limit
+  on either loop. Viscous damping (`damping="viscous"`, 0.05) converges it reliably
+  (71k iterations on the fixture).
+- Fixed: the progress bar of preview and CalculiX runs stayed near the start until the
+  very end. It now follows the best residual so far and the share of the iteration
+  limit, so it never moves backwards and fills by the time the run ends, converged or
+  stopped at its limit. CalculiX moves during each `ccx` job. The text gives the
+  elapsed time, the time to the iteration limit, and *about N s left* once the residual
+  is clearly falling (or a warning that it may not converge in time).
+- Added: the gore editor checks the profile under load while it is edited (membrane
+  statics, milliseconds). Spans that would need hoop or meridional compression, which
+  fabric cannot carry and which therefore do not keep their shape, are drawn red, live
+  while dragging. *Show natural shape* draws the zero-hoop-stress shape for comparison.
+  *Snap to a shape that holds* limits the curvature of the red spans only. Generic
+  fixture, converged previews at 800 mm: drawn, 23 % of the tape fails the check, the
+  lowest quarter collapses inward by 62 mm, largest deviation 103 mm; snapped, no
+  compression, no collapse, largest deviation 48 mm. The snapped preview needs 211k
+  iterations, above the default limit of 200k.
+- CalculiX runs converge. A CalculiX run now always starts from a preview equilibrium of
+  the same mesh. Without a current one it solves the preview first and keeps it as a
+  run. From that start the tension-field states and wrinkle directions stay frozen until
+  the passes settle, and are then checked against the tension-field law (new acceptance
+  criterion, within 0.2 %). Generic 8-gore fixture, 800 mm mesh: before, 60 passes in
+  147 s (cold) or 129 s (warm), not converged; now 1 pass in 4.4 s after an 18 s
+  preview, converged, with height and volume equal to the preview's. Validation envelope
+  (`docs/validation/preview-vs-calculix.md`): CalculiX 30–35 % faster (35.1 → 23.5 s on
+  the finest level). Its results are unchanged within 1e-7 relative; preview values on
+  that page moved by up to 5e-8 relative from earlier solver commits now regenerated.
+  Cold starts are unchanged.
+- The gore editor draws the solved tape line of the latest preview and CalculiX run over
+  the profile, with its deviation from the intended profile (largest and RMS distance,
+  height and diameter change). Stale and unconverged runs are drawn dotted and flagged.
+  *Compensate towards intended profile* changes the cut so the inflated tapes land on
+  the drawn profile, one step per solve. The intended profile is kept in the project
+  file as `profile_target`. On the generic fixture the deviation fell 103 → 47 → 32 → 21
+  → 16 mm in four preview steps. *Adopt solved shape* makes the drawn profile the solved
+  line. Both need a current, converged run. New run result arrays carry the gore count.
 - Added: *Set profile from file…* in the gore editor takes a shape file's or project's
   profile into the open design (points, interpolation, segments). The rows are refitted,
   the locks applied, and the edit can be undone. *Use as profile* does the same from a

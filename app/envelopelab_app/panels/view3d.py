@@ -17,21 +17,27 @@ anywhere else orbits the camera as usual.
 
 from __future__ import annotations
 
+import json
 import math
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 import numpy as np
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtCore import QEvent, QKeyCombination, QObject, QSettings, Qt
+from PySide6.QtGui import QBrush, QColor, QKeyEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QVBoxLayout,
     QWidget,
@@ -52,6 +58,18 @@ from envelopelab.project.shapes import (
     feed_hole_rings,
     footprint_preview,
     placement_at,
+)
+from envelopelab.rigging.common import seam_azimuth
+from envelopelab_app.camera import (
+    CameraPose,
+    facing,
+    fit_to_bounds,
+    gore_centre_azimuth,
+    gore_step,
+    pose_from_dict,
+    pose_to_dict,
+    turn_about_axis,
+    view_pose,
 )
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.refresh import Refresher
@@ -192,6 +210,19 @@ def _merged_lines(polylines: list[Any]) -> Any:
     return pv.PolyData(points, lines=np.concatenate(cells))
 
 
+def _interactor(parent: QWidget) -> Any:
+    """The PyVista Qt render widget, without its auto-update timer.
+
+    pyvistaqt re-renders 5 times a second by default, changed or not. On a software
+    OpenGL renderer (WSLg, Mesa llvmpipe) a frame of a large window takes about 0.1 s, so
+    the timer alone kept the GUI thread half busy while the 3D view was shown. The panel
+    renders after every change itself, and the interactor renders while the view is moved.
+    """
+    from pyvistaqt import QtInteractor
+
+    return QtInteractor(parent, auto_update=False)
+
+
 def pyvista_available() -> bool:
     """PyVista and pyvistaqt can be imported and a 3D view is allowed."""
     if os.environ.get("ENVELOPELAB_NO_3D"):
@@ -202,6 +233,30 @@ def pyvista_available() -> bool:
     except ImportError:
         return False
     return True
+
+
+#: View buttons: (key, label, shortcut). The number keys follow the numeric-keypad views of
+#: common 3D programs (1 front, 3 side, 7 top; Ctrl for the opposite side).
+VIEW_CONTROLS = (
+    ("front", "Front", "1"),
+    ("back", "Back", "Ctrl+1"),
+    ("right", "Side", "3"),
+    ("left", "Other side", "Ctrl+3"),
+    ("top", "Top", "7"),
+    ("bottom", "Into mouth", "Ctrl+7"),
+    ("iso", "Isometric", "0"),
+    ("fit", "Fit", "Home"),
+)
+VIEW_TIPS = {
+    "front": "Look at the envelope from the front (along +y), mouth down",
+    "back": "Look at the envelope from the back (along -y), mouth down",
+    "right": "Look at the envelope from the side (along -x), mouth down",
+    "left": "Look at the envelope from the other side (along +x), mouth down",
+    "top": "Look down onto the crown",
+    "bottom": "Look up into the mouth",
+    "iso": "Three-quarter view from above",
+    "fit": "Fit the whole scene in the current view direction",
+}
 
 
 class View3DPanel(QWidget):
@@ -235,6 +290,107 @@ class View3DPanel(QWidget):
         self._drag_observers: list[tuple[Any, int]] = []
         reset = QPushButton("Reset camera")
         reset.clicked.connect(self._reset_camera)
+        # Viewpoints: standard views, one-gore turns about the envelope axis, projection.
+        self.view_buttons: dict[str, QPushButton] = {}
+        #: View keys and their actions, also caught on the render widget (VTK would take
+        #: the key presses there: its 3 toggles stereo rendering).
+        self.view_keys: dict[str, Callable[[], None]] = {}
+        views = QHBoxLayout()
+        views.addWidget(QLabel("View:"))
+        for key, text, shortcut in VIEW_CONTROLS:
+            button = QPushButton(text)
+            button.setObjectName(f"view_{key}")
+            button.setToolTip(f"{VIEW_TIPS[key]} (key {shortcut})")
+            button.clicked.connect(lambda _c=False, k=key: self.set_view(k))
+            self.view_buttons[key] = button
+            views.addWidget(button)
+            self.view_keys[shortcut] = partial(self.set_view, key)
+        for step, text, shortcut, tip in (
+            (-1, "◀ Gore", "4", "Turn the view one gore clockwise, seen from above"),
+            (1, "Gore ▶", "6", "Turn the view one gore counter-clockwise, seen from above"),
+        ):
+            button = QPushButton(text)
+            button.setObjectName("gore_prev" if step < 0 else "gore_next")
+            button.setToolTip(f"{tip} (key {shortcut})")
+            button.clicked.connect(lambda _c=False, n=step: self.turn_gores(n))
+            self.view_buttons[button.objectName()] = button
+            views.addWidget(button)
+            self.view_keys[shortcut] = partial(self.turn_gores, step)
+        self.orthographic = QCheckBox("Orthographic")
+        self.orthographic.setToolTip(
+            "Parallel projection: no perspective, so profiles and lengths can be compared (key 5)"
+        )
+        self.orthographic.toggled.connect(self._set_projection)
+        self.view_keys["5"] = self.orthographic.toggle
+        for sequence, action in self.view_keys.items():
+            # The same key on the numeric keypad ("Num+7") as on the number row.
+            keypad = f"Num+{sequence}" if sequence[-1].isdigit() else None
+            for text in filter(None, (sequence, keypad)):
+                QShortcut(QKeySequence(text), self, action).setContext(
+                    Qt.ShortcutContext.WidgetWithChildrenShortcut
+                )
+        views.addWidget(self.orthographic)
+        views.addStretch(1)
+        # Seams and gores, a layer, and saved viewpoints.
+        places = QHBoxLayout()
+        self.seam_number = QSpinBox()
+        self.seam_number.setObjectName("faceNumber")
+        self.seam_number.setRange(1, 12)
+        self.seam_number.setPrefix("No. ")
+        self.seam_number.setToolTip("Seam or gore to face (numbered as in the rigging)")
+        places.addWidget(QLabel("Seam/gore:"))
+        places.addWidget(self.seam_number)
+        for key, text, tip, action in (
+            (
+                "face_seam",
+                "Face seam",
+                "Look straight at the seam, running up the middle",
+                lambda: self.face_seam(self.seam_number.value()),
+            ),
+            (
+                "face_gore",
+                "Face gore",
+                "Look straight at the centre of the gore",
+                lambda: self.face_gore(self.seam_number.value()),
+            ),
+            (
+                "zoom_layer",
+                "Zoom to layer",
+                "Fit the view to the layer selected in the list",
+                lambda: self.zoom_to_layer(self._selected_layer()),
+            ),
+        ):
+            button = QPushButton(text)
+            button.setObjectName(key)
+            button.setToolTip(tip)
+            button.clicked.connect(lambda _c=False, a=action: a())
+            self.view_buttons[key] = button
+            places.addWidget(button)
+        places.addSpacing(12)
+        self.saved_views = QComboBox()
+        self.saved_views.setObjectName("savedViews")
+        self.saved_views.setMinimumContentsLength(12)
+        self.saved_views.setToolTip("Saved viewpoints of this project; choose one to go there")
+        self.saved_views.activated.connect(
+            lambda i: self.restore_view(self.saved_views.itemText(i))
+        )
+        save = QPushButton("Save view")
+        save.setObjectName("save_view")
+        save.setToolTip("Remember the current viewpoint under a name (kept per project)")
+        save.clicked.connect(self._save_view_clicked)
+        delete = QPushButton("Delete view")
+        delete.setObjectName("delete_view")
+        delete.clicked.connect(lambda: self.delete_view(self.saved_views.currentText()))
+        self.view_buttons["save_view"] = save
+        self.view_buttons["delete_view"] = delete
+        places.addWidget(QLabel("Views:"))
+        for widget in (self.saved_views, save, delete):
+            places.addWidget(widget)
+        places.addStretch(1)
+        #: Where saved viewpoints are kept (the main window's settings); None keeps them
+        #: for this session only.
+        self.settings: QSettings | None = None
+        self._session_views: dict[str, list[dict[str, object]]] = {}
         self.info = QLabel()
         self.info.setWordWrap(True)
         controls = QHBoxLayout()
@@ -255,9 +411,8 @@ class View3DPanel(QWidget):
             self.renderer_widget = QLabel("Loading the 3D view…")
             self.renderer_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
         elif enable_renderer and pyvista_available():
-            from pyvistaqt import QtInteractor
-
-            interactor = QtInteractor(self)
+            interactor = _interactor(self)
+            interactor.installEventFilter(self)
             self.plotter = interactor
             self.renderer_widget = interactor
         else:
@@ -272,6 +427,8 @@ class View3DPanel(QWidget):
         splitter.setStretchFactor(0, 4)
         layout = QVBoxLayout(self)
         layout.addLayout(controls)
+        layout.addLayout(views)
+        layout.addLayout(places)
         layout.addWidget(splitter)
         self.refresher = Refresher(
             self,
@@ -303,9 +460,8 @@ class View3DPanel(QWidget):
             )
             label.setWordWrap(True)
             return False
-        from pyvistaqt import QtInteractor
-
-        interactor = QtInteractor(self)
+        interactor = _interactor(self)
+        interactor.installEventFilter(self)
         old = self.renderer_widget
         self.splitter.replaceWidget(0, interactor)
         old.deleteLater()
@@ -426,6 +582,8 @@ class View3DPanel(QWidget):
             if key in self.layers:
                 self.layers[key].visible = value
         self._fill_list()
+        self.seam_number.setMaximum(self._gore_count())
+        self._fill_saved()
         self.redraw()
 
     def _shape_layers(self) -> None:
@@ -543,10 +701,24 @@ class View3DPanel(QWidget):
     # -- rendering ----------------------------------------------------------------------
 
     def redraw(self) -> None:
-        """Draw the visible layers (no-op without a renderer)."""
+        """Draw the visible layers (no-op without a renderer).
+
+        The scene is rebuilt with rendering suppressed and rendered once at the end:
+        PyVista renders after every added actor otherwise, which took 22 s for the
+        full-size fixture's 473 actors on a software OpenGL renderer (47 ms a frame).
+        """
         plotter = self.plotter
         if plotter is None:
             return
+        suppressed = plotter.suppress_rendering
+        plotter.suppress_rendering = True
+        try:
+            self._build_scene(plotter)
+        finally:
+            plotter.suppress_rendering = suppressed
+        plotter.render()
+
+    def _build_scene(self, plotter: Any) -> None:
         import pyvista as pv
 
         plotter.clear()
@@ -591,13 +763,15 @@ class View3DPanel(QWidget):
                     name=layer.key,
                 )
             if layer.tapes:
-                for edges in layer.tapes.values():
-                    lines = np.hstack([np.full((len(edges), 1), 2), edges]).ravel()
-                    plotter.add_mesh(
-                        pv.PolyData(np.asarray(layer.points, dtype=float), lines=lines),
-                        color="#d62728",
-                        line_width=3,
-                    )
+                # Every tape in one line actor (one actor per tape was 462 actors on the
+                # full-size fixture, each a draw call in every frame).
+                edges = np.vstack([np.asarray(e).reshape(-1, 2) for e in layer.tapes.values()])
+                lines = np.hstack([np.full((len(edges), 1), 2), edges]).ravel()
+                plotter.add_mesh(
+                    pv.PolyData(np.asarray(layer.points, dtype=float), lines=lines),
+                    color="#d62728",
+                    line_width=3,
+                )
             legend.append([layer.label, layer.color])
         if legend:
             plotter.add_legend(legend, bcolor="white", size=(0.45, 0.2))
@@ -818,6 +992,199 @@ class View3DPanel(QWidget):
     def _reset_camera(self) -> None:
         if self.plotter is not None:
             self.plotter.reset_camera()
+
+    # -- viewpoints ---------------------------------------------------------------------
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 (Qt API)
+        """View keys pressed over the render widget choose views (VTK never sees them)."""
+        if watched is self.plotter and event.type() in (
+            QEvent.Type.KeyPress,
+            QEvent.Type.ShortcutOverride,
+        ):
+            assert isinstance(event, QKeyEvent)
+            # A keypad digit is the same view key as the number-row digit.
+            modifiers = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+            combination = QKeyCombination(modifiers, Qt.Key(event.key()))
+            sequence = QKeySequence(combination).toString()
+            action = self.view_keys.get(sequence)
+            if action is not None:
+                if event.type() == QEvent.Type.KeyPress:
+                    action()
+                event.accept()
+                return True
+        return super().eventFilter(watched, event)
+
+    def _apply_pose(self, pose: CameraPose) -> None:
+        plotter = self.plotter
+        camera = plotter.camera
+        camera.position = tuple(pose.position)
+        camera.focal_point = tuple(pose.focal_point)
+        camera.up = tuple(pose.view_up)
+        camera.parallel_scale = pose.parallel_scale
+        plotter.reset_camera_clipping_range()
+        plotter.render()
+
+    def _pose(self) -> CameraPose:
+        camera = self.plotter.camera
+        return CameraPose(
+            np.array(camera.position, dtype=float),
+            np.array(camera.focal_point, dtype=float),
+            np.array(camera.up, dtype=float),
+            float(camera.parallel_scale),
+        )
+
+    def set_view(self, key: str) -> None:
+        """Look at the whole visible scene from a standard view (:data:`VIEWS`), or fit
+        the current view to it (``"fit"``)."""
+        plotter = self.plotter
+        if plotter is None:
+            return
+        if key == "fit":
+            plotter.reset_camera()
+            plotter.render()
+            return
+        angle = float(plotter.camera.view_angle)
+        self._apply_pose(view_pose(tuple(plotter.bounds), key, angle))
+
+    def turn_gores(self, gores: int) -> None:
+        """Turn the view about the envelope axis by ``gores`` gores (counter-clockwise
+        seen from above for a positive count)."""
+        if self.plotter is None:
+            return
+        design = self.controller.design
+        count = design.gores.count if design is not None and design.gores is not None else 12
+        self._apply_pose(turn_about_axis(self._pose(), gores * gore_step(count)))
+
+    def face_seam(self, seam: int) -> None:
+        """Look straight at vertical seam ``seam`` (1..N), mouth down."""
+        if self.plotter is None:
+            return
+        count = self._gore_count()
+        azimuth = seam_azimuth(min(max(seam, 1), count), count)
+        self._apply_pose(facing(tuple(self.plotter.bounds), azimuth, self._view_angle()))
+
+    def face_gore(self, gore: int) -> None:
+        """Look straight at the centre of gore ``gore`` (1..N), mouth down."""
+        if self.plotter is None:
+            return
+        count = self._gore_count()
+        azimuth = gore_centre_azimuth(min(max(gore, 1), count), count)
+        self._apply_pose(facing(tuple(self.plotter.bounds), azimuth, self._view_angle()))
+
+    def zoom_to_layer(self, key: str | None) -> None:
+        """Fit the view to one layer, keeping the viewing direction."""
+        layer = self.layers.get(key) if key is not None else None
+        if self.plotter is None or layer is None:
+            return
+        parts = [np.asarray(layer.points, dtype=float).reshape(-1, 3)]
+        for lines in layer.polylines.values():
+            parts += [np.asarray(line, dtype=float).reshape(-1, 3) for line in lines]
+        points = np.vstack([p for p in parts if len(p)]) if any(len(p) for p in parts) else None
+        if points is None:
+            return
+        lo, hi = points.min(axis=0), points.max(axis=0)
+        bounds = (lo[0], hi[0], lo[1], hi[1], lo[2], hi[2])
+        self._apply_pose(fit_to_bounds(self._pose(), bounds, self._view_angle()))
+
+    def _selected_layer(self) -> str | None:
+        item = self.layer_list.currentItem()
+        return None if item is None else str(item.data(Qt.ItemDataRole.UserRole))
+
+    def _gore_count(self) -> int:
+        design = self.controller.design
+        return design.gores.count if design is not None and design.gores is not None else 12
+
+    def _view_angle(self) -> float:
+        return float(self.plotter.camera.view_angle)
+
+    # -- saved viewpoints ---------------------------------------------------------------
+
+    def _views_key(self) -> str:
+        session = self.controller.session
+        path = None if session is None else session.path
+        return "view3d/saved/" + (str(path.resolve()) if path is not None else "unsaved")
+
+    def saved(self) -> list[dict[str, object]]:
+        """Saved viewpoints of this project, oldest first (``name`` and the camera)."""
+        key = self._views_key()
+        if self.settings is None:
+            return list(self._session_views.get(key, []))
+        raw = self.settings.value(key)
+        try:
+            views = json.loads(str(raw)) if raw else []
+        except json.JSONDecodeError:
+            views = []
+        return [v for v in views if isinstance(v, dict) and "name" in v]
+
+    def _store(self, views: list[dict[str, object]]) -> None:
+        key = self._views_key()
+        if self.settings is None:
+            self._session_views[key] = views
+        else:
+            self.settings.setValue(key, json.dumps(views))
+            self.settings.sync()
+        self._fill_saved()
+
+    def _fill_saved(self) -> None:
+        self.saved_views.blockSignals(True)
+        self.saved_views.clear()
+        for view in self.saved():
+            self.saved_views.addItem(str(view["name"]))
+        self.saved_views.blockSignals(False)
+
+    def save_view(self, name: str) -> bool:
+        """Remember the current viewpoint as ``name`` (replacing one of that name)."""
+        name = name.strip()
+        if self.plotter is None or not name:
+            return False
+        entry = {"name": name, **pose_to_dict(self._pose(), self.orthographic.isChecked())}
+        views = [v for v in self.saved() if v.get("name") != name] + [entry]
+        self._store(views)
+        self.saved_views.setCurrentText(name)
+        return True
+
+    def restore_view(self, name: str) -> bool:
+        """Go to the saved viewpoint ``name``."""
+        if self.plotter is None:
+            return False
+        for view in self.saved():
+            if view.get("name") == name:
+                try:
+                    pose, parallel = pose_from_dict(view)
+                except ValueError:
+                    return False
+                self.orthographic.setChecked(parallel)
+                self._apply_pose(pose)
+                return True
+        return False
+
+    def delete_view(self, name: str) -> bool:
+        """Forget the saved viewpoint ``name``."""
+        views = self.saved()
+        kept = [v for v in views if v.get("name") != name]
+        if len(kept) == len(views):
+            return False
+        self._store(kept)
+        return True
+
+    def _save_view_clicked(self) -> None:
+        default = f"View {len(self.saved()) + 1}"
+        if not self.controller.defer_hidden:  # scripted window: no dialog
+            self.save_view(default)
+            return
+        name, ok = QInputDialog.getText(self, "Save view", "Name of this viewpoint:", text=default)
+        if ok:
+            self.save_view(name)
+
+    def _set_projection(self, parallel: bool) -> None:
+        plotter = self.plotter
+        if plotter is None:
+            return
+        if parallel:
+            plotter.enable_parallel_projection()
+        else:
+            plotter.disable_parallel_projection()
+        plotter.render()
 
     def close_renderer(self) -> None:
         """Release the VTK render window."""

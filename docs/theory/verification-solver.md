@@ -86,7 +86,40 @@ jobs.
 
 Pass 1 establishes the prestress (form finding from the start geometry) and applies the
 inflation loads over `ramp_steps` steps; later passes are balanced restarts. With the
-tension field, \(\kappa\) may be lowered pass by pass from `kappa_start` to its final value.
+tension field and a cold start, \(\kappa\) may be lowered pass by pass from `kappa_start`
+to its final value.
+
+### Warm start: frozen states, refreshed on settling
+
+Started from a preview equilibrium (`start_positions`, the way the application and the
+validation study run it), the passes use the final \(\kappa\) from pass 1 and keep the
+states and wrinkle directions classified at the start **frozen** (`freeze_states`).
+Re-classifying them every pass makes the passes wander. A wrinkled element is stiff only
+along \(n\), so a few degrees' change of \(n\) moves its stress a lot. On the generic
+8-gore fixture (800 mm mesh, 616 nodes) the old scheme never settled. Started from the
+converged preview it went 60 passes (129 s) with the out-of-balance between 0.04 and 0.2.
+The first pass at `kappa_start` = 0.1 alone moved the preview equilibrium by 23 mm.
+
+When the passes have settled on the frozen material (movement, stress consistency and
+out-of-balance within their tolerances), the frozen material is compared with the
+tension-field law itself at the new geometry. This is the **law consistency**: the largest
+difference between the frozen material's resultant and the preview law's resultant
+(state and \(n\) from the strain at that geometry, final \(\kappa\)), relative to the
+largest resultant. Above `stress_tolerance` the states are re-classified and the passes
+continue. The re-classification has a hysteresis band \(\beta\) (`state_band`, default
+\(10^{-3}\)) of the largest major trial resultant \(S\):
+
+* a taut element is released only when \(s_2 < -\beta S\), and a released one becomes
+  taut again only when \(s_2 > \beta S\);
+* wrinkled and slack swap only when \(E_n\varepsilon_n\) leaves \(\pm\beta S\).
+
+The law is continuous at both switch points, so inside the band either state gives the
+same resultant within \(O(\beta S)\). That is half the stress tolerance.
+
+With this scheme the fixture converges in one pass (4.4 s; out-of-balance
+\(6.7\times10^{-7}\), law consistency \(7\times10^{-7}\)), and the validation envelope
+runs 30–35 % faster with the same results. A cold start keeps the per-pass
+classification and the \(\kappa\) continuation.
 
 Because the springs are re-anchored every pass, their final force equals the
 out-of-balance of the unstabilised problem at the new positions; the converged result does
@@ -102,6 +135,9 @@ A result is `converged` only when **all** hold:
   exact law and an out-of-balance below \(10^{-5}\) of the load;
 - the held job of the next pass, i.e. CalculiX's internal force for the exact law at the
   settled geometry, is below \(10^{-5}\) of the load;
+- for a warm start with frozen states: the law consistency (above) is within 0.2 %. The
+  frozen material then gives the tension-field law's stresses at the result, so the
+  equilibrium is one of the law and not only of the frozen material;
 - the global force balance (applied loads + mouth/tape/plane reactions) closes within
   0.5 % of the pressure resultant.
 
@@ -127,8 +163,10 @@ settings, random seed).
   release fails even at the continuation limits; from a shape 0.2–0.3 m away from
   equilibrium the passes stall near 10 % out-of-balance after 60 passes (with the tension
   field about 1 % of the elements change state every pass; without it the compressed
-  fabric buckles). The validation study therefore starts CalculiX from the preview's
-  equilibrium (`start_positions`) and accepts the result only on CalculiX's own criteria.
+  fabric buckles). The validation study and the application therefore start CalculiX
+  from the preview's equilibrium (`start_positions`). Without a current preview of the
+  same mesh, the application solves one first and keeps it as its own run. The result is
+  accepted only on CalculiX's own criteria.
   This verifies that the preview's shape, stresses, tape tensions and reactions are an
   equilibrium of an independent finite-element model; the preview remains the form-finding
   tool. The analytic benchmarks start from their stress-free initial shape.

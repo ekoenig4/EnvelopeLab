@@ -943,6 +943,7 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
     },
     "TapeSet": {
       "additionalProperties": false,
+      "description": "Tape classes of the envelope, and how long the vertical load tapes are cut.\n\n``vertical_length`` is how a vertical load tape's length is set when it is sewn:\n\n* ``\"fabric_edge\"`` (default): the tape is cut as long as the gore edge it is sewn to.\n  A flat gore's side edge is longer than the tape line wherever the gore narrows or\n  widens (``docs/theory/gore-geometry.md``), so such a tape is longer than the\n  design's meridian and the fabric carries much of the vertical load.\n* ``\"tape_line\"``: the tape is cut to the design's tape line (the meridian length of\n  each row) and the longer gore edge is eased onto it, so the tapes carry the vertical\n  load.",
       "properties": {
         "hole": {
           "$ref": "#/$defs/TapeSpec"
@@ -955,6 +956,15 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
         },
         "vertical": {
           "$ref": "#/$defs/TapeSpec"
+        },
+        "vertical_length": {
+          "default": "fabric_edge",
+          "enum": [
+            "fabric_edge",
+            "tape_line"
+          ],
+          "title": "Vertical Length",
+          "type": "string"
         }
       },
       "required": [
@@ -1144,7 +1154,7 @@ _This document is auto-generated from `DesignDocument.model_json_schema()`._
       "type": "array"
     },
     "schema_version": {
-      "default": 7,
+      "default": 8,
       "title": "Schema Version",
       "type": "integer"
     },

@@ -182,6 +182,101 @@ in the undo history. Nothing is edited by hand in JSON.
   locks; a target that cannot be met is refused. See
   [theory](../theory/design-editing.md).
 
+### Shape under load
+
+The **Shape under load** box checks the drawn profile at the design's operating
+conditions while you edit it. It takes milliseconds and needs no simulation. A span drawn
+in **thick red** would need the fabric to be compressed around the envelope (or along
+it). Fabric cannot take compression, so that part will not keep the drawn shape. The
+status line says how much of the tape that is and where along it. Everything not red is
+held by fabric tension. The check redraws while you drag a point, so you can watch a span
+turn red as you over-curve it.
+
+* **Show natural shape** draws (dashed, cyan) the shape whose whole load the tapes
+  carry, with your mouth, top opening and tape length. Most good gore designs are far
+  from it, because their fabric carries tension around the envelope. It is shown for
+  comparison.
+* **Snap to a shape that holds** changes only the red spans. Each is given the most
+  curvature the load can hold there, and everything else keeps its curvature. Mouth, top
+  opening and tape length stay. The profile is refitted within the *Fit tolerance*
+  (5 mm). One undoable edit. Unlock *Fixed height*, *Fixed volume* and *Fixed maximum
+  diameter* first.
+
+A snapped shape still grows a few centimetres when inflated, from tape and fabric
+stretch. Run a solve and use *Compensate* below for that. On the generic fixture the
+drawn profile's lowest quarter collapses inward by 62 mm when solved; snapped, it does
+not, and the largest deviation halves (103 → 48 mm). See
+[theory](../theory/profile-physics.md).
+
+### Solved shape vs profile
+
+The patterns cut from a profile do not inflate exactly onto it. Tapes stretch, gores
+lobe and the crown flattens. The **Solved shape vs profile** box draws the tape line of
+the latest **Preview** (orange) and **CalculiX** (green) run over the profile canvas,
+mirrored like the profile. Each line has a check box to show or hide it. Under each check
+box, the run is summarised: its date and mesh, the largest and RMS distance from the
+intended profile, and the change of height and maximum diameter.
+
+A few centimetres on an envelope several metres tall are hard to see, so *Show
+deviation* (× 1 to × 50) draws the solved lines that many times further from the intended
+profile. The numbers are never scaled.
+
+A **stale** run (the design changed since) is drawn dotted and flagged in amber. A run
+that is **not converged** is drawn dotted and flagged in red: its shape is not final.
+Neither can drive a profile update.
+
+Two buttons change the profile from the run chosen under *Update from*:
+
+* **Compensate towards intended profile** changes the cut so that the inflated tapes land
+  on the profile you drew. The first step keeps your drawn profile as the **intended
+  profile** (dash-dot purple line). The drawn control points become the *cut* line. Run
+  the solver again and repeat: the box lists the largest deviation before each step, so
+  you can see it shrink. A third to a half of the error typically goes per step. Lower
+  the *Step factor* if a step does not reduce the deviation. *Restore intended profile*
+  sets the drawn profile back to the target in one undoable edit. *Keep cut, clear
+  target* stops compensating and keeps the current cut.
+* **Adopt solved shape** replaces the drawn profile by the solved tape line, so the
+  profile shows what the patterns fly. It drops any intended profile.
+
+Both buttons work only from a current, converged run. Both add control points where the
+solved line needs them, until the new profile follows it within the *Fit tolerance*
+(5 mm by default; the solved line is only known to about the mesh size). Each is one
+undoable edit. Unlock *Fixed height*, *Fixed volume*, *Fixed maximum diameter* and the
+mouth and top-hole diameter locks first, because the update changes them on purpose. A
+*Segments* profile (lines and arcs) cannot follow a solved line. *Compensate* needs
+*Profile between points* set to *Spline* or *Straight segments*. *Adopt* turns a
+*Segments* profile into a spline in the same undoable edit. The ghost lines are shown
+either way.
+
+**Fit profile to simulated shape** does the whole of *Adopt* in one click:
+
+* If there is a current, converged run, it fits the profile to that run. It tries the
+  solver under *Update from* first, then the other one.
+* If there is none, it starts a preview run (progress in the status bar). When that run
+  has converged, it fits the profile to it.
+* If the preview does not converge, the profile is not changed, and the box says so in
+  red capitals.
+
+**Take out the stretch (cut the flight shape)** is ticked by default. Fit then cuts the
+inflated *shape* at the current tape length, with the mouth and the top opening kept at
+their sizes. The inflated tapes are slightly stretched (0.1–0.4 % on a full-size
+envelope), so cutting the inflated line as it is would make the patterns grow by that
+much every time you fit again. The box reports the stretch taken out. Untick it to adopt
+the inflated tape line as it is, like *Adopt*.
+
+Repeated flight-shape fits keep the tape length. The shape can still move a little each
+time, because re-cut patterns change the equilibrium. On the full-size test envelope it
+keeps getting taller and narrower by about 50 mm per fit after ten fits. Check the
+deviation after each fit and stop when it no longer matters for your design
+([theory](../theory/profile-matching.md#flight-shape)).
+
+The button is unavailable while another run is in progress. Undo takes the fit back in
+one step. Afterwards every run is stale, because the profile they solved has changed.
+
+A practical loop: compensate from fast **Preview** runs until the deviation is small,
+then run **CalculiX** once to verify, and compensate from it if needed. See
+[theory](../theory/profile-matching.md).
+
 ## Properties and materials
 
 Select a section in the **Design Tree** (operating conditions, tapes, seam types,
@@ -189,6 +284,18 @@ parachute, rigging, turning vents, …) and edit its fields in **Properties**; t
 parachute, red line, flying wires and turning vents are added and checked in the
 **Rigging** panel ([guide](rigging.md)). Values are SI: lengths m, temperatures K (°C shown
 beside), pressure Pa, masses kg.
+
+The **tapes** section sets the tape classes and **vertical_length**, the way the vertical
+load tapes are cut:
+
+* *fabric_edge* (default): each tape is as long as the gore edge it is sewn to. A flat
+  gore's edge is longer than the design's tape line near the mouth and the top, so these
+  tapes hang partly slack and the fabric carries much of the vertical load.
+* *tape_line*: each tape is cut to the row's tape length and the gore edge is eased onto
+  it, so the tapes carry the vertical load. The simulation models the tapes at that length
+  ([theory](../theory/gore-geometry.md#vertical-tape-length)). With few gores (8 or fewer)
+  the eased fabric just above the mouth can keep the preview from converging. The result
+  then says NOT CONVERGED; a coarser mesh or more gores help.
 
 Each field gets the editor its value needs:
 
@@ -253,10 +360,20 @@ pattern view only.
 
 ## The 2D pattern view
 
-The pattern view fills the **Patterns** mode (Ctrl+2), beside the Materials panel. It stacks the
-pieces vertically in the order they are sewn up a gore: the scoop (if any) at the bottom,
-the panel rows from the mouth up (e.g. the Nomex mouth row, then the nylon rows), the
-parachute's radial panel on top and, above it, its circular centre panel. Each panel row is drawn as cut (dashed) and finished (solid,
+The pattern view fills the **Patterns** mode (Ctrl+2), beside the Materials panel. The
+pieces come in the order they are sewn up a gore: the scoop (if any), the panel rows from
+the mouth up (e.g. the Nomex mouth row, then the nylon rows), the parachute's radial panel
+and its circular centre panel. **Layout** in the toolbar chooses how they are arranged:
+
+* *Side by side* (default): in that order, left to right on shelves. The number of
+  shelves is the one that draws the pieces largest in the view, and the pieces are
+  re-arranged when the view is resized. In a wide window the pieces come out 2–4 times
+  larger than stacked: 2.6 times for the 4-row test envelope and 4.1 times for a 12-row
+  full-size one.
+* *Assembled gore*: stacked up one gore as they are sewn, the scoop at the bottom and the
+  parachute's centre panel on top, so you can see how the rows meet.
+
+The layout is for display only: it does not change the cut files. Each panel row is drawn as cut (dashed) and finished (solid,
 filled with the zone's fabric colour) outlines with its label, grain arrow, notches, tapes
 and features; the parachute and scoop panels are read-only here (edit them in the
 Rigging panel and Properties).

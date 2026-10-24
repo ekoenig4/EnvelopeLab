@@ -8,7 +8,8 @@ the same command, so the design stays consistent and one undo restores both.
 from __future__ import annotations
 
 import math
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -28,6 +29,7 @@ from envelopelab.geometry.profile_segments import (
     resolve_segments,
     split_segment,
 )
+from envelopelab.materials.repository import FabricCatalog, FabricLibraryRepository
 from envelopelab.project.dependencies import canonical_hash
 from envelopelab.project.gore_design import (
     DEFAULT_CREST_LOFT,
@@ -46,9 +48,28 @@ from envelopelab.project.gore_design import (
     profile_from_arrays,
     profile_layout,
 )
-from envelopelab.project.model import ConstraintLocks, ManualOutline, PatternSet, utc_now
+from envelopelab.project.model import (
+    ConstraintLocks,
+    ManualOutline,
+    PatternSet,
+    ProfileTarget,
+    utc_now,
+)
+from envelopelab.project.profile_match import (
+    FIT_TOLERANCE,
+    MAX_CONTROL_POINTS,
+    ProfileUpdate,
+    SolvedMeridian,
+    adopted_control_points,
+    compensated_control_points,
+    flight_shape_points,
+    solved_deviation,
+    target_profile,
+    updatable_interpolation,
+)
 from envelopelab.project.session import ProjectSession
 from envelopelab.project.shapes import ShapeSpec
+from envelopelab.solvers.axisymmetric import hold_shape
 
 LOCKABLE = (
     "height",
@@ -529,6 +550,285 @@ def delete_control_point(
     return set_control_points(
         session, points, f"Delete control point {index + 1}", keep_rows_fitted, segments
     )
+
+
+@dataclass(frozen=True)
+class HoldSnap:
+    """Result of :func:`snap_profile_to_hold`: control points, fit distance (m) and the
+    changed fraction of the tape (0 when the drawn shape already holds)."""
+
+    points: int
+    fit_distance: float
+    changed: float
+
+
+#: Locks that a profile update from a solved shape would fight (it moves these on purpose).
+SHAPE_LOCKS = ("height", "volume", "max_diameter", "mouth_diameter", "top_diameter")
+
+
+def _check_shape_locks(session: ProjectSession) -> None:
+    locked = [name for name in SHAPE_LOCKS if getattr(session.project.locks, name) is not None]
+    if locked:
+        raise LockError(
+            f"unlock {', '.join(n.replace('_', ' ') for n in locked)} first: a profile "
+            "update from a solved shape changes them on purpose"
+        )
+
+
+def _with_target(
+    session: ProjectSession, target: ProfileTarget | None, edit: Callable[[], bool]
+) -> bool:
+    """Run a profile edit with ``target`` as the project's compensation target.
+
+    The target is set first, so that views refreshed by the edit already show it, and put
+    back when the edit is refused.
+    """
+    previous = session.project.profile_target
+    session.project.profile_target = target
+    try:
+        changed = edit()
+    except Exception:
+        session.project.profile_target = previous
+        raise
+    if target != previous:
+        session.mark_aux_dirty()
+    return changed
+
+
+def snap_profile_to_hold(
+    session: ProjectSession,
+    fabrics: FabricLibraryRepository | FabricCatalog | None = None,
+    tolerance: float = 0.005,
+    keep_rows_fitted: bool = True,
+) -> HoldSnap:
+    """Move the profile to the nearest shape its load can hold: no hoop compression.
+
+    See :func:`envelopelab.solvers.axisymmetric.hold_shape`: the curvature is limited to
+    the zero-hoop value where the drawn profile would need hoop compression, and kept
+    elsewhere; mouth, top opening and tape length stay. The shape is fitted with control
+    points within ``tolerance`` (m; spline, or straight segments for a straight-segment
+    profile). One undoable command.
+
+    Returns
+    -------
+    HoldSnap
+        The fit's control-point count and distance (m), and the fraction of the tape that
+        was changed.
+
+    Raises
+    ------
+    LockError
+        When height, volume or maximum diameter is locked.
+    ValueError
+        When the shape does not converge, the fit misses the tolerance, or the result is
+        not a valid design; nothing is changed.
+    """
+    from envelopelab.project.profile_physics import design_load
+
+    locked = [n for n in SHAPE_LOCKS[:3] if getattr(session.project.locks, n) is not None]
+    if locked:
+        raise LockError(
+            f"unlock {', '.join(n.replace('_', ' ') for n in locked)} first: the shape "
+            "that holds has its own height, volume and diameter"
+        )
+    design = session.design
+    assert design.gores is not None
+    load = design_load(design, session.patterns, fabrics).load
+    held = hold_shape(design_profile(design), load)
+    if not held.converged:
+        raise ValueError(
+            f"no shape that holds was found ({held.iterations} passes; the load may not "
+            "keep the envelope taut)"
+        )
+    if held.changed == 0.0:
+        return HoldSnap(0, 0.0, 0.0)
+    interpolation: Literal["spline", "linear"] = (
+        "linear" if design.gores.profile_interpolation == "linear" else "spline"
+    )
+    s = np.linspace(0.0, held.profile.meridian_length, 401)
+    fit = profile_editing.simplify_profile(
+        held.profile.radius_at(s), held.profile.height_at(s), tolerance, interpolation, 60
+    )
+    if not fit.within_tolerance:
+        raise ValueError(
+            f"no profile within {tolerance * 1e3:g} mm of the shape that holds "
+            f"(best {fit.deviation * 1e3:.1f} mm)"
+        )
+    _replace_profile(
+        session,
+        fit.r,
+        fit.z,
+        interpolation,
+        None,
+        "Snap profile to a shape that holds",
+        keep_rows_fitted,
+    )
+    return HoldSnap(len(fit.r), float(fit.deviation), held.changed)
+
+
+def compensate_profile(
+    session: ProjectSession,
+    solved: SolvedMeridian,
+    relaxation: float = 1.0,
+    tolerance: float = FIT_TOLERANCE,
+    keep_rows_fitted: bool = True,
+) -> ProfileUpdate:
+    """Correct the cut profile so the inflated tapes land on the intended line (one step).
+
+    The first step stores the drawn profile as the project's
+    :class:`~envelopelab.project.model.ProfileTarget`; later steps correct towards that
+    target, so repeated steps converge on it instead of drifting with the cut line. See
+    :func:`envelopelab.project.profile_match.compensated_control_points`.
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit; ``solved`` must come from a run of its current design.
+    solved : SolvedMeridian
+        Solved tape line, m.
+    relaxation : float
+        Step factor in (0, 1], dimensionless.
+    tolerance : float
+        Fit tolerance, m.
+    keep_rows_fitted : bool
+        Rescale the panel rows to the new meridian length.
+
+    Returns
+    -------
+    ProfileUpdate
+        The control points written (m) and their fit error (m).
+
+    Raises
+    ------
+    LockError
+        When height, volume, maximum, mouth or top-hole diameter is locked.
+    ValueError
+        For a segment profile (switch it to a spline or straight segments first).
+    """
+    _check_shape_locks(session)
+    design = session.design
+    interpolation = updatable_interpolation(design)
+    target = session.project.profile_target
+    if target is None:
+        r, z = control_arrays(design)
+        target = ProfileTarget(
+            control_points=list(zip(r.tolist(), z.tolist(), strict=True)),
+            interpolation=interpolation,
+        )
+    goal = target_profile(target)
+    update = compensated_control_points(
+        design, solved, relaxation, tolerance, MAX_CONTROL_POINTS, goal
+    )
+    deviation = solved_deviation(goal, solved).max_distance
+    _with_target(
+        session,
+        target.model_copy(update={"step_deviations": [*target.step_deviations, deviation]}),
+        lambda: set_control_points(
+            session, update.points, "Compensate profile for the solved shape", keep_rows_fitted
+        ),
+    )
+    return update
+
+
+def adopt_solved_profile(
+    session: ProjectSession,
+    solved: SolvedMeridian,
+    tolerance: float = FIT_TOLERANCE,
+    keep_rows_fitted: bool = True,
+) -> ProfileUpdate:
+    """Replace the profile by the solved tape line; any compensation target is dropped
+    (the solved line becomes the intent).
+
+    A segment profile becomes a spline: its lines, arcs and curves cannot follow a solved
+    line. See :func:`envelopelab.project.profile_match.adopted_control_points`;
+    parameters, return value and lock errors as :func:`compensate_profile`.
+    """
+    _check_shape_locks(session)
+    update = adopted_control_points(session.design, solved, tolerance, MAX_CONTROL_POINTS)
+    _adopt(session, update, "Adopt solved profile", keep_rows_fitted)
+    return update
+
+
+def fit_flight_shape(
+    session: ProjectSession,
+    solved: SolvedMeridian,
+    tolerance: float = FIT_TOLERANCE,
+    keep_rows_fitted: bool = True,
+) -> ProfileUpdate:
+    """Replace the profile by the solved shape with its stretch taken out; any
+    compensation target is dropped.
+
+    See :func:`envelopelab.project.profile_match.flight_shape_points`: the tape length
+    stays, so repeating it settles on the shape the patterns fly in. Parameters, return
+    value and lock errors as :func:`compensate_profile`; a segment profile becomes a
+    spline.
+    """
+    _check_shape_locks(session)
+    update = flight_shape_points(session.design, solved, tolerance, MAX_CONTROL_POINTS)
+    _adopt(session, update, "Fit profile to flight shape", keep_rows_fitted)
+    return update
+
+
+def _adopt(
+    session: ProjectSession, update: ProfileUpdate, description: str, keep_rows_fitted: bool
+) -> None:
+    """Write adopted control points in one command, dropping any compensation target (a
+    segment profile becomes a spline)."""
+    design = session.design
+    if design.gores is not None and design.gores.profile_interpolation == "segments":
+        pts = np.asarray(update.points, dtype=np.float64)
+        _with_target(
+            session,
+            None,
+            lambda: _replace_profile(
+                session,
+                pts[:, 0],
+                pts[:, 1],
+                "spline",
+                None,
+                f"{description} (as a spline)",
+                keep_rows_fitted,
+            ),
+        )
+        return
+    _with_target(
+        session,
+        None,
+        lambda: set_control_points(session, update.points, description, keep_rows_fitted),
+    )
+
+
+def restore_profile_target(session: ProjectSession, keep_rows_fitted: bool = True) -> bool:
+    """Set the drawn profile back to the compensation target and drop the target
+    (undoes every compensation step in one command; the target is not restored by undo).
+
+    Raises
+    ------
+    ValueError
+        When the project has no compensation target.
+    """
+    target = session.project.profile_target
+    if target is None:
+        raise ValueError("no compensation target to restore")
+    _check_shape_locks(session)
+    return _with_target(
+        session,
+        None,
+        lambda: set_control_points(
+            session, target.control_points, "Restore the intended profile", keep_rows_fitted
+        ),
+    )
+
+
+def clear_profile_target(session: ProjectSession) -> None:
+    """Forget the compensation target, keeping the drawn (cut) profile as it is.
+
+    Like the locks the target is an editor setting saved with the project, not a design
+    edit, so this does not enter the undo history.
+    """
+    if session.project.profile_target is not None:
+        session.project.profile_target = None
+        session.mark_aux_dirty()
 
 
 def set_gore_count(session: ProjectSession, count: int) -> bool:

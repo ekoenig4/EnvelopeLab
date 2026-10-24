@@ -144,7 +144,7 @@ def test_version_6_documents_migrate_without_segments() -> None:
     raw["meta"]["content_hash"] = None
     raw["meta"]["content_hash"] = _raw_hash(raw)
     loaded = load_design_document(json.dumps(raw))
-    assert loaded.schema_version == CURRENT_SCHEMA_VERSION == 7
+    assert loaded.schema_version == CURRENT_SCHEMA_VERSION == 8
     assert loaded.gores is not None and loaded.gores.profile_segments is None
     r, _ = control_arrays(loaded)
     assert r.size == len(POINTS)

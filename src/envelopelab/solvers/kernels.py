@@ -339,3 +339,523 @@ def element_forces(
         out.external,
     )
     return out
+
+
+# --------------------------------------------------------------------------------------
+# Compiled dynamic-relaxation iterations
+# --------------------------------------------------------------------------------------
+
+#: Return codes of the compiled iterations (:func:`relax_kernel`).
+RELAX_REPORT, RELAX_CONVERGED, RELAX_DIVERGED, RELAX_LIMIT = 0, 2, 3, 4
+
+
+def _gas_pressure(params: Any, code: int, z: float) -> float:  # pragma: no cover - compiled
+    """Differential pressure of gas ``code`` (row of ``params``) at height ``z``, Pa:
+    ``p0 + gradient * (z - z_ref)``, clamped at zero height for the open envelope."""
+    p0 = float(params[code, 0])
+    gradient = float(params[code, 1])
+    height = z - float(params[code, 2])
+    if params[code, 3] > 0.5 and height < 0.0:
+        height = 0.0
+    return p0 + gradient * height
+
+
+def _forces_into(  # pragma: no cover - compiled by numba; the NumPy path is the reference
+    x: Any,
+    tri: Any,
+    grad: Any,
+    area: Any,
+    c: Any,
+    ci: Any,
+    kappa: float,
+    enabled: bool,
+    tri_gas: Any,
+    gas: Any,
+    fixed: Any,
+    cable_edges: Any,
+    cable_l0: Any,
+    cable_ea: Any,
+    cl_edges: Any,
+    cl_edge_ptr: Any,
+    cl_nodes: Any,
+    cl_node_ptr: Any,
+    cl_gas: Any,
+    p: Any,
+    xe: Any,
+    f: Any,
+    strain: Any,
+    stress: Any,
+    state: Any,
+    minor: Any,
+    f_int: Any,
+    f_p: Any,
+    r: Any,
+    ext: Any,
+) -> None:
+    """Residual ``r`` and external force ``ext`` (n, 3) at ``x``: the same terms as
+    ``_System.forces`` (elements and pressure, fixed weight and dead loads, tapes,
+    closure caps)."""
+    n = x.shape[0]
+    m = tri.shape[0]
+    # Corner pressures: gas inside (side 0) minus gas outside (side 1).
+    for t in range(m):
+        for a in range(3):
+            z = x[tri[t, a], 2]
+            p[t, a] = _gas_pressure(gas, tri_gas[t, 0], z) - _gas_pressure(gas, tri_gas[t, 1], z)
+    for i in range(n):
+        for k in range(3):
+            r[i, k] = 0.0
+            ext[i, k] = 0.0
+    _element_loop_nb(
+        x,
+        tri,
+        grad,
+        area,
+        c,
+        ci,
+        kappa,
+        enabled,
+        p,
+        xe,
+        f,
+        strain,
+        stress,
+        state,
+        minor,
+        f_int,
+        f_p,
+        r,
+        ext,
+    )
+    for i in range(n):
+        for k in range(3):
+            r[i, k] += fixed[i, k]
+            ext[i, k] += fixed[i, k]
+    for e in range(cable_edges.shape[0]):
+        a = cable_edges[e, 0]
+        b = cable_edges[e, 1]
+        dx = x[b, 0] - x[a, 0]
+        dy = x[b, 1] - x[a, 1]
+        dz = x[b, 2] - x[a, 2]
+        length = np.sqrt(dx * dx + dy * dy + dz * dz)
+        strain_c = length / cable_l0[e] - 1.0
+        tension = cable_ea[e] * strain_c if strain_c > 0.0 else 0.0
+        scale = tension / (length if length > 1e-300 else 1e-300)
+        r[a, 0] += scale * dx
+        r[a, 1] += scale * dy
+        r[a, 2] += scale * dz
+        r[b, 0] -= scale * dx
+        r[b, 1] -= scale * dy
+        r[b, 2] -= scale * dz
+    for q in range(cl_gas.shape[0]):
+        n0, n1 = cl_node_ptr[q], cl_node_ptr[q + 1]
+        cx = cy = cz = 0.0
+        for j in range(n0, n1):
+            cx += x[cl_nodes[j], 0]
+            cy += x[cl_nodes[j], 1]
+            cz += x[cl_nodes[j], 2]
+        count = n1 - n0
+        cx /= count
+        cy /= count
+        cz /= count
+        tx = ty = tz = 0.0
+        trib_total = 0.0
+        e0, e1 = cl_edge_ptr[q], cl_edge_ptr[q + 1]
+        for j in range(e0, e1):
+            a = cl_edges[j, 0]
+            b = cl_edges[j, 1]
+            ax = x[b, 0] - cx
+            ay = x[b, 1] - cy
+            az = x[b, 2] - cz
+            bx = x[a, 0] - cx
+            by = x[a, 1] - cy
+            bz = x[a, 2] - cz
+            nx = 0.5 * (ay * bz - az * by)
+            ny = 0.5 * (az * bx - ax * bz)
+            nz = 0.5 * (ax * by - ay * bx)
+            zc = (cz + x[a, 2] + x[b, 2]) / 3.0
+            pc = _gas_pressure(gas, cl_gas[q], zc)
+            tx += pc * nx
+            ty += pc * ny
+            tz += pc * nz
+            ex = x[b, 0] - x[a, 0]
+            ey = x[b, 1] - x[a, 1]
+            ez = x[b, 2] - x[a, 2]
+            trib_total += np.sqrt(ex * ex + ey * ey + ez * ez)
+        if trib_total <= 0.0:
+            continue
+        for j in range(e0, e1):
+            a = cl_edges[j, 0]
+            b = cl_edges[j, 1]
+            ex = x[b, 0] - x[a, 0]
+            ey = x[b, 1] - x[a, 1]
+            ez = x[b, 2] - x[a, 2]
+            share = 0.5 * np.sqrt(ex * ex + ey * ey + ez * ez) / trib_total
+            for node in (a, b):
+                r[node, 0] += share * tx
+                r[node, 1] += share * ty
+                r[node, 2] += share * tz
+                ext[node, 0] += share * tx
+                ext[node, 1] += share * ty
+                ext[node, 2] += share * tz
+
+
+def _project_into(r: Any, constrained: Any, proj: Any, out: Any) -> None:  # pragma: no cover
+    """``out`` = ``r`` with the constrained components removed."""
+    for i in range(r.shape[0]):
+        for k in range(3):
+            out[i, k] = r[i, k]
+    for j in range(constrained.shape[0]):
+        node = constrained[j]
+        r0, r1, r2 = r[node, 0], r[node, 1], r[node, 2]
+        for k in range(3):
+            out[node, k] = proj[j, k, 0] * r0 + proj[j, k, 1] * r1 + proj[j, k, 2] * r2
+
+
+def _masses_into(  # pragma: no cover - compiled by numba; _System.masses is the reference
+    tri: Any,
+    grad: Any,
+    area: Any,
+    c: Any,
+    f: Any,
+    stress: Any,
+    xe: Any,
+    p: Any,
+    x: Any,
+    cable_edges: Any,
+    cable_l0: Any,
+    cable_ea: Any,
+    mass_factor: float,
+    mass: Any,
+) -> None:
+    """Gershgorin fictitious masses at the current state, as ``_System.masses``: CST
+    material and geometric row sums
+    (:func:`~envelopelab.solvers.membrane.element_stiffness_rowsum`), the pressure term
+    ``max|p| * perimeter / 6``, and the tapes' ``2 sqrt(3) (EA/L0 + T/L)``."""
+    n = mass.shape[0]
+    m = tri.shape[0]
+    for i in range(n):
+        mass[i] = 0.0
+    b = np.empty((3, 3, 3))  # corner, voigt, xyz
+    gn = np.empty(3)
+    for t in range(m):
+        for a in range(3):
+            g0 = grad[t, a, 0]
+            g1 = grad[t, a, 1]
+            gn[a] = np.sqrt(g0 * g0 + g1 * g1)
+            for i in range(3):
+                b[a, 0, i] = g0 * f[t, i, 0]
+                b[a, 1, i] = g1 * f[t, i, 1]
+                b[a, 2, i] = g1 * f[t, i, 0] + g0 * f[t, i, 1]
+        s00 = stress[t, 0, 0]
+        s11 = stress[t, 1, 1]
+        s01 = stress[t, 0, 1]
+        mean = 0.5 * (s00 + s11)
+        rad = np.sqrt((0.5 * (s00 - s11)) ** 2 + s01 * s01)
+        s_abs = max(abs(mean + rad), abs(mean - rad))
+        gsum = gn[0] + gn[1] + gn[2]
+        perimeter = 0.0
+        p_max = 0.0
+        for a in range(3):
+            q = (a + 1) % 3
+            dx = xe[t, q, 0] - xe[t, a, 0]
+            dy = xe[t, q, 1] - xe[t, a, 1]
+            dz = xe[t, q, 2] - xe[t, a, 2]
+            perimeter += np.sqrt(dx * dx + dy * dy + dz * dz)
+            if abs(p[t, a]) > p_max:
+                p_max = abs(p[t, a])
+        pressure_term = p_max * perimeter / 6.0
+        for a in range(3):
+            best = 0.0
+            for i in range(3):
+                row = 0.0
+                for bb in range(3):
+                    for j in range(3):
+                        kij = 0.0
+                        for v in range(3):
+                            cbv = 0.0
+                            for w in range(3):
+                                cbv += c[t, v, w] * b[bb, w, j]
+                            kij += b[a, v, i] * cbv
+                        row += abs(kij)
+                if row > best:
+                    best = row
+            mass[tri[t, a]] += area[t] * (best + gn[a] * gsum * s_abs) + pressure_term
+    for e in range(cable_edges.shape[0]):
+        a = cable_edges[e, 0]
+        bnode = cable_edges[e, 1]
+        dx = x[bnode, 0] - x[a, 0]
+        dy = x[bnode, 1] - x[a, 1]
+        dz = x[bnode, 2] - x[a, 2]
+        length = np.sqrt(dx * dx + dy * dy + dz * dz)
+        strain_c = length / cable_l0[e] - 1.0
+        tension = cable_ea[e] * strain_c if strain_c > 0.0 else 0.0
+        kc = 2.0 * np.sqrt(3.0) * (cable_ea[e] / cable_l0[e] + tension / length)
+        mass[a] += kc
+        mass[bnode] += kc
+    k_max = 0.0
+    for i in range(n):
+        if mass[i] > k_max:
+            k_max = mass[i]
+    floor = 1e-9 * k_max if k_max > 0.0 else 1.0
+    for i in range(n):
+        mass[i] = mass_factor * 0.5 * (mass[i] if mass[i] > floor else floor)
+
+
+def _relax_loop(  # pragma: no cover - compiled by numba; the Python loop is the reference
+    x: Any,
+    v: Any,
+    v_prev: Any,
+    r_free: Any,
+    mass: Any,
+    scalars: Any,
+    first: int,
+    last: int,
+    report_every: int,
+    tolerance: float,
+    kinetic: bool,
+    viscous: float,
+    tri: Any,
+    grad: Any,
+    area: Any,
+    c: Any,
+    ci: Any,
+    kappa: float,
+    enabled: bool,
+    tri_gas: Any,
+    gas: Any,
+    fixed: Any,
+    cable_edges: Any,
+    cable_l0: Any,
+    cable_ea: Any,
+    cl_edges: Any,
+    cl_edge_ptr: Any,
+    cl_nodes: Any,
+    cl_node_ptr: Any,
+    cl_gas: Any,
+    constrained: Any,
+    proj: Any,
+    mass_factor: float,
+) -> tuple[int, int]:
+    """Iterations ``first``..``last`` of ``solve`` (same order of operations).
+
+    ``scalars`` holds ``[ke_prev, fresh, ke, residual, resets]``; it, ``x``, ``v``,
+    ``v_prev``, ``r_free`` and ``mass`` are updated in place. Returns ``(code, iteration)``:
+    a progress report is due, the solve converged or diverged, or ``last`` was reached.
+    """
+    n = x.shape[0]
+    m = tri.shape[0]
+    p = np.empty((m, 3))
+    xe = np.empty((m, 3, 3))
+    f = np.empty((m, 3, 2))
+    strain = np.empty((m, 2, 2))
+    stress = np.empty((m, 2, 2))
+    state = np.empty(m, dtype=np.int8)
+    minor = np.empty(m)
+    f_int = np.empty((m, 3, 3))
+    f_p = np.empty((m, 3, 3))
+    r = np.empty((n, 3))
+    ext = np.empty((n, 3))
+    ke_prev = scalars[0]
+    fresh = scalars[1] > 0.5
+    ke = scalars[2]
+    residual = scalars[3]
+    for it in range(first, last + 1):
+        ke = 0.0
+        for i in range(n):
+            for k in range(3):
+                accel = r_free[i, k] / mass[i]
+                if kinetic:
+                    v[i, k] = 0.5 * accel if fresh else v[i, k] + accel
+                else:
+                    v[i, k] = ((1.0 - 0.5 * viscous) * v[i, k] + accel) / (1.0 + 0.5 * viscous)
+                ke += mass[i] * v[i, k] * v[i, k]
+        ke *= 0.5
+        fresh = False
+        reset = kinetic and ke < ke_prev
+        if reset:
+            # Back to the kinetic-energy peak, at rest, with masses for that state.
+            for i in range(n):
+                for k in range(3):
+                    x[i, k] -= 0.5 * v_prev[i, k]
+                    v[i, k] = 0.0
+                    v_prev[i, k] = 0.0
+            ke_prev = 0.0
+            fresh = True
+            scalars[4] += 1.0
+        else:
+            for i in range(n):
+                for k in range(3):
+                    x[i, k] += v[i, k]
+                    v_prev[i, k] = v[i, k]
+            ke_prev = ke
+        _forces_into(
+            x,
+            tri,
+            grad,
+            area,
+            c,
+            ci,
+            kappa,
+            enabled,
+            tri_gas,
+            gas,
+            fixed,
+            cable_edges,
+            cable_l0,
+            cable_ea,
+            cl_edges,
+            cl_edge_ptr,
+            cl_nodes,
+            cl_node_ptr,
+            cl_gas,
+            p,
+            xe,
+            f,
+            strain,
+            stress,
+            state,
+            minor,
+            f_int,
+            f_p,
+            r,
+            ext,
+        )
+        if reset:
+            _masses_into(
+                tri,
+                grad,
+                area,
+                c,
+                f,
+                stress,
+                xe,
+                p,
+                x,
+                cable_edges,
+                cable_l0,
+                cable_ea,
+                mass_factor,
+                mass,
+            )
+        _project_into(r, constrained, proj, r_free)
+        norm_r = 0.0
+        norm_e = 0.0
+        for i in range(n):
+            for k in range(3):
+                norm_r += r_free[i, k] * r_free[i, k]
+                norm_e += ext[i, k] * ext[i, k]
+        norm_r = np.sqrt(norm_r)
+        norm_e = np.sqrt(norm_e)
+        residual = norm_r / norm_e if norm_e > 0.0 else norm_r
+        scalars[0] = ke_prev
+        scalars[1] = 1.0 if fresh else 0.0
+        scalars[2] = ke
+        scalars[3] = residual
+        if not np.isfinite(residual) or residual > 1e8:
+            return RELAX_DIVERGED, it
+        if residual < tolerance:
+            return RELAX_CONVERGED, it
+        if it % report_every == 0:
+            return RELAX_REPORT, it
+    return RELAX_LIMIT, last
+
+
+_compiled_relax: Any = None
+_element_loop_nb: Any = None
+
+
+def relax_kernel() -> Any:
+    """The compiled iteration loop (:func:`_relax_loop`), compiled on first use."""
+    global _compiled_relax, _element_loop_nb
+    if _compiled_relax is None:
+        assert numba is not None
+        jit = numba.njit(cache=True, nogil=True)
+        _element_loop_nb = _kernel()
+        globals()["_gas_pressure"] = jit(_gas_pressure)
+        globals()["_forces_into"] = jit(_forces_into)
+        globals()["_project_into"] = jit(_project_into)
+        globals()["_masses_into"] = jit(_masses_into)
+        _compiled_relax = jit(_relax_loop)
+    return _compiled_relax
+
+
+def compiled_forces_and_masses(
+    x: FloatArray,
+    tri: IntArray,
+    rest: RestGeometry,
+    stiffness: FloatArray,
+    compliance: FloatArray,
+    slack_stiffness_ratio: float,
+    enabled: bool,
+    inputs: dict[str, Any],
+    mass_factor: float,
+) -> tuple[FloatArray, FloatArray, FloatArray]:
+    """Residual and external force (N, (n, 3)) and fictitious masses ((n,)) at ``x`` with
+    the compiled functions of the iteration loop (for comparison with the reference
+    ``_System.forces`` and ``_System.masses``; ``inputs`` from ``_System.compiled_inputs``).
+    """
+    relax_kernel()
+    n, m = len(x), len(tri)
+    p = np.empty((m, 3))
+    xe = np.empty((m, 3, 3))
+    f = np.empty((m, 3, 2))
+    strain = np.empty((m, 2, 2))
+    stress = np.empty((m, 2, 2))
+    state = np.empty(m, dtype=np.int8)
+    minor = np.empty(m)
+    f_int = np.empty((m, 3, 3))
+    f_p = np.empty((m, 3, 3))
+    r = np.empty((n, 3))
+    ext = np.empty((n, 3))
+    mass = np.empty(n)
+    xc = np.ascontiguousarray(x, dtype=np.float64)
+    _forces_into(
+        xc,
+        tri,
+        rest.grad_n,
+        rest.area,
+        stiffness,
+        compliance,
+        float(slack_stiffness_ratio),
+        bool(enabled),
+        inputs["tri_gas"],
+        inputs["gas"],
+        inputs["fixed"],
+        inputs["cable_edges"],
+        inputs["cable_l0"],
+        inputs["cable_ea"],
+        inputs["cl_edges"],
+        inputs["cl_edge_ptr"],
+        inputs["cl_nodes"],
+        inputs["cl_node_ptr"],
+        inputs["cl_gas"],
+        p,
+        xe,
+        f,
+        strain,
+        stress,
+        state,
+        minor,
+        f_int,
+        f_p,
+        r,
+        ext,
+    )
+    _masses_into(
+        tri,
+        rest.grad_n,
+        rest.area,
+        stiffness,
+        f,
+        stress,
+        xe,
+        p,
+        xc,
+        inputs["cable_edges"],
+        inputs["cable_l0"],
+        inputs["cable_ea"],
+        float(mass_factor),
+        mass,
+    )
+    return r, ext, mass
