@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: viewpoint controls in the 3D view. *Front*, *Back*, *Side*, *Top*, *Into mouth*
+  and *Isometric* views fit the whole scene, *◀ Gore* and *Gore ▶* turn the view one gore
+  about the envelope axis, and *Orthographic* switches to a parallel projection. Each has
+  a key (1, 3, 7 with Ctrl for the opposite side, 0, Home, 4/6, 5) that works over the 3D
+  view itself, where VTK's own keys used to take them (its 3 turned on stereo rendering).
 - Fixed: the 3D view slowed the whole window down, especially on software OpenGL (WSLg,
   Mesa llvmpipe). The render widget redrew 5 times a second even when nothing changed
   (about 0.1 s a frame for a large window there). The scene was also rebuilt with one

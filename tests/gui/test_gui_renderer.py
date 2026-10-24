@@ -224,3 +224,69 @@ def test_the_3d_view_does_not_render_on_a_timer(qtbot: QtBot, settings: QSetting
     timer = getattr(plotter, "render_timer", None)
     assert timer is None or not timer.isActive()
     w.close()
+
+
+def test_view_buttons_place_the_camera_and_survive_a_redraw(
+    qtbot: QtBot, settings: QSettings
+) -> None:
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    session = w.open_project(GORE_PROJECT)
+    assert session is not None and session.design.gores is not None
+    view, plotter = w.view3d, w.view3d.plotter
+    assert plotter is not None
+    view.view_buttons["top"].click()
+    position = np.array(plotter.camera.position)
+    focal = np.array(plotter.camera.focal_point)
+    assert position[:2] == pytest.approx(focal[:2], abs=1e-6) and position[2] > focal[2]
+    view.view_buttons["front"].click()
+    front = np.array(plotter.camera.position) - np.array(plotter.camera.focal_point)
+    assert front[1] < 0.0 and abs(front[0]) < 1e-6 and abs(front[2]) < 1e-6
+    # One gore: 360 / 8 = 45 deg about the axis.
+    view.view_buttons["gore_next"].click()
+    turned = np.array(plotter.camera.position) - np.array(plotter.camera.focal_point)
+    angle = np.degrees(np.arctan2(turned[1], turned[0]) - np.arctan2(front[1], front[0]))
+    assert angle == pytest.approx(360.0 / session.design.gores.count)
+    view.orthographic.setChecked(True)
+    assert plotter.camera.parallel_projection
+    view.orthographic.setChecked(False)
+    assert not plotter.camera.parallel_projection
+    # A redraw (any edit, a run arriving) keeps the chosen view.
+    before = tuple(plotter.camera.position)
+    view.redraw()
+    assert tuple(plotter.camera.position) == pytest.approx(before)
+    w.close()
+
+
+def test_view_keys_over_the_3d_view_choose_views(qtbot: QtBot, settings: QSettings) -> None:
+    """The number keys reach the view shortcuts, not VTK's own key bindings (VTK's 3
+    would turn stereo rendering on)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    assert w.open_project(GORE_PROJECT) is not None
+    plotter = w.view3d.plotter
+    assert plotter is not None
+    plotter.setFocus()
+    QTest.keyClick(plotter, Qt.Key.Key_7)
+    sight = np.array(plotter.camera.position) - np.array(plotter.camera.focal_point)
+    assert abs(sight[0]) < 1e-6 and abs(sight[1]) < 1e-6 and sight[2] > 0.0
+    QTest.keyClick(plotter, Qt.Key.Key_3)
+    sight = np.array(plotter.camera.position) - np.array(plotter.camera.focal_point)
+    assert sight[0] > 0.0 and abs(sight[2]) < 1e-6
+    assert not plotter.ren_win.GetStereoRender()
+    QTest.keyClick(plotter, Qt.Key.Key_5)
+    assert w.view3d.orthographic.isChecked() and plotter.camera.parallel_projection
+    # The numeric keypad works as the number row does (Ctrl+keypad 7: into the mouth).
+    QTest.keyClick(
+        plotter,
+        Qt.Key.Key_7,
+        Qt.KeyboardModifier.KeypadModifier | Qt.KeyboardModifier.ControlModifier,
+    )
+    sight = np.array(plotter.camera.position) - np.array(plotter.camera.focal_point)
+    assert abs(sight[0]) < 1e-6 and abs(sight[1]) < 1e-6 and sight[2] < 0.0
+    w.close()

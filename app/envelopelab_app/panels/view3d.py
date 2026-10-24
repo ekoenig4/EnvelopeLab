@@ -19,12 +19,14 @@ from __future__ import annotations
 
 import math
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import Any
 
 import numpy as np
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtCore import QEvent, QKeyCombination, QObject, Qt
+from PySide6.QtGui import QBrush, QColor, QKeyEvent, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
@@ -53,6 +55,7 @@ from envelopelab.project.shapes import (
     footprint_preview,
     placement_at,
 )
+from envelopelab_app.camera import CameraPose, gore_step, turn_about_axis, view_pose
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.refresh import Refresher
 
@@ -217,6 +220,30 @@ def pyvista_available() -> bool:
     return True
 
 
+#: View buttons: (key, label, shortcut). The number keys follow the numeric-keypad views of
+#: common 3D programs (1 front, 3 side, 7 top; Ctrl for the opposite side).
+VIEW_CONTROLS = (
+    ("front", "Front", "1"),
+    ("back", "Back", "Ctrl+1"),
+    ("right", "Side", "3"),
+    ("left", "Other side", "Ctrl+3"),
+    ("top", "Top", "7"),
+    ("bottom", "Into mouth", "Ctrl+7"),
+    ("iso", "Isometric", "0"),
+    ("fit", "Fit", "Home"),
+)
+VIEW_TIPS = {
+    "front": "Look at the envelope from the front (along +y), mouth down",
+    "back": "Look at the envelope from the back (along -y), mouth down",
+    "right": "Look at the envelope from the side (along -x), mouth down",
+    "left": "Look at the envelope from the other side (along +x), mouth down",
+    "top": "Look down onto the crown",
+    "bottom": "Look up into the mouth",
+    "iso": "Three-quarter view from above",
+    "fit": "Fit the whole scene in the current view direction",
+}
+
+
 class View3DPanel(QWidget):
     """The 3D view panel (see module docstring)."""
 
@@ -248,6 +275,47 @@ class View3DPanel(QWidget):
         self._drag_observers: list[tuple[Any, int]] = []
         reset = QPushButton("Reset camera")
         reset.clicked.connect(self._reset_camera)
+        # Viewpoints: standard views, one-gore turns about the envelope axis, projection.
+        self.view_buttons: dict[str, QPushButton] = {}
+        #: View keys and their actions, also caught on the render widget (VTK would take
+        #: the key presses there: its 3 toggles stereo rendering).
+        self.view_keys: dict[str, Callable[[], None]] = {}
+        views = QHBoxLayout()
+        views.addWidget(QLabel("View:"))
+        for key, text, shortcut in VIEW_CONTROLS:
+            button = QPushButton(text)
+            button.setObjectName(f"view_{key}")
+            button.setToolTip(f"{VIEW_TIPS[key]} (key {shortcut})")
+            button.clicked.connect(lambda _c=False, k=key: self.set_view(k))
+            self.view_buttons[key] = button
+            views.addWidget(button)
+            self.view_keys[shortcut] = partial(self.set_view, key)
+        for step, text, shortcut, tip in (
+            (-1, "◀ Gore", "4", "Turn the view one gore clockwise, seen from above"),
+            (1, "Gore ▶", "6", "Turn the view one gore counter-clockwise, seen from above"),
+        ):
+            button = QPushButton(text)
+            button.setObjectName("gore_prev" if step < 0 else "gore_next")
+            button.setToolTip(f"{tip} (key {shortcut})")
+            button.clicked.connect(lambda _c=False, n=step: self.turn_gores(n))
+            self.view_buttons[button.objectName()] = button
+            views.addWidget(button)
+            self.view_keys[shortcut] = partial(self.turn_gores, step)
+        self.orthographic = QCheckBox("Orthographic")
+        self.orthographic.setToolTip(
+            "Parallel projection: no perspective, so profiles and lengths can be compared (key 5)"
+        )
+        self.orthographic.toggled.connect(self._set_projection)
+        self.view_keys["5"] = self.orthographic.toggle
+        for sequence, action in self.view_keys.items():
+            # The same key on the numeric keypad ("Num+7") as on the number row.
+            keypad = f"Num+{sequence}" if sequence[-1].isdigit() else None
+            for text in filter(None, (sequence, keypad)):
+                QShortcut(QKeySequence(text), self, action).setContext(
+                    Qt.ShortcutContext.WidgetWithChildrenShortcut
+                )
+        views.addWidget(self.orthographic)
+        views.addStretch(1)
         self.info = QLabel()
         self.info.setWordWrap(True)
         controls = QHBoxLayout()
@@ -269,6 +337,7 @@ class View3DPanel(QWidget):
             self.renderer_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
         elif enable_renderer and pyvista_available():
             interactor = _interactor(self)
+            interactor.installEventFilter(self)
             self.plotter = interactor
             self.renderer_widget = interactor
         else:
@@ -283,6 +352,7 @@ class View3DPanel(QWidget):
         splitter.setStretchFactor(0, 4)
         layout = QVBoxLayout(self)
         layout.addLayout(controls)
+        layout.addLayout(views)
         layout.addWidget(splitter)
         self.refresher = Refresher(
             self,
@@ -315,6 +385,7 @@ class View3DPanel(QWidget):
             label.setWordWrap(True)
             return False
         interactor = _interactor(self)
+        interactor.installEventFilter(self)
         old = self.renderer_widget
         self.splitter.replaceWidget(0, interactor)
         old.deleteLater()
@@ -843,6 +914,78 @@ class View3DPanel(QWidget):
     def _reset_camera(self) -> None:
         if self.plotter is not None:
             self.plotter.reset_camera()
+
+    # -- viewpoints ---------------------------------------------------------------------
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 (Qt API)
+        """View keys pressed over the render widget choose views (VTK never sees them)."""
+        if watched is self.plotter and event.type() in (
+            QEvent.Type.KeyPress,
+            QEvent.Type.ShortcutOverride,
+        ):
+            assert isinstance(event, QKeyEvent)
+            # A keypad digit is the same view key as the number-row digit.
+            modifiers = event.modifiers() & ~Qt.KeyboardModifier.KeypadModifier
+            combination = QKeyCombination(modifiers, Qt.Key(event.key()))
+            sequence = QKeySequence(combination).toString()
+            action = self.view_keys.get(sequence)
+            if action is not None:
+                if event.type() == QEvent.Type.KeyPress:
+                    action()
+                event.accept()
+                return True
+        return super().eventFilter(watched, event)
+
+    def _apply_pose(self, pose: CameraPose) -> None:
+        plotter = self.plotter
+        camera = plotter.camera
+        camera.position = tuple(pose.position)
+        camera.focal_point = tuple(pose.focal_point)
+        camera.up = tuple(pose.view_up)
+        camera.parallel_scale = pose.parallel_scale
+        plotter.reset_camera_clipping_range()
+        plotter.render()
+
+    def _pose(self) -> CameraPose:
+        camera = self.plotter.camera
+        return CameraPose(
+            np.array(camera.position, dtype=float),
+            np.array(camera.focal_point, dtype=float),
+            np.array(camera.up, dtype=float),
+            float(camera.parallel_scale),
+        )
+
+    def set_view(self, key: str) -> None:
+        """Look at the whole visible scene from a standard view (:data:`VIEWS`), or fit
+        the current view to it (``"fit"``)."""
+        plotter = self.plotter
+        if plotter is None:
+            return
+        if key == "fit":
+            plotter.reset_camera()
+            plotter.render()
+            return
+        angle = float(plotter.camera.view_angle)
+        self._apply_pose(view_pose(tuple(plotter.bounds), key, angle))
+
+    def turn_gores(self, gores: int) -> None:
+        """Turn the view about the envelope axis by ``gores`` gores (counter-clockwise
+        seen from above for a positive count)."""
+        if self.plotter is None:
+            return
+        design = self.controller.design
+        count = design.gores.count if design is not None and design.gores is not None else 12
+        self._apply_pose(turn_about_axis(self._pose(), gores * gore_step(count)))
+
+    def _set_projection(self, parallel: bool) -> None:
+        plotter = self.plotter
+        if plotter is None:
+            return
+        if parallel:
+            plotter.enable_parallel_projection()
+        else:
+            plotter.disable_parallel_projection()
+        plotter.render()
 
     def close_renderer(self) -> None:
         """Release the VTK render window."""
