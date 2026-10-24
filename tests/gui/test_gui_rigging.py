@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from envelopelab_app.main_window import MainWindow
+from envelopelab_app.panels.patterns import _polygon
 
 
 def _messages(window: MainWindow) -> list[str]:
@@ -92,7 +93,9 @@ def test_parachute_fields_have_units(gore_window: MainWindow) -> None:
 def test_parachute_panel_in_the_pattern_view(gore_window: MainWindow) -> None:
     assert gore_window.patterns.parachute_item is None
     _add_all(gore_window)
-    gore_window.patterns.regenerate()
+    patterns = gore_window.patterns
+    patterns.layout_mode.setCurrentIndex(patterns.layout_mode.findData("assembled"))
+    patterns.regenerate()
     item = gore_window.patterns.parachute_item
     assert item is not None and "PARACHUTE x8" in item.toolTip()
     centre = gore_window.patterns.centre_item
@@ -193,7 +196,9 @@ def test_scoop_can_be_added_and_is_drawn(gore_window: MainWindow) -> None:
 def test_patterns_are_stacked_vertically_in_their_own_column(gore_window: MainWindow) -> None:
     _add_all(gore_window)
     gore_window.rigging.buttons["add_scoop"].click()
-    gore_window.patterns.regenerate()
+    patterns = gore_window.patterns
+    patterns.layout_mode.setCurrentIndex(patterns.layout_mode.findData("assembled"))
+    patterns.regenerate()
     offsets = gore_window.patterns.view.offsets
     letters = list(offsets)
     assert letters == ["A", "B", "C", "D"]
@@ -253,3 +258,39 @@ def test_new_from_template_opens_an_unsaved_copy(window: MainWindow, tmp_path: o
     assert window.controller.session is session
     assert window.template_action.text() == "New from &template…"
     assert window.new_from_template(Path(str(tmp_path)) / "missing.elproj", "x") is None
+
+
+def test_patterns_side_by_side_fill_a_wide_view(gore_window: MainWindow) -> None:
+    """The default layout puts the pieces in order on shelves that suit a wide view,
+    instead of one tall column."""
+    _add_all(gore_window)
+    gore_window.rigging.buttons["add_scoop"].click()
+    patterns = gore_window.patterns
+    assert patterns.layout_mode.currentData() == "shelves"
+    patterns.view.resize(1200, 500)
+    patterns.regenerate()
+    items = [patterns.scoop_item]
+    rects = []
+    for letter in ("A", "B", "C", "D"):
+        origin = patterns.view.offsets[letter]
+        rects.append((letter, origin))
+    boxes = [i.mapToScene(i.polygon()).boundingRect() for i in items if i is not None]
+    assert patterns.parachute_item is not None and patterns.centre_item is not None
+    for item in (patterns.parachute_item, patterns.centre_item):
+        boxes.append(item.mapToScene(item.polygon()).boundingRect())
+    content = patterns.view.content_rect
+    # Wider than tall, like the view, where the stack was about 4x taller than wide.
+    assert content.width() > content.height()
+    # Rows in reading order: right of the one before on its shelf, or on a lower shelf.
+    rows = patterns.rows_by_letter()
+    row_boxes = [
+        _polygon(rows[letter].cut_outline, 0.0).boundingRect().translated(origin)
+        for letter, origin in rects
+    ]
+    for a, b in zip(row_boxes, row_boxes[1:], strict=False):
+        assert b.left() > a.right() or b.top() > a.bottom()
+    boxes += row_boxes
+    # No piece overlaps another.
+    for i, a in enumerate(boxes):
+        for b in boxes[i + 1 :]:
+            assert not a.intersects(b)

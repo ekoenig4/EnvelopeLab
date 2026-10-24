@@ -15,11 +15,21 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
+from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QPoint, QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPolygonF,
+    QResizeEvent,
+)
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -58,6 +68,7 @@ from envelopelab.project.gore_design import (
 from envelopelab.project.model import RowPattern
 from envelopelab.rigging.parachute import CentrePanel
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.pattern_layout import shelf_layout
 from envelopelab_app.refresh import Refresher
 
 GAP = 0.4  # m between rows in the layout
@@ -104,6 +115,16 @@ class FeatureMarker(QGraphicsEllipseItem):
         QTimer.singleShot(0, lambda: self.view.commit_feature(self))
 
 
+@dataclass(frozen=True)
+class _Piece:
+    """A piece to draw: its cut outline (local, m), its height in the assembled stack
+    (m) and how to draw it at a scene origin."""
+
+    outline: np.ndarray
+    stacked_y: float
+    draw: Callable[[QPointF], None]
+
+
 class PatternView(QGraphicsView):
     """The drawing (see module docstring)."""
 
@@ -117,6 +138,15 @@ class PatternView(QGraphicsView):
         self.handles: list[OutlineHandle] = []
         self.edit_letter: str | None = None
         self.content_rect = QRectF()
+        self._relayout = QTimer(self)
+        self._relayout.setSingleShot(True)
+        self._relayout.setInterval(150)
+        self._relayout.timeout.connect(self.panel.relayout_for_view)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (Qt API)
+        super().resizeEvent(event)
+        # Re-pack once the resizing settles (a drag sends many events).
+        self._relayout.start()
 
     def wheelEvent(self, event: object) -> None:  # noqa: N802
         delta = event.angleDelta().y()  # type: ignore[attr-defined]
@@ -178,6 +208,19 @@ class PatternPanel(QWidget):
         self.regenerate_action.triggered.connect(self.regenerate)
         fit = toolbar.addAction("Fit view")
         fit.triggered.connect(self.fit)
+        self.layout_mode = QComboBox()
+        self.layout_mode.setObjectName("patternLayout")
+        self.layout_mode.addItem("Side by side", "shelves")
+        self.layout_mode.addItem("Assembled gore", "assembled")
+        self.layout_mode.setToolTip(
+            "Side by side: the pieces in order on shelves that fill the view. Assembled "
+            "gore: the rows stacked as they are sewn, the parachute on top. Display only; "
+            "the cut files are not affected."
+        )
+        self.layout_mode.activated.connect(self._layout_changed)
+        self._layout_aspect = 1.6
+        toolbar.addWidget(QLabel(" Layout: "))
+        toolbar.addWidget(self.layout_mode)
         self.edit_outline = QCheckBox("Edit outline (manual override)")
         self.edit_outline.toggled.connect(self._toggle_edit)
         toolbar.addWidget(self.edit_outline)
@@ -376,34 +419,84 @@ class PatternPanel(QWidget):
         design = session.design
         assert design.gores is not None
         selected = self.selected_letter()
+        pieces: list[_Piece] = []
         y = 0.0
         scoop = self.controller.rigging.scoop if self.controller.rigging is not None else None
         if scoop is not None:
             # Below the mouth row: its top edge meets the mouth row's bottom edge.
-            self.scoop_item = self._piece(
-                scoop.panel,
-                f"SCOOP x{scoop.gore_count}",
-                scoop.zone,
-                -(scoop.panel.finished_height + GAP),
-                stale,
-                f"gores {scoop.first_gore}-{scoop.first_gore + scoop.gore_count - 1}; top edge "
-                "sewn to the mouth row, bottom edge free",
+            def draw_scoop(origin: QPointF, scoop: Any = scoop) -> None:
+                self.scoop_item = self._piece(
+                    scoop.panel,
+                    f"SCOOP x{scoop.gore_count}",
+                    scoop.zone,
+                    origin,
+                    stale,
+                    f"gores {scoop.first_gore}-{scoop.first_gore + scoop.gore_count - 1}; "
+                    "top edge sewn to the mouth row, bottom edge free",
+                )
+
+            pieces.append(
+                _Piece(scoop.panel.cut_outline, -(scoop.panel.finished_height + GAP), draw_scoop)
             )
         for row in self.rows_by_letter().values():
             ann = session.patterns.row(row.label)
-            origin = QPointF(0.0, -y)
-            self.view.offsets[row.label] = origin
-            self._in_container(
-                origin,
-                partial(
-                    self._draw_row, row, ann, 0.0, stale, row.label == selected, design.gores.count
-                ),
-            )
-            self._grow(row.cut_outline, origin)
+
+            def draw_row(origin: QPointF, row: PanelRow = row, ann: RowPattern = ann) -> None:
+                self.view.offsets[row.label] = origin
+                self._in_container(
+                    origin,
+                    partial(
+                        self._draw_row,
+                        row,
+                        ann,
+                        0.0,
+                        stale,
+                        row.label == selected,
+                        design.gores.count if design.gores is not None else 0,
+                    ),
+                )
+
+            pieces.append(_Piece(row.cut_outline, y, draw_row))
             y += row.finished_height + GAP
-        self._draw_parachute(y, stale)
+        pieces += self._parachute_pieces(y, stale)
+        for piece, origin in zip(pieces, self._origins(pieces), strict=True):
+            piece.draw(origin)
+            self._grow(piece.outline, origin)
         if first:
             QTimer.singleShot(0, self.fit)
+
+    def _origins(self, pieces: list[_Piece]) -> list[QPointF]:
+        """Scene origin of every piece: stacked as the assembled gore, or side by side on
+        shelves that fill the view (:func:`~envelopelab_app.pattern_layout.shelf_layout`)."""
+        if self.layout_mode.currentData() == "assembled":
+            return [QPointF(0.0, -p.stacked_y) for p in pieces]
+        boxes = [_polygon(p.outline, 0.0).boundingRect() for p in pieces]
+        viewport = self.view.viewport()
+        aspect = viewport.width() / viewport.height() if viewport.height() > 0 else 1.6
+        self._layout_aspect = aspect
+        layout = shelf_layout([(b.width(), b.height()) for b in boxes], aspect, GAP)
+        # Scene y grows downward, as the shelves do; a piece's box is placed with its
+        # top-left corner at the shelf position.
+        return [
+            QPointF(x - box.left(), top - box.top())
+            for (x, top), box in zip(layout.positions, boxes, strict=True)
+        ]
+
+    def _layout_changed(self, _index: int) -> None:
+        self.refresh()
+        self.fit()
+
+    def relayout_for_view(self) -> None:
+        """Re-place the pieces when the view's shape has changed enough to matter."""
+        if self.layout_mode.currentData() == "assembled":
+            return
+        viewport = self.view.viewport()
+        if viewport.height() <= 0:
+            return
+        aspect = viewport.width() / viewport.height()
+        if abs(aspect - self._layout_aspect) > 0.1 * self._layout_aspect:
+            self.refresh()
+            self.fit()
 
     def _draw_row(
         self, row: PanelRow, ann: RowPattern, dx: float, stale: bool, selected: bool, n: int
@@ -528,53 +621,67 @@ class PatternPanel(QWidget):
         bounds = _polygon(outline, 0.0).boundingRect().translated(origin)
         self.view.content_rect = self.view.content_rect.united(bounds)
 
-    def _draw_parachute(self, y: float, stale: bool) -> None:
+    def _parachute_pieces(self, y: float, stale: bool) -> list[_Piece]:
         """The parachute's radial panel on top of the rows and its centre panel above it
-        (read-only; placed from the Rigging panel)."""
+        in the assembled stack (read-only; placed from the Rigging panel)."""
         rigging = self.controller.rigging
         session = self.controller.session
         if rigging is None or session is None:
-            return
+            return []
         design = session.design
         pr = rigging.parachute
         if pr is None or pr.panel is None or design.parachute is None:
-            return
+            return []
         zone = design.parachute.zone or next(iter(design.zones), "")
         centre = pr.centre_panel
         top = "the centre panel" if centre is not None else "the centre ring or apex"
-        self.parachute_item = self._piece(
-            pr.panel,
-            f"PARACHUTE x{pr.panel_count}",
-            zone,
-            y,
-            stale,
-            f"edge at the bottom, {top} at the top; shroud and centralising lines at each "
-            "side seam's bottom end",
-        )
-        if centre is not None:
-            radius = 0.5 * centre.diameter + centre.allowance
-            above = float(pr.panel.cut_outline[:, 1].max()) + GAP + radius
-            self.centre_item = self._piece(
-                centre,
-                "PARACHUTE CENTRE x1",
+        radial = pr.panel
+
+        def draw_radial(origin: QPointF) -> None:
+            self.parachute_item = self._piece(
+                radial,
+                f"PARACHUTE x{pr.panel_count}",
                 zone,
-                y + above,
+                origin,
                 stale,
-                f"sewn round its edge ({centre.seam_length:.3f} m) to the tops of the "
-                f"{pr.panel_count} radial panels",
+                f"edge at the bottom, {top} at the top; shroud and centralising lines at "
+                "each side seam's bottom end",
             )
 
+        pieces = [_Piece(radial.cut_outline, y, draw_radial)]
+        if centre is not None:
+            radius = 0.5 * centre.diameter + centre.allowance
+            above = float(radial.cut_outline[:, 1].max()) + GAP + radius
+
+            def draw_centre(origin: QPointF) -> None:
+                self.centre_item = self._piece(
+                    centre,
+                    "PARACHUTE CENTRE x1",
+                    zone,
+                    origin,
+                    stale,
+                    f"sewn round its edge ({centre.seam_length:.3f} m) to the tops of the "
+                    f"{pr.panel_count} radial panels",
+                )
+
+            pieces.append(_Piece(centre.cut_outline, y + above, draw_centre))
+        return pieces
+
     def _piece(
-        self, panel: PanelRow | CentrePanel, text: str, zone: str, y: float, stale: bool, note: str
+        self,
+        panel: PanelRow | CentrePanel,
+        text: str,
+        zone: str,
+        origin: QPointF,
+        stale: bool,
+        note: str,
     ) -> QGraphicsPolygonItem:
         """Draw a read-only piece with its origin (a panel's finished bottom seam, the centre
-        panel's centre) at height ``y`` (m)."""
-        origin = QPointF(0.0, -y)
+        panel's centre) at ``origin`` (scene coordinates, m)."""
         drawn: list[QGraphicsPolygonItem] = []
         self._in_container(
             origin, lambda: drawn.append(self._draw_piece(panel, text, zone, stale, note))
         )
-        self._grow(panel.cut_outline, origin)
         return drawn[0]
 
     def _draw_piece(

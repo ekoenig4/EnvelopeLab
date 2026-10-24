@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the 2D pattern view puts the pieces side by side on shelves that fill the view
+  (*Layout: Side by side*, the new default), re-arranged when the view is resized,
+  instead of one tall column with empty space on both sides. In a wide window the pieces
+  draw 2.6 times larger for the 4-row test envelope and 4.1 times for a 12-row full-size
+  one. *Layout: Assembled gore* keeps the stacked view. Display only; the cut files are
+  unchanged.
 - Added: viewpoint controls in the 3D view. *Front*, *Back*, *Side*, *Top*, *Into mouth*
   and *Isometric* views fit the whole scene, *◀ Gore* and *Gore ▶* turn the view one gore
   about the envelope axis, and *Orthographic* switches to a parallel projection. Each has

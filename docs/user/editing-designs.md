@@ -360,10 +360,20 @@ pattern view only.
 
 ## The 2D pattern view
 
-The pattern view fills the **Patterns** mode (Ctrl+2), beside the Materials panel. It stacks the
-pieces vertically in the order they are sewn up a gore: the scoop (if any) at the bottom,
-the panel rows from the mouth up (e.g. the Nomex mouth row, then the nylon rows), the
-parachute's radial panel on top and, above it, its circular centre panel. Each panel row is drawn as cut (dashed) and finished (solid,
+The pattern view fills the **Patterns** mode (Ctrl+2), beside the Materials panel. The
+pieces come in the order they are sewn up a gore: the scoop (if any), the panel rows from
+the mouth up (e.g. the Nomex mouth row, then the nylon rows), the parachute's radial panel
+and its circular centre panel. **Layout** in the toolbar chooses how they are arranged:
+
+* *Side by side* (default): in that order, left to right on shelves. The number of
+  shelves is the one that draws the pieces largest in the view, and the pieces are
+  re-arranged when the view is resized. In a wide window the pieces come out 2–4 times
+  larger than stacked: 2.6 times for the 4-row test envelope and 4.1 times for a 12-row
+  full-size one.
+* *Assembled gore*: stacked up one gore as they are sewn, the scoop at the bottom and the
+  parachute's centre panel on top, so you can see how the rows meet.
+
+The layout is for display only: it does not change the cut files. Each panel row is drawn as cut (dashed) and finished (solid,
 filled with the zone's fabric colour) outlines with its label, grain arrow, notches, tapes
 and features; the parachute and scoop panels are read-only here (edit them in the
 Rigging panel and Properties).
