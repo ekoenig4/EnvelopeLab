@@ -296,3 +296,55 @@ def test_attachment_ease_adds_up_to_rim_minus_marked_line(primitive: Dome | Tube
     assert check.value == pytest.approx(float(np.abs(d.mark_ease).max()))
     assert check.severity == ("info" if check.value <= DEFAULT_TOLERANCE else "error")
     assert d.as_dict()["mark_ease_m"] == pytest.approx(d.mark_ease.tolist())
+
+
+def _distance_to_loop(points: np.ndarray, loop: np.ndarray) -> np.ndarray:
+    """Distance of 3D points to a closed 3D polyline, m."""
+    a, b = loop, np.roll(loop, -1, axis=0)
+    ab = b - a
+    t = np.einsum("pij,ij->pi", points[:, None, :] - a[None], ab) / np.einsum("ij,ij->i", ab, ab)
+    proj = a[None] + np.clip(t, 0.0, 1.0)[..., None] * ab[None]
+    out: np.ndarray = np.linalg.norm(points[:, None, :] - proj, axis=2).min(axis=1)
+    return out
+
+
+@pytest.mark.parametrize("kind", ["dome", "mesh"])
+def test_sub_model_rim_lies_on_the_footprint_where_host_tapes_cross_it(kind: str) -> None:
+    """Rim nodes the host mesh adds where load tapes and row seams cross the footprint lie
+    on the designed footprint, not on the chord between two footprint nodes, and every
+    rim edge has the same length in the flat cut pieces as on the envelope."""
+    from envelopelab.features.primitives import FreeformShape, _to_host_frame
+    from envelopelab.validation.primitives import ellipsoid_mesh
+
+    s_row = SPHERE.rows[1].s_top
+    place = Placement(5, s_row, across=0.5)
+    prim: Dome | FreeformShape = (
+        Dome("x", place, 0.9, 0.6, gores=6)
+        if kind == "dome"
+        else FreeformShape("x", place, ellipsoid_mesh(0.9, 0.7, 0.6, -0.3), 6)
+    )
+    d = design_primitive(prim, SPHERE, feed_hole_radius=0.2)
+    spec = primitive_appendage(d, 0.3, load_tape=GENERIC_TAPE, row_tape=GENERIC_TAPE)
+    assert {t.name.split()[0] for t in spec.host_tapes} == {"load", "row"}
+    am = build_appendage(spec, HOT, {"host": GENERIC_FABRIC, "skin": GENERIC_FABRIC})
+    model = am.model
+    loop = _to_host_frame(d, d.footprint_points)
+    off = _distance_to_loop(model.positions[am.rim_nodes], loop)
+    assert off.max() < 5e-4
+    # Rim edges of the skin: flat (rest) length against the envelope (3D) length.
+    rim = set(am.rim_nodes.tolist())
+    tri = model.triangles[am.skin_triangles]
+    rest = model.rest_uv[am.skin_triangles]
+    worst = 0.0
+    for k in range(3):
+        i, j = (k + 1) % 3, (k + 2) % 3
+        on_rim = np.array(
+            [a in rim and b in rim for a, b in zip(tri[:, i], tri[:, j], strict=True)]
+        )
+        l3 = np.linalg.norm(
+            model.positions[tri[on_rim, i]] - model.positions[tri[on_rim, j]], axis=1
+        )
+        lf = np.linalg.norm(rest[on_rim, i] - rest[on_rim, j], axis=1)
+        if len(l3):
+            worst = max(worst, float(np.abs(lf / l3 - 1.0).max()))
+    assert worst < 0.01

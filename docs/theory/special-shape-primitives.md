@@ -220,6 +220,23 @@ and optionally the row seams, cross the patch. The far-field prestress of the pa
 the local radii at the base point (\(R_1\) from the meridian's curvature over
 \( \pm 0.25 \) m, \( R_2 = r/\cos\beta \)) in the membrane theory of shells of revolution.
 
+**Footprint nodes on the designed footprint.** The skin rim and the host footprint share
+their nodes, and every rim node rests on its piece's flat rim at the point of the designed
+footprint it stands for. The host mesh adds footprint nodes of its own where a host tape
+crosses the footprint. On the straight segment between two sampled nodes such a node would
+lie up to the segment's sagitta \( L^2/(8\rho) \) inside a curved footprint (\(L\): segment
+length, \(\rho\): footprint radius of curvature; up to 10 mm, measured, on a 9 m long
+teardrop pod at 0.25 m mesh size), and the skin next to it would rest up to 20 % longer
+or shorter than it sits before any pressure is applied. `primitive_appendage` therefore
+passes the designed footprint, sampled densely
+(`AppendageSpec.footprint_curve`, `FOOTPRINT_CURVE_SAMPLES` per piece), and the nodes where
+the skin seams end (`footprint_fixed`). The builder moves every crossing onto the curve
+together with the tape vertex it shares, keeps every footprint segment one element, and
+lets a crossing within \(0.3\,h\) of a seam end meet the footprint at the seam end. The
+tape then meets the rim up to \(0.3\,h\) from its true crossing (\(h\): mesh size), a
+small error in the host's load path in exchange for an unstrained skin. Imported pods
+(build packs) give no curve: their footprint polyline is the marked line itself.
+
 **Feed holes.** A shape is fed through a hole under its base point
 (`feed_hole_radius`) and any number of extra holes anywhere inside the footprint
 (`feed_holes`, each given by its tape position, azimuth and radius). Every hole is a hemmed

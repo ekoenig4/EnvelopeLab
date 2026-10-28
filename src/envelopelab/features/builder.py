@@ -334,6 +334,16 @@ class AppendageSpec:
         Feature name (also the chamber name).
     footprint : ndarray, shape (k, 2)
         Footprint line in the host chart, m (closed, any orientation).
+    footprint_curve : ndarray, shape (q, 2), optional
+        The designed footprint the ``footprint`` nodes are sampled from, densely, in the
+        host chart, m (closed). When given, every footprint node of the host mesh lies on
+        it: the points where host tapes cross the footprint are moved onto it (with the
+        tape vertex they share) and the host mesh adds no node between two footprint
+        nodes. Without it the footprint polyline is the footprint (an imported pattern).
+    footprint_fixed : ndarray, shape (f, 2), optional
+        Footprint nodes that must stay where they are (where a designed skin's seams end
+        on the rim), m: a host tape crossing next to one meets the footprint at it
+        (:func:`conform_tapes`).
     skin_outline : ndarray, shape (q, 2), optional
         Finished rim of the flat skin pattern, m (``flat_pattern``).
     skin_mode : {"flat_pattern", "spherical_cap", "designed"}
@@ -377,6 +387,8 @@ class AppendageSpec:
 
     name: str
     footprint: FloatArray
+    footprint_curve: FloatArray | None = None
+    footprint_fixed: FloatArray | None = None
     skin_outline: FloatArray | None = None
     skin_mode: SkinMode = "flat_pattern"
     cap_height: float | None = None
@@ -553,12 +565,19 @@ def _segment_hits(
 
 
 def conform_tapes(
-    footprint: FloatArray, tapes: list[FloatArray], size: float, names: Sequence[str]
+    footprint: FloatArray,
+    tapes: list[FloatArray],
+    size: float,
+    names: Sequence[str],
+    fixed: FloatArray | None = None,
 ) -> tuple[FloatArray, list[FloatArray], list[str]]:
     """Make tape lines and the footprint line meet cleanly before meshing.
 
     Where a tape crosses the footprint, the crossing point is inserted into both lines
-    and their vertices within ``0.3 size`` of it are removed (no sliver elements).
+    and their vertices within ``0.3 size`` of it are removed (no sliver elements). A
+    crossing within ``0.3 size`` of a ``fixed`` footprint node (where a designed skin's
+    seam ends) is moved to that node instead, so the node stays where the skin needs it
+    and the tape meets the footprint there.
     Where a tape only touches the footprint (a tangency, e.g. a row seam at the top of
     a footprint that spans whole rows), the tape is moved away from the footprint until
     they are ``0.3 size`` apart, and a note records the shift.
@@ -573,6 +592,8 @@ def conform_tapes(
         Mesh size, m.
     names : sequence of str
         Tape names (for the notes).
+    fixed : ndarray, shape (f, 2), optional
+        Footprint nodes that must stay (each one of ``footprint``'s vertices), m.
 
     Returns
     -------
@@ -623,6 +644,13 @@ def conform_tapes(
             )
             out.append(line)
             continue
+        if fixed is not None and len(fixed):
+            moved_hits = []
+            for i, j, point in hits:
+                d_fix = np.linalg.norm(fixed - point, axis=1)
+                k = int(np.argmin(d_fix))
+                moved_hits.append((i, j, fixed[k].copy() if d_fix[k] < clear else point))
+            hits = moved_hits
         for i, _, point in sorted(hits, key=lambda h: -h[0]):
             if np.linalg.norm(fp - point, axis=1).min() > 1e-9:
                 fp = np.insert(fp, i + 1, point, axis=0)
@@ -631,7 +659,10 @@ def conform_tapes(
                 line = np.insert(line, j + 1, point, axis=0)
         for _, _, point in hits:
             dist_fp = np.linalg.norm(fp - point, axis=1)
-            fp = fp[(dist_fp >= clear) | (dist_fp < 1e-12)]
+            stay = (dist_fp >= clear) | (dist_fp < 1e-12)
+            if fixed is not None and len(fixed):
+                stay |= np.linalg.norm(fp[:, None, :] - fixed[None], axis=2).min(axis=1) < 1e-12
+            fp = fp[stay]
             dist_t = np.linalg.norm(line - point, axis=1)
             keep = (dist_t >= clear) | (dist_t < 1e-12)
             keep[0] = keep[-1] = True
@@ -644,6 +675,56 @@ def conform_tapes(
             )
         out.append(line)
     return fp, out, notes
+
+
+def footprint_on_curve(
+    footprint: FloatArray, tapes: list[FloatArray], curve: FloatArray
+) -> tuple[FloatArray, list[FloatArray], float]:
+    """Move the footprint nodes onto the designed footprint curve.
+
+    Footprint nodes inserted between two sampled nodes (where :func:`conform_tapes` puts
+    a tape crossing) lie on the straight segment, up to its sagitta inside a curved
+    footprint, while a designed skin's rim meets the footprint on the curve. Each node
+    goes to its closest point on ``curve``, and every tape vertex at the same point moves
+    with it, so tapes and footprint keep sharing their crossing points.
+
+    Parameters
+    ----------
+    footprint : ndarray, shape (k, 2)
+        Closed footprint line, m.
+    tapes : list of ndarray
+        Open tape lines, m.
+    curve : ndarray, shape (q, 2)
+        Densely sampled closed designed footprint, m.
+
+    Returns
+    -------
+    footprint : ndarray
+        Nodes on the curve, m.
+    tapes : list of ndarray
+        Tape lines with their shared points moved, m.
+    moved : float
+        Largest node move, m.
+    """
+    a = np.asarray(curve, dtype=np.float64)
+    b = np.roll(a, -1, axis=0)
+    ab = b - a
+    ll = np.maximum(np.einsum("ij,ij->i", ab, ab), 1e-300)
+    rel = footprint[:, None, :] - a[None]
+    t = np.clip(np.einsum("pij,ij->pi", rel, ab) / ll, 0.0, 1.0)
+    proj = a[None] + t[..., None] * ab[None]
+    k = np.argmin(np.linalg.norm(footprint[:, None, :] - proj, axis=2), axis=1)
+    on = proj[np.arange(len(footprint)), k]
+    out: list[FloatArray] = []
+    for line in tapes:
+        line = line.copy()
+        for i, q in enumerate(line):
+            d = np.linalg.norm(footprint - q, axis=1)
+            j = int(np.argmin(d))
+            if d[j] < 1e-9:
+                line[i] = on[j]
+        out.append(line)
+    return on, out, float(np.linalg.norm(on - footprint, axis=1).max())
 
 
 def _project_on_line(line: FloatArray, point: FloatArray) -> tuple[float, FloatArray]:
@@ -738,7 +819,14 @@ def _mesh_host(
     holes: Sequence[ChartHole],
     tapes: Sequence[FloatArray],
     size: float,
+    keep_footprint: bool = False,
 ) -> tuple[FloatArray, IntArray]:
+    """Mesh the host patch round the footprint, tapes and holes (chart, m).
+
+    With ``keep_footprint`` every footprint segment stays one element, so the footprint
+    nodes are exactly the given ones (a designed footprint: a node added on a segment
+    would lie on the chord, off the curve the skin rim follows).
+    """
     import gmsh
 
     gmsh.clear()
@@ -766,8 +854,15 @@ def _mesh_host(
             a = occ.addPoint(float(line[i, 0]), float(line[i, 1]), 0.0)
             b = occ.addPoint(float(line[i + 1, 0]), float(line[i + 1, 1]), 0.0)
             curves.append((1, occ.addLine(a, b)))
-    occ.fragment(surf, curves)
+    _, children = occ.fragment(surf, curves)
     occ.synchronize()
+    if keep_footprint:
+        # fragment lists the children of the objects first, then of each tool curve;
+        # the first n tools are the footprint segments.
+        for parts in children[len(surf) : len(surf) + n]:
+            for dim, tag in parts:
+                if dim == 1:
+                    gmsh.model.mesh.setTransfiniteCurve(tag, 2)
     gmsh.option.setNumber("Mesh.MeshSizeMax", size)
     gmsh.option.setNumber("Mesh.MeshSizeMin", 0.25 * size)
     gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
@@ -994,9 +1089,20 @@ def build_appendage(
             dropped = [tapes[k].name for k in range(len(tapes)) if k not in kept]
             tapes = [tapes[k] for k in kept]
             tape_lines = [tape_lines[k] for k in kept]
-            fp, tape_lines, notes = conform_tapes(fp, tape_lines, size, [t.name for t in tapes])
+            fixed = None if spec.footprint_fixed is None else np.asarray(spec.footprint_fixed)
+            fp, tape_lines, notes = conform_tapes(
+                fp, tape_lines, size, [t.name for t in tapes], fixed
+            )
             notes += [f"tape {n} runs along the patch edge and is left out" for n in dropped]
-            xy_h, tri_h = _mesh_host(rect, fp, spec.holes, tape_lines, size)
+            on_curve = spec.footprint_curve is not None
+            if spec.footprint_curve is not None:
+                fp, tape_lines, moved = footprint_on_curve(fp, tape_lines, spec.footprint_curve)
+                if moved > 0.25 * size:
+                    raise FeatureBuildError(
+                        f"{spec.name}: a footprint node is {moved * 1000:.0f} mm off the "
+                        "designed footprint (sample the footprint finer)"
+                    )
+            xy_h, tri_h = _mesh_host(rect, fp, spec.holes, tape_lines, size, on_curve)
         else:
             if spec.holes:
                 raise FeatureBuildError(f"{spec.name}: holes need a host")

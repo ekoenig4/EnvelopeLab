@@ -154,6 +154,11 @@ FOOTPRINT_GRID = 241
 """Path samples per skin meridian that bracket the footprint crossing before bisection
 (about 1 % of the path; a second crossing finer than that is not detected)."""
 
+FOOTPRINT_CURVE_SAMPLES = 256
+"""Samples of the designed footprint per skin piece given to the sub-model
+(:attr:`~envelopelab.features.builder.AppendageSpec.footprint_curve`): its chord sagitta
+is microns for usual shapes (source: assumed)."""
+
 MARK_EASE_SAMPLES = 48
 """Integration steps per match-mark interval when measuring the attachment ease
 (:func:`_mark_ease`; a few mm per step for usual mark spacings)."""
@@ -2306,6 +2311,16 @@ def primitive_appendage(
     s, theta, _ = design.surface.locate(skin.rim_points(phi))
     host = host_surface_at(design)
     chart = _chart(design, s, theta)
+    on_seam = np.isin(phi, seams[:-1])
+    # The designed footprint, densely, so host-mesh nodes between these lie on it too.
+    dense = np.concatenate(
+        [
+            np.linspace(a, b, FOOTPRINT_CURVE_SAMPLES, endpoint=False)
+            for a, b in zip(seams[:-1], seams[1:], strict=True)
+        ]
+    )
+    s_c, theta_c, _ = design.surface.locate(skin.rim_points(dense))
+    curve = _chart(design, s_c, theta_c)
     lo, hi = chart.min(axis=0), chart.max(axis=0)
     margin = margin if margin is not None else 0.5 * float((hi - lo).max())
     rect = (lo[0] - margin, lo[1] - margin, hi[0] + margin, hi[1] + margin)
@@ -2348,6 +2363,8 @@ def primitive_appendage(
     return AppendageSpec(
         name=prim.name,
         footprint=chart,
+        footprint_curve=curve,
+        footprint_fixed=chart[on_seam],
         skin_mode="designed",
         skin_mesh=skin.factory(design, host),
         match_points=prim.pieces * prim.marks_per_piece,

@@ -3,6 +3,17 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: special-shape simulations put rim nodes on the straight segment between two
+  footprint nodes where a load tape or row seam crossed the footprint, up to 10 mm inside
+  a curved footprint, and moved a skin seam's end along the rim by up to 0.3 mesh sizes
+  where a tape crossed next to it. The cut skin was strained there before any pressure
+  (up to 21 % on a 9 m teardrop pod) and the solver reported false stress peaks. Every
+  rim node now lies on the designed footprint and seam ends stay put (a tape crossing
+  next to one meets the rim there). That pod (20 panels, 0.25 m mesh, preview solver,
+  not verified): lowest skin FoS 2.6 → 67.6, converged in 147 000 iterations instead
+  of 404 000, height 1.298 → 1.305 m (designed 1.300 m). The validation study on
+  `special-shape-primitives` is unchanged within its tolerances (only one mesh lost 3
+  of 1435 nodes). Imported build-pack pods are unaffected.
 - Changed: the 2D pattern view puts the pieces side by side on shelves that fill the view
   (*Layout: Side by side*, the new default), re-arranged when the view is resized,
   instead of one tall column with empty space on both sides. In a wide window the pieces
