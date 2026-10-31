@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: build packs say where and how special shapes are sewn on. Marking sheets draw
+  each feed hole at its cut and finished size with the hem (double fold over the hole
+  tape by default), tick the side of the footprint line the shape covers, name the skin
+  piece beside every match number and say when a panel lies under a shape; skin pieces
+  say what each edge is sewn to (rim with its mark numbers, neighbouring pieces, tip disc
+  or apex); envelope row sheets list the gores that carry a marking sheet or feed hole.
 - Added: **Run Preview** and **Run CalculiX** also solve every placed special shape that
   has a feed hole, after the envelope, with the same solver and load case (each shape's
   own sub-model, element size footprint length / 100 between 60 and 300 mm, assumed;

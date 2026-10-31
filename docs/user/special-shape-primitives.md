@@ -284,9 +284,16 @@ The pack contains:
 
 * one DXF per piece, in millimetres: the envelope's row panels (cut once per gore) and
   every gore, panel and tip disc of each shape;
-* a **marking sheet** for each envelope panel a shape crosses: the panel with the
-  footprint line, the numbered match marks and the feed hole drawn where they go. Mark
-  them on the cut panels before sewing the envelope;
+* a **marking sheet** for each envelope panel a shape crosses or lies over: the panel
+  with the footprint line the shape's rim is sewn on (short ticks point into the shape),
+  the numbered match marks, each naming the skin piece with the same number (`55 (P15)`),
+  and every feed hole drawn twice, as cut and as finished, with its sizes and the hem
+  (by default a double fold over the hole tape). Mark them on the cut panels before
+  sewing the envelope. Each envelope row sheet lists which of its gores have a marking
+  sheet or a feed hole, so none is missed when the copies of the row are cut;
+* on every skin piece, what each edge is sewn to: the rim to the envelope (with its mark
+  numbers and the panels they lie on), each seam to the neighbouring piece, the top to
+  the tip disc or the apex;
 * `pattern.pdf`: every sheet at 1:1 on pages as wide as your fabric roll. A sheet wider
   than the roll is split into numbered strips;
 * `index.json`: every file with its piece, cut count, fabric, finished size, and which
