@@ -7,10 +7,11 @@ specification and envelope (a key from both), recomputes only the shapes whose k
 changed, in a worker thread, and announces new results with ``updated``. A result
 computed for an older key is dropped when it arrives.
 
-Shape simulations (the shape's sub-model solved by the preview solver) run in their own
-worker; their results are kept in memory for this session and are marked stale when the
-shape or the envelope changes. Nothing here does engineering math: every number comes
-from :mod:`envelopelab`.
+Shape simulations (the shape's sub-model, its skin sewn from the cut pieces, solved by the
+preview solver) run in their own worker, one at a time. Each result is a run record and
+the skin as solved (:mod:`envelopelab.project.shape_runs`), kept with the project; it is
+marked stale when the shape or the envelope changes. Nothing here does engineering math:
+every number comes from :mod:`envelopelab`.
 """
 
 from __future__ import annotations
@@ -19,14 +20,19 @@ import json
 import traceback
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from PySide6.QtCore import QCoreApplication, QObject, QThread, Signal
 
 from envelopelab.design.model import DesignDocument
 from envelopelab.features.primitives import PrimitiveDesign, PrimitiveError
-from envelopelab.project.model import PatternSet
+from envelopelab.features.scene import ShapeDisplay
+from envelopelab.project.model import PatternSet, ShapeRunRecord
 from envelopelab.project.shapes import ShapeSpec, envelope_surface, shape_design
+
+if TYPE_CHECKING:
+    from envelopelab.project.session import ProjectSession
 
 
 def shape_key(spec: ShapeSpec, host_hash: str) -> str:
@@ -56,7 +62,7 @@ class ShapeResult:
 
 @dataclass
 class ShapeSimulation:
-    """A solved shape sub-model (kept in memory for this session).
+    """A shape simulation: its record and the skin as solved, as sewn.
 
     Attributes
     ----------
@@ -65,22 +71,20 @@ class ShapeSimulation:
     key : str
         Simulation key of the solve (stale when it differs from the current one, see
         :func:`simulation_key`).
-    appendage : AppendageModel
-        Sub-model.
-    result : SimulationResult
-        Preview-solver result.
-    metrics : AppendageMetrics
-        Heights (m), FoS (-), wrinkled fraction (-), chamber pressure (Pa).
-    design : PrimitiveDesign
-        The placed shape that was solved.
+    record : ShapeRunRecord
+        Summary, metrics and provenance.
+    display : ShapeDisplay
+        The solved skin split into its pieces, with its seams and rim (envelope frame, m).
+    arrays : dict of str to ndarray, optional
+        Display arrays of a new solve, to be kept with the project (None once kept or for
+        a simulation read from the project).
     """
 
     name: str
     key: str
-    appendage: Any
-    result: Any
-    metrics: Any
-    design: PrimitiveDesign
+    record: ShapeRunRecord
+    display: ShapeDisplay
+    arrays: dict[str, np.ndarray] | None = None
 
 
 class _DesignWorker(QThread):
@@ -144,6 +148,19 @@ class ShapeService(QObject):
         """Forget every result and simulation (another project was opened)."""
         self.keys, self.results, self.simulations = {}, {}, {}
         self._queued = None
+
+    def restore(self, session: ProjectSession) -> None:
+        """Take the shape simulations kept with ``session``'s project (those whose result
+        file can be read); their status follows from their keys as usual."""
+        from envelopelab.project.shape_runs import display_from_arrays
+
+        for record in session.project.shape_runs:
+            arrays = session.run_arrays(record.run_id)
+            if arrays is None:
+                continue
+            self.simulations[record.shape] = ShapeSimulation(
+                record.shape, record.simulation_key, record, display_from_arrays(arrays)
+            )
 
     def sync(
         self,
@@ -302,6 +319,7 @@ class _SolveWorker(QThread):
         from envelopelab.features.builder import FeatureBuildError, build_appendage
         from envelopelab.features.metrics import appendage_metrics
         from envelopelab.features.primitives import primitive_appendage
+        from envelopelab.project.shape_runs import display_from_arrays, shape_run_record
         from envelopelab.project.simulation import (
             membrane_for_fabric,
             operating_conditions,
@@ -346,7 +364,18 @@ class _SolveWorker(QThread):
                 return
             result = from_preview(appendage.model, raw)
             metrics = appendage_metrics(appendage, result)
-            self.solved.emit(ShapeSimulation(req.name, req.key, appendage, result, metrics, design))
+            record, arrays = shape_run_record(
+                req.name,
+                req.key,
+                design,
+                appendage,
+                result,
+                metrics,
+                req.mesh_mm / 1000.0,
+                doc.compute_content_hash(),
+            )
+            display = display_from_arrays(arrays)
+            self.solved.emit(ShapeSimulation(req.name, req.key, record, display, arrays))
         except (FeatureBuildError, PrimitiveError, ValueError) as exc:
             self.failed.emit(f"{label}: not simulated: {exc}")
         except Exception as exc:  # the thread must report every failure to the GUI
@@ -367,16 +396,29 @@ class ShapeSimulator(QObject):
         self.service = service
         self._worker: _SolveWorker | None = None
         self._solved_sim: ShapeSimulation | None = None
+        self._next: ShapeSolveRequest | None = None
+        #: The request being solved (None when idle).
+        self.request: ShapeSolveRequest | None = None
 
     @property
     def running(self) -> bool:
-        """A shape simulation is running."""
-        return self._worker is not None
+        """A shape simulation is running (or one waits for the running one to stop)."""
+        return self._worker is not None or self._next is not None
 
-    def start(self, request: ShapeSolveRequest) -> bool:
-        """Start a simulation; False when one is already running."""
+    def start(self, request: ShapeSolveRequest, replace: bool = False) -> bool:
+        """Start a simulation.
+
+        With ``replace`` a running simulation is cancelled and ``request`` starts as soon
+        as it has stopped; otherwise nothing starts while one runs (returns False).
+        """
         if self._worker is not None:
-            return False
+            if not replace:
+                return False
+            self._next = request
+            self.cancel()
+            return True
+        self._next = None
+        self.request = request
         worker = _SolveWorker(request)
         worker.progress.connect(self._progress)
         worker.failed.connect(self._failed)
@@ -394,7 +436,7 @@ class ShapeSimulator(QObject):
             self._worker.token.cancel()
 
     def wait(self, timeout_ms: int = 600_000) -> bool:
-        """Block until no simulation runs."""
+        """Block until no simulation runs (a queued one included)."""
         while self._worker is not None:
             if not self._worker.wait(timeout_ms):
                 return False
@@ -413,6 +455,7 @@ class ShapeSimulator(QObject):
 
     def _ended(self) -> None:
         worker, self._worker = self._worker, None
+        self.request = None
         if worker is not None:
             worker.deleteLater()
         sim, self._solved_sim = self._solved_sim, None
@@ -420,4 +463,7 @@ class ShapeSimulator(QObject):
             self.service.simulations[sim.name] = sim
             self.finished.emit(sim.name)
             self.service.updated.emit()
+        if self._next is not None:
+            self.start(self._next)
+            return
         self.idle.emit()

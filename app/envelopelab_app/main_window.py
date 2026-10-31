@@ -800,6 +800,7 @@ class MainWindow(QMainWindow):
         save_preferences(self.settings, self.prefs)
         self._apply_autosave_interval()
         self.simulation.detect_calculix()
+        self.controller.auto_simulate_shapes()
 
     def _fill_recent(self) -> None:
         self.recent_menu.clear()

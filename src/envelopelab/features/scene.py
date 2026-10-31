@@ -306,6 +306,7 @@ def export_scene(
     designs: Sequence[PrimitiveDesign] = (),
     solved: Sequence[tuple[PrimitiveDesign, AppendageModel, SimulationResult]] = (),
     up: UpAxis = "Y",
+    objects: Sequence[MeshObject] = (),
 ) -> Path:
     """Write the envelope, its shapes and their solved skins as one OBJ scene.
 
@@ -321,13 +322,23 @@ def export_scene(
         Solved sub-models.
     up : {"Y", "Z"}
         Up axis of the file ("Y": Blender's default OBJ import).
+    objects : sequence of MeshObject
+        More objects, written last (e.g. kept simulations, :func:`display_object`).
 
     Returns
     -------
     Path
         The written file.
     """
-    objects = [envelope_object(surface)]
-    objects += [designed_object(d) for d in designs]
-    objects += [simulated_object(d, a, r) for d, a, r in solved]
-    return write_obj_scene(path, objects, up)
+    scene = [envelope_object(surface)]
+    scene += [designed_object(d) for d in designs]
+    scene += [simulated_object(d, a, r) for d, a, r in solved]
+    scene += list(objects)
+    return write_obj_scene(path, scene, up)
+
+
+def display_object(name: str, display: ShapeDisplay, converged: bool) -> MeshObject:
+    """A solved shape's display skin as an object (``<name> simulated``, marked
+    ``UNCONVERGED`` when the solve did not converge), m."""
+    state = "simulated" if converged else "simulated UNCONVERGED"
+    return MeshObject(f"{name} {state}", display.points, display.triangles)

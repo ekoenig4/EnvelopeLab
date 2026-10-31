@@ -266,3 +266,71 @@ def test_3d_view_draws_shapes_as_sewn_pieces(gore_window: MainWindow) -> None:
     item.setCheckState(Qt.CheckState.Checked)
     view.refresh()
     assert view.layers["shape:Dome"].visible
+
+
+def _auto(window: MainWindow) -> None:
+    window.controller.prefs.auto_simulate_shapes = True
+    window.controller.auto_simulate_shapes()
+
+
+def test_placed_shapes_are_simulated_automatically_and_kept(
+    gore_window: MainWindow, tmp_path: Path
+) -> None:
+    """A placed shape that can be fed is solved in the background at the automatic mesh
+    size; the result is kept with the project and read back as current."""
+    from envelopelab.project.shape_runs import auto_mesh_size
+
+    controller = gore_window.controller
+    _auto(gore_window)
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("dome")
+    _placed(gore_window)
+    # Without a feed hole the dome cannot be fed: nothing starts.
+    assert not controller.shape_simulator.running
+    panel.set_value(("feed_hole_radius",), 0.07)
+    _placed(gore_window)
+    assert controller.shape_simulator.running
+    assert controller.shape_simulator.wait(600_000)
+    assert controller.shapes.simulation_status("Dome") == "current"
+    session = controller.session
+    assert session is not None
+    record = session.shape_run("Dome")
+    placed = panel.placed("Dome")
+    assert record is not None and placed is not None
+    assert record.mesh_target_mm == pytest.approx(1000.0 * auto_mesh_size(placed))
+    gore_window.view3d.refresh()
+    assert gore_window.view3d.layers["shape-sim:Dome"].visible
+    path = session.save(tmp_path / "auto.elproj")
+    # Reopened: the kept simulation is current and nothing is solved again.
+    assert gore_window.open_project(path) is not None
+    _placed(gore_window)
+    assert controller.shapes.simulation_status("Dome") == "current"
+    assert not controller.shape_simulator.running
+    assert "shape-sim:Dome" in gore_window.view3d.labels()
+    # An edit makes it stale, and it is solved again.
+    panel.set_value(("height",), 0.25)
+    _placed(gore_window)
+    assert controller.shapes.simulation_status("Dome") == "stale"
+    assert controller.shape_simulator.wait(600_000)
+    assert controller.shapes.simulation_status("Dome") == "current"
+
+
+def test_a_chosen_solve_replaces_a_running_automatic_one(gore_window: MainWindow) -> None:
+    controller = gore_window.controller
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("dome")
+    _placed(gore_window)
+    panel.set_value(("feed_hole_radius",), 0.07)
+    _placed(gore_window)
+    _auto(gore_window)
+    assert controller.shape_simulator.running
+    panel.mesh_spin.setValue(90.0)
+    assert panel.simulate_selected()
+    assert controller.shape_simulator.wait(600_000)
+    session = controller.session
+    assert session is not None
+    record = session.shape_run("Dome")
+    assert record is not None and record.mesh_target_mm == 90.0
+    assert controller.shapes.simulation_status("Dome") == "current"

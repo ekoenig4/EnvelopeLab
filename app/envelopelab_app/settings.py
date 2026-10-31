@@ -30,6 +30,9 @@ class Preferences:
         until *Regenerate* is pressed).
     keep_rows_fitted : bool
         Rescale the panel rows to the meridian after profile edits.
+    auto_simulate_shapes : bool
+        Solve every placed special shape in the background (preview solver, automatic
+        mesh size) whenever it has no current simulation.
     enable_3d : bool
         Use the PyVista 3D view (needs OpenGL; takes effect at the next start).
     recovery_dir : str
@@ -46,6 +49,7 @@ class Preferences:
     ccx_path: str = ""
     auto_regenerate_patterns: bool = False
     keep_rows_fitted: bool = True
+    auto_simulate_shapes: bool = True
     enable_3d: bool = True
     recovery_dir: str = ""
     material_library: str = ""

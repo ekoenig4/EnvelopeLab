@@ -30,13 +30,15 @@ from .gui_support import GORE_PROJECT, make_window  # noqa: E402
 
 @pytest.fixture
 def settings(tmp_path: Path) -> QSettings:
-    """Isolated settings: autosave off, recovery folder and fabric library in ``tmp_path``."""
+    """Isolated settings: autosave off, recovery folder and fabric library in ``tmp_path``,
+    special shapes simulated only on request (tests of automatic simulation turn it on)."""
     s = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
     s.setValue("preferences/autosave_minutes", 0.0)
     s.setValue("preferences/recovery_dir", str(tmp_path / "recovery"))
     s.setValue("preferences/material_library", str(tmp_path / "materials.sqlite"))
     s.setValue("preferences/preview_mesh_mm", 1600.0)
     s.setValue("preferences/calculix_mesh_mm", 1600.0)
+    s.setValue("preferences/auto_simulate_shapes", False)
     s.sync()
     return s
 

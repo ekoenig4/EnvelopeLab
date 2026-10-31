@@ -596,10 +596,10 @@ class View3DPanel(QWidget):
 
     def _shape_layers(self) -> None:
         """Special shapes as sewn: the latest simulation of each shape (the skin sewn from
-        its cut pieces and inflated) and the designed shape, both drawn piece by piece in
-        the skin fabric's colour with their seams. The designed layer starts hidden while
-        a current simulation is shown."""
-        from envelopelab.features.scene import designed_display, simulated_display
+        its cut pieces and inflated, kept with the project) and the designed shape, both
+        drawn piece by piece in the skin fabric's colour with their seams. The designed
+        layer starts hidden while a current simulation is shown."""
+        from envelopelab.features.scene import designed_display
 
         service = self.controller.shapes
         session = self.controller.session
@@ -630,12 +630,14 @@ class View3DPanel(QWidget):
             layer.visible = service.simulation_status(name) != "current"
             self.layers[layer.key] = layer
         for name, sim in service.simulations.items():
-            if name not in service.keys:
+            result = service.result(name)
+            if name not in service.keys or result is None or result.design is None:
                 continue
-            shown = simulated_display(sim.design, sim.appendage, sim.result)
-            shift = display_offset(host, sim.design) if host else np.zeros(3)
+            placed = result.design  # the shape as placed now (offset and fabric)
+            shown = sim.display
+            shift = display_offset(host, placed) if host else np.zeros(3)
             stale = service.simulation_status(name) != "current"
-            converged = bool(sim.result.converged)
+            converged = bool(sim.record.converged)
             label = f"Special shape {name} as sewn and inflated (preview solver)"
             if not converged:
                 label += " [NOT CONVERGED]"
@@ -650,7 +652,7 @@ class View3DPanel(QWidget):
                 stale,
                 converged,
                 polylines=self._shifted_lines(shown, shift),
-                face_colors=self._piece_colors(shown, specs.get(name), sim.design),
+                face_colors=self._piece_colors(shown, specs.get(name), placed),
             )
 
     @staticmethod

@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: special shapes are simulated automatically in the background (preview solver,
+  one at a time, element size footprint length / 100 between 60 and 300 mm, assumed)
+  whenever a placed shape with a feed hole has no current simulation, and the 3D view
+  shows them as sewn and inflated. *Simulate shape* still solves with a chosen size and
+  goes first. Turn it off in *Preferences*.
+- Changed: project format version 3 keeps the latest simulation of every special shape
+  (summary, factor of safety, provenance and the solved skin) with the project, so it is
+  shown again, current or STALE, after reopening (ADR-0030). Version 1 and 2 files open
+  unchanged; older releases cannot open version 3 files.
 - Changed: the 3D view draws special shapes as sewn instead of as a plain pink surface:
   every gore or panel in the skin fabric's colour (every second one darker), with the
   seams between the pieces and the rim drawn as lines. A shape simulation is drawn the

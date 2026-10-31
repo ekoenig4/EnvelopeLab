@@ -65,6 +65,10 @@ class PreferencesDialog(QDialog):
         self.auto_patterns.setChecked(prefs.auto_regenerate_patterns)
         self.keep_rows = QCheckBox("Keep panel rows fitted to the meridian after profile edits")
         self.keep_rows.setChecked(prefs.keep_rows_fitted)
+        self.auto_shapes = QCheckBox(
+            "Simulate special shapes automatically (preview solver, in the background)"
+        )
+        self.auto_shapes.setChecked(prefs.auto_simulate_shapes)
         self.enable_3d = QCheckBox("Use the PyVista 3D view (next start)")
         self.enable_3d.setChecked(prefs.enable_3d)
         self.recovery = QLineEdit(prefs.recovery_dir)
@@ -80,6 +84,7 @@ class PreferencesDialog(QDialog):
         form.addRow("CalculiX executable", ccx_row)
         form.addRow(self.auto_patterns)
         form.addRow(self.keep_rows)
+        form.addRow(self.auto_shapes)
         form.addRow(self.enable_3d)
         form.addRow("Recovery folder", self.recovery)
         form.addRow("Fabric library file (next start)", self.material_library)
@@ -111,6 +116,7 @@ class PreferencesDialog(QDialog):
             ccx_path=self.ccx.text().strip(),
             auto_regenerate_patterns=self.auto_patterns.isChecked(),
             keep_rows_fitted=self.keep_rows.isChecked(),
+            auto_simulate_shapes=self.auto_shapes.isChecked(),
             enable_3d=self.enable_3d.isChecked(),
             recovery_dir=self.recovery.text().strip(),
             material_library=self.material_library.text().strip(),

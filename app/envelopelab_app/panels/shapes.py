@@ -64,7 +64,6 @@ from envelopelab.project.shapes import (
 )
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.refresh import Refresher
-from envelopelab_app.shapes_service import ShapeSolveRequest
 
 FAIL_COLOR = "#b00020"
 WARN_COLOR = "#8a6d3b"
@@ -503,20 +502,11 @@ class ShapesPanel(QWidget):
         if placed is None:
             self.sim_status.setText("The shape is not placed yet (or cannot be placed).")
             return False
-        key = self.controller.shapes.current_simulation_key(name)
-        assert key is not None
-        host, skin = shape_fabrics(spec, session.design, session.patterns, placed)
-        request = ShapeSolveRequest(
-            name,
-            key,
-            placed,
-            session.design,
-            host,
-            skin,
-            self.controller.fabrics.catalog(),
-            self.mesh_mm,
-        )
-        started = self.controller.shape_simulator.start(request)
+        request = self.controller.shape_solve_request(name, self.mesh_mm)
+        if request is None:
+            return False
+        # A chosen solve goes first: an automatic one that is running stops for it.
+        started = self.controller.shape_simulator.start(request, replace=True)
         self._update_buttons()
         return started
 
@@ -550,7 +540,7 @@ class ShapesPanel(QWidget):
 
     def export_blender(self, path: str | Path) -> Path | None:
         """Write the envelope, the placed shapes and their current simulations as OBJ."""
-        from envelopelab.features.scene import export_scene
+        from envelopelab.features.scene import display_object, export_scene
         from envelopelab.project.shapes import envelope_surface
 
         session = self.controller.session
@@ -559,14 +549,14 @@ class ShapesPanel(QWidget):
         service = self.controller.shapes
         designs = [d for d in (self.placed(s.name) for s in session.state.shapes) if d]
         solved = [
-            (sim.design, sim.appendage, sim.result)
+            display_object(name, sim.display, sim.record.converged)
             for name, sim in service.simulations.items()
             if service.simulation_status(name) == "current"
         ]
         surface = self.controller.attempt(envelope_surface, session.design, session.patterns)
         if surface is None:
             return None
-        out = self.controller.attempt(export_scene, path, surface, designs, solved)
+        out = self.controller.attempt(export_scene, path, surface, designs, (), "Y", solved)
         if out is not None:
             self.controller.message.emit(f"Blender scene written to {path}")
         return out
@@ -976,7 +966,7 @@ class ShapesPanel(QWidget):
             self.sim_status.setText("Not simulated.")
             self.sim_status.setStyleSheet("")
             return
-        m = sim.metrics
+        m = sim.record
         stale = service.simulation_status(spec.name) == "stale"
         problems = []
         if not m.converged:
@@ -995,22 +985,25 @@ class ShapesPanel(QWidget):
                 "verified with CalculiX)"
             )
             self.sim_status.setStyleSheet(f"color: {OK_COLOR};")
-        r = sim.result
-        iterations, residual = r.residual_history[-1] if r.residual_history else (0, float("nan"))
+        v = m.metrics
         rows = [
             ("Status", m.status),
-            ("Iterations", str(iterations)),
-            (f"Final residual ({r.residual_measure})", f"{residual:.2e}"),
-            ("Mesh", f"{r.n_nodes} nodes, {r.n_elements} elements"),
-            ("Run time", f"{r.elapsed:.1f} s"),
-            ("Height above envelope (designed)", f"{m.initial_projected_height:.3f} m"),
-            ("Height above envelope (inflated)", f"{m.projected_height:.3f} m"),
-            ("Chamber pressure", f"{m.chamber_pressure:.1f} Pa"),
-            ("Skin wrinkled", f"{100 * m.skin_wrinkled_fraction:.0f} %"),
-            ("Rim tape max tension", f"{m.rim_tape_max_tension:.0f} N"),
+            ("Iterations", str(m.iterations)),
+            (f"Final residual ({m.residual_measure})", f"{m.residual:.2e}"),
+            (
+                "Mesh",
+                f"{m.n_nodes} nodes, {m.n_elements} elements (target {m.mesh_target_mm:g} mm)",
+            ),
+            ("Run time", f"{m.run_time:.1f} s"),
+            ("Solved", m.created.strftime("%Y-%m-%d %H:%M UTC")),
+            ("Height above envelope (designed)", f"{v['initial_projected_height_m']:.3f} m"),
+            ("Height above envelope (inflated)", f"{v['projected_height_m']:.3f} m"),
+            ("Chamber pressure", f"{v['chamber_pressure_pa']:.1f} Pa"),
+            ("Skin wrinkled", f"{100 * v['skin_wrinkled_fraction']:.0f} %"),
+            ("Rim tape max tension", f"{v['rim_tape_max_tension_n']:.0f} N"),
             (
                 "Footprint max normal movement",
-                f"{1000 * m.footprint_max_normal_displacement:.1f} mm",
+                f"{1000 * v['footprint_max_normal_displacement_m']:.1f} mm",
             ),
         ]
         for region, fos in sorted(m.fos.items()):
