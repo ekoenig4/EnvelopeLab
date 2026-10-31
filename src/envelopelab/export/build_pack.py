@@ -424,6 +424,16 @@ def primitive_sheets(
     return out
 
 
+def default_hole_hem(design: DesignDocument) -> tuple[float, str]:
+    """Hem turned back round a feed hole by default, m, and the tape it is turned over.
+
+    A double fold over the design's hole tape: twice the tape width (source: design tape
+    width; the double fold is the usual hem of a hole, assumed).
+    """
+    tape = design.tapes.hole
+    return 2.0 * tape.width, tape.tape_class
+
+
 #: Spacing and length of the ticks on the shape's side of a footprint line, m.
 TICK_SPACING = 0.15
 TICK_LENGTH = 0.04
@@ -906,8 +916,8 @@ def export_build_pack(
     Path
         ``index.json``.
     """
-    hole_tape = design.tapes.hole.tape_class
-    hem = 2.0 * design.tapes.hole.width if hole_hem is None else hole_hem
+    hem, hole_tape = default_hole_hem(design)
+    hem = hem if hole_hem is None else hole_hem
     sheets = envelope_sheets(design, patterns)
     row_notes = shape_row_notes(primitives)
     for sheet in sheets:

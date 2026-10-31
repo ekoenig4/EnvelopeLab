@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: *Show special shapes* in the 2D pattern view (on by default) adds every envelope
+  panel a special shape is sewn on, gore by gore, with the footprint line and its
+  shape-side ticks, the match marks naming their skin pieces and the feed holes at cut and
+  finished size; each row lists the gores it carries shapes on. Display only.
 - Added: build packs say where and how special shapes are sewn on. Marking sheets draw
   each feed hole at its cut and finished size with the hem (double fold over the hole
   tape by default), tick the side of the footprint line the shape covers, name the skin

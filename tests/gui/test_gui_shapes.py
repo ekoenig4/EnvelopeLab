@@ -336,3 +336,38 @@ def test_a_calculix_run_verifies_the_special_shapes(gore_window: MainWindow, qtb
     assert record.envelope_run_id == session.project.runs[-1].run_id
     if not record.converged:
         assert any(f.severity == "error" for f in record.findings)
+
+
+def test_pattern_view_shows_where_each_shape_is_sewn(gore_window: MainWindow) -> None:
+    """Every panel a shape is sewn on follows the rows as its own piece, with the footprint
+    line, the match marks and the feed hole; the rows say which gores are marked."""
+    from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsSimpleTextItem
+
+    from envelopelab.export.build_pack import primitive_sheets
+
+    w = gore_window
+    panel = _fed_dome(w)
+    placed = panel.placed("Dome")
+    assert placed is not None
+    w.controller.regenerate_patterns()
+    w.show_panel("patterns")
+    view = w.patterns
+    view.refresh()
+
+    def texts() -> list[str]:
+        return [
+            i.text() for i in view.view.scene().items() if isinstance(i, QGraphicsSimpleTextItem)
+        ]
+
+    markings = [s for s in primitive_sheets(placed) if s.kind == "marking"]
+    shown = texts()
+    for sheet in markings:
+        assert f"{sheet.piece.upper()}: Dome" in shown
+    numbers = {t.split()[0] for t in shown if "(G" in t}
+    assert {str(m.number) for m in placed.marks} <= numbers
+    assert any(t.startswith("hole: cut ") for t in shown)
+    assert any(t.startswith("Dome: mark gores") for t in shown)
+    rings = [i for i in view.view.scene().items() if isinstance(i, QGraphicsEllipseItem)]
+    assert len(rings) >= 2  # the feed hole, cut and finished
+    view.show_shapes.setChecked(False)
+    assert not any(t.startswith("Dome: mark gores") for t in texts())
