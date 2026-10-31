@@ -638,7 +638,8 @@ class View3DPanel(QWidget):
             shift = display_offset(host, placed) if host else np.zeros(3)
             stale = service.simulation_status(name) != "current"
             converged = bool(sim.record.converged)
-            label = f"Special shape {name} as sewn and inflated (preview solver)"
+            solver = SOLVER_LABELS.get(sim.record.solver, sim.record.solver)
+            label = f"Special shape {name} as sewn and inflated ({solver})"
             if not converged:
                 label += " [NOT CONVERGED]"
             if stale:

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import TYPE_CHECKING, Any
@@ -301,8 +302,127 @@ class ShapeSolveRequest:
     mesh_mm: float
 
 
+class ShapeSolveError(Exception):
+    """A shape simulation did not produce a result (the message says why)."""
+
+
+#: Solver identifiers (as in envelope run records).
+PREVIEW = "envelopelab-preview"
+CALCULIX = "calculix"
+
+
+def solve_shape(
+    req: ShapeSolveRequest,
+    solver: str = PREVIEW,
+    progress: Callable[[str, float], None] | None = None,
+    cancel: Any = None,
+    ccx_path: str | None = None,
+    workdir: str | None = None,
+    envelope_run_id: str | None = None,
+) -> ShapeSimulation:
+    """Build and solve one shape sub-model (worker thread; no Qt).
+
+    The skin is sewn from the shape's cut pieces
+    (:func:`envelopelab.features.primitives.primitive_appendage`) and loaded with the
+    envelope's load case. ``solver`` is the preview solver, or CalculiX started from a
+    converged preview of the same sub-model (when that preview does not converge, it is
+    returned as the result, with the reason in its findings).
+
+    Raises
+    ------
+    ShapeSolveError
+        When the sub-model cannot be built, or the solve is cancelled.
+    """
+    from envelopelab.features.builder import FeatureBuildError, build_appendage
+    from envelopelab.features.metrics import appendage_metrics
+    from envelopelab.features.primitives import primitive_appendage
+    from envelopelab.project.model import RunFinding
+    from envelopelab.project.shape_runs import display_from_arrays, shape_run_record
+    from envelopelab.project.simulation import (
+        membrane_for_fabric,
+        operating_conditions,
+        tape_material,
+    )
+    from envelopelab.solvers.dynamic_relaxation import SolverProgress, solve
+    from envelopelab.solvers.simulation import from_preview
+
+    label = f"Shape {req.name}"
+    say = progress or (lambda _m, _f: None)
+    try:
+        doc = req.document
+        tapes = doc.tapes
+        design = req.design
+        conditions = operating_conditions(doc, float(design.surface.profile.z[0]))
+        spec = primitive_appendage(
+            design,
+            mesh_size=req.mesh_mm / 1000.0,
+            load_tape=tape_material(tapes.vertical.tape_class, tapes.vertical.strength),
+            row_tape=tape_material(tapes.horizontal.tape_class, tapes.horizontal.strength),
+            rim_tape=tape_material(tapes.rim.tape_class, tapes.rim.strength),
+            hem_tape=tape_material(tapes.hole.tape_class, tapes.hole.strength),
+        )
+        materials = {
+            "host": membrane_for_fabric(req.host_fabric, req.fabrics),
+            "skin": membrane_for_fabric(req.skin_fabric, req.fabrics),
+        }
+        say(f"{label}: building the sub-model ({req.mesh_mm:g} mm)", 0.0)
+        appendage = build_appendage(spec, conditions, materials)
+    except (FeatureBuildError, PrimitiveError, ValueError) as exc:
+        raise ShapeSolveError(f"{label}: not simulated: {exc}") from exc
+
+    def report(p: SolverProgress) -> None:
+        say(
+            f"{label}: preview iteration {p.iteration}, residual {p.residual:.2e} "
+            f"(target {p.tolerance:.0e}), {p.elapsed:.0f} s",
+            p.fraction,
+        )
+
+    raw = solve(appendage.model, progress=report, cancel=cancel)
+    if raw.convergence.status == "cancelled":
+        raise ShapeSolveError(f"{label}: simulation cancelled")
+    result = from_preview(appendage.model, raw)
+    note: str | None = None
+    if solver == CALCULIX:
+        if not result.converged:
+            note = (
+                "CalculiX not started: the preview that finds its starting shape did not "
+                f"converge ({result.status})"
+            )
+        else:
+            from calculix_adapter import CalculixCancelledError, CalculixSettings, run_calculix
+
+            say(f"{label}: CalculiX from the preview equilibrium", 0.5)
+            try:
+                result = run_calculix(
+                    appendage.model,
+                    CalculixSettings(executable=ccx_path),
+                    workdir=workdir,
+                    start_positions=result.positions,
+                    cancel=cancel,
+                )
+            except CalculixCancelledError as exc:
+                raise ShapeSolveError(f"{label}: CalculiX cancelled (no result)") from exc
+    metrics = appendage_metrics(appendage, result)
+    record, arrays = shape_run_record(
+        req.name,
+        req.key,
+        design,
+        appendage,
+        result,
+        metrics,
+        req.mesh_mm / 1000.0,
+        doc.compute_content_hash(),
+        envelope_run_id,
+    )
+    if note is not None:
+        record.findings.append(
+            RunFinding(code="calculix_not_started", severity="error", message=note)
+        )
+    return ShapeSimulation(req.name, req.key, record, display_from_arrays(arrays), arrays)
+
+
 class _SolveWorker(QThread):
-    """Builds and solves one shape sub-model with the preview solver."""
+    """Solves one shape sub-model with the preview solver (Simulate shape)."""
 
     progress = Signal(str, float)
     solved = Signal(object)  # ShapeSimulation
@@ -316,70 +436,13 @@ class _SolveWorker(QThread):
         self.token = CancellationToken()
 
     def run(self) -> None:  # noqa: D102 (QThread entry point)
-        from envelopelab.features.builder import FeatureBuildError, build_appendage
-        from envelopelab.features.metrics import appendage_metrics
-        from envelopelab.features.primitives import primitive_appendage
-        from envelopelab.project.shape_runs import display_from_arrays, shape_run_record
-        from envelopelab.project.simulation import (
-            membrane_for_fabric,
-            operating_conditions,
-            tape_material,
-        )
-        from envelopelab.solvers.dynamic_relaxation import SolverProgress, solve
-        from envelopelab.solvers.simulation import from_preview
-
         req = self.request
-        label = f"Shape {req.name}"
         try:
-            doc = req.document
-            tapes = doc.tapes
-            design = req.design
-            z_mouth = float(design.surface.profile.z[0])
-            conditions = operating_conditions(doc, z_mouth)
-            spec = primitive_appendage(
-                design,
-                mesh_size=req.mesh_mm / 1000.0,
-                load_tape=tape_material(tapes.vertical.tape_class, tapes.vertical.strength),
-                row_tape=tape_material(tapes.horizontal.tape_class, tapes.horizontal.strength),
-                rim_tape=tape_material(tapes.rim.tape_class, tapes.rim.strength),
-                hem_tape=tape_material(tapes.hole.tape_class, tapes.hole.strength),
-            )
-            materials = {
-                "host": membrane_for_fabric(req.host_fabric, req.fabrics),
-                "skin": membrane_for_fabric(req.skin_fabric, req.fabrics),
-            }
-            self.progress.emit(f"{label}: building the sub-model ({req.mesh_mm:g} mm)", 0.0)
-            appendage = build_appendage(spec, conditions, materials)
-
-            def report(p: SolverProgress) -> None:
-                self.progress.emit(
-                    f"{label}: iteration {p.iteration}, residual {p.residual:.2e} "
-                    f"(target {p.tolerance:.0e}), {p.elapsed:.0f} s",
-                    p.fraction,
-                )
-
-            raw = solve(appendage.model, progress=report, cancel=self.token)
-            if raw.convergence.status == "cancelled":
-                self.failed.emit(f"{label}: simulation cancelled")
-                return
-            result = from_preview(appendage.model, raw)
-            metrics = appendage_metrics(appendage, result)
-            record, arrays = shape_run_record(
-                req.name,
-                req.key,
-                design,
-                appendage,
-                result,
-                metrics,
-                req.mesh_mm / 1000.0,
-                doc.compute_content_hash(),
-            )
-            display = display_from_arrays(arrays)
-            self.solved.emit(ShapeSimulation(req.name, req.key, record, display, arrays))
-        except (FeatureBuildError, PrimitiveError, ValueError) as exc:
-            self.failed.emit(f"{label}: not simulated: {exc}")
+            self.solved.emit(solve_shape(req, PREVIEW, self.progress.emit, self.token))
+        except ShapeSolveError as exc:
+            self.failed.emit(str(exc))
         except Exception as exc:  # the thread must report every failure to the GUI
-            self.failed.emit(f"{label}: simulation failed: {type(exc).__name__}: {exc}")
+            self.failed.emit(f"Shape {req.name}: simulation failed: {type(exc).__name__}: {exc}")
 
 
 class ShapeSimulator(QObject):

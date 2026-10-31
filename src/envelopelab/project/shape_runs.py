@@ -20,7 +20,6 @@ for a 1.3 m pod) and coarse enough to solve in minutes. All three constants are
 
 from __future__ import annotations
 
-import math
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -80,6 +79,7 @@ def shape_run_record(
     metrics: AppendageMetrics,
     mesh_size: float,
     design_content_hash: str,
+    envelope_run_id: str | None = None,
 ) -> tuple[ShapeRunRecord, dict[str, np.ndarray]]:
     """Record and display arrays of a solved shape sub-model.
 
@@ -99,17 +99,24 @@ def shape_run_record(
         Target element size used, m.
     design_content_hash : str
         Design document hash at solve time.
+    envelope_run_id : str, optional
+        The envelope run the shape is solved with (None: solved on its own).
 
     Returns
     -------
     (ShapeRunRecord, dict of str to ndarray)
         Record, and the skin as solved (:func:`display_arrays`).
     """
-    iterations, residual = (
-        (int(result.residual_history[-1][0]), float(result.residual_history[-1][1]))
-        if result.residual_history
-        else (0, math.nan)
+    from envelopelab.project.simulation import final_residual
+
+    # As for envelope runs: preview iterations, or recorded CalculiX iterations, and the
+    # residual each solver's convergence criterion uses.
+    iterations = (
+        int(result.residual_history[-1][0])
+        if result.solver == "envelopelab-preview" and result.residual_history
+        else len(result.residual_history)
     )
+    residual, measure = final_residual(result)
     findings = [
         RunFinding(code=f.code, severity=f.severity, message=f.message) for f in result.findings
     ]
@@ -130,7 +137,7 @@ def shape_run_record(
         status=result.status,
         converged=result.converged,
         residual=residual,
-        residual_measure=result.residual_measure,
+        residual_measure=measure,
         iterations=iterations,
         run_time=result.elapsed,
         n_nodes=result.n_nodes,
@@ -151,6 +158,7 @@ def shape_run_record(
         fos={k: float(v) for k, v in metrics.fos.items()},
         findings=findings,
         manifest=result.manifest.to_dict(),
+        envelope_run_id=envelope_run_id,
     )
     return record, display_arrays(simulated_display(design, appendage, result))
 

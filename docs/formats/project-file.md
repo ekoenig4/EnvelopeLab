@@ -2129,7 +2129,7 @@ clean exit, and offered for recovery at the next start otherwise.
     },
     "ShapeRunRecord": {
       "additionalProperties": false,
-      "description": "Summary and provenance of one special-shape simulation (version 3).\n\nThe shape's sub-model solved with its skin sewn from the cut pieces\n(:func:`envelopelab.features.primitives.primitive_appendage`). The skin as solved is\nkept in the result file for display (:mod:`envelopelab.project.shape_runs`).\n\nAttributes\n----------\nrun_id : str\n    Unique id (also the result file name).\nshape : str\n    Name of the special shape.\nsimulation_key : str\n    Key of the inputs the shape was solved with (its specification, the envelope it\n    sits on and the envelope's load case, materials and tapes); the result is current\n    while the shape's key now is the same.\nsolver, solver_version : str\n    Solver identifier and version.\nstatus : str\n    ``converged`` or why the solve stopped.\nconverged : bool\n    True only when every convergence criterion was met.\nresidual : float\n    Final residual (see ``residual_measure``), dimensionless.\nresidual_measure : str\n    What the residual means.\niterations : int\n    Solver iterations.\nrun_time : float\n    Wall time, s.\nn_nodes, n_elements : int\n    Mesh size of the sub-model.\nmesh_target_mm : float\n    Target edge length, mm (a boundary format).\nload_case : str\n    Operating-condition label.\nmaterial_sources : list of str\n    Distinct source tags of the materials and tapes used.\ndesign_content_hash : str\n    Design document hash at solve time.\npieces : int\n    Number of skin gores or panels.\nmetrics : dict of str to float\n    ``projected_height_m``, ``initial_projected_height_m`` (m),\n    ``chamber_pressure_pa`` (Pa), ``skin_wrinkled_fraction`` (-),\n    ``rim_tape_max_tension_n`` (N), ``footprint_max_normal_displacement_m`` (m).\nfos : dict of str to float\n    Lowest factor of safety per region (dimensionless).\nfindings : list of RunFinding\n    Warnings and errors.\nmanifest : dict\n    Run manifest (git commit, dependency versions, seed, ...).\nresult_file : str, optional\n    Skin as solved (display arrays), relative to the project directory.",
+      "description": "Summary and provenance of one special-shape simulation (version 3).\n\nThe shape's sub-model solved with its skin sewn from the cut pieces\n(:func:`envelopelab.features.primitives.primitive_appendage`). The skin as solved is\nkept in the result file for display (:mod:`envelopelab.project.shape_runs`).\n\nAttributes\n----------\nrun_id : str\n    Unique id (also the result file name).\nshape : str\n    Name of the special shape.\nsimulation_key : str\n    Key of the inputs the shape was solved with (its specification, the envelope it\n    sits on and the envelope's load case, materials and tapes); the result is current\n    while the shape's key now is the same.\nsolver, solver_version : str\n    Solver identifier and version.\nstatus : str\n    ``converged`` or why the solve stopped.\nconverged : bool\n    True only when every convergence criterion was met.\nresidual : float\n    Final residual (see ``residual_measure``), dimensionless.\nresidual_measure : str\n    What the residual means.\niterations : int\n    Solver iterations.\nrun_time : float\n    Wall time, s.\nn_nodes, n_elements : int\n    Mesh size of the sub-model.\nmesh_target_mm : float\n    Target edge length, mm (a boundary format).\nload_case : str\n    Operating-condition label.\nmaterial_sources : list of str\n    Distinct source tags of the materials and tapes used.\ndesign_content_hash : str\n    Design document hash at solve time.\npieces : int\n    Number of skin gores or panels.\nmetrics : dict of str to float\n    ``projected_height_m``, ``initial_projected_height_m`` (m),\n    ``chamber_pressure_pa`` (Pa), ``skin_wrinkled_fraction`` (-),\n    ``rim_tape_max_tension_n`` (N), ``footprint_max_normal_displacement_m`` (m).\nfos : dict of str to float\n    Lowest factor of safety per region (dimensionless).\nfindings : list of RunFinding\n    Warnings and errors.\nmanifest : dict\n    Run manifest (git commit, dependency versions, seed, ...).\nresult_file : str, optional\n    Skin as solved (display arrays), relative to the project directory.\nenvelope_run_id : str, optional\n    The envelope run the shape was solved with (None: solved on its own).",
       "properties": {
         "converged": {
           "title": "Converged",
@@ -2143,6 +2143,18 @@ clean exit, and offered for recovery at the next start otherwise.
         "design_content_hash": {
           "title": "Design Content Hash",
           "type": "string"
+        },
+        "envelope_run_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Envelope Run Id"
         },
         "findings": {
           "items": {

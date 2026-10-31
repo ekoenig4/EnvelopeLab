@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
 
 from envelopelab.features.metrics import REQUIRED_FOS
 from envelopelab.features.primitives import CutPiece, PrimitiveDesign
+from envelopelab.project.model import SOLVER_LABELS
 from envelopelab.project.shapes import (
     MeshShape,
     RevolvedShape,
@@ -976,12 +977,17 @@ class ShapesPanel(QWidget):
         low = {k: v for k, v in m.fos.items() if v < REQUIRED_FOS}
         if low:
             problems.append(f"FACTOR OF SAFETY BELOW {REQUIRED_FOS:g}")
+        solver = SOLVER_LABELS.get(m.solver, m.solver)
+        origin = " with the envelope run" if m.envelope_run_id else ""
         if problems:
-            self.sim_status.setText("Preview solver: " + "; ".join(problems))
+            self.sim_status.setText(f"{solver}{origin}: " + "; ".join(problems))
             self.sim_status.setStyleSheet(f"color: {FAIL_COLOR}; font-weight: bold;")
+        elif m.solver == "calculix":
+            self.sim_status.setText(f"{solver}{origin}: converged (stiffness values are assumed)")
+            self.sim_status.setStyleSheet(f"color: {OK_COLOR};")
         else:
             self.sim_status.setText(
-                "Preview solver: converged (preview stiffness values are assumed; not "
+                f"{solver}{origin}: converged (preview stiffness values are assumed; not "
                 "verified with CalculiX)"
             )
             self.sim_status.setStyleSheet(f"color: {OK_COLOR};")

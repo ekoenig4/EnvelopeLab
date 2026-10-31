@@ -58,14 +58,13 @@ shapes**, or its tab).
    Pressing anywhere else still turns the view. The ring is an approximate preview (a
    circle of the base radius, without the lean); the real footprint, pattern and checks
    come when the shape is placed.
-5. Every placed shape that has a feed hole is **simulated automatically** in the
-   background, one shape at a time, whenever it has no current simulation: its skin is
-   sewn from the cut pieces and inflated with the preview solver, at an element size of
-   about 1/100 of the footprint length (60 to 300 mm). Turn this off in
-   **File ▸ Preferences** (*Simulate special shapes automatically*).
-   **Simulate shape (preview solver)** solves the selected shape with the element size
-   you choose (finer is slower) and stops an automatic solve that is running. **Cancel**
-   stops it. The result lists the
+5. Every placed shape that has a feed hole is **simulated with the envelope**: **Run
+   Preview** and **Run CalculiX** solve the envelope and then each shape with the same
+   solver, its skin sewn from the cut pieces and inflated, at an element size of about
+   1/100 of the footprint length (60 to 300 mm; see
+   [Running simulations](running-simulations.md)). **Simulate shape (preview solver)**
+   solves the selected shape on its own, with the element size you choose (finer is
+   slower). **Cancel** stops it. The result lists the
    convergence status, iterations, final residual, mesh size, heights above the envelope
    as designed and inflated, chamber pressure, wrinkled fraction, rim tape tension and
    the factor of safety of each region. The 3D View then draws the shape **as sewn and
@@ -333,6 +332,6 @@ default.
   gore are placed in proportion to its flat width.
 * Seam allowances, stitching and tape widths are not part of the simulation model.
 * In the desktop application, shape simulations use the preview solver with assumed
-  stiffness values, and automatic ones use an automatic element size (footprint length /
-  100, between 60 and 300 mm, assumed). Solve with a chosen size to check that a result
-  does not depend on the mesh.
+  stiffness values, and those solved with the envelope use an automatic element size
+  (footprint length / 100, between 60 and 300 mm, assumed). Solve with a chosen size to
+  check that a result does not depend on the mesh.

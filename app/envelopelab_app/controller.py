@@ -119,10 +119,6 @@ class WorkspaceController(QObject):
         self.shapes.updated.connect(self._shapes_updated)
         self.shape_simulator = ShapeSimulator(self.shapes)
         self.shape_simulator.finished.connect(self._shape_solved)
-        self.shape_simulator.failed.connect(self._shape_solve_failed)
-        self.shape_simulator.idle.connect(self.auto_simulate_shapes)
-        #: Simulation keys an automatic solve failed for (not retried until they change).
-        self._auto_failed: set[str] = set()
 
     def bump(self) -> None:
         """Start a new change (call before emitting the signals that announce it)."""
@@ -209,7 +205,6 @@ class WorkspaceController(QObject):
         self.patterns_cache = None
         self.model_cache = None
         self.shapes.reset()
-        self._auto_failed = set()
         if session is not None:
             session.set_fabric_lookup(self.fabric_lookup)
             self.shapes.restore(session)
@@ -372,7 +367,6 @@ class WorkspaceController(QObject):
             s.tracker.mark_built("shapes", s.fingerprints()["shapes"])
         self.bump()
         self.shapesChanged.emit()
-        self.auto_simulate_shapes()
 
     def shape_solve_request(
         self, name: str, mesh_mm: float | None = None
@@ -395,48 +389,12 @@ class WorkspaceController(QObject):
             name, key, placed, s.design, host, skin, self.fabrics.catalog(), size
         )
 
-    def auto_simulate_shapes(self) -> None:
-        """Start the next automatic shape simulation, if any is due.
-
-        A shape is due when it is placed, can be fed (it has a feed hole) and has no
-        current simulation, and no automatic solve has already failed for its inputs. A
-        running automatic solve of inputs that changed meanwhile is cancelled (its
-        replacement starts when it has stopped).
-        """
-        s, sim = self.session, self.shape_simulator
-        if s is None or not self.prefs.auto_simulate_shapes:
-            return
-        if sim.running:
-            req = sim.request
-            if req is not None and self.shapes.current_simulation_key(req.name) != req.key:
-                sim.cancel()
-            return
-        for spec in s.state.shapes:
-            name = spec.name
-            result = self.shapes.result(name)
-            key = self.shapes.current_simulation_key(name)
-            if result is None or result.design is None or key is None:
-                continue
-            if self.shapes.simulation_status(name) == "current" or key in self._auto_failed:
-                continue
-            placed = result.design
-            if placed.feed_hole is None and not placed.extra_feed_holes:
-                continue  # a fed shape needs a feed hole; nothing to solve
-            request = self.shape_solve_request(name)
-            if request is not None and sim.start(request):
-                return
-
     def _shape_solved(self, name: str) -> None:
         """Keep a new shape simulation with the project."""
         sim = self.shapes.simulations.get(name)
         if self.session is not None and sim is not None and sim.arrays is not None:
             self.session.add_shape_run(sim.record, sim.arrays)
             sim.arrays = None
-
-    def _shape_solve_failed(self, message: str) -> None:
-        req = self.shape_simulator.request
-        if req is not None and "cancelled" not in message:
-            self._auto_failed.add(req.key)
 
     def shape_findings(self) -> list[DesignFinding]:
         """Findings of the special shapes: placement errors, pattern checks, simulations."""

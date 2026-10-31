@@ -429,6 +429,8 @@ class ShapeRunRecord(BaseModel):
         Run manifest (git commit, dependency versions, seed, ...).
     result_file : str, optional
         Skin as solved (display arrays), relative to the project directory.
+    envelope_run_id : str, optional
+        The envelope run the shape was solved with (None: solved on its own).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -457,6 +459,7 @@ class ShapeRunRecord(BaseModel):
     findings: list[RunFinding] = Field(default_factory=list)
     manifest: dict[str, Any] = Field(default_factory=dict)
     result_file: str | None = None
+    envelope_run_id: str | None = None
 
 
 class ReferenceProfile(BaseModel):

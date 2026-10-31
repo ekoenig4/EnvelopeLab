@@ -1,6 +1,6 @@
 # ADR-0030: Special-shape simulations are solved automatically and kept in the project
 
-- Status: Accepted
+- Status: Accepted; the automatic background solves are superseded by ADR-0031
 - Date: 2026-10-31
 
 ## Context

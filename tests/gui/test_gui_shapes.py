@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 import pytest
 from PySide6.QtCore import Qt
+from pytestqt.qtbot import QtBot
 
 from envelopelab.export.qa import check_pack
 from envelopelab.io.blender import MeshObject, write_obj_scene
@@ -134,7 +135,7 @@ def test_simulate_shape_shows_result_and_goes_stale(gore_window: MainWindow) -> 
     assert panel.simulate_selected()
     assert gore_window.controller.shape_simulator.wait(600_000)
     text = panel.sim_status.text()
-    assert text.startswith("Preview solver"), text
+    assert text.startswith("Preview (dynamic relaxation)"), text
     assert panel.sim_tree.topLevelItemCount() > 5
     assert gore_window.controller.shapes.simulation_status("Dome") == "current"
     assert "shape-sim:Dome" in gore_window.view3d.labels()
@@ -268,69 +269,70 @@ def test_3d_view_draws_shapes_as_sewn_pieces(gore_window: MainWindow) -> None:
     assert view.layers["shape:Dome"].visible
 
 
-def _auto(window: MainWindow) -> None:
-    window.controller.prefs.auto_simulate_shapes = True
-    window.controller.auto_simulate_shapes()
-
-
-def test_placed_shapes_are_simulated_automatically_and_kept(
-    gore_window: MainWindow, tmp_path: Path
-) -> None:
-    """A placed shape that can be fed is solved in the background at the automatic mesh
-    size; the result is kept with the project and read back as current."""
-    from envelopelab.project.shape_runs import auto_mesh_size
-
-    controller = gore_window.controller
-    _auto(gore_window)
-    gore_window.show_panel("shapes")
-    panel = gore_window.shapes
+def _fed_dome(window: MainWindow) -> ShapesPanel:
+    window.show_panel("shapes")
+    panel = window.shapes
     panel.add_shape("dome")
-    _placed(gore_window)
-    # Without a feed hole the dome cannot be fed: nothing starts.
-    assert not controller.shape_simulator.running
+    _placed(window)
     panel.set_value(("feed_hole_radius",), 0.07)
-    _placed(gore_window)
-    assert controller.shape_simulator.running
-    assert controller.shape_simulator.wait(600_000)
-    assert controller.shapes.simulation_status("Dome") == "current"
-    session = controller.session
+    return _placed(window)
+
+
+@pytest.mark.slow
+def test_an_envelope_run_solves_the_special_shapes_too(
+    gore_window: MainWindow, qtbot: QtBot, tmp_path: Path
+) -> None:
+    """Run preview solves the envelope and then every fed shape, with the same solver,
+    at the automatic element size; the result is kept with the project and the run."""
+    from envelopelab.project.shape_runs import auto_mesh_size
+    from envelopelab_app.simulation import PREVIEW
+
+    w = gore_window
+    panel = _fed_dome(w)
+    panel.add_shape("tube")  # no feed hole: left out, and said so
+    _placed(w)
+    messages: list[str] = []
+    w.controller.message.connect(messages.append)
+    session = w.controller.session
     assert session is not None
+    assert not session.project.shape_runs
+    assert w.simulation.start(PREVIEW)
+    assert any("Tube" in m and "no feed hole" in m for m in messages)
+    assert w.simulation.wait(900_000)
+    qtbot.waitUntil(lambda: session.shape_run("Dome") is not None, timeout=10_000)
+    run = session.project.runs[-1]
     record = session.shape_run("Dome")
     placed = panel.placed("Dome")
     assert record is not None and placed is not None
+    assert record.envelope_run_id == run.run_id
+    assert record.solver == PREVIEW
     assert record.mesh_target_mm == pytest.approx(1000.0 * auto_mesh_size(placed))
-    gore_window.view3d.refresh()
-    assert gore_window.view3d.layers["shape-sim:Dome"].visible
-    path = session.save(tmp_path / "auto.elproj")
-    # Reopened: the kept simulation is current and nothing is solved again.
-    assert gore_window.open_project(path) is not None
-    _placed(gore_window)
-    assert controller.shapes.simulation_status("Dome") == "current"
-    assert not controller.shape_simulator.running
-    assert "shape-sim:Dome" in gore_window.view3d.labels()
-    # An edit makes it stale, and it is solved again.
-    panel.set_value(("height",), 0.25)
-    _placed(gore_window)
-    assert controller.shapes.simulation_status("Dome") == "stale"
-    assert controller.shape_simulator.wait(600_000)
-    assert controller.shapes.simulation_status("Dome") == "current"
+    assert session.shape_run("Tube") is None
+    assert w.controller.shapes.simulation_status("Dome") == "current"
+    w.view3d.refresh()
+    assert "shape-sim:Dome" in w.view3d.labels()
+    # Kept with the project.
+    path = session.save(tmp_path / "with-shapes.elproj")
+    assert w.open_project(path) is not None
+    _placed(w)
+    assert w.controller.shapes.simulation_status("Dome") == "current"
 
 
-def test_a_chosen_solve_replaces_a_running_automatic_one(gore_window: MainWindow) -> None:
-    controller = gore_window.controller
-    gore_window.show_panel("shapes")
-    panel = gore_window.shapes
-    panel.add_shape("dome")
-    _placed(gore_window)
-    panel.set_value(("feed_hole_radius",), 0.07)
-    _placed(gore_window)
-    _auto(gore_window)
-    assert controller.shape_simulator.running
-    panel.mesh_spin.setValue(90.0)
-    assert panel.simulate_selected()
-    assert controller.shape_simulator.wait(600_000)
-    session = controller.session
+@pytest.mark.slow
+def test_a_calculix_run_verifies_the_special_shapes(gore_window: MainWindow, qtbot: QtBot) -> None:
+    from envelopelab_app.simulation import CALCULIX
+
+    w = gore_window
+    if not w.simulation.calculix_available:
+        pytest.skip("CalculiX (ccx) is not installed")
+    _fed_dome(w)
+    session = w.controller.session
     assert session is not None
+    assert w.simulation.start(CALCULIX)
+    assert w.simulation.wait(1_800_000)
+    qtbot.waitUntil(lambda: session.shape_run("Dome") is not None, timeout=10_000)
     record = session.shape_run("Dome")
-    assert record is not None and record.mesh_target_mm == 90.0
-    assert controller.shapes.simulation_status("Dome") == "current"
+    assert record is not None and record.solver == CALCULIX
+    assert record.envelope_run_id == session.project.runs[-1].run_id
+    if not record.converged:
+        assert any(f.severity == "error" for f in record.findings)

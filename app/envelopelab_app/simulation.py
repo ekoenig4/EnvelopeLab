@@ -10,13 +10,20 @@ detected at start and when the preferences change, and *Run CalculiX* is disable
 explanation when it is missing. CalculiX starts from a preview equilibrium of the same
 model: a current converged preview run of the same mesh when there is one, else a preview
 solved first in the same run (and kept as its own run record).
+
+After the envelope, the same run solves every placed special shape that can be fed (it has
+a feed hole) with the same solver and load case: each shape's own sub-model, its skin sewn
+from the cut pieces on a patch of the envelope round it, at the automatic element size of
+:func:`envelopelab.project.shape_runs.auto_mesh_size` (CalculiX from a preview of the same
+sub-model). Each result is kept with the project, linked to the envelope run. A shape that
+cannot be solved is reported and does not stop the others.
 """
 
 from __future__ import annotations
 
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -35,6 +42,12 @@ from envelopelab.project.simulation import (
 from envelopelab.solvers.dynamic_relaxation import CancellationToken, SolverProgress
 from envelopelab.solvers.progress import ConvergenceEstimator, PassProgress, format_duration
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.shapes_service import (
+    ShapeSimulation,
+    ShapeSolveError,
+    ShapeSolveRequest,
+    solve_shape,
+)
 
 PREVIEW = "envelopelab-preview"
 #: Share of the progress bar for building the model, and where a CalculiX run's own
@@ -56,6 +69,7 @@ class RunRequest:
     mesh_mm: float
     ccx_path: str | None
     start_positions: np.ndarray | None = None
+    shapes: list[ShapeSolveRequest] = field(default_factory=list)
 
 
 class SolveWorker(QThread):
@@ -64,6 +78,8 @@ class SolveWorker(QThread):
     progress = Signal(str, float)  # message, fraction in [0, 1]
     built = Signal(object)  # BuiltModel
     finished_run = Signal(object, object)  # RunRecord, arrays
+    shape_solved = Signal(object)  # ShapeSimulation
+    shape_failed = Signal(str)
     failed = Signal(str)
 
     def __init__(self, request: RunRequest, fabrics: Any) -> None:
@@ -110,10 +126,47 @@ class SolveWorker(QThread):
                 record, arrays = run_record(result, built, req.fingerprints["simulation"])
                 record.findings = [*built.findings, *record.findings]
                 self.finished_run.emit(record, arrays)
+                self._shapes(record.run_id, Path(tmp))
         except BuildError as exc:
             self.failed.emit(f"{label} run not started: {exc}")
         except Exception as exc:  # the thread must report every failure to the GUI
             self.failed.emit(f"{label} run failed: {type(exc).__name__}: {exc}")
+
+    def _shapes(self, run_id: str, tmp: Path) -> None:
+        """Solve the run's special shapes after the envelope (module docstring)."""
+        req = self.request
+        n = len(req.shapes)
+        for i, shape in enumerate(req.shapes):
+            if self.token.cancelled:
+                self.failed.emit("run cancelled before every special shape was solved")
+                return
+            head = f"Special shape {i + 1} of {n}"
+
+            def say(message: str, fraction: float, head: str = head) -> None:
+                self.progress.emit(f"{head}: {message}", fraction)
+
+            try:
+                sim = solve_shape(
+                    shape,
+                    req.solver,
+                    say,
+                    self.token,
+                    req.ccx_path,
+                    str(tmp / f"shape-{i}"),
+                    run_id,
+                )
+            except ShapeSolveError as exc:
+                if self.token.cancelled:
+                    self.failed.emit(str(exc))
+                    return
+                self.shape_failed.emit(str(exc))
+                continue
+            except Exception as exc:  # report it, go on with the other shapes
+                self.shape_failed.emit(
+                    f"Shape {shape.name}: simulation failed: {type(exc).__name__}: {exc}"
+                )
+                continue
+            self.shape_solved.emit(sim)
 
     def _preview(
         self, built: BuiltModel, span: tuple[float, float], prefix: str = "Preview"
@@ -222,6 +275,8 @@ class SimulationManager(QObject):
         self.calculix_message = ""
         self.last_message = ""
         self.last_run_started = 0.0
+        #: Why shapes were left out of the last run (still being placed, no feed hole).
+        self.skipped_shapes: list[str] = []
         self.detect_calculix()
 
     # -- CalculiX detection -------------------------------------------------------------
@@ -273,6 +328,7 @@ class SimulationManager(QObject):
         prefs = self.controller.prefs
         mesh = prefs.preview_mesh_mm if solver == PREVIEW else prefs.calculix_mesh_mm
         fingerprints = session.fingerprints()
+        shapes, skipped = self._shape_requests()
         request = RunRequest(
             solver=solver,
             design=session.design.model_copy(deep=True),
@@ -281,12 +337,16 @@ class SimulationManager(QObject):
             mesh_mm=mesh,
             ccx_path=prefs.ccx_path or None,
             start_positions=self._warm_start(solver, fingerprints["simulation"], mesh),
+            shapes=shapes,
         )
+        self.skipped_shapes = skipped
         # SQLite connections cannot cross threads: the worker gets an immutable copy.
         worker = SolveWorker(request, self.controller.fabrics.catalog())
         worker.progress.connect(self._progress)
         worker.built.connect(lambda built: self.controller.store_model(built, fingerprints))
         worker.finished_run.connect(self._finished)
+        worker.shape_solved.connect(self._shape_finished)
+        worker.shape_failed.connect(self._shape_failed)
         worker.failed.connect(self._failed)
         worker.finished.connect(self.idle.emit)
         self.worker = worker
@@ -294,7 +354,32 @@ class SimulationManager(QObject):
         self.last_run_started = time.perf_counter()
         worker.start()
         self.started.emit(solver)
+        if skipped:
+            self.controller.message.emit("Special shapes not simulated: " + "; ".join(skipped))
         return True
+
+    def _shape_requests(self) -> tuple[list[ShapeSolveRequest], list[str]]:
+        """Solve requests of the shapes this run solves, and why the others are left out."""
+        session, c = self.controller.session, self.controller
+        requests: list[ShapeSolveRequest] = []
+        skipped: list[str] = []
+        if session is None:
+            return requests, skipped
+        for spec in session.state.shapes:
+            result = c.shapes.result(spec.name)
+            if result is None:
+                skipped.append(f"shape {spec.name} is still being placed")
+                continue
+            if result.design is None:
+                skipped.append(f"shape {spec.name} cannot be placed")
+                continue
+            if result.design.feed_hole is None and not result.design.extra_feed_holes:
+                skipped.append(f"shape {spec.name} has no feed hole, so it cannot be fed")
+                continue
+            request = c.shape_solve_request(spec.name)
+            if request is not None:
+                requests.append(request)
+        return requests, skipped
 
     def _warm_start(self, solver: str, fingerprint: str, mesh: float) -> np.ndarray | None:
         """CalculiX starts from a current preview result of the same model, when there is
@@ -339,6 +424,21 @@ class SimulationManager(QObject):
             session.tracker.mark_built("simulation", record.input_fingerprint)
             self.controller.notify_artifacts()
         self.finished.emit(record)
+
+    def _shape_finished(self, sim: ShapeSimulation) -> None:
+        """Keep a special shape solved in this run with the project."""
+        session, c = self.controller.session, self.controller
+        if session is None or session is not self._session or sim.name not in c.shapes.keys:
+            return  # the project was closed or the shape removed meanwhile
+        c.shapes.simulations[sim.name] = sim
+        if sim.arrays is not None:
+            session.add_shape_run(sim.record, sim.arrays)
+            sim.arrays = None
+        c.shapes.updated.emit()
+
+    def _shape_failed(self, message: str) -> None:
+        self.last_message = message
+        self.controller.message.emit(message)
 
     def _failed(self, message: str) -> None:
         self.last_message = message

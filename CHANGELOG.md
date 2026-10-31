@@ -3,15 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
-- Added: special shapes are simulated automatically in the background (preview solver,
-  one at a time, element size footprint length / 100 between 60 and 300 mm, assumed)
-  whenever a placed shape with a feed hole has no current simulation, and the 3D view
-  shows them as sewn and inflated. *Simulate shape* still solves with a chosen size and
-  goes first. Turn it off in *Preferences*.
+- Added: **Run Preview** and **Run CalculiX** also solve every placed special shape that
+  has a feed hole, after the envelope, with the same solver and load case (each shape's
+  own sub-model, element size footprint length / 100 between 60 and 300 mm, assumed;
+  CalculiX from a preview of the same sub-model). The 3D view shows them as sewn and
+  inflated (ADR-0031). *Simulate shape* still solves one shape with a chosen size.
 - Changed: project format version 3 keeps the latest simulation of every special shape
-  (summary, factor of safety, provenance and the solved skin) with the project, so it is
-  shown again, current or STALE, after reopening (ADR-0030). Version 1 and 2 files open
-  unchanged; older releases cannot open version 3 files.
+  (summary, factor of safety, provenance, the envelope run it was solved with and the
+  solved skin) with the project, so it is shown again, current or STALE, after reopening
+  (ADR-0030). Version 1 and 2 files open unchanged; older releases cannot open version 3
+  files.
 - Changed: the 3D view draws special shapes as sewn instead of as a plain pink surface:
   every gore or panel in the skin fabric's colour (every second one darker), with the
   seams between the pieces and the rim drawn as lines. A shape simulation is drawn the
