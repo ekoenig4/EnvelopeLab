@@ -46,7 +46,9 @@ shapes**, or its tab).
    shows the **pattern checks**, a drawing of the **cut pieces** (finished line solid, cut
    line dashed, the rim sewn to the envelope in red) with their sizes and areas, and the
    **attachment lines** on each envelope panel. The **3D View** shows the shape on the
-   envelope.
+   envelope as it is sewn: each gore or panel in the colour of the skin fabric (every
+   second one darker, like the envelope's gores), the seams between them and the rim
+   sewn to the envelope drawn as dark lines.
 4. To move a shape by hand, press **Drag in 3D view…** (or tick **Drag special shapes**
    in the 3D View). Press the left mouse button on a shape and drag it over the
    envelope: a magenta ring shows where its base will sit, and the 3D View's info line
@@ -60,7 +62,11 @@ shapes**, or its tab).
    size; finer is slower) in the background. **Cancel** stops it. The result lists the
    convergence status, iterations, final residual, mesh size, heights above the envelope
    as designed and inflated, chamber pressure, wrinkled fraction, rim tape tension and
-   the factor of safety of each region. It is drawn in the 3D View as a separate layer.
+   the factor of safety of each region. The 3D View then draws the shape **as sewn and
+   inflated**: the skin sewn from its cut pieces, as the solver left it, with the same
+   colours and seams. While that result is current the designed shape is hidden; tick
+   its layer in the layer list to compare the two (your choice is kept). A result that
+   did not converge says **NOT CONVERGED** in its label, and a **STALE** one is drawn grey.
 6. **Export build pack…** writes the envelope rows, the parachute (radial panel and
    centre panel) and every shape's pieces and marking sheets (DXF, PDF and `index.json`,
    section 4). **Export to Blender (OBJ)…** writes the

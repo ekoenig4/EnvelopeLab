@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the 3D view draws special shapes as sewn instead of as a plain pink surface:
+  every gore or panel in the skin fabric's colour (every second one darker), with the
+  seams between the pieces and the rim drawn as lines. A shape simulation is drawn the
+  same way as *as sewn and inflated*, and the designed shape is hidden while that result
+  is current (tick it to compare). Display only; no pattern or result changes.
 - Fixed: special-shape simulations put rim nodes on the straight segment between two
   footprint nodes where a load tape or row seam crossed the footprint, up to 10 mm inside
   a curved footprint, and moved a skin seam's end along the rim by up to 0.3 mesh sizes

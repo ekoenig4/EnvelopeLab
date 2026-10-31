@@ -58,6 +58,7 @@ from envelopelab.project.shapes import (
     feed_hole_rings,
     footprint_preview,
     placement_at,
+    shape_fabrics,
 )
 from envelopelab.rigging.common import seam_azimuth
 from envelopelab_app.camera import (
@@ -101,6 +102,8 @@ RIGGING_COLORS = {
     "tape_paths": "#1a1a1a",
     "feature_locations": "#e6550d",
     "feed_holes": "#ff00ff",
+    "skin_seams": "#1a1a1a",
+    "skin_rim": "#1a1a1a",
 }
 #: Layers drawn without mesh edges: display meshes (the design surface and the designed
 #: shapes, whose dense grids would render as solid black with edges), not solver meshes.
@@ -116,6 +119,8 @@ LINE_WIDTHS = {
     "panel_zones": 3,
     "tape_paths": 3,
     "feed_holes": 3,
+    "skin_seams": 2,
+    "skin_rim": 3,
 }
 #: Brightness of every second gore, so that neighbouring gores are told apart.
 ALTERNATE_GORE_SHADE = 0.8
@@ -271,6 +276,8 @@ class View3DPanel(QWidget):
         super().__init__()
         self.controller = controller
         self.layers: dict[str, Layer] = {}
+        #: Layer visibility the user set in the list (kept when the layers are rebuilt).
+        self._chosen_visibility: dict[str, bool] = {}
         self.plotter: Any = None
         self.layer_list = QListWidget()
         self.layer_list.itemChanged.connect(self._visibility_changed)
@@ -475,8 +482,9 @@ class View3DPanel(QWidget):
     # -- layers -------------------------------------------------------------------------
 
     def refresh(self) -> None:
-        """Rebuild the layers from the session."""
-        visible = {k: layer.visible for k, layer in self.layers.items()}
+        """Rebuild the layers from the session (the visibility the user chose is kept; other
+        layers take their default)."""
+        visible = dict(self._chosen_visibility)
         self.layers = {}
         session = self.controller.session
         if session is not None and session.design.gores is not None:
@@ -587,37 +595,48 @@ class View3DPanel(QWidget):
         self.redraw()
 
     def _shape_layers(self) -> None:
-        """Special shapes as designed and their latest shape simulations."""
-        from envelopelab.features.scene import designed_object, simulated_object
+        """Special shapes as sewn: the latest simulation of each shape (the skin sewn from
+        its cut pieces and inflated) and the designed shape, both drawn piece by piece in
+        the skin fabric's colour with their seams. The designed layer starts hidden while
+        a current simulation is shown."""
+        from envelopelab.features.scene import designed_display, simulated_display
 
         service = self.controller.shapes
+        session = self.controller.session
         design = self.controller.design
         host = design if design is not None and design.gores is not None else None
+        specs = {s.name: s for s in session.state.shapes} if session is not None else {}
         for name in service.keys:
             result = service.result(name)
             if result is None or result.design is None:
                 continue
-            obj = designed_object(result.design)
+            shown = designed_display(result.design)
             # Sit the shape and its feed holes on the drawn envelope (display only).
             shift = display_offset(host, result.design) if host else np.zeros(3)
             holes = feed_hole_rings(host, result.design) if host else []
-            self.layers[f"shape:{name}"] = Layer(
+            lines = self._shifted_lines(shown, shift)
+            if holes:
+                lines["feed_holes"] = holes
+            layer = Layer(
                 f"shape:{name}",
                 "shape",
                 f"Special shape {name} (as designed, current)"
                 + (f", {len(holes)} feed hole(s)" if holes else ""),
-                obj.vertices + shift,
-                obj.triangles,
-                polylines={"feed_holes": holes} if holes else {},
+                shown.points + shift,
+                shown.triangles,
+                polylines=lines,
+                face_colors=self._piece_colors(shown, specs.get(name), result.design),
             )
+            layer.visible = service.simulation_status(name) != "current"
+            self.layers[layer.key] = layer
         for name, sim in service.simulations.items():
             if name not in service.keys:
                 continue
-            obj = simulated_object(sim.design, sim.appendage, sim.result)
+            shown = simulated_display(sim.design, sim.appendage, sim.result)
             shift = display_offset(host, sim.design) if host else np.zeros(3)
             stale = service.simulation_status(name) != "current"
             converged = bool(sim.result.converged)
-            label = f"Special shape {name}, preview solver result"
+            label = f"Special shape {name} as sewn and inflated (preview solver)"
             if not converged:
                 label += " [NOT CONVERGED]"
             if stale:
@@ -626,11 +645,38 @@ class View3DPanel(QWidget):
                 f"shape-sim:{name}",
                 "shape-simulated",
                 label,
-                obj.vertices + shift,
-                obj.triangles,
+                shown.points + shift,
+                shown.triangles,
                 stale,
                 converged,
+                polylines=self._shifted_lines(shown, shift),
+                face_colors=self._piece_colors(shown, specs.get(name), sim.design),
             )
+
+    @staticmethod
+    def _shifted_lines(shown: Any, shift: np.ndarray) -> dict[str, list[np.ndarray]]:
+        """Seams and rim of a shape display, moved by the display offset."""
+        return {
+            "skin_seams": [s + shift for s in shown.seams],
+            "skin_rim": [shown.rim + shift] if len(shown.rim) else [],
+        }
+
+    def _piece_colors(self, shown: Any, spec: Any, placed: Any) -> np.ndarray | None:
+        """Skin fabric colour per triangle, every second piece darker (display only)."""
+        session = self.controller.session
+        if session is None or spec is None or session.design.gores is None:
+            return None
+        fabric_id = shape_fabrics(spec, session.design, session.patterns, placed)[1]
+        fabric = self.controller.fabrics.fabric(fabric_id) if fabric_id else None
+        color = QColor(fabric.color) if fabric is not None else QColor(LAYER_COLORS["shape"])
+        if not color.isValid():
+            color = QColor(LAYER_COLORS["shape"])
+        rgb = np.tile(
+            np.array([color.red(), color.green(), color.blue()], dtype=float),
+            (len(shown.piece), 1),
+        )
+        rgb[shown.piece % 2 == 1] *= ALTERNATE_GORE_SHADE
+        return np.asarray(rgb.astype(np.uint8))
 
     def _face_colors(self, surface: DisplaySurface) -> np.ndarray:
         """Fabric colour per triangle: the panel's zone (a panel zone, else its row's),
@@ -696,6 +742,7 @@ class View3DPanel(QWidget):
         key = item.data(Qt.ItemDataRole.UserRole)
         if key in self.layers:
             self.layers[key].visible = item.checkState() == Qt.CheckState.Checked
+            self._chosen_visibility[key] = self.layers[key].visible
             self.redraw()
 
     # -- rendering ----------------------------------------------------------------------

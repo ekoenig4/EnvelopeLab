@@ -8,6 +8,7 @@ from typing import Any
 
 import numpy as np
 import pytest
+from PySide6.QtCore import Qt
 
 from envelopelab.export.qa import check_pack
 from envelopelab.io.blender import MeshObject, write_obj_scene
@@ -231,3 +232,37 @@ def test_drag_button_opens_the_3d_view_with_dragging_on(gore_window: MainWindow)
     assert "drag it over the envelope" in gore_window.view3d.info.text()
     gore_window.view3d.pick.setChecked(True)  # picking and dragging exclude each other
     assert not gore_window.view3d.drag_shapes.isChecked()
+
+
+def test_3d_view_draws_shapes_as_sewn_pieces(gore_window: MainWindow) -> None:
+    """Both shape layers are coloured piece by piece in the skin fabric with their seams;
+    a current simulation replaces the designed shape until the user shows it again."""
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("dome")
+    _placed(gore_window)
+    panel.set_value(("feed_hole_radius",), 0.07)
+    _placed(gore_window)
+    view = gore_window.view3d
+    view.refresh()
+    designed = view.layers["shape:Dome"]
+    assert designed.visible
+    assert designed.face_colors is not None and len(designed.face_colors) == len(designed.faces)
+    assert len(np.unique(designed.face_colors, axis=0)) == 2  # every second gore darker
+    assert len(designed.polylines["skin_seams"]) == 16
+    assert len(designed.polylines["skin_rim"]) == 1
+    panel.mesh_spin.setValue(80.0)
+    assert panel.simulate_selected()
+    assert gore_window.controller.shape_simulator.wait(600_000)
+    view.refresh()
+    sewn = view.layers["shape-sim:Dome"]
+    assert "as sewn and inflated" in sewn.label
+    assert sewn.visible and not view.layers["shape:Dome"].visible
+    assert sewn.face_colors is not None and len(np.unique(sewn.face_colors, axis=0)) == 2
+    assert len(sewn.polylines["skin_seams"]) == 16
+    # The user's choice is kept when the layers are rebuilt.
+    items = [view.layer_list.item(i) for i in range(view.layer_list.count())]
+    item = next(i for i in items if i.data(Qt.ItemDataRole.UserRole) == "shape:Dome")
+    item.setCheckState(Qt.CheckState.Checked)
+    view.refresh()
+    assert view.layers["shape:Dome"].visible
