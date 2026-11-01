@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the Special shapes screen is reorganised so it is no longer squeezed. It uses
+  the whole window (design tree and properties folded away, warnings strip compact but
+  always shown, both restored in the other modes) and has three columns: the shape list
+  with its buttons; the editor in tabs (*Placement & size*, *Profile* for revolved shapes,
+  *Feed holes & cap*, *Simulation*); and the results in tabs (*Cut pieces*, *Checks*,
+  *Attachment*). The cut-piece drawing lays the pieces out in rows to fill its area,
+  names each one, zooms with the mouse wheel, pans by dragging and fits on a double
+  click. Stored window layouts from earlier versions are reset once (layout version 2).
+  Display only; no pattern or result changes.
 - Changed: special shapes whose gores or panels met in a point (domes, revolved profiles
   ending on the axis, pointed tubes, mesh shapes) now have their tops sewn round a
   **cap**, a round piece of measurable diameter, as points are made in practice

@@ -1,10 +1,12 @@
 """Special shapes panel: domes, tubes, revolved and imported mesh shapes on the envelope.
 
-The panel lists the project's special shapes, edits the selected one (every change is one
-undoable edit of the design state), and shows what :mod:`envelopelab.features.primitives`
-derives from it: the pattern checks, the cut pieces (with a drawing of their outlines),
-the attachment lines on the envelope panels, and the result of a shape simulation with
-the preview solver. Placing a shape runs in a worker thread
+The panel has three columns: the project's special shapes; the selected one's editor in
+tabs (*Placement & size*, *Profile* for a revolved shape, *Feed holes & cap*,
+*Simulation*; every change is one undoable edit of the design state); and in tabs what
+:mod:`envelopelab.features.primitives` derives from it: the cut pieces (a drawing of their
+outlines that zooms with the mouse wheel and pans by dragging, and their sizes), the
+pattern checks and the attachment lines on the envelope panels. The shape simulation
+with the preview solver is on the *Simulation* tab. Placing a shape runs in a worker thread
 (:class:`~envelopelab_app.shapes_service.ShapeService`), so editing never waits for it;
 the panel says "being placed…" until the result arrives.
 
@@ -22,14 +24,22 @@ from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtGui import (
+    QBrush,
+    QColor,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QPolygonF,
+    QWheelEvent,
+)
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
-    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -39,10 +49,13 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
+    QScrollArea,
+    QSizePolicy,
     QSpinBox,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
@@ -157,29 +170,129 @@ def _values(path: tuple[str, ...], value: Any) -> dict[str, Any]:
     return {path[0]: {path[1]: value}}
 
 
+def _scrolled(page: QWidget) -> QScrollArea:
+    """``page`` in a frameless scroll area (a tab scrolls instead of squeezing its rows)."""
+    area = QScrollArea()
+    area.setWidget(page)
+    area.setWidgetResizable(True)
+    area.setFrameShape(QScrollArea.Shape.NoFrame)
+    return area
+
+
 class PiecePreview(QWidget):
-    """Draws the cut pieces of a shape side by side (finished line solid, cut line dashed)."""
+    """Draws the cut pieces of a shape side by side (finished line solid, cut line dashed).
+
+    The mouse wheel zooms about the pointer, dragging pans and a double click fits every
+    piece again.
+    """
+
+    #: Zoom step per wheel notch, and the zoom range (1: every piece fits).
+    ZOOM_STEP = 1.25
+    ZOOM_RANGE = (1.0, 200.0)
 
     def __init__(self) -> None:
         super().__init__()
         self.pieces: list[CutPiece] = []
+        self.zoom = 1.0
+        self.pan = QPointF(0.0, 0.0)
+        self._drag: QPointF | None = None
         self.setMinimumHeight(160)
+        self.setToolTip("Mouse wheel: zoom; drag: pan; double click: fit all pieces")
 
     def set_pieces(self, pieces: list[CutPiece]) -> None:
-        """Show these pieces (m)."""
+        """Show these pieces (m); the view fits them again when the set of pieces changes."""
+        if [p.label for p in pieces] != [p.label for p in self.pieces]:
+            self.reset_view()
         self.pieces = pieces
         self.update()
 
+    def reset_view(self) -> None:
+        """Fit every piece in the widget."""
+        self.zoom = 1.0
+        self.pan = QPointF(0.0, 0.0)
+        self.update()
+
+    def zoom_at(self, factor: float, at: QPointF) -> None:
+        """Zoom by ``factor`` keeping the drawing point under ``at`` (widget px) still."""
+        old = self.zoom
+        lo, hi = self.ZOOM_RANGE
+        self.zoom = min(max(old * factor, lo), hi)
+        k = self.zoom / old
+        # Screen point = origin + pan + world * scale: keep ``at`` on the same world point.
+        origin = QPointF(self._margin, -self._margin)
+        rel = at - origin - QPointF(0.0, float(self.height())) - self.pan
+        self.pan = at - origin - QPointF(0.0, float(self.height())) - rel * k
+        self.update()
+
+    _margin = 8.0
+
+    def wheelEvent(self, event: QWheelEvent) -> None:  # noqa: N802 (Qt API)
+        notches = event.angleDelta().y() / 120.0
+        if notches:
+            self.zoom_at(self.ZOOM_STEP**notches, event.position())
+        event.accept()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag = event.position()
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        if self._drag is not None:
+            self.pan += event.position() - self._drag
+            self._drag = event.position()
+            self.update()
+
+    def mouseReleaseEvent(self, _event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        self._drag = None
+
+    def mouseDoubleClickEvent(self, _event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        self.reset_view()
+
     def layout_offsets(self) -> tuple[list[np.ndarray], float, float]:
-        """x offset per piece (m), the total width and the height of the row (m)."""
-        offsets, x, height = [], 0.0, 0.0
-        for piece in self.pieces:
-            lo, hi = piece.cut.min(axis=0), piece.cut.max(axis=0)
-            offsets.append(np.array([x - lo[0], -lo[1]]))
-            gap = 0.1 * (hi[0] - lo[0])
-            x += hi[0] - lo[0] + gap
-            height = max(height, float(hi[1] - lo[1]))
-        return offsets, x, height
+        """Where each piece goes, m: offsets, and the width and height of the layout.
+
+        The pieces are laid out in rows, in order, with the number per row that draws them
+        largest in the widget's shape (one row for a few pieces, a grid for many).
+        """
+        sizes = [p.cut.max(axis=0) - p.cut.min(axis=0) for p in self.pieces]
+        if not sizes:
+            return [], 0.0, 0.0
+        aspect = max(self.width() - 2 * self._margin, 1.0) / max(
+            self.height() - 2 * self._margin, 1.0
+        )
+        best: tuple[float, int] | None = None
+        for cols in range(1, len(sizes) + 1):
+            width, height = self._grid_extent(sizes, cols)
+            fit = min(aspect / max(width, 1e-9), 1.0 / max(height, 1e-9))
+            if best is None or fit > best[0]:
+                best = (fit, cols)
+        assert best is not None
+        cols = best[1]
+        offsets: list[np.ndarray] = []
+        _, total_height = self._grid_extent(sizes, cols)
+        y_top = total_height
+        for start in range(0, len(sizes), cols):
+            row = range(start, min(start + cols, len(sizes)))
+            row_height = max(float(sizes[i][1]) for i in row)
+            x = 0.0
+            for i in row:
+                lo = self.pieces[i].cut.min(axis=0)
+                offsets.append(np.array([x - lo[0], y_top - row_height - lo[1]]))
+                x += float(sizes[i][0]) * (1.0 + self.GAP)
+            y_top -= row_height * (1.0 + self.GAP)
+        width, height = self._grid_extent(sizes, cols)
+        return offsets, width, height
+
+    #: Gap between pieces, as a fraction of the piece's width (or the row's height).
+    GAP = 0.15
+
+    def _grid_extent(self, sizes: list[np.ndarray], cols: int) -> tuple[float, float]:
+        width = height = 0.0
+        for start in range(0, len(sizes), cols):
+            row = sizes[start : start + cols]
+            width = max(width, sum(float(s[0]) * (1.0 + self.GAP) for s in row))
+            height += max(float(s[1]) for s in row) * (1.0 + self.GAP)
+        return width, height
 
     def paintEvent(self, _event: object) -> None:  # noqa: N802 (Qt API)
         painter = QPainter(self)
@@ -189,16 +302,17 @@ class PiecePreview(QWidget):
             return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         offsets, width, height = self.layout_offsets()
-        margin = 8.0
-        scale = min(
+        margin = self._margin
+        scale = self.zoom * min(
             (self.width() - 2 * margin) / max(width, 1e-9),
             (self.height() - 2 * margin) / max(height, 1e-9),
         )
+        px, py = self.pan.x(), self.pan.y()
 
         def polygon(points: np.ndarray, offset: np.ndarray) -> QPolygonF:
             p = (points + offset) * scale
             return QPolygonF(
-                [QPointF(margin + x, self.height() - margin - y) for x, y in p.tolist()]
+                [QPointF(margin + px + x, self.height() - margin + py - y) for x, y in p.tolist()]
             )
 
         for piece, offset in zip(self.pieces, offsets, strict=True):
@@ -215,6 +329,16 @@ class PiecePreview(QWidget):
             if piece.rim is not None:
                 painter.setPen(QPen(QColor(FAIL_COLOR), 2.0))
                 painter.drawPolyline(polygon(piece.rim, offset))
+            # The piece's short name under it (the part after the shape name).
+            label = piece.label.rsplit("-", 1)[-1]
+            box = polygon(piece.cut, offset).boundingRect()
+            painter.setPen(QPen(QColor("#333333")))
+            painter.drawText(
+                QPointF(box.center().x() - 4.0 * len(label), box.bottom() - 4.0)
+                if box.height() > 30.0
+                else box.bottomLeft(),
+                label,
+            )
 
 
 class ShapesPanel(QWidget):
@@ -246,32 +370,28 @@ class ShapesPanel(QWidget):
         self.remove_button.clicked.connect(self.remove_selected)
         self.list = QListWidget()
         self.list.setObjectName("shapeList")
-        self.list.setMaximumHeight(140)
         self.list.currentItemChanged.connect(self._current_changed)
-        buttons = QHBoxLayout()
-        buttons.addWidget(self.add_button)
-        buttons.addWidget(self.duplicate_button)
-        buttons.addWidget(self.remove_button)
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.addLayout(buttons)
-        left_layout.addWidget(self.list)
         self.busy_label = QLabel()
-        left_layout.addWidget(self.busy_label)
+        self.busy_label.setWordWrap(True)
 
         # -- parameters ------------------------------------------------------------------
         self.status = QLabel()
         self.status.setWordWrap(True)
-        self.form_box = QGroupBox("Parameters")
+        self.status.setObjectName("shapeStatus")
+        self.form_box = QWidget()
         self.form = QFormLayout(self.form_box)
+        self.holes_box = QWidget()
+        self.holes_form = QFormLayout(self.holes_box)
+        for form in (self.form, self.holes_form):
+            form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         self.profile_table = QTableWidget(0, 2)
         self.profile_table.setHorizontalHeaderLabels(["Radius ρ (m)", "Height ζ (m)"])
         self.profile_table.setMinimumHeight(120)
         self.profile_table.itemChanged.connect(self._profile_edited)
-        self.profile_box = QGroupBox("Revolved profile (base first, axis last)")
+        self.profile_box = QWidget()
         profile_layout = QVBoxLayout(self.profile_box)
-        profile_layout.addWidget(self.profile_table)
+        profile_layout.addWidget(QLabel("Profile points, base first, axis last (m)"))
+        profile_layout.addWidget(self.profile_table, 1)
         row_buttons = QHBoxLayout()
         add_row = QPushButton("Add point")
         add_row.clicked.connect(self._add_profile_point)
@@ -309,6 +429,7 @@ class ShapesPanel(QWidget):
         self.sim_tree = QTreeWidget()
         self.sim_tree.setHeaderLabels(["Result", "Value"])
         self.sim_tree.setMinimumHeight(120)
+        self.sim_tree.setColumnWidth(0, 260)
         self.export_pack_button = QPushButton("Export build pack…")
         self.export_pack_button.clicked.connect(self._export_pack_dialog)
         self.drag_button = QPushButton("Drag in 3D view…")
@@ -319,46 +440,87 @@ class ShapesPanel(QWidget):
         self.drag_button.clicked.connect(self._request_drag)
         self.export_blender_button = QPushButton("Export to Blender (OBJ)…")
         self.export_blender_button.clicked.connect(self._export_blender_dialog)
-        sim_box = QGroupBox("Simulation")
+        sim_box = QWidget()
         sim_layout = QVBoxLayout(sim_box)
         sim_row = QHBoxLayout()
         sim_row.addWidget(QLabel("Mesh size"))
         sim_row.addWidget(self.mesh_spin)
         sim_row.addWidget(self.simulate_button)
         sim_row.addWidget(self.cancel_button)
+        sim_row.addStretch(1)
         sim_layout.addLayout(sim_row)
         sim_layout.addWidget(self.sim_status)
-        sim_layout.addWidget(self.sim_tree)
-        export_row = QHBoxLayout()
-        export_row.addWidget(self.export_pack_button)
-        export_row.addWidget(self.export_blender_button)
+        sim_layout.addWidget(self.sim_tree, 1)
 
+        # Column 1: the shapes, and what applies to all of them.
+        left = QWidget()
+        left_layout = QVBoxLayout(left)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.addWidget(self.list, 1)
+        left_layout.addWidget(self.busy_label)
+        for button in (
+            self.add_button,
+            self.duplicate_button,
+            self.remove_button,
+            self.export_pack_button,
+            self.export_blender_button,
+        ):
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            left_layout.addWidget(button)
+
+        # Column 2: the selected shape's editor in tabs.
+        self.editor_tabs = QTabWidget()
+        self.editor_tabs.setObjectName("shapeEditorTabs")
+        place = QWidget()
+        place_layout = QVBoxLayout(place)
+        place_layout.addWidget(self.form_box)
+        place_layout.addWidget(self.drag_button)
+        place_layout.addStretch(1)
+        holes_page = QWidget()
+        holes_layout = QVBoxLayout(holes_page)
+        holes_layout.addWidget(self.holes_box, 1)
+        for page, title in (
+            (place, "Placement && size"),
+            (self.profile_box, "Profile"),
+            (holes_page, "Feed holes && cap"),
+            (sim_box, "Simulation"),
+        ):
+            self.editor_tabs.addTab(_scrolled(page), title)
         middle = QWidget()
         middle_layout = QVBoxLayout(middle)
         middle_layout.setContentsMargins(0, 0, 0, 0)
-        middle_layout.addWidget(left)
         middle_layout.addWidget(self.status)
-        middle_layout.addWidget(self.drag_button)
-        middle_layout.addWidget(self.form_box)
-        middle_layout.addWidget(self.profile_box)
-        middle_layout.addWidget(sim_box)
-        middle_layout.addLayout(export_row)
-        middle_layout.addStretch(1)
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addWidget(QLabel("Pattern checks"))
-        right_layout.addWidget(self.checks)
-        right_layout.addWidget(QLabel("Cut pieces (finished line solid, cut line dashed)"))
-        right_layout.addWidget(self.preview, 1)
-        right_layout.addWidget(self.pieces)
-        right_layout.addWidget(QLabel("Attachment to the envelope"))
-        right_layout.addWidget(self.attachment)
+        middle_layout.addWidget(self.editor_tabs, 1)
+
+        # Column 3: what is derived from it, in tabs.
+        self.result_tabs = QTabWidget()
+        self.result_tabs.setObjectName("shapeResultTabs")
+        pieces_split = QSplitter(Qt.Orientation.Vertical)
+        pieces_split.setObjectName("shapePiecesSplitter")
+        drawing = QWidget()
+        drawing_layout = QVBoxLayout(drawing)
+        drawing_layout.setContentsMargins(0, 0, 0, 0)
+        drawing_layout.addWidget(
+            QLabel(
+                "Finished line solid, cut line dashed, rim (sewn to the envelope) red. "
+                "Wheel: zoom, drag: pan, double click: fit."
+            )
+        )
+        drawing_layout.addWidget(self.preview, 1)
+        pieces_split.addWidget(drawing)
+        pieces_split.addWidget(self.pieces)
+        pieces_split.setStretchFactor(0, 3)
+        pieces_split.setStretchFactor(1, 1)
+        self.result_tabs.addTab(pieces_split, "Cut pieces")
+        self.result_tabs.addTab(self.checks, "Checks")
+        self.result_tabs.addTab(self.attachment, "Attachment")
+
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         self.splitter.setObjectName("shapesSplitter")
-        for i, widget in enumerate((middle, right)):
+        for i, widget in enumerate((left, middle, self.result_tabs)):
             self.splitter.addWidget(widget)
             self.splitter.setCollapsible(i, False)
+        self.splitter.setStretchFactor(2, 1)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(self.splitter)
@@ -720,11 +882,12 @@ class ShapesPanel(QWidget):
             self.profile_table.blockSignals(False)
 
     def _build_form(self, spec: ShapeSpec | None) -> None:
-        while self.form.rowCount():
-            self.form.removeRow(0)
+        for form in (self.form, self.holes_form):
+            while form.rowCount():
+                form.removeRow(0)
         self.fields = {}
-        self.profile_box.setVisible(isinstance(spec, RevolvedShape))
-        self.form_box.setVisible(spec is not None)
+        self.editor_tabs.setTabVisible(1, isinstance(spec, RevolvedShape))
+        self.editor_tabs.setEnabled(spec is not None)
         if spec is None:
             return
         self.name_edit = QLineEdit(spec.name)
@@ -735,13 +898,12 @@ class ShapesPanel(QWidget):
         self.form.addRow("Name", self.name_edit)
         self.form.addRow("Kind", QLabel(KIND_LABELS[spec.kind]))
         if isinstance(spec, MeshShape):
-            self.form.addRow(
-                "Mesh",
-                QLabel(
-                    f"{spec.source or 'imported'}: {len(spec.vertices)} vertices, "
-                    f"{len(spec.triangles)} triangles"
-                ),
+            mesh_label = QLabel(
+                f"{spec.source or 'imported'}: {len(spec.vertices)} vertices, "
+                f"{len(spec.triangles)} triangles"
             )
+            mesh_label.setWordWrap(True)
+            self.form.addRow("Mesh", mesh_label)
         gores = self.controller.design.gores.count if self.controller.is_gore else 999  # type: ignore[union-attr]
         for field in (*PLACEMENT_FIELDS, *KIND_FIELDS[spec.kind], *COMMON_FIELDS):
             box: QSpinBox | QDoubleSpinBox
@@ -772,7 +934,7 @@ class ShapesPanel(QWidget):
         feed_row = QHBoxLayout()
         feed_row.addWidget(self.feed_check)
         feed_row.addWidget(self.feed_radius)
-        self.form.addRow("Feed hole radius (m)", feed_row)
+        self.holes_form.addRow("Feed hole radius (m)", feed_row)
         self.cap_auto = QCheckBox("Automatic")
         self.cap_auto.setObjectName("shapeCapAuto")
         self.cap_diameter = QDoubleSpinBox()
@@ -796,14 +958,14 @@ class ShapesPanel(QWidget):
         cap_row = QHBoxLayout()
         cap_row.addWidget(self.cap_auto)
         cap_row.addWidget(self.cap_diameter)
-        self.form.addRow("Cap diameter (m)", cap_row)
+        self.holes_form.addRow("Cap diameter (m)", cap_row)
         self.holes_table = QTableWidget(0, 4)
         self.holes_table.setObjectName("extraFeedHoles")
         self.holes_table.setHorizontalHeaderLabels(
             ["gore", "tape position (m)", "across (−0.5–0.5)", "radius (m)"]
         )
         self.holes_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.holes_table.setMaximumHeight(130)
+        self.holes_table.setMinimumHeight(160)
         self.holes_table.setToolTip(
             "More feed holes inside the footprint: gore number, tape length from the mouth, "
             "fraction of the gore width from its centreline, finished radius."
@@ -821,13 +983,14 @@ class ShapesPanel(QWidget):
         )
         clear_holes.clicked.connect(self.move_holes_clear)
         holes_buttons = QHBoxLayout()
+        holes_buttons.setSpacing(4)
         holes_buttons.addWidget(add_hole)
         holes_buttons.addWidget(remove_hole)
         holes_buttons.addWidget(clear_holes)
         holes = QVBoxLayout()
         holes.addWidget(self.holes_table)
         holes.addLayout(holes_buttons)
-        self.form.addRow("More feed holes", holes)
+        self.holes_form.addRow("More feed holes", holes)
         self.fabric_combo = QComboBox()
         self.fabric_combo.addItem("Same as the envelope row", "")
         for fabric in self.controller.fabrics.fabrics():
@@ -1025,11 +1188,19 @@ class ShapesPanel(QWidget):
                     ]
                 )
             )
+        for column in range(self.pieces.columnCount()):
+            self.pieces.resizeColumnToContents(column)
+        for tree in (self.pieces, self.checks, self.attachment):
+            for column in range(tree.columnCount()):
+                tree.resizeColumnToContents(column)
         for line in design.attachment:
             length = float(np.linalg.norm(np.diff(line.points, axis=0), axis=1).sum())
             self.attachment.addTopLevelItem(
                 QTreeWidgetItem([f"gore {line.gore}, row {line.row}", f"{length:.3f}"])
             )
+        for tree in (self.pieces, self.checks, self.attachment):
+            for column in range(tree.columnCount()):
+                tree.resizeColumnToContents(column)
         self.preview.set_pieces(design.pieces)
 
     def _show_simulation(self, spec: ShapeSpec | None) -> None:

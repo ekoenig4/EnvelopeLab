@@ -1,10 +1,12 @@
 """Main-window layout: workflow modes, splitter sizes, and saving/restoring them.
 
-The window shows one workflow mode at a time (a page of the mode stack) between an
-always-visible sidebar (design tree, properties) and an always-visible Validation /
-Warnings strip, so safety warnings are never hidden by the layout. Every resizable divider
-is a named ``QSplitter``; the layout is the current mode plus each splitter's state, kept
-in ``QSettings`` under ``layout/<slot>/``.
+The window shows one workflow mode at a time (a page of the mode stack) between a sidebar
+(design tree, properties) and an always-visible Validation / Warnings strip, so safety
+warnings are never hidden by the layout. A *wide* mode (:data:`WIDE_MODES`, the Special
+shapes editor) collapses the sidebar and shrinks the strip to
+:data:`COMPACT_WARNINGS_PX` while it is shown; the other modes keep their sizes. Every
+resizable divider is a named ``QSplitter``; the layout is the current mode plus each
+splitter's state, kept in ``QSettings`` under ``layout/<slot>/``.
 """
 
 from __future__ import annotations
@@ -15,7 +17,13 @@ from PySide6.QtCore import QByteArray, QSettings
 from PySide6.QtWidgets import QSplitter, QWidget
 
 #: Bumped when the splitter structure changes, so older stored layouts are ignored.
-LAYOUT_VERSION = 1
+LAYOUT_VERSION = 2
+
+#: Modes that take the whole window (sidebar collapsed, warnings strip compact).
+WIDE_MODES = frozenset({"shapes"})
+#: Height of the Validation / Warnings strip in a wide mode, px (never below the strip's
+#: own minimum): its title, the error and warning counts and the first lines stay readable.
+COMPACT_WARNINGS_PX = 110
 
 #: Settings slot written on close and read at start.
 LAST_SLOT = "last"
@@ -43,7 +51,7 @@ DEFAULT_SIZES: dict[str, tuple[int, ...]] = {
     "patternsModeSplitter": (850, 350),  # pattern view beside materials
     "patternPanelSplitter": (700, 250),  # pattern drawing above its row form
     "simulateSplitter": (620, 220),  # 3D view above the runs table
-    "shapesSplitter": (520, 560),  # shape list and parameters beside checks and pieces
+    "shapesSplitter": (200, 620, 620),  # shape list | tabbed editor | tabbed results
 }
 
 

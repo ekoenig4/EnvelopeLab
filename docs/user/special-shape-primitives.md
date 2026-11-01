@@ -26,21 +26,31 @@ application ([below](#in-the-desktop-application)) or from Python (sections 1 to
 ## In the desktop application
 
 Open a standard-gore project and choose the **Special shapes** mode (**View ▸ Special
-shapes**, or its tab).
+shapes**, or its tab). This mode uses the whole window: the design tree and properties
+are folded away and the Validation / Warnings strip is made compact (it is never hidden);
+both come back when you change mode. The screen has three columns:
+
+* on the left, the list of special shapes with **Add shape**, **Duplicate**, **Remove**
+  and the exports;
+* in the middle, the selected shape's editor in tabs: **Placement & size**, **Profile**
+  (revolved shapes only), **Feed holes & cap** and **Simulation**;
+* on the right, what the shape gives, in tabs: **Cut pieces** (a drawing and a table),
+  **Checks** and **Attachment**.
 
 1. **Add shape** ▸ **Dome**, **Tube** or **Revolved profile** adds a shape sized from your
    envelope on gore 1, about halfway up the tape. **Import mesh (OBJ/STL/PLY)…** adds a
    free-form shape modelled in Blender (metres, Y up for OBJ as Blender exports it; Z up
    for STL and PLY). The mesh is stored in the project, so the file is no longer needed.
-2. Edit the shape in the **Parameters** form: placement (gore, tape position from the
+2. Edit the shape. **Placement & size**: placement (gore, tape position from the
    mouth in m, position across the gore, lean and lean direction in degrees), sizes in m,
-   number of skin gores or panels, match marks per piece, seam allowance, an optional
-   feed hole in the envelope, and the skin fabric (by default the fabric of the envelope
-   row the shape sits on). *More feed holes* lists extra holes inside the footprint (gore,
-   tape position from the mouth in m, position across the gore, radius in m). *Add feed
+   the number of skin gores or panels, match marks per piece, seam allowance and the
+   skin fabric (by default the fabric of the envelope row the shape sits on).
+   **Profile**: a revolved shape's profile points (radius and height in m, base first,
+   axis last). **Feed holes & cap**: an optional feed hole in the envelope under the base
+   point, the cap, and *More feed holes*, extra holes inside the footprint (gore, tape
+   position from the mouth in m, position across the gore, radius in m). *Add feed
    hole* puts one at the base point to edit; *Remove feed hole* deletes the selected
-   one. A revolved shape's profile is edited in its table (radius and
-   height in m, base first, axis last). **Cap diameter** closes the top of a shape whose
+   one. **Cap diameter** closes the top of a shape whose
    gores or panels would otherwise meet in a point: their tops are sewn round a cap of
    that diameter instead, which is how points are made in practice. *Automatic* (the
    default) makes every gore's or panel's top at least 100 mm wide (a 20-panel shape gets
@@ -48,10 +58,12 @@ shapes**, or its tab).
    untick it to type a diameter, or 0 to bring the pieces to a point. Every change is one
    undo step.
 3. The shape is placed in the background while you keep editing; the list says
-   **being placed…** until it is done (usually under a second). The right-hand side then
-   shows the **pattern checks**, a drawing of the **cut pieces** (finished line solid, cut
-   line dashed, the rim sewn to the envelope in red) with their sizes and areas, and the
-   **attachment lines** on each envelope panel. The **3D View** shows the shape on the
+   **being placed…** until it is done (usually under a second). The right-hand column then
+   shows the **Cut pieces**: a drawing of every piece, named under it (finished line
+   solid, cut line dashed, the rim sewn to the envelope in red; the mouse wheel zooms,
+   dragging pans, a double click fits them all again), and a table of their sizes and
+   areas; the **Checks** of the pattern; and the **Attachment** lines on each envelope
+   panel. The **3D View** shows the shape on the
    envelope as it is sewn: each gore or panel in the colour of the skin fabric (every
    second one darker, like the envelope's gores), the seams between them and the rim
    sewn to the envelope drawn as dark lines.
@@ -68,7 +80,8 @@ shapes**, or its tab).
    Preview** and **Run CalculiX** solve the envelope and then each shape with the same
    solver, its skin sewn from the cut pieces and inflated, at an element size of about
    1/100 of the footprint length (60 to 300 mm; see
-   [Running simulations](running-simulations.md)). **Simulate shape (preview solver)**
+   [Running simulations](running-simulations.md)). On the **Simulation** tab,
+   **Simulate shape (preview solver)**
    solves the selected shape on its own, with the element size you choose (finer is
    slower). **Cancel** stops it. The result lists the
    convergence status, iterations, final residual, mesh size, heights above the envelope

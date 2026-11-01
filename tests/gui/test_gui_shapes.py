@@ -434,3 +434,61 @@ def test_move_feed_holes_clear_of_the_seams(gore_window: MainWindow) -> None:
     placed = _placed(w).placed("Dome")
     assert placed is not None
     assert all(c.severity == "info" for c in placed.checks if c.name == "feed hole clear of seams")
+
+
+def test_editor_and_results_are_in_tabs(gore_window: MainWindow) -> None:
+    """Three columns: the shapes, the editor in tabs (Profile only for a revolved shape)
+    and the results in tabs."""
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    editor, results = panel.editor_tabs, panel.result_tabs
+    assert [editor.tabText(i) for i in range(editor.count())] == [
+        "Placement && size",
+        "Profile",
+        "Feed holes && cap",
+        "Simulation",
+    ]
+    assert [results.tabText(i) for i in range(results.count())] == [
+        "Cut pieces",
+        "Checks",
+        "Attachment",
+    ]
+    assert panel.splitter.count() == 3
+    panel.add_shape("dome")
+    _placed(gore_window)
+    assert not editor.isTabVisible(1)
+    assert panel.fields[("gores",)].parent() is panel.form_box
+    assert panel.cap_diameter.parent() is panel.holes_box
+    panel.add_shape("revolved")
+    _placed(gore_window)
+    assert editor.isTabVisible(1)
+
+
+def test_cut_piece_drawing_zooms_pans_and_fits(gore_window: MainWindow) -> None:
+    from PySide6.QtCore import QPointF
+
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("dome")
+    _placed(gore_window)
+    preview = panel.preview
+    preview.resize(600, 400)
+    # 17 pieces (16 gores and the cap) in rows filling the widget, not one long row.
+    offsets, width, height = preview.layout_offsets()
+    assert len(offsets) == 17
+    rows = len({round(float(o[1]), 9) for o in offsets})
+    assert rows > 1
+    at = QPointF(150.0, 120.0)
+    pan = preview.pan
+    preview.zoom_at(2.0, at)
+    assert preview.zoom == 2.0
+    # The point under the pointer stays put: pan' = at - origin - (at - origin - pan) * 2.
+    origin = QPointF(preview._margin, preview.height() - preview._margin)
+    expected = at - origin - (at - origin - pan) * 2.0
+    assert preview.pan.x() == pytest.approx(expected.x())
+    assert preview.pan.y() == pytest.approx(expected.y())
+    preview.zoom_at(1e-3, at)
+    assert preview.zoom == preview.ZOOM_RANGE[0]
+    preview.zoom_at(10.0, at)
+    preview.reset_view()
+    assert preview.zoom == 1.0 and preview.pan == QPointF(0.0, 0.0)

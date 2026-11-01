@@ -77,9 +77,9 @@ class Panel(QFrame):
             area.setWidget(widget)
             area.setWidgetResizable(True)
             area.setFrameShape(QFrame.Shape.NoFrame)
-            layout.addWidget(area)
+            layout.addWidget(area, 1)
         else:
-            layout.addWidget(widget)
+            layout.addWidget(widget, 1)  # the content takes all spare height, not the header
         # The mode tabs repeat the indicators, so they update while hidden too.
         self.indicator = Refresher(
             self,
