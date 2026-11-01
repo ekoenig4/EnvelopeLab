@@ -148,6 +148,17 @@ uses \(v^{t+\frac12} = [(1 - c/2)v^{t-\frac12} + R/m]/(1 + c/2)\).
 earlier equilibrium (constrained nodes keep their prescribed positions), which is how the
 GUI updates the preview after a small design change.
 
+**Starts from another mesh.** `envelopelab.solvers.multilevel.prolongate` carries a solved
+shape onto a finer (or coarser) mesh of the same panels. Each fine node is located in a
+coarse rest triangle of its own panel in the flat (as-cut) frame and takes the
+barycentric interpolation of that triangle's solved positions,
+\(x = \sum_k \lambda_k(u, v)\, x_k\). Interpolating in the flat frame keeps the fine rest
+geometry consistent with the coarse strains; matching nearest points on the two 3D shapes
+does not (their faceting differs, and on the generic fixture the start was 230 times the
+load out of balance against 8 times with the flat-frame map). Fine nodes outside the
+coarse panel outline take its nearest boundary point. Whether such a start shortens the
+fine solve is measured in the [solver trial](../dev/solver-trial.md).
+
 ### Implementation of the element evaluation
 
 Each iteration evaluates every triangle's deformation gradient, strain, tension-field
