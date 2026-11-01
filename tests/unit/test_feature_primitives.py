@@ -348,3 +348,43 @@ def test_sub_model_rim_lies_on_the_footprint_where_host_tapes_cross_it(kind: str
         if len(l3):
             worst = max(worst, float(np.abs(lf / l3 - 1.0).max()))
     assert worst < 0.01
+
+
+def test_feed_holes_must_clear_the_seams_and_can_be_moved_clear() -> None:
+    """A feed hole reaching over a row seam fails *feed hole clear of seams*; the nearest
+    clear position in its panel, inside the footprint, passes."""
+    from envelopelab.features.primitives import clear_feed_hole, feed_hole_seam_clearance
+
+    seam = SPHERE.rows[1].s_top  # between rows B and C
+    theta = SPHERE.theta_at(5)
+    dome = Dome("pod", Placement(5, seam), 1.0, 0.6, gores=8)
+    required = 0.05
+    # One hole reaching over the row seam below it, one well inside row C.
+    on_seam = (seam + 0.03, theta, 0.1)
+    inside = (seam + 0.5, theta, 0.1)
+    d = design_primitive(dome, SPHERE, feed_holes=[on_seam, inside], seam_clearance=required)
+    checks = [c for c in d.checks if c.name == "feed hole clear of seams"]
+    assert [c.severity for c in checks] == ["error", "info"]
+    assert checks[0].value < 0.0  # over the seam
+    hole = d.extra_feed_holes[1]
+    assert checks[1].value == pytest.approx(
+        feed_hole_seam_clearance(SPHERE, hole.row, hole.centre_xy, hole.radius)
+    )
+    found = clear_feed_hole(d, *on_seam, required)
+    assert found is not None
+    s, th = found
+    moved = design_primitive(
+        dome, SPHERE, feed_holes=[(s, th, 0.1), inside], seam_clearance=required
+    )
+    after = [c for c in moved.checks if c.name.startswith("feed hole")]
+    assert all(c.severity == "info" for c in after), [c.message for c in after]
+    # The least move: up the tape to just clear of the seam (10 mm search grid).
+    assert seam + 0.1 + required <= s <= seam + 0.1 + required + 0.02
+    assert (
+        abs(SPHERE.gore_position(np.array([th]))[0] - SPHERE.gore_position(np.array([theta]))[0])
+        < 0.01
+    )
+    # A hole too large for its panel cannot be cleared.
+    big = (seam + 0.5, theta, 1.2)
+    d_big = design_primitive(dome, SPHERE, feed_holes=[big], seam_clearance=required)
+    assert clear_feed_hole(d_big, *big, required) is None

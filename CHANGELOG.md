@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: special shapes check that every feed hole is clear of the seams of the envelope
+  panel it is cut in, by the hole tape's width plus the seam allowance (*feed hole clear
+  of seams*, an error when too close), and **Move feed holes clear of seams** moves the
+  extra holes that are too close the least distance, inside their panels and footprints
+  (one undo step). Shapes are placed again when the seam allowance or the tapes change.
 - Added: *Show special shapes* in the 2D pattern view (on by default) adds every envelope
   panel a special shape is sewn on, gore by gore, with the footprint line and its
   shape-side ticks, the match marks naming their skin pieces and the feed holes at cut and

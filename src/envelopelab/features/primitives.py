@@ -163,6 +163,12 @@ MARK_EASE_SAMPLES = 48
 """Integration steps per match-mark interval when measuring the attachment ease
 (:func:`_mark_ease`; a few mm per step for usual mark spacings)."""
 
+FEED_HOLE_SEAM_CLEARANCE = 0.05
+"""Default least distance from a feed hole's finished edge to a seam of its panel, m: room
+for the hole's hem band and the seam's fell side by side (source: assumed; a project uses
+its own hole-tape width and seam allowance, :func:`envelopelab.project.shapes.
+feed_hole_clearance`)."""
+
 DEFAULT_TOLERANCE = 0.003
 """Default length tolerance of the pattern checks, m (AGENTS.md sewn-edge default, 3 mm;
 source: assumed)."""
@@ -1384,6 +1390,136 @@ def band_outline(surface: EnvelopeSurface, row: int, samples: int = 97) -> Float
     return np.vstack([right, top[1:-1], right[::-1] * np.array([-1.0, 1.0]), bottom[1:-1]])
 
 
+def feed_hole_seam_clearance(
+    surface: EnvelopeSurface, row: str, centre_xy: Sequence[float], radius: float
+) -> float:
+    """Distance from a feed hole's finished edge to the nearest finished seam of its panel.
+
+    The panel is the row's finished outline (:func:`band_outline`: both gore seams and
+    both row seams, in panel-pattern coordinates); the hole is a circle of ``radius``
+    round ``centre_xy`` in the same coordinates.
+
+    Parameters
+    ----------
+    surface : EnvelopeSurface
+        Envelope.
+    row : str
+        Row label of the panel the hole is cut in.
+    centre_xy : sequence of float
+        Hole centre in panel-pattern coordinates, m.
+    radius : float
+        Finished hole radius, m.
+
+    Returns
+    -------
+    float
+        Clearance, m: negative when the hole reaches over a seam (or its centre is outside
+        the panel).
+    """
+    from envelopelab.geometry.polygon import distance_to_polyline
+
+    index = next(i for i, b in enumerate(surface.rows) if b.label == row)
+    outline = band_outline(surface, index)
+    centre = np.asarray(centre_xy, dtype=np.float64).reshape(1, 2)
+    distance = float(distance_to_polyline(centre, outline, True)[0])
+    if not bool(points_in_polygon(centre, outline)[0]):
+        distance = -distance
+    return distance - radius
+
+
+def clear_feed_hole(
+    design: PrimitiveDesign,
+    s: float,
+    theta: float,
+    radius: float,
+    required: float,
+    step: float = 0.01,
+) -> tuple[float, float] | None:
+    """The nearest position of a feed hole, in the same envelope panel, clear of its seams.
+
+    Candidate centres on a grid of about ``step`` across the panel (in tape position and
+    across the gore) are kept when the hole's edge is at least ``required`` from every
+    finished seam of the panel (:func:`feed_hole_seam_clearance`); the nearest of them (in
+    the panel pattern) whose hole lies wholly inside the shape's footprint is returned.
+
+    Parameters
+    ----------
+    design : PrimitiveDesign
+        The placed shape the hole feeds.
+    s, theta : float
+        Tape position (m) and azimuth (rad) of the hole's centre now.
+    radius : float
+        Finished hole radius, m.
+    required : float
+        Least distance from the hole's edge to a seam, m.
+    step : float
+        Grid spacing, m.
+
+    Returns
+    -------
+    (float, float) or None
+        Tape position (m) and azimuth (rad) of the new centre, or None when no position
+        in the panel is clear of the seams and inside the footprint.
+    """
+    from envelopelab.geometry.polygon import distance_to_polyline
+
+    surface = design.surface
+    n = surface.gore_count
+    g0 = float(surface.gore_position(np.array([theta]))[0])
+    g_centre = design.primitive.placement.gore - 0.5 + design.primitive.placement.across
+    g0 = g_centre + ((g0 - g_centre + 0.5 * n) % n) - 0.5 * n
+    cell = math.floor(g0)
+    index = int(surface.row_index(np.array([s]))[0])
+    band = surface.rows[index]
+    outline = band_outline(surface, index)
+    here = _panel_xy(surface, np.array([s]), np.array([g0]), cell, index)[0]
+    width = 2.0 * float(surface.half_width(np.array([0.5 * (band.s_bottom + band.s_top)]))[0])
+    ss = np.linspace(
+        band.s_bottom, band.s_top, max(int((band.s_top - band.s_bottom) / step), 2) + 1
+    )
+    aa = np.linspace(0.0, 1.0, max(int(width / step), 2) + 1)
+    grid_s, grid_a = np.meshgrid(ss, aa, indexing="ij")
+    cand_s, cand_g = grid_s.ravel(), cell + grid_a.ravel()
+    xy = _panel_xy(surface, cand_s, cand_g, cell, index)
+    inside = points_in_polygon(xy, outline)
+    clear = distance_to_polyline(xy, outline, True) - radius >= required
+    ok = np.flatnonzero(inside & clear)
+    if not len(ok):
+        return None
+    order = ok[np.argsort(np.linalg.norm(xy[ok] - here, axis=1))]
+    loop = _chart(design, design.footprint_s, design.footprint_theta)
+    ang = np.linspace(0.0, 2.0 * math.pi, 64, endpoint=False)
+    ring = radius * np.column_stack([np.cos(ang), np.sin(ang)])
+    for k in order:
+        th = float(cand_g[k]) * surface.gore_angle
+        centre = _chart(design, np.array([cand_s[k]]), np.array([th]))[0]
+        if bool(points_in_polygon(centre + ring, loop).all()):
+            return float(cand_s[k]), th
+    return None
+
+
+def _seam_clearance_checks(design: PrimitiveDesign, required: float) -> list[DesignCheck]:
+    """Check *feed hole clear of seams* for every feed hole of a placed shape."""
+    out = []
+    for hole in design.feed_holes:
+        clearance = feed_hole_seam_clearance(design.surface, hole.row, hole.centre_xy, hole.radius)
+        ok = clearance >= required
+        out.append(
+            DesignCheck(
+                "feed hole clear of seams",
+                clearance,
+                required,
+                "m",
+                "info" if ok else "error",
+                f"feed hole of radius {hole.radius:.3f} m in gore {hole.gore} row {hole.row}: "
+                f"{clearance * 1000:.0f} mm from its edge to the nearest seam of the panel "
+                f"(at least {required * 1000:.0f} mm needed"
+                + (")" if ok else "; move it into the panel)"),
+            )
+        )
+    return out
+
+
 def _panel_xy(
     surface: EnvelopeSurface, s: FloatArray, g: FloatArray, cell: int, row: int
 ) -> FloatArray:
@@ -1571,6 +1707,7 @@ def design_primitive(
     tolerance: float = DEFAULT_TOLERANCE,
     samples: int = 720,
     feed_holes: Sequence[tuple[float, float, float]] = (),
+    seam_clearance: float = FEED_HOLE_SEAM_CLEARANCE,
 ) -> PrimitiveDesign:
     """Place a primitive on the envelope and derive its attachment and cutting pattern.
 
@@ -1591,6 +1728,10 @@ def design_primitive(
     feed_holes : sequence of (float, float, float)
         More holes cut in the envelope inside the footprint: tape position (m), azimuth
         (rad) and finished radius (m) of each.
+    seam_clearance : float
+        Least distance from a feed hole's finished edge to the finished seams of the
+        envelope panel it is cut in, m (check *feed hole clear of seams*; see
+        :func:`feed_hole_seam_clearance`).
 
     Returns
     -------
@@ -1613,7 +1754,7 @@ def design_primitive(
     s0, theta0 = pl.tape_position, surface.theta_at(pl.gore, pl.across)
     base, axis, b1, b2 = _axis_frame(surface, pl, s0, theta0)
     if isinstance(primitive, FreeformShape):
-        return _design_freeform(
+        placed = _design_freeform(
             primitive,
             surface,
             s0,
@@ -1627,6 +1768,8 @@ def design_primitive(
             tolerance,
             feed_holes,
         )
+        placed.checks += _seam_clearance_checks(placed, seam_clearance)
+        return placed
     skin = _Skin(primitive, surface, base, axis, b1, b2, samples)
     fp = skin.at(np.zeros(samples), skin.phi)
     fp_s, fp_theta, _ = surface.locate(fp)
@@ -1732,6 +1875,7 @@ def design_primitive(
     )
     design.extra_feed_holes = _extra_feed_holes(design, feed_holes, g_centre)
     design.checks = _checks(design, pieces, tolerance)
+    design.checks += _seam_clearance_checks(design, seam_clearance)
     return design
 
 

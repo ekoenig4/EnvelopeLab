@@ -57,7 +57,9 @@ from envelopelab_app.settings import Preferences
 from envelopelab_app.shapes_service import ShapeService, ShapeSimulator, ShapeSolveRequest
 
 #: Input groups of the envelope a special shape reads (its key, see ``shape_host_hash``).
-SHAPE_HOST_GROUPS = ("geometry", "row_zones", "materials")
+#: Inputs a placed shape reads: the envelope, its row fabrics, and the seam allowances and
+#: hole tape the feed holes must clear (feed_hole_clearance).
+SHAPE_HOST_GROUPS = ("geometry", "seam_allowance", "row_zones", "tapes", "materials")
 
 T = TypeVar("T")
 

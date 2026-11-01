@@ -28,8 +28,9 @@ def session() -> ProjectSession:
     return s
 
 
-def test_seam_allowance_invalidates_patterns_nesting_and_export_only() -> None:
-    assert invalidated_by({"seam_allowance"}) == {"patterns", "nesting", "export"}
+def test_seam_allowance_invalidates_patterns_nesting_export_and_shapes_only() -> None:
+    # Special shapes read the seam allowance for the feed holes' clearance from the seams.
+    assert invalidated_by({"seam_allowance"}) == {"patterns", "nesting", "export", "shapes"}
 
 
 def test_geometry_invalidates_every_geometric_artifact() -> None:

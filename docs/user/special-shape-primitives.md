@@ -224,6 +224,13 @@ partner on a skin piece's rim edge (`piece`, `piece_xy`).
   holes anywhere under it (`feed_holes`; in a shape file, placed by gore and row). The
   build pack draws each on the panel it is cut in, and adds a marking sheet for a panel
   that only has a hole.
+* *feed hole clear of seams*: a hole's finished edge must stay clear of every seam of the
+  panel it is cut in, by the width of the hole tape (the hem band) plus the seam
+  allowance (the fell): 76 mm for a 25 mm tape and 2 in seams. A hole too close is an
+  error. **Move feed holes clear of seams** (under *More feed holes*) moves every extra
+  hole that is too close the least distance, inside its panel and the footprint, in one
+  undo step, and says what it moved. The hole under the base point moves with the shape,
+  so it is only reported: move the shape or make the hole smaller.
 
 A shape is rejected if it does not fit: a base too large for the local envelope
 curvature, a lean that brings the skin back onto the envelope, or a footprint that would

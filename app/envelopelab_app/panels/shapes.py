@@ -776,9 +776,17 @@ class ShapesPanel(QWidget):
         add_hole.clicked.connect(self.add_feed_hole)
         remove_hole = QPushButton("Remove feed hole")
         remove_hole.clicked.connect(self._remove_feed_hole)
+        clear_holes = QPushButton("Move feed holes clear of seams")
+        clear_holes.setToolTip(
+            "Move every shape's extra feed holes the least distance, inside their panels and "
+            "footprints, so each is clear of its panel's seams by the hole tape and the seam "
+            "allowance (one undo step)"
+        )
+        clear_holes.clicked.connect(self.move_holes_clear)
         holes_buttons = QHBoxLayout()
         holes_buttons.addWidget(add_hole)
         holes_buttons.addWidget(remove_hole)
+        holes_buttons.addWidget(clear_holes)
         holes = QVBoxLayout()
         holes.addWidget(self.holes_table)
         holes.addLayout(holes_buttons)
@@ -812,6 +820,29 @@ class ShapesPanel(QWidget):
             "radius": 0.1,
         }
         return self.set_value(("feed_holes",), [*self._holes(), hole])
+
+    def move_holes_clear(self) -> list[str] | None:
+        """Move every shape's extra feed holes clear of their panels' seams (one undo step);
+        returns what was done, None when refused (e.g. a shape is still being placed)."""
+        session = self.controller.session
+        if session is None:
+            return None
+        placed = {}
+        for spec in session.state.shapes:
+            design = self.placed(spec.name)
+            if design is None:
+                self.controller.editRejected.emit(
+                    f"feed holes not moved: shape {spec.name} is not placed yet"
+                )
+                return None
+            placed[spec.name] = design
+        notes = self.controller.edit("move_feed_holes_clear", placed)
+        if notes is None:
+            return None
+        self.controller.message.emit(
+            "; ".join(notes) if notes else "Every feed hole is clear of the seams."
+        )
+        return list(notes)
 
     def remove_feed_hole(self, index: int) -> bool:
         """Remove extra feed hole ``index``."""

@@ -196,15 +196,20 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
     return FreeformShape(spec.name, placement, mesh, spec.panels, marks)
 
 
-def shape_design(spec: ShapeSpec, surface: EnvelopeSurface) -> PrimitiveDesign:
+def shape_design(
+    spec: ShapeSpec, surface: EnvelopeSurface, seam_clearance: float | None = None
+) -> PrimitiveDesign:
     """Place a shape on an envelope and derive its attachment and cutting pattern.
+
+    ``seam_clearance`` is the least distance from a feed hole's edge to a seam of its
+    envelope panel, m (:func:`feed_hole_clearance`; None: the library default).
 
     Raises
     ------
     PrimitiveError
         When the shape does not fit (the message says why).
     """
-    from envelopelab.features.primitives import design_primitive
+    from envelopelab.features.primitives import FEED_HOLE_SEAM_CLEARANCE, design_primitive
 
     return design_primitive(
         to_primitive(spec),
@@ -214,7 +219,80 @@ def shape_design(spec: ShapeSpec, surface: EnvelopeSurface) -> PrimitiveDesign:
         feed_holes=[
             (h.tape_position, surface.theta_at(h.gore, h.across), h.radius) for h in spec.feed_holes
         ],
+        seam_clearance=FEED_HOLE_SEAM_CLEARANCE if seam_clearance is None else seam_clearance,
     )
+
+
+def feed_hole_clearance(design: DesignDocument, patterns: PatternSet) -> float:
+    r"""Least distance from a feed hole's finished edge to a seam of its panel, m.
+
+    The hole's hem band (the hole tape's width) and the widest seam allowance of the rows
+    (the fell beside the seam) must fit side by side:
+    :math:`c = w_{hole\,tape} + \max_{rows} a_{row}` (source: design values; the rule is
+    assumed).
+    """
+    from envelopelab.project.gore_design import row_allowance
+
+    rows = [r.letter for r in design.gores.panel_rows] if design.gores is not None else []
+    allowance = max((row_allowance(design, patterns, r) for r in rows), default=0.0)
+    return float(design.tapes.hole.width + allowance)
+
+
+def clear_feed_holes(
+    spec: ShapeSpec,
+    surface: EnvelopeSurface,
+    clearance: float,
+    placed: PrimitiveDesign | None = None,
+) -> tuple[ShapeSpec, list[str]]:
+    """Move a shape's extra feed holes clear of the seams of their panels.
+
+    Every extra feed hole closer than ``clearance`` to a seam moves to the nearest position
+    in its panel that is clear of the seams and inside the footprint
+    (:func:`envelopelab.features.primitives.clear_feed_hole`). The hole under the base
+    point moves with the shape, so it is only reported. ``placed`` is the shape already
+    placed on ``surface`` from ``spec`` (placed here when None).
+
+    Returns
+    -------
+    (ShapeSpec, list of str)
+        The shape with its holes moved (unchanged when none needed moving), and what was
+        done or could not be done.
+    """
+    from envelopelab.features.primitives import clear_feed_hole, feed_hole_seam_clearance
+
+    if placed is None:
+        placed = shape_design(spec, surface, clearance)
+    notes: list[str] = []
+    holes = list(spec.feed_holes)
+    for i, (hole, mark) in enumerate(zip(spec.feed_holes, placed.extra_feed_holes, strict=True)):
+        if feed_hole_seam_clearance(surface, mark.row, mark.centre_xy, mark.radius) >= clearance:
+            continue
+        theta = surface.theta_at(hole.gore, hole.across)
+        found = clear_feed_hole(placed, hole.tape_position, theta, hole.radius, clearance)
+        where = f"{spec.name}: feed hole in gore {mark.gore} row {mark.row}"
+        if found is None:
+            notes.append(f"{where} cannot be moved clear of the seams inside its panel")
+            continue
+        s, th = found
+        g = float(surface.gore_position(np.array([th]))[0])
+        gore = int(math.floor(g)) % surface.gore_count + 1
+        across = round(g - math.floor(g) - 0.5, 4)
+        holes[i] = hole.model_copy(
+            update={"gore": gore, "tape_position": round(s, 4), "across": across}
+        )
+        notes.append(
+            f"{where} moved clear of the seams (tape position {hole.tape_position:.3f} "
+            f"-> {s:.3f} m, across {hole.across:+.3f} -> {across:+.3f})"
+        )
+    if spec.feed_hole_radius is not None and placed.feed_hole is not None:
+        centre = placed.feed_hole
+        c = feed_hole_seam_clearance(surface, centre.row, centre.centre_xy, centre.radius)
+        if c < clearance:
+            notes.append(
+                f"{spec.name}: the feed hole under the base point is {c * 1000:.0f} mm from a "
+                "seam; move the shape or make that hole smaller"
+            )
+    return spec.model_copy(update={"feed_holes": holes}), notes
 
 
 def envelope_surface(design: DesignDocument, patterns: PatternSet) -> EnvelopeSurface:

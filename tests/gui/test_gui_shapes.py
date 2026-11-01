@@ -371,3 +371,33 @@ def test_pattern_view_shows_where_each_shape_is_sewn(gore_window: MainWindow) ->
     assert len(rings) >= 2  # the feed hole, cut and finished
     view.show_shapes.setChecked(False)
     assert not any(t.startswith("Dome: mark gores") for t in texts())
+
+
+def test_move_feed_holes_clear_of_the_seams(gore_window: MainWindow) -> None:
+    w = gore_window
+    w.show_panel("shapes")
+    panel = w.shapes
+    panel.add_shape("dome")
+    placed = _placed(w).placed("Dome")
+    assert placed is not None
+    seam = next(b.s_top for b in placed.surface.rows if b.s_top > placed.base_s)
+    spec = panel.spec()
+    assert spec is not None
+    hole = {
+        "gore": spec.placement.gore,
+        "tape_position": seam - 0.01,
+        "across": 0.0,
+        "radius": 0.03,
+    }
+    panel.set_value(("placement", "tape_position"), seam - 0.05)  # the dome over the seam
+    panel.set_value(("feed_holes",), [hole])
+    placed = _placed(w).placed("Dome")
+    assert placed is not None
+    assert any(
+        c.name == "feed hole clear of seams" and c.severity == "error" for c in placed.checks
+    )
+    notes = panel.move_holes_clear()
+    assert notes and "moved clear of the seams" in notes[0]
+    placed = _placed(w).placed("Dome")
+    assert placed is not None
+    assert all(c.severity == "info" for c in placed.checks if c.name == "feed hole clear of seams")

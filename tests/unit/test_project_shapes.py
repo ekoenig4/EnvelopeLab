@@ -242,3 +242,47 @@ def test_attachment_ease_is_checked_per_mark_interval(session: ProjectSession) -
     finer = shape_design(big.model_copy(update={"marks_per_piece": 4}), surface)
     assert float(np.abs(finer.mark_ease).max()) < 0.6 * check.value
     assert float(finer.mark_ease.sum()) == pytest.approx(float(placed.mark_ease.sum()), abs=3e-4)
+
+
+def test_feed_holes_are_moved_clear_of_the_seams_in_one_undo_step(
+    session: ProjectSession,
+) -> None:
+    from envelopelab.features.primitives import feed_hole_seam_clearance
+    from envelopelab.project.edits import move_feed_holes_clear
+    from envelopelab.project.shapes import (
+        FeedHole,
+        envelope_surface,
+        feed_hole_clearance,
+        shape_design,
+    )
+
+    surface = envelope_surface(session.design, session.patterns)
+    band = surface.rows[1]
+    dome = _dome(session).model_copy(
+        update={
+            "placement": _dome(session).placement.model_copy(update={"tape_position": band.s_top}),
+            "base_radius": 0.9,
+            "feed_holes": [
+                FeedHole(gore=1, tape_position=band.s_top - 0.02, across=0.0, radius=0.08)
+            ],
+        }
+    )
+    edits.add_shape(session, dome)
+    clearance = feed_hole_clearance(session.design, session.patterns)
+    assert clearance == pytest.approx(
+        session.design.tapes.hole.width + session.design.seam_types[0].allowance
+    )
+    before = shape_design(session.state.shapes[0], surface, clearance)
+    assert any(
+        c.name == "feed hole clear of seams" and c.severity == "error" for c in before.checks
+    )
+    notes = move_feed_holes_clear(session)
+    assert any("moved clear of the seams" in n for n in notes), notes
+    after = shape_design(session.state.shapes[0], surface, clearance)
+    hole = after.extra_feed_holes[0]
+    assert feed_hole_seam_clearance(surface, hole.row, hole.centre_xy, hole.radius) >= clearance
+    assert all(c.severity == "info" for c in after.checks if c.name.startswith("feed hole"))
+    assert session.stack.history()[-1] == "Move feed holes clear of seams"
+    session.undo()
+    assert session.state.shapes[0].feed_holes == dome.feed_holes
+    assert move_feed_holes_clear(session) and move_feed_holes_clear(session) == []

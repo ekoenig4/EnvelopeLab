@@ -131,6 +131,13 @@ gores (see [Special-shape primitives](../validation/special-shape-primitives.md)
 | seam flattening | largest relative difference of a flat seam edge from its 3D seam | 2 % (assumed) |
 | area distortion | largest relative difference of a piece's flat and designed area | 1 % (assumed) |
 | feed hole inside footprint | — | inside (every hole: the centred one and each extra one) |
+| feed hole clear of seams | distance from the hole's finished edge to the nearest finished seam of its panel (both gore seams, both row seams), m | \(w_{hole\,tape} + \max a_{row}\): the hem band beside the fell (assumed rule, design values; 50 mm without a design) |
+
+A hole that fails the last check can be moved by `clear_feed_hole`: centres on a 10 mm grid
+over the hole's panel (tape position and fraction across the gore) are kept where the
+hole clears every seam by the required distance, and the nearest of them in the panel
+pattern whose hole lies wholly inside the footprint is taken. The hole under the base
+point moves only with the shape.
 
 ### Attachment ease
 

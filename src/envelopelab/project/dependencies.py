@@ -142,7 +142,11 @@ ARTIFACTS: tuple[ArtifactSpec, ...] = (
     ArtifactSpec(
         "export", "Export", ("meta", "rigging", "turning_vents", "scale_variants"), ("nesting",)
     ),
-    ArtifactSpec("shapes", "Special shapes", ("geometry", "row_zones", "materials", "shapes")),
+    ArtifactSpec(
+        "shapes",
+        "Special shapes",
+        ("geometry", "seam_allowance", "row_zones", "tapes", "materials", "shapes"),
+    ),
 )
 
 _BY_NAME: dict[str, ArtifactSpec] = {a.name: a for a in ARTIFACTS}

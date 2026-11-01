@@ -30,7 +30,12 @@ from envelopelab.design.model import DesignDocument
 from envelopelab.features.primitives import PrimitiveDesign, PrimitiveError
 from envelopelab.features.scene import ShapeDisplay
 from envelopelab.project.model import PatternSet, ShapeRunRecord
-from envelopelab.project.shapes import ShapeSpec, envelope_surface, shape_design
+from envelopelab.project.shapes import (
+    ShapeSpec,
+    envelope_surface,
+    feed_hole_clearance,
+    shape_design,
+)
 
 if TYPE_CHECKING:
     from envelopelab.project.session import ProjectSession
@@ -112,9 +117,10 @@ class _DesignWorker(QThread):
             message = f"the envelope cannot be built: {exc}"
             self.done.emit([(n, ShapeResult(k, None, message)) for n, k, _ in self.jobs])
             return
+        clearance = feed_hole_clearance(self.design, self.patterns)
         for name, key, spec in self.jobs:
             try:
-                out.append((name, ShapeResult(key, shape_design(spec, surface))))
+                out.append((name, ShapeResult(key, shape_design(spec, surface, clearance))))
             except (PrimitiveError, ValueError) as exc:
                 out.append((name, ShapeResult(key, None, str(exc))))
             except Exception as exc:  # report everything to the GUI, never crash it
