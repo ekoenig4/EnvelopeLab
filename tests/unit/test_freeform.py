@@ -136,3 +136,104 @@ def test_freeform_attachment_ease_adds_up_to_rim_minus_marked_line() -> None:
     assert len(d.mark_ease) == 16
     assert float(d.mark_ease.sum()) == pytest.approx(rim - marked, abs=5e-4)
     assert _checks(d)["attachment ease"] == pytest.approx(float(np.abs(d.mark_ease).max()))
+
+
+def test_a_cap_closes_the_top_and_the_panels_end_on_its_edge() -> None:
+    """With a cap, the panels end on a circle round the pole instead of a point."""
+    rc = 0.15
+    d = design_primitive(
+        FreeformShape("blob", Placement(2, EQUATOR), BLOB, 8, cap_radius=rc), SPHERE, 0.01, 0.2
+    )
+    assert [p.label for p in d.pieces] == [*(f"blob-P{k}" for k in range(1, 9)), "blob-TIP"]
+    c = _checks(d)
+    assert c["cap seam match"] < 1e-9 and c["skin seam match"] < 1e-6
+    cap = d.pieces[-1]
+    assert cap.rim is None and len(cap.seam_points) == 8
+    # The panel tops are sewn round the cap's edge, on the cylinder rho = rc about the
+    # axis: at least the circle's length (more where the top is not level, < 1 % here).
+    edge = float(np.linalg.norm(np.diff(cap.edges["top"], axis=0), axis=1).sum())
+    assert 2.0 * math.pi * rc * (1.0 - 1e-3) < edge < 2.0 * math.pi * rc * 1.01
+    skin = d._skin
+    ring = skin.cap.x[skin.cap.top] - d.base_point
+    rho = np.linalg.norm(ring - np.outer(ring @ d.axis, d.axis), axis=1)
+    assert rho.max() == pytest.approx(rc, abs=1e-9)
+    for piece in d.pieces[:-1]:
+        top = piece.edges["top"]
+        assert len(top) > 1 and float(np.linalg.norm(np.diff(top, axis=0), axis=1).sum()) > 0.1
+    # The seams meet the cap where the panels' tops end, at the cap's edge, in order.
+    finished = cap.finished
+    for x, y in cap.seam_points:
+        assert np.min(np.linalg.norm(finished - [x, y], axis=1)) < 1e-12
+    # The cap lifts nothing off the designed shape: same footprint and height.
+    plain = design_primitive(FreeformShape("blob", Placement(2, EQUATOR), BLOB, 8), SPHERE)
+    assert d.footprint_length == pytest.approx(plain.footprint_length, rel=1e-9)
+    assert d.designed_height == pytest.approx(plain.designed_height, abs=1e-9)
+    assert sum(p.surface_area for p in d.pieces) == pytest.approx(
+        sum(p.surface_area for p in plain.pieces), rel=1e-9
+    )
+
+
+def test_a_cap_that_does_not_fit_on_the_top_is_rejected() -> None:
+    with pytest.raises(PrimitiveError, match="cap of diameter 2.000 m reaches the footprint"):
+        design_primitive(FreeformShape("a", Placement(2, EQUATOR), BLOB, 6, cap_radius=1.0), SPHERE)
+    with pytest.raises(PrimitiveError, match="cap radius must not be negative"):
+        design_primitive(
+            FreeformShape("a", Placement(2, EQUATOR), BLOB, 6, cap_radius=-0.1), SPHERE
+        )
+
+
+def test_capped_sub_model_shares_the_cap_circle_nodes() -> None:
+    d = design_primitive(
+        FreeformShape("blob", Placement(2, EQUATOR), BLOB, 8, cap_radius=0.15), SPHERE, 0.01, 0.2
+    )
+    am = build_appendage(
+        primitive_appendage(d, 0.1, load_tape=GENERIC_TAPE),
+        HOT,
+        {"host": GENERIC_FABRIC, "skin": GENERIC_FABRIC},
+    )
+    model = am.model
+    skin = model.triangles[am.skin_triangles]
+    rest = model.rest_uv[am.skin_triangles]
+    area = 0.5 * (
+        (rest[:, 1, 0] - rest[:, 0, 0]) * (rest[:, 2, 1] - rest[:, 0, 1])
+        - (rest[:, 1, 1] - rest[:, 0, 1]) * (rest[:, 2, 0] - rest[:, 0, 0])
+    )
+    assert np.all(area > 0.0)
+    assert area.sum() == pytest.approx(sum(p.flat_area for p in d.pieces), rel=0.02)
+    # Closed except for the rim: the cap is sewn to every panel along one shared circle.
+    edges = np.sort(np.concatenate([skin[:, [0, 1]], skin[:, [1, 2]], skin[:, [2, 0]]]), axis=1)
+    uniq, count = np.unique(edges, axis=0, return_counts=True)
+    assert len(uniq[count == 1]) == len(am.rim_nodes)
+    tip = next(s for s in model.seams if s.name == "blob:tip seam")
+    ring = np.unique(tip.edges)
+    assert len(ring) == len(tip.edges)  # one closed loop
+    for j in range(1, 9):
+        seam = next(s for s in model.seams if s.name == f"blob:seam {j}")
+        assert np.isin(seam.edges, ring).sum() == 1  # each seam ends on the cap circle
+
+
+@pytest.mark.slow
+def test_capped_freeform_shape_inflates_to_its_designed_height() -> None:
+    from envelopelab.features.metrics import appendage_metrics
+    from envelopelab.solvers.dynamic_relaxation import solve
+    from envelopelab.solvers.simulation import from_preview
+
+    d = design_primitive(
+        FreeformShape("blob", Placement(2, EQUATOR), BLOB, 16, cap_radius=0.15),
+        SPHERE,
+        0.01,
+        0.2,
+    )
+    am = build_appendage(
+        primitive_appendage(d, 0.2, load_tape=GENERIC_TAPE),
+        HOT,
+        {"host": GENERIC_FABRIC, "skin": GENERIC_FABRIC},
+    )
+    result = from_preview(am.model, solve(am.model))
+    assert result.converged
+    m = appendage_metrics(am, result)
+    # The cap is cut flat, so it flattens the top: the height drops by at most the cap's
+    # sagitta (its rise above its edge on the designed mesh), less what the cloth stretches.
+    cap = d._skin.cap
+    sagitta = float(((cap.x - d.base_point) @ d.axis).max()) - d._skin.cap_floor
+    assert d.designed_height - sagitta < m.projected_height < d.designed_height

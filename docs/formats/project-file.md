@@ -430,6 +430,19 @@ clean exit, and offered for recovery at the next start otherwise.
           "title": "Base Radius",
           "type": "number"
         },
+        "cap_diameter": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cap Diameter"
+        },
         "fabric": {
           "anyOf": [
             {
@@ -921,6 +934,19 @@ clean exit, and offered for recovery at the next start otherwise.
       "additionalProperties": false,
       "description": "Closed triangle mesh (m, z out of the envelope) cut into panels.\n\nThe vertices and triangles are stored in the project, so it does not depend on the\nfile they came from (``source`` only records its name).",
       "properties": {
+        "cap_diameter": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cap Diameter"
+        },
         "fabric": {
           "anyOf": [
             {
@@ -1519,6 +1545,19 @@ clean exit, and offered for recovery at the next start otherwise.
       "additionalProperties": false,
       "description": "Profile ``(rho, zeta)`` points (m) revolved about the axis; number of skin gores.",
       "properties": {
+        "cap_diameter": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cap Diameter"
+        },
         "fabric": {
           "anyOf": [
             {
@@ -2519,6 +2558,19 @@ clean exit, and offered for recovery at the next start otherwise.
           "exclusiveMinimum": 0.0,
           "title": "Base Radius",
           "type": "number"
+        },
+        "cap_diameter": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cap Diameter"
         },
         "fabric": {
           "anyOf": [

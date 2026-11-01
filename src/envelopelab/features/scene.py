@@ -1,4 +1,4 @@
-"""3D scene of an envelope with its special shapes, as designed and as simulated.
+r"""3D scene of an envelope with its special shapes, as designed and as simulated.
 
 The objects are triangle meshes in the envelope frame (m, :math:`z` up, the mouth's
 axis on :math:`z`) ready for :func:`envelopelab.io.blender.write_obj_scene`:
@@ -199,7 +199,12 @@ def designed_display(design: PrimitiveDesign, rows: int = 60, per_piece: int = 1
         obj = designed_object(design)
         cen = obj.vertices[obj.triangles].mean(axis=1)
         seams = [np.asarray(p.x[p.left], dtype=np.float64) for p in panels]
-        return ShapeDisplay(obj.vertices, obj.triangles, _piece_of(design, cen), m, seams, rim)
+        cap = getattr(skin, "cap", None)
+        tip = None
+        if cap is not None:
+            tip = np.asarray(skin.cap_mask, dtype=bool)
+            seams.append(np.asarray(cap.x[[*cap.top, cap.top[0]]], dtype=np.float64))
+        return ShapeDisplay(obj.vertices, obj.triangles, _piece_of(design, cen, tip), m, seams, rim)
     # Parametric skin: a grid whose columns start on the first seam, so every piece is a
     # whole number of columns (designed_object's grid starts at phi = 0).
     cols = m * per_piece
@@ -284,8 +289,16 @@ def simulated_display(
     prim = design.primitive
     tip = None
     if prim.closed_tip:
-        height = (cen - design.base_point) @ design.axis
-        tip = height > prim.tip_height - 1e-6 * max(prim.tip_height, 1.0)
+        # Tip (cap) triangles: every corner inside the cap's radius, at the top. Each
+        # panel triangle has a corner outside it; a narrow neck lies lower down.
+        rel = start[tri] - design.base_point
+        height = rel @ design.axis
+        rho = np.linalg.norm(rel - height[..., None] * design.axis, axis=-1)
+        rc = prim.tip_radius
+        floor = float(getattr(design._skin, "cap_floor", prim.tip_height))
+        tip = np.all(rho <= rc * (1.0 + 1e-6) + 1e-9, axis=1) & np.all(
+            height >= floor - 0.25 * rc, axis=1
+        )
     piece = _piece_of(design, cen, tip)
     pts = to_envelope_frame(design, result.positions)
     name = prim.name

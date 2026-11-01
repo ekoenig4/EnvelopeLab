@@ -3,6 +3,23 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: special shapes whose gores or panels met in a point (domes, revolved profiles
+  ending on the axis, pointed tubes, mesh shapes) now have their tops sewn round a
+  **cap**, a round piece of measurable diameter, as points are made in practice
+  (ADR-0032). Each shape's *Cap diameter* (project field `cap_diameter`) is automatic by
+  default: every piece's top at least 100 mm wide, d = M x 100 mm / pi (637 mm for 20
+  panels, 509 mm for 16), at most half the base diameter; 0 brings the pieces to a point.
+  Existing projects get automatic caps when opened. Results change: a capped dome or
+  revolved shape stops where it is as wide as the cap (designed height
+  h sqrt(1 - (r_c/a)^2), e.g. 0.600 to 0.585 m for the special-shape fixture's dome) and
+  gains a `-TIP` piece; a mesh shape keeps its designed surface and gains a cap piece
+  cut from its top, so its panels lose that area. The flat cap flattens the inflated top
+  (a free-form test shape stood 14 mm, 1.2 %, lower than designed) and the preview solver
+  converges more slowly, or not at all for some large caps, round its edge. The tip
+  disc's sheet ticks where every seam meets it and names each piece between its ticks.
+- Fixed: a mesh shape's panel was split the wrong way round when its boundary loop
+  started part-way along the rim (the rim's direction was tested before the loop was
+  turned to start at the rim).
 - Added: special shapes check that every feed hole is clear of the seams of the envelope
   panel it is cut in, by the hole tape's width plus the seam allowance (*feed hole clear
   of seams*, an error when too close), and **Move feed holes clear of seams** moves the

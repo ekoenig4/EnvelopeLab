@@ -43,10 +43,10 @@ def test_add_dome_is_placed_in_the_background(gore_window: MainWindow) -> None:
     assert session is not None and [s.name for s in session.state.shapes] == ["Dome"]
     panel = _placed(gore_window)
     assert "placed" in panel.status.text()
-    assert panel.pieces.topLevelItemCount() == 16
+    assert panel.pieces.topLevelItemCount() == 16 + 1  # 16 gores and the automatic cap
     assert panel.attachment.topLevelItemCount() >= 1
     assert panel.checks.topLevelItemCount() >= 1
-    assert len(panel.preview.pieces) == 16
+    assert len(panel.preview.pieces) == 16 + 1
     assert not any("shape Dome" in m and "[ERROR]" in m for m in _messages(gore_window))
     assert gore_window.controller.artifact_status("shapes") == "current"
     assert "shape:Dome" in gore_window.view3d.labels()
@@ -250,7 +250,7 @@ def test_3d_view_draws_shapes_as_sewn_pieces(gore_window: MainWindow) -> None:
     assert designed.visible
     assert designed.face_colors is not None and len(designed.face_colors) == len(designed.faces)
     assert len(np.unique(designed.face_colors, axis=0)) == 2  # every second gore darker
-    assert len(designed.polylines["skin_seams"]) == 16
+    assert len(designed.polylines["skin_seams"]) == 16 + 1  # and the cap's seam
     assert len(designed.polylines["skin_rim"]) == 1
     panel.mesh_spin.setValue(80.0)
     assert panel.simulate_selected()
@@ -260,13 +260,40 @@ def test_3d_view_draws_shapes_as_sewn_pieces(gore_window: MainWindow) -> None:
     assert "as sewn and inflated" in sewn.label
     assert sewn.visible and not view.layers["shape:Dome"].visible
     assert sewn.face_colors is not None and len(np.unique(sewn.face_colors, axis=0)) == 2
-    assert len(sewn.polylines["skin_seams"]) == 16
+    assert len(sewn.polylines["skin_seams"]) == 16 + 1
     # The user's choice is kept when the layers are rebuilt.
     items = [view.layer_list.item(i) for i in range(view.layer_list.count())]
     item = next(i for i in items if i.data(Qt.ItemDataRole.UserRole) == "shape:Dome")
     item.setCheckState(Qt.CheckState.Checked)
     view.refresh()
     assert view.layers["shape:Dome"].visible
+
+
+def test_cap_diameter_is_automatic_or_chosen_in_the_form(gore_window: MainWindow) -> None:
+    """Automatic by default (the box shows the diameter used); unticked, the diameter is
+    typed (0: the gores meet in a point); each change places the shape again."""
+    from envelopelab.project.shapes import cap_diameter
+
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("dome")
+    panel = _placed(gore_window)
+    spec = panel.spec()
+    assert spec is not None and spec.cap_diameter is None
+    assert panel.cap_auto.isChecked() and not panel.cap_diameter.isEnabled()
+    assert panel.cap_diameter.value() == pytest.approx(cap_diameter(spec))
+    panel.cap_auto.setChecked(False)
+    spec = panel.spec()
+    assert spec is not None and spec.cap_diameter == pytest.approx(cap_diameter(spec))
+    assert panel.cap_diameter.isEnabled()
+    panel.cap_diameter.setValue(0.0)
+    panel = _placed(gore_window)
+    spec = panel.spec()
+    assert spec is not None and spec.cap_diameter == 0.0
+    assert panel.pieces.topLevelItemCount() == 16  # no cap piece
+    panel.cap_auto.setChecked(True)
+    spec = panel.spec()
+    assert spec is not None and spec.cap_diameter is None
 
 
 def _fed_dome(window: MainWindow) -> ShapesPanel:
@@ -325,7 +352,13 @@ def test_a_calculix_run_verifies_the_special_shapes(gore_window: MainWindow, qtb
     w = gore_window
     if not w.simulation.calculix_available:
         pytest.skip("CalculiX (ccx) is not installed")
-    _fed_dome(w)
+    panel = _fed_dome(w)
+    # CalculiX starts from a converged preview. This small default dome's preview does
+    # not converge with its automatic cap (half its base diameter: the flat cap wrinkles
+    # round its edge, ADR-0032), so the run would rightly end at the preview; a pointed
+    # dome checks that CalculiX solves the shapes of its run.
+    panel.set_value(("cap_diameter",), 0.0)
+    _placed(w)
     session = w.controller.session
     assert session is not None
     assert w.simulation.start(CALCULIX)

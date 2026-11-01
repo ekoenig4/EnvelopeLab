@@ -9,7 +9,7 @@ EnvelopeLab works out:
 * numbered **match marks** on that line and on the shape's rim, so the skin goes on
   in the right place;
 * the **cutting pattern** of the shape: finished and cut outlines of every gore or panel,
-  and a tip disc for a tube;
+  and the tip disc or **cap** their tops are sewn round;
 * **checks** on that pattern;
 * a **simulation model** whose skin is sewn from exactly those cut pieces, so you can see
   how the shape holds under pressure before cutting cloth.
@@ -40,7 +40,13 @@ shapes**, or its tab).
    tape position from the mouth in m, position across the gore, radius in m). *Add feed
    hole* puts one at the base point to edit; *Remove feed hole* deletes the selected
    one. A revolved shape's profile is edited in its table (radius and
-   height in m, base first, axis last). Every change is one undo step.
+   height in m, base first, axis last). **Cap diameter** closes the top of a shape whose
+   gores or panels would otherwise meet in a point: their tops are sewn round a cap of
+   that diameter instead, which is how points are made in practice. *Automatic* (the
+   default) makes every gore's or panel's top at least 100 mm wide (a 20-panel shape gets
+   a 637 mm cap, a 16-panel one 509 mm), but at most half the shape's base diameter;
+   untick it to type a diameter, or 0 to bring the pieces to a point. Every change is one
+   undo step.
 3. The shape is placed in the background while you keep editing; the list says
    **being placed…** until it is done (usually under a second). The right-hand side then
    shows the **pattern checks**, a drawing of the **cut pieces** (finished line solid, cut
@@ -300,7 +306,8 @@ The pack contains:
   sheet or a feed hole, so none is missed when the copies of the row are cut;
 * on every skin piece, what each edge is sewn to: the rim to the envelope (with its mark
   numbers and the panels they lie on), each seam to the neighbouring piece, the top to
-  the tip disc or the apex;
+  the tip disc (cap) or the apex. The tip disc has a tick on its edge where every seam
+  meets it, and each piece's name between the two ticks its top is sewn between;
 * `pattern.pdf`: every sheet at 1:1 on pages as wide as your fabric roll. A sheet wider
   than the roll is split into numbered strips;
 * `index.json`: every file with its piece, cut count, fabric, finished size, and which
@@ -345,6 +352,11 @@ default.
   between tapes is not included when placing the footprint, and marks across a lofted
   gore are placed in proportion to its flat width.
 * Seam allowances, stitching and tape widths are not part of the simulation model.
+* A cap is cut flat, so it flattens the top of a curved shape: by up to the height the
+  cap takes off (a dome's apex) or the cap's rise on a mesh's top, less what the cloth
+  stretches. The cloth round its edge wrinkles, and the preview solver may need more
+  iterations there, or not converge for a large cap. A smaller cap, more pieces or a
+  different element size can help; an unconverged result is never a prediction.
 * In the desktop application, shape simulations use the preview solver with assumed
   stiffness values, and those solved with the envelope use an automatic element size
   (footprint length / 100, between 60 and 300 mm, assumed). Solve with a chosen size to

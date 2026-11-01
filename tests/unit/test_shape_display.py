@@ -74,13 +74,28 @@ def test_designed_freeform_uses_its_panels() -> None:
     assert np.abs(SPHERE.signed_distance(d.rim)).max() < 1e-4
 
 
-@pytest.mark.parametrize("kind", ["dome", "tube"])
+def test_designed_freeform_cap_is_its_own_piece() -> None:
+    blob = ellipsoid_mesh(1.0, 0.7, 1.4, -0.3)
+    shape = FreeformShape("blob", Placement(2, EQUATOR), blob, 6, cap_radius=0.15)
+    d = designed_display(design_primitive(shape, SPHERE))
+    assert d.pieces == 6 and set(d.piece.tolist()) == set(range(7))
+    assert len(d.seams) == 6 + 1  # the cap circle is a seam too
+    cap = d.seams[-1]
+    assert np.allclose(cap[0], cap[-1])
+
+
+@pytest.mark.parametrize("kind", ["dome", "tube", "capped dome", "capped mesh"])
 def test_simulated_skin_keeps_its_pieces_and_seams(kind: str) -> None:
-    prim = (
-        Dome("pod", Placement(2, EQUATOR), 0.8, 0.6, gores=6)
-        if kind == "dome"
-        else Tube("pod", Placement(2, EQUATOR), 0.6, 0.3, 1.0, panels=4)
-    )
+    prim: Any
+    if kind == "dome":
+        prim = Dome("pod", Placement(2, EQUATOR), 0.8, 0.6, gores=6)
+    elif kind == "tube":
+        prim = Tube("pod", Placement(2, EQUATOR), 0.6, 0.3, 1.0, panels=4)
+    elif kind == "capped dome":
+        prim = Dome("pod", Placement(2, EQUATOR), 0.8, 0.6, gores=6, cap_radius=0.2)
+    else:
+        blob = ellipsoid_mesh(1.0, 0.7, 1.4, -0.3)
+        prim = FreeformShape("pod", Placement(2, EQUATOR), blob, 6, cap_radius=0.15)
     design = design_primitive(prim, SPHERE, feed_hole_radius=0.2)
     am = build_appendage(
         primitive_appendage(design, 0.3, load_tape=GENERIC_TAPE),

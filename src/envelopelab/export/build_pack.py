@@ -349,6 +349,11 @@ def primitive_sheets(
         if piece.rim is not None:
             edges["rim"] = piece.rim
         texts, notes = _piece_directions(piece, own, rim_pieces, tip, order, name)
+        ticks = [
+            np.vstack([pt, pt + TICK_LENGTH * (piece.finished.mean(axis=0) - pt) / d])
+            for pt in (np.asarray(q, dtype=np.float64) for q in piece.seam_points)
+            if (d := float(np.linalg.norm(piece.finished.mean(axis=0) - pt))) > 0.0
+        ]
         out.append(
             Sheet(
                 name=piece.label,
@@ -364,6 +369,7 @@ def primitive_sheets(
                 "to the envelope",
                 texts=texts,
                 notes=notes,
+                ticks=ticks,
             )
         )
     from envelopelab.features.primitives import band_outline
@@ -517,8 +523,21 @@ def _piece_directions(
 
     texts: list[tuple[float, float, str]] = []
     notes: list[str] = []
-    if piece.rim is None:  # the tip disc
-        texts.append((*at(piece.finished), f"TIP DISC: sew round the tops of all {name} panels"))
+    if piece.rim is None:  # the tip disc or cap
+        texts.append((float(centre[0]), float(centre[1]), "TIP DISC"))
+        notes.append(f"TIP DISC: sew round the tops of all {name} panels")
+        if piece.seam_points:
+            # Each panel's top is sewn along the edge between the ticks of its two seams.
+            for k, mid in enumerate(_between(piece.finished, piece.seam_points)):
+                inward = centre - mid
+                norm = float(np.linalg.norm(inward))
+                p = mid + (0.6 * TEXT_INSET * inward / norm if norm > 0.0 else 0.0)
+                label = _short(rim_pieces[k % len(rim_pieces)].label, name)
+                texts.append((float(p[0]), float(p[1]), label))
+            notes.append(
+                "the ticks on the edge are where the seams between the panels meet it: sew "
+                "each panel's top between the ticks either side of its name"
+            )
         return texts, notes
     k, m = order[piece.label], len(rim_pieces)
     nxt = _short(rim_pieces[(k + 1) % m].label, name)
@@ -538,6 +557,30 @@ def _piece_directions(
         where = ", ".join(f"gore {g} row {r}" for g, r in panels)
         notes.append(f"rim marks {numbers[0]}-{numbers[-1]} lie on the envelope at {where}")
     return texts, notes
+
+
+def _between(ring: FloatArray, points: Sequence[tuple[float, float]]) -> list[FloatArray]:
+    """Midpoints along a closed outline (CCW) between successive points on it, m."""
+    pts = np.vstack([ring, ring[:1]])
+    seg = np.diff(pts, axis=0)
+    lengths = np.linalg.norm(seg, axis=1)
+    arc = np.concatenate([[0.0], np.cumsum(lengths)])
+    total = float(arc[-1])
+
+    def param(q: FloatArray) -> float:
+        rel = q - pts[:-1]
+        t = np.clip(np.einsum("ij,ij->i", rel, seg) / np.maximum(lengths**2, 1e-30), 0.0, 1.0)
+        d = np.linalg.norm(pts[:-1] + t[:, None] * seg - q, axis=1)
+        k = int(np.argmin(d))
+        return float(arc[k] + t[k] * lengths[k])
+
+    at = [param(np.asarray(q, dtype=np.float64)) for q in points]
+    out = []
+    for j, a in enumerate(at):
+        b = at[(j + 1) % len(at)]
+        mid = (a + 0.5 * ((b - a) % total or total)) % total
+        out.append(np.array([np.interp(mid, arc, pts[:, c]) for c in (0, 1)]))
+    return out
 
 
 def shape_row_notes(primitives: Sequence[PrimitiveDesign]) -> dict[str, list[str]]:

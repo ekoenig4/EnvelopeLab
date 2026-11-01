@@ -447,6 +447,9 @@ class Dome:
         Number of skin gores M (>= 3).
     marks_per_piece : int
         Match marks per gore on the rim (>= 1).
+    cap_radius : float
+        Radius :math:`r_c` of a flat cap that closes the top, m (0: the gores meet in a
+        point). The meridian stops where :math:`\\rho = r_c`.
     """
 
     name: str
@@ -455,32 +458,37 @@ class Dome:
     height: float
     gores: int = 8
     marks_per_piece: int = 2
+    cap_radius: float = 0.0
 
     kind: PrimitiveKind = field(default="dome", init=False)
 
     @property
     def pieces(self) -> int:
-        """Number of skin pieces round the axis."""
+        """Number of skin pieces round the axis (a cap is extra)."""
         return self.gores
 
     @property
     def closed_tip(self) -> bool:
-        """False: the gores meet in a point at the apex."""
-        return False
+        """True when a flat cap closes the top (otherwise the gores meet in a point)."""
+        return self.cap_radius > 0.0
 
     @property
     def tip_radius(self) -> float:
         """Radius of the tip circle, m (0: an apex)."""
-        return 0.0
+        return self.cap_radius
+
+    @property
+    def _w_tip(self) -> float:
+        return math.acos(min(self.cap_radius / self.base_radius, 1.0))
 
     @property
     def tip_height(self) -> float:
         """Height of the tip above the base circle along the axis, m."""
-        return self.height
+        return self.height * math.sin(self._w_tip)
 
     def meridian(self, count: int = 2001) -> tuple[FloatArray, FloatArray]:
         """Dense skin meridian :math:`(\\rho, \\zeta)` from the base circle to the tip, m."""
-        w = np.linspace(0.0, 0.5 * math.pi, count)
+        w = np.linspace(0.0, self._w_tip, count)
         return self.base_radius * np.cos(w), self.height * np.sin(w)
 
     def validate(self) -> None:
@@ -488,6 +496,8 @@ class Dome:
         _check_common(self.name, self.placement, self.marks_per_piece)
         if self.base_radius <= 0.0 or self.height <= 0.0:
             raise PrimitiveError(f"{self.name}: dome radius and height must be positive")
+        if not 0.0 <= self.cap_radius < self.base_radius:
+            raise PrimitiveError(f"{self.name}: cap radius must be between 0 and the base radius")
         if self.gores < 3:
             raise PrimitiveError(f"{self.name}: a dome needs at least 3 gores")
 
@@ -570,14 +580,18 @@ class Revolved:
     profile : tuple of (float, float)
         Meridian points :math:`(\rho, \zeta)` from the base circle (:math:`\zeta = 0`,
         :math:`\rho > 0`) to the tip, m: distance from the axis and height along it. The
-        last point on the axis (:math:`\rho = 0`) closes the shape in an apex; otherwise
-        a flat disc of the last radius closes it.
+        last point on the axis (:math:`\rho = 0`) closes the shape in an apex (or a cap,
+        see ``cap_radius``); otherwise a flat disc of the last radius closes it.
     gores : int
         Number of skin gores M (>= 3).
     smooth : bool
         Interpolate the points with a cubic spline (otherwise straight segments).
     marks_per_piece : int
         Match marks per gore on the rim (>= 1).
+    cap_radius : float
+        For a profile ending on the axis: radius :math:`r_c` of a flat cap that closes the
+        top instead of an apex, m (0: an apex). The meridian stops where it last comes in
+        to :math:`\rho = r_c`.
     """
 
     name: str
@@ -586,6 +600,7 @@ class Revolved:
     gores: int = 12
     smooth: bool = True
     marks_per_piece: int = 2
+    cap_radius: float = 0.0
 
     kind: PrimitiveKind = field(default="revolved", init=False)
 
@@ -595,9 +610,13 @@ class Revolved:
         return self.gores
 
     @property
+    def _capped(self) -> bool:
+        return float(self.profile[-1][0]) <= 0.0 and self.cap_radius > 0.0
+
+    @property
     def tip_radius(self) -> float:
         """Radius of the tip circle, m (0: an apex)."""
-        return float(self.profile[-1][0])
+        return self.cap_radius if self._capped else float(self.profile[-1][0])
 
     @property
     def closed_tip(self) -> bool:
@@ -607,10 +626,26 @@ class Revolved:
     @property
     def tip_height(self) -> float:
         """Height of the tip above the base circle along the axis, m."""
+        if self._capped:
+            return float(self.meridian(4001)[1][-1])
         return float(self.profile[-1][1])
 
     def meridian(self, count: int = 2001) -> tuple[FloatArray, FloatArray]:
-        """Dense skin meridian from the base circle to the tip, m."""
+        """Dense skin meridian from the base circle to the tip (or the cap), m."""
+        if not self._capped:
+            return self._full_meridian(count)
+        rho, zeta = self._full_meridian(max(count, 4001))
+        rc = self.cap_radius
+        # Cut where the meridian last comes in to the cap radius, then resample evenly.
+        i = int(np.flatnonzero(rho >= rc)[-1])
+        f = (rho[i] - rc) / (rho[i] - rho[i + 1])
+        r = np.append(rho[: i + 1], rc)
+        z = np.append(zeta[: i + 1], zeta[i] + f * (zeta[i + 1] - zeta[i]))
+        arc = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(r), np.diff(z)))])
+        t = np.linspace(0.0, arc[-1], count)
+        return np.interp(t, arc, r), np.interp(t, arc, z)
+
+    def _full_meridian(self, count: int) -> tuple[FloatArray, FloatArray]:
         pts = np.asarray(self.profile, dtype=np.float64)
         chord = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))])
         t = np.linspace(0.0, chord[-1], count)
@@ -636,9 +671,15 @@ class Revolved:
             raise PrimitiveError(f"{self.name}: profile points must be distinct")
         if self.gores < 3:
             raise PrimitiveError(f"{self.name}: a revolved shape needs at least 3 gores")
-        rho, _ = self.meridian()
+        rho, _ = self._full_meridian(2001)
         if np.any(rho[:-1] <= 0.0):
             raise PrimitiveError(f"{self.name}: the smoothed profile crosses the axis")
+        if self.cap_radius < 0.0:
+            raise PrimitiveError(f"{self.name}: cap radius must not be negative")
+        if self.cap_radius > 0.0 and pts[-1, 0] > 0.0:
+            raise PrimitiveError(f"{self.name}: a cap closes only a profile that ends on the axis")
+        if self.cap_radius >= float(rho.max()):
+            raise PrimitiveError(f"{self.name}: cap radius must be less than the widest radius")
 
 
 @dataclass(frozen=True)
@@ -661,6 +702,11 @@ class FreeformShape:
         Number of skin panels M (>= 2), cut along half-planes through the axis.
     marks_per_piece : int
         Match marks per panel on the rim (>= 1).
+    cap_radius : float
+        Radius :math:`r_c` of the cap round the pole, m (0: the panels meet in a point at
+        the pole). The part of the mesh round the pole inside the cylinder
+        :math:`\\rho = r_c` about the axis is cut off as one more piece, the cap, and the
+        panels end on its edge.
     """
 
     name: str
@@ -668,23 +714,24 @@ class FreeformShape:
     mesh: ReferenceMesh = field(repr=False)
     panels: int = 6
     marks_per_piece: int = 2
+    cap_radius: float = 0.0
 
     kind: PrimitiveKind = field(default="mesh", init=False)
 
     @property
     def pieces(self) -> int:
-        """Number of skin panels."""
+        """Number of skin panels (a cap is extra)."""
         return self.panels
 
     @property
     def closed_tip(self) -> bool:
-        """False: the panels meet at the pole where the axis leaves the mesh."""
-        return False
+        """True with a cap; otherwise the panels meet at the pole."""
+        return self.cap_radius > 0.0
 
     @property
     def tip_radius(self) -> float:
-        """0: the panels meet in a point."""
-        return 0.0
+        """Radius of the cap circle, m (0: the panels meet in a point)."""
+        return self.cap_radius
 
     @property
     def tip_height(self) -> float:
@@ -698,6 +745,8 @@ class FreeformShape:
             raise PrimitiveError(f"{self.name}: the mesh has too few triangles")
         if self.panels < 2:
             raise PrimitiveError(f"{self.name}: a free-form shape needs at least 2 panels")
+        if self.cap_radius < 0.0:
+            raise PrimitiveError(f"{self.name}: cap radius must not be negative")
 
 
 Primitive = Dome | Tube | Revolved | FreeformShape
@@ -806,7 +855,7 @@ class CutPiece:
     ----------
     label : str
         Piece label (``<name>-G1`` dome gores, ``<name>-P1`` tube panels,
-        ``<name>-TIP`` tip disc).
+        ``<name>-TIP`` tip disc or cap).
     finished : ndarray, shape (n, 2)
         Finished (sewn-line) outline, m, counter-clockwise, ``y`` up the piece.
     cut : ndarray, shape (m, 2)
@@ -819,6 +868,9 @@ class CutPiece:
         Area of the piece on the designed 3D shape, m^2.
     cut_count : int
         Pieces to cut.
+    seam_points : tuple of (float, float)
+        Of a tip disc or cap: where every skin seam meets its edge, m, seam 1 first (seam
+        ``j`` joins pieces ``j - 1`` and ``j``, seam 1 the last piece and the first).
     """
 
     label: str
@@ -828,6 +880,7 @@ class CutPiece:
     edges: dict[str, FloatArray] = field(repr=False)
     surface_area: float
     cut_count: int = 1
+    seam_points: tuple[tuple[float, float], ...] = ()
 
     @property
     def flat_area(self) -> float:
@@ -1800,6 +1853,10 @@ def design_primitive(
                 rim=None,
                 edges={"top": np.vstack([disc, disc[:1]])},
                 surface_area=math.pi * primitive.tip_radius**2,
+                seam_points=tuple(
+                    (primitive.tip_radius * math.cos(a), primitive.tip_radius * math.sin(a))
+                    for a in _seams(primitive)[:-1]
+                ),
             )
         )
 
@@ -1961,6 +2018,18 @@ def _checks(design: PrimitiveDesign, pieces: list[_Piece], tol: float) -> list[D
     if m == 1:  # a single tube panel is sewn to itself along one seam
         c = design.pieces[0]
         worst_pair = abs(_length(c.edges["right"]) - _length(c.edges["left"]))
+    if p.closed_tip and isinstance(p, FreeformShape):
+        # The panel tops are sewn round the cap's edge.
+        tops = sum(_length(c.edges["top"]) for c in design.pieces[:m])
+        edge = _length(design.pieces[m].edges["top"])
+        check(
+            "cap seam match",
+            abs(tops - edge),
+            tol,
+            "m",
+            "error",
+            f"panel tops {tops:.4f} m against the cap's edge {edge:.4f} m",
+        )
     check(
         "skin seam match",
         worst_pair,
@@ -2379,7 +2448,10 @@ class _SkinFactory:
             centre = design.base_point + prim.tip_height * design.axis
             local[free] = len(positions) + np.arange(len(free))
             positions.extend(
-                centre + np.outer(xy[free, 0], design.b1) + np.outer(xy[free, 1], design.b2)
+                centre
+                + np.outer(xy[free, 0], design.b1)
+                + np.outer(xy[free, 1], design.b2)
+                + np.outer(_cap_rise(prim, np.hypot(xy[free, 0], xy[free, 1])), design.axis)
             )
             tris.append(local[tri])
             rests.append(xy[tri])
@@ -2396,6 +2468,27 @@ class _SkinFactory:
             seams=seam_edges,
             notes=notes,
         )
+
+
+def _cap_rise(prim: Primitive, rho: FloatArray) -> FloatArray:
+    """Height of the designed surface above a cap's plane at radii ``rho`` (m) inside it.
+
+    A cap closes a shape that comes to a point; its nodes start on that pointed surface
+    (curved and taut), not on the flat cap, so the solve starts near the inflated shape. A
+    tip disc of the shape itself (a tube's or a profile's last radius) starts flat (0).
+    """
+    import dataclasses
+
+    if not isinstance(prim, Dome | Revolved) or prim.cap_radius <= 0.0:
+        return np.zeros(len(rho))
+    if isinstance(prim, Revolved) and not prim._capped:
+        return np.zeros(len(rho))
+    r_full, z_full = dataclasses.replace(prim, cap_radius=0.0).meridian(4001)
+    inner = r_full <= prim.cap_radius
+    order = np.argsort(r_full[inner])
+    rise = np.interp(rho, r_full[inner][order], z_full[inner][order]) - prim.tip_height
+    out: FloatArray = np.maximum(rise, 0.0)
+    return out
 
 
 def primitive_appendage(
@@ -2544,6 +2637,7 @@ def _design_freeform(
     from envelopelab.features.freeform import (
         EDGE_STRAIN_LIMIT,
         build_mesh_skin,
+        cap_outline,
         cut_outline,
         panel_outline,
     )
@@ -2559,8 +2653,10 @@ def _design_freeform(
     g_centre = shape.placement.gore - 0.5 + shape.placement.across
     pieces: list[CutPiece] = []
     strain = 0.0
-    for k, panel in enumerate(skin.panels):
-        finished, edges = panel_outline(panel)
+    flat_pieces = [*skin.panels, *([skin.cap] if skin.cap is not None else [])]
+    for k, panel in enumerate(flat_pieces):
+        cap = k == len(skin.panels)
+        finished, edges = cap_outline(panel) if cap else panel_outline(panel)
         e3 = panel.x[panel.tri]
         ef = panel.flat[panel.tri]
         for a, b in ((0, 1), (1, 2), (2, 0)):
@@ -2572,12 +2668,13 @@ def _design_freeform(
         )
         pieces.append(
             CutPiece(
-                label=_piece_label(shape, k),
+                label=f"{shape.name}-TIP" if cap else _piece_label(shape, k),
                 finished=finished,
                 cut=cut_outline(finished, seam_allowance),
-                rim=edges.pop("rim"),
+                rim=edges.pop("rim", None),
                 edges=edges,
                 surface_area=area,
+                seam_points=skin.cap_seam_points() if cap else (),
             )
         )
     marks = []

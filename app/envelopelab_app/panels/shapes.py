@@ -54,13 +54,17 @@ from envelopelab.features.metrics import REQUIRED_FOS
 from envelopelab.features.primitives import CutPiece, PrimitiveDesign
 from envelopelab.project.model import SOLVER_LABELS
 from envelopelab.project.shapes import (
+    CAP_PANEL_TOP_WIDTH,
     MeshShape,
     RevolvedShape,
     ShapeKind,
     ShapePlacement,
     ShapeSpec,
+    auto_cap_diameter,
+    cap_diameter,
     default_shape,
     mesh_shape,
+    pointed,
     shape_fabrics,
 )
 from envelopelab_app.controller import WorkspaceController
@@ -691,6 +695,15 @@ class ShapesPanel(QWidget):
         if spec.feed_hole_radius is not None:
             self.feed_radius.setValue(spec.feed_hole_radius)
         self.feed_radius.blockSignals(False)
+        capped = pointed(spec)
+        self.cap_auto.blockSignals(True)
+        self.cap_auto.setChecked(spec.cap_diameter is None)
+        self.cap_auto.setEnabled(capped)
+        self.cap_auto.blockSignals(False)
+        self.cap_diameter.blockSignals(True)
+        self.cap_diameter.setValue(cap_diameter(spec))
+        self.cap_diameter.setEnabled(capped and spec.cap_diameter is not None)
+        self.cap_diameter.blockSignals(False)
         self.fabric_combo.blockSignals(True)
         index = self.fabric_combo.findData(spec.fabric or "")
         self.fabric_combo.setCurrentIndex(max(index, 0))
@@ -760,6 +773,30 @@ class ShapesPanel(QWidget):
         feed_row.addWidget(self.feed_check)
         feed_row.addWidget(self.feed_radius)
         self.form.addRow("Feed hole radius (m)", feed_row)
+        self.cap_auto = QCheckBox("Automatic")
+        self.cap_auto.setObjectName("shapeCapAuto")
+        self.cap_diameter = QDoubleSpinBox()
+        self.cap_diameter.setObjectName("shapeCapDiameter")
+        self.cap_diameter.setDecimals(3)
+        self.cap_diameter.setRange(0.0, 100.0)
+        self.cap_diameter.setSingleStep(0.01)
+        self.cap_diameter.setKeyboardTracking(False)
+        tip = (
+            "Diameter of the cap the tops of the skin pieces are sewn round, so they do not "
+            "meet in a point. Automatic: every piece's top at least "
+            f"{CAP_PANEL_TOP_WIDTH * 1000:.0f} mm wide (at most half the base diameter). "
+            "0: the pieces meet in a point."
+        )
+        self.cap_auto.setToolTip(tip)
+        self.cap_diameter.setToolTip(tip)
+        self.cap_auto.toggled.connect(self._cap_toggled)
+        self.cap_diameter.valueChanged.connect(
+            lambda v: self.set_value(("cap_diameter",), float(v))
+        )
+        cap_row = QHBoxLayout()
+        cap_row.addWidget(self.cap_auto)
+        cap_row.addWidget(self.cap_diameter)
+        self.form.addRow("Cap diameter (m)", cap_row)
         self.holes_table = QTableWidget(0, 4)
         self.holes_table.setObjectName("extraFeedHoles")
         self.holes_table.setHorizontalHeaderLabels(
@@ -871,6 +908,13 @@ class ShapesPanel(QWidget):
         holes[item.row()][key] = value
         if not self.set_value(("feed_holes",), holes):
             self._update_form(self.spec())
+
+    def _cap_toggled(self, on: bool) -> None:
+        spec = self.spec()
+        if spec is None:
+            return
+        # Leaving automatic keeps the automatic diameter as the starting value.
+        self.set_value(("cap_diameter",), None if on else auto_cap_diameter(spec))
 
     def _feed_toggled(self, on: bool) -> None:
         spec = self.spec()

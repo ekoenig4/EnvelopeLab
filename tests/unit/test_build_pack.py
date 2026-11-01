@@ -310,7 +310,8 @@ def test_skin_pieces_say_what_each_edge_is_sewn_to(pack: Path) -> None:
     assert "sew to G16 (its right side)" in first  # round the shape
     horn = _texts(pack / "horn-P1.dxf", "NOTES")
     assert "TOP: sew to the tip disc" in horn
-    tip = _texts(pack / "horn-TIP.dxf", "NOTES")
+    assert "TIP DISC" in _texts(pack / "horn-TIP.dxf", "NOTES")
+    tip = _texts(pack / "horn-TIP.dxf", "LABEL")
     assert any(t.startswith("TIP DISC: sew round the tops") for t in tip)
     label = _texts(pack / "ear-G5.dxf", "LABEL")
     assert any(t.startswith("rim marks") and "lie on the envelope at gore" in t for t in label)
@@ -330,3 +331,51 @@ def test_row_sheets_list_the_gores_to_mark(pack: Path) -> None:
             for t in label
         ), label
     assert check_pack(pack) == []
+
+
+def test_the_tip_disc_shows_where_every_seam_meets_it() -> None:
+    """A tick on the tip disc's edge (pointing in) and the two panels' names at every seam,
+    so the panel tops are sewn round it in place."""
+    from envelopelab.export.build_pack import TICK_LENGTH, primitive_sheets
+
+    horn = SHAPES[1]
+    sheets = {s.name: s for s in primitive_sheets(horn)}
+    tip = sheets["horn-TIP"]
+    m = horn.primitive.pieces
+    assert len(tip.ticks) == m
+    radius = horn.primitive.tip_radius
+    for tick in tip.ticks:
+        assert np.linalg.norm(tick[0]) == pytest.approx(radius, abs=1e-9)
+        assert np.linalg.norm(tick[1]) == pytest.approx(radius - TICK_LENGTH, abs=1e-9)
+    names = [t[2] for t in tip.texts]
+    assert names == ["TIP DISC", *(f"P{k}" for k in range(1, m + 1))]
+    # Each panel's name sits inside its stretch of edge, between the ticks of its seams.
+    for k, (x, y, _) in enumerate(tip.texts[1:]):
+        a = 2.0 * math.pi * k / m - math.pi / m
+        turn = (math.atan2(y, x) - (a + math.pi / m) + math.pi) % (2.0 * math.pi) - math.pi
+        assert turn == pytest.approx(0.0, abs=1e-6)
+        assert math.hypot(x, y) < radius
+    assert any("sew each panel's top between the ticks" in n for n in tip.notes)
+    assert any(n.startswith("TIP DISC: sew round the tops of all horn") for n in tip.notes)
+
+
+def test_a_capped_dome_is_sewn_round_its_cap() -> None:
+    from envelopelab.export.build_pack import primitive_seam_pairs, primitive_sheets
+
+    ear = design_primitive(
+        Dome("ear", Placement(3, 12.0, across=0.5), 1.0, 1.2, gores=16, cap_radius=0.25),
+        SURFACE,
+    )
+    assert ear.pieces[-1].label == "ear-TIP"
+    sheets = {s.name: s for s in primitive_sheets(ear)}
+    assert any(t[2] == "TOP: sew to the tip disc" for t in sheets["ear-G5"].texts)
+    assert len(sheets["ear-TIP"].ticks) == 16
+    # The gore tops add up to the cap's edge (3 mm sewing tolerance of the QA).
+    pair = next(p for p in primitive_seam_pairs(ear) if p.b == (("ear-TIP", "top"),))
+    tops = sum(_polyline_length(ear.pieces[k].edges["top"]) for k in range(16))
+    cap = _polyline_length(ear.pieces[-1].edges["top"])
+    assert len(pair.a) == 16 and abs(tops - cap) < 3e-3
+
+
+def _polyline_length(points: np.ndarray) -> float:
+    return float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())

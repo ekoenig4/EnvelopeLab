@@ -130,6 +130,7 @@ gores (see [Special-shape primitives](../validation/special-shape-primitives.md)
 | skin seam match | largest length difference of the two sides of a seam, m | 3 mm (assumed) |
 | seam flattening | largest relative difference of a flat seam edge from its 3D seam | 2 % (assumed) |
 | area distortion | largest relative difference of a piece's flat and designed area | 1 % (assumed) |
+| cap seam match | panel tops summed − the cap's edge, m (mesh shapes; a parametric tip disc is a circle of the tops' radius) | 3 mm (assumed) |
 | feed hole inside footprint | — | inside (every hole: the centred one and each extra one) |
 | feed hole clear of seams | distance from the hole's finished edge to the nearest finished seam of its panel (both gore seams, both row seams), m | \(w_{hole\,tape} + \max a_{row}\): the hem band beside the fell (assumed rule, design values; 50 mm without a design) |
 
@@ -177,7 +178,7 @@ side of the envelope is cut where the signed distance is zero (bisection to
 one loop turning once round the axis. The point where the axis leaves the mesh (the
 *pole*) is inserted as a vertex. The skin is then cut along the half-planes
 \( \phi_j = 2\pi j/M - \pi/M \), so every panel is a disc bounded by the footprint, two seams
-and the pole.
+and the pole (or the cap's edge, see [Caps](#caps)).
 
 **Flattening** [Levy, Liu]. Each panel is mapped by least-squares conformal maps, then
 by as-rigid-as-possible iterations that fit every triangle's best rotation and solve the
@@ -201,6 +202,60 @@ The sub-model meshes every flat panel round the footprint nodes like the paramet
 shapes. Its interior nodes start on the mesh (barycentric in the flat panel), and every
 triangle rests in its flat panel. No faceting correction is applied: the mesh is taken as
 the designed surface.
+
+## Caps
+
+Pieces that meet in a point are hard to sew: \(M\) seams and \(M\) seam allowances pile
+up in one spot. Balloon practice sews their tops round a circle of measurable diameter
+instead, closed by a round *cap*. A shape that would otherwise come to a point (a dome, a
+revolved profile ending on the axis, a pointed tube, a mesh) can therefore be closed by a
+cap of radius \(r_c\) (`cap_radius`; 0 keeps the point).
+
+**Parametric shapes.** The meridian stops where it last comes in to \( \rho = r_c \), and a
+flat disc of radius \(r_c\) closes it (the tip disc of a tube). A dome stops at
+\( \omega_c = \arccos(r_c/a) \), at height
+
+\[
+\zeta_c = h\sqrt{1 - (r_c/a)^2};
+\]
+
+a pointed tube becomes the frustum to \( r_t = r_c \) over \( L(1 - r_c/r_b) \). The disc is
+flat, so the cap takes the point off the designed shape: the designed height drops by
+\( h - \zeta_c \) and the inflated top is as flat as the disc's strain allows.
+
+**Mesh shapes.** The part of the mesh round the pole inside the cylinder \( \rho = r_c \)
+about the axis is cut off (crossings found by bisection along each edge, where
+\( \rho \) is convex, to \(10^{-7}\) m relative to the cap). Only the part joined to the
+pole is cut, so a narrower neck lower down stays whole. The cap is flattened like a panel,
+its edge at its true 3D length; the panels end on that edge and the *cap seam match*
+check compares the tops with it. The designed surface is unchanged (the cap is the mesh's
+own top), but a doubly curved top cannot be flattened exactly: held at its edge's true
+length, the flat cap is smaller in area than the top it stands for (*area distortion*
+check), so it flattens the inflated top as above.
+
+**Automatic diameter (projects).** A project shape's `cap_diameter` is None (automatic),
+0 (a point) or a chosen diameter. The automatic one gives each of the \(M\) pieces a top
+at least \( w_{top} = 100 \) mm wide (assumed: a top that can still be sewn and taped),
+
+\[
+d = \frac{M\,w_{top}}{\pi},
+\]
+
+at most half the base diameter (assumed): 637 mm for 20 panels, 509 mm for 16.
+
+**Sub-model.** The panels share the nodes of the cap's edge with the cap, which is meshed
+as one more piece and sewn round by the `tip seam`. A parametric cap rests in its flat
+disc but its nodes start on the pointed shape it replaced, so the solve starts taut near
+the inflated shape instead of from a slack flat disc; a mesh cap starts on the mesh.
+
+**What to expect.** A flat cap on a curved top cannot take the curvature without
+stretching. At envelope pressures the cloth hardly stretches, so the top flattens and the
+cloth round the cap's edge wrinkles. The preview solver converges more slowly there, and
+not at all for some caps and mesh sizes (measured: a 16-gore dome of
+\(a = 0.8\), \(h = 0.6\) m converged with \(r_c = 0.25\) m at 0.15 m elements, but not with
+\(r_c = 0.4\) m; the flat tube tip disc behaves the same). An unconverged solve is
+reported as such, never as a result. A free-form test shape (16 panels, \(r_c = 0.15\) m)
+converged 14 mm (1.2 %) lower than designed, within its cap's sagitta.
 
 ## Sub-model with an as-cut skin
 
@@ -252,7 +307,7 @@ at least one hole.
 
 **Assumptions.** Seam allowances, stitching and tape widths are not modelled as material.
 The patch edge is held on the designed envelope (keep the margin at least half the
-footprint size). The tip disc of a tube is flat as cut.
+footprint size). The tip disc of a tube, and every cap, is flat as cut.
 
 ## What the solver shows
 
