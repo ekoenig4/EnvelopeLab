@@ -492,3 +492,34 @@ def test_cut_piece_drawing_zooms_pans_and_fits(gore_window: MainWindow) -> None:
     preview.zoom_at(10.0, at)
     preview.reset_view()
     assert preview.zoom == 1.0 and preview.pan == QPointF(0.0, 0.0)
+
+
+def test_shapes_are_reported_one_by_one_and_a_stale_batch_stops() -> None:
+    """The placing worker announces each shape as soon as it is placed (the first shapes
+    show while the rest are placed), and a batch made out of date ends early."""
+    from envelopelab.project.session import ProjectSession
+    from envelopelab.project.shapes import default_shape
+    from envelopelab_app.shapes_service import _DesignWorker
+
+    from .gui_support import GORE_PROJECT
+
+    session = ProjectSession.open(GORE_PROJECT)
+    design, patterns = session.state.design, session.state.patterns
+    jobs = [(n, f"key-{n}", default_shape("dome", design, n)) for n in ("A", "B", "C")]
+    worker = _DesignWorker(design, patterns, jobs)
+    batches: list[list[Any]] = []
+    worker.done.connect(batches.append)
+    worker.run()  # in this thread: every emission is delivered at once
+    assert [[name for name, _ in b] for b in batches] == [["A"], ["B"], ["C"]]
+    assert all(r.design is not None and r.key == f"key-{n}" for b in batches for n, r in b)
+
+    stopped = _DesignWorker(design, patterns, jobs)
+    seen: list[list[Any]] = []
+
+    def stop_after_first(batch: list[Any]) -> None:
+        seen.append(batch)
+        stopped.stop = True
+
+    stopped.done.connect(stop_after_first)
+    stopped.run()
+    assert [[name for name, _ in b] for b in seen] == [["A"]]

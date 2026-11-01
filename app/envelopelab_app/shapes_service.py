@@ -94,7 +94,12 @@ class ShapeSimulation:
 
 
 class _DesignWorker(QThread):
-    """Places a batch of shapes on the envelope (pure functions of copies of the data)."""
+    """Places a batch of shapes on the envelope (pure functions of copies of the data).
+
+    Each shape's result is announced as soon as it is placed, so the first shapes show
+    while the others are still being placed. Setting ``stop`` (a newer request is waiting)
+    ends the batch after the shape being placed.
+    """
 
     done = Signal(object)  # list[tuple[str, ShapeResult]]
 
@@ -108,9 +113,11 @@ class _DesignWorker(QThread):
         self.design = design
         self.patterns = patterns
         self.jobs = jobs
+        #: Set from the GUI thread when the batch is out of date (a plain flag is enough:
+        #: it is only read between shapes).
+        self.stop = False
 
     def run(self) -> None:  # noqa: D102 (QThread entry point)
-        out: list[tuple[str, ShapeResult]] = []
         try:
             surface = envelope_surface(self.design, self.patterns)
         except Exception as exc:  # the envelope itself cannot be built
@@ -119,14 +126,16 @@ class _DesignWorker(QThread):
             return
         clearance = feed_hole_clearance(self.design, self.patterns)
         for name, key, spec in self.jobs:
+            if self.stop:
+                return
             try:
-                out.append((name, ShapeResult(key, shape_design(spec, surface, clearance))))
+                result = ShapeResult(key, shape_design(spec, surface, clearance))
             except (PrimitiveError, ValueError) as exc:
-                out.append((name, ShapeResult(key, None, str(exc))))
+                result = ShapeResult(key, None, str(exc))
             except Exception as exc:  # report everything to the GUI, never crash it
                 detail = traceback.format_exception_only(type(exc), exc)[-1].strip()
-                out.append((name, ShapeResult(key, None, f"internal error: {detail}")))
-        self.done.emit(out)
+                result = ShapeResult(key, None, f"internal error: {detail}")
+            self.done.emit([(name, result)])
 
 
 class ShapeService(QObject):
@@ -218,8 +227,10 @@ class ShapeService(QObject):
         self, design: DesignDocument, patterns: PatternSet, jobs: list[tuple[str, str, ShapeSpec]]
     ) -> None:
         if self._worker is not None:
-            # One worker at a time: the newest request runs when the current one ends.
+            # One worker at a time: the newest request runs when the current one ends,
+            # which it does after its current shape (the rest of its batch is out of date).
             self._queued = (design, patterns, jobs)
+            self._worker.stop = True
             return
         self._worker = _DesignWorker(design, patterns, jobs)
         self._worker.done.connect(self._finished)
@@ -240,7 +251,13 @@ class ShapeService(QObject):
         if self._queued is not None:
             design, patterns, jobs = self._queued
             self._queued = None
-            jobs = [j for j in jobs if self.keys.get(j[0]) == j[1]]
+            # Still wanted, and not placed meanwhile by the batch that just ended.
+            jobs = [
+                (name, key, spec)
+                for name, key, spec in jobs
+                if self.keys.get(name) == key
+                and (name not in self.results or self.results[name].key != key)
+            ]
             if jobs:
                 self._start(design, patterns, jobs)
                 return

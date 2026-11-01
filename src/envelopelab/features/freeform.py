@@ -61,7 +61,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from scipy.sparse import coo_matrix, csc_matrix
-from scipy.sparse.linalg import lsqr, splu
+from scipy.sparse.linalg import splu
 from scipy.spatial import cKDTree
 
 from envelopelab.features.builder import DesignedSkin, FeatureBuildError, HostSurface, _mesh_disc
@@ -93,69 +93,100 @@ def _cut(
 ) -> tuple[FloatArray, IntArray]:
     """Split a triangle mesh along ``value = 0``.
 
-    Vertices with ``|value| <= tol`` lie on the cut and are never split. ``point(a, b, s)``
-    places the crossing on edge ``ab`` (default linear), ``accept(p)`` says whether a
-    crossing at ``p`` is cut at all (a half-plane). ``keep="pos"`` drops the negative side,
-    ``"both"`` keeps both sides. ``parents``, when given, receives the input triangle of
-    every output triangle.
+    Vertices with ``|value| <= tol`` lie on the cut and are never split.
+    ``point(A, B, S)`` places the crossings on edges ``AB`` (arrays of edge ends, shape
+    (k, 3), and linear fractions, shape (k,); default linear), ``accept(P)`` says which
+    crossings at ``P`` (shape (k, 3)) are cut at all (a half-plane). ``keep="pos"``
+    drops the negative side, ``"both"`` keeps both sides. ``parents``, when given,
+    receives the input triangle of every output triangle.
+
+    Only the triangles the cut crosses are split, one by one; the others are copied as
+    they are. New vertices are numbered in the order the triangles first use their edges.
     """
     sign = np.where(value > tol, 1, np.where(value < -tol, -1, 0))
-    verts = list(x)
-    cache: dict[tuple[int, int], int | None] = {}
+    st = sign[tri]
+    pos, neg = (st > 0).any(axis=1), (st < 0).any(axis=1)
+    crossed = np.flatnonzero(pos & neg)
+    side = np.where(pos, 1, np.where(neg, -1, 0))
 
-    def cross(a: int, b: int) -> int | None:
+    # Each crossed triangle: one vertex on the cut (one crossing) or none (two).
+    plans: list[tuple[int, int, int, int, int]] = []
+    edge_index: dict[tuple[int, int], int] = {}
+    ends: list[tuple[int, int]] = []
+
+    def edge(a: int, b: int) -> int:
         key = (min(a, b), max(a, b))
-        if key not in cache:
-            s = value[a] / (value[a] - value[b])
-            p = x[a] + s * (x[b] - x[a]) if point is None else point(x[a], x[b], s)
-            if accept is not None and not accept(p):
-                cache[key] = None
-            else:
-                cache[key] = len(verts)
-                verts.append(p)
-        return cache[key]
+        if key not in edge_index:
+            edge_index[key] = len(ends)
+            ends.append((a, b))  # oriented as first used, as the crossing is computed
+        return edge_index[key]
 
-    out: list[list[int]] = []
-    side: list[int] = []
-    src: list[int] = []
-    for i_t, t in enumerate(tri):
-        src += [i_t - 1] * (len(out) - len(src))  # outputs of the previous triangle
-        st = sign[t]
-        if not ((st > 0).any() and (st < 0).any()):
-            out.append(list(t))
-            side.append(1 if (st > 0).any() else (-1 if (st < 0).any() else 0))
-            continue
-        zero = np.flatnonzero(st == 0)
+    for t in crossed.tolist():
+        tt, s3 = tri[t], st[t]
+        zero = np.flatnonzero(s3 == 0)
         if len(zero) == 1:
             z = int(zero[0])
-            a, b, c = t[z], t[(z + 1) % 3], t[(z + 2) % 3]
-            m = cross(b, c)
-            if m is None:
-                out.append(list(t))
-                side.append(2)
-                continue
-            out += [[a, b, m], [a, m, c]]
-            side += [int(sign[b]), int(sign[c])]
+            a, b, c = int(tt[z]), int(tt[(z + 1) % 3]), int(tt[(z + 2) % 3])
+            edge(b, c)
+            plans.append((t, 1, a, b, c))
+        else:
+            n_pos = int((s3 > 0).sum())
+            odd = int(np.flatnonzero(s3 > 0 if n_pos == 1 else s3 < 0)[0])
+            a, b, c = int(tt[odd]), int(tt[(odd + 1) % 3]), int(tt[(odd + 2) % 3])
+            edge(a, b)
+            edge(a, c)
+            plans.append((t, 2, a, b, c))
+
+    # Every crossing at once.
+    vertex = np.full(len(ends), -1, dtype=np.int64)
+    new_points = np.zeros((0, 3))
+    if ends:
+        ea = np.array([e[0] for e in ends], dtype=np.int64)
+        eb = np.array([e[1] for e in ends], dtype=np.int64)
+        frac = value[ea] / (value[ea] - value[eb])
+        pa, pb = x[ea], x[eb]
+        pts = pa + frac[:, None] * (pb - pa) if point is None else point(pa, pb, frac)
+        ok = np.ones(len(ends), dtype=bool) if accept is None else np.asarray(accept(pts))
+        vertex[ok] = len(x) + np.arange(int(ok.sum()))
+        new_points = np.asarray(pts)[ok]
+
+    # The pieces of each crossed triangle (a crossing that is not cut leaves it whole).
+    pieces: dict[int, tuple[list[list[int]], list[int]]] = {}
+    for t, kind, a, b, c in plans:
+        if kind == 1:
+            m = int(vertex[edge_index[(min(b, c), max(b, c))]])
+            if m < 0:
+                pieces[t] = ([[a, b, c]], [2])
+            else:
+                pieces[t] = ([[a, b, m], [a, m, c]], [int(sign[b]), int(sign[c])])
             continue
-        n_pos = int((st > 0).sum())
-        odd = int(np.flatnonzero(st > 0 if n_pos == 1 else st < 0)[0])
-        a, b, c = t[odd], t[(odd + 1) % 3], t[(odd + 2) % 3]
-        ab, ac = cross(a, b), cross(a, c)
-        if ab is None and ac is None:
-            out.append(list(t))
-            side.append(2)
+        ab = int(vertex[edge_index[(min(a, b), max(a, b))]])
+        ac = int(vertex[edge_index[(min(a, c), max(a, c))]])
+        if ab < 0 and ac < 0:
+            pieces[t] = ([[a, b, c]], [2])
             continue
-        if ab is None or ac is None:
+        if ab < 0 or ac < 0:
             raise FeatureBuildError("a seam cut ends inside a triangle (axis not through the pole)")
-        out += [[a, ab, ac], [ab, b, c], [ab, c, ac]]
-        side += [int(sign[a]), int(sign[b]), int(sign[b])]
-    src += [len(tri) - 1] * (len(out) - len(src))
-    tri_out = np.asarray(out, dtype=np.int64)
-    keep_mask = np.asarray(side) > 0 if keep == "pos" else np.ones(len(out), dtype=bool)
-    tri_out = tri_out[keep_mask]
+        pieces[t] = (
+            [[a, ab, ac], [ab, b, c], [ab, c, ac]],
+            [int(sign[a]), int(sign[b]), int(sign[b])],
+        )
+
+    # Assemble in the input order.
+    counts = np.ones(len(tri), dtype=np.int64)
+    for t, (tris, _) in pieces.items():
+        counts[t] = len(tris)
+    first = np.concatenate([[0], np.cumsum(counts)[:-1]])
+    out = np.repeat(tri, counts, axis=0)
+    out_side = np.repeat(side, counts)
+    for t, (tris, sides) in pieces.items():
+        out[first[t] : first[t] + len(tris)] = tris
+        out_side[first[t] : first[t] + len(tris)] = sides
+    src = np.repeat(np.arange(len(tri)), counts)
+    keep_mask = out_side > 0 if keep == "pos" else np.ones(len(out), dtype=bool)
     if parents is not None:
-        parents[:] = np.asarray(src, dtype=np.int64)[keep_mask].tolist()
-    return np.asarray(verts), tri_out
+        parents[:] = src[keep_mask].tolist()
+    return np.vstack([x, new_points]), out[keep_mask]
 
 
 def _insert_pole(
@@ -284,11 +315,23 @@ def _lscm(x: FloatArray, tri: IntArray, pins: tuple[int, int]) -> FloatArray:
     pin_val = np.array([0.0, 1.0, 0.0, 0.0])
     free = np.setdiff1d(np.arange(2 * n), pin_idx)
     rhs = -big[:, pin_idx] @ pin_val
-    sol = lsqr(big[:, free], rhs, atol=1e-12, btol=1e-12, iter_lim=20000)[0]
+    # The least-squares solution from the normal equations, factorised directly (the
+    # system is small and sparse; an iterative solver needs thousands of products).
+    a = big[:, free]
+    sol = splu(csc_matrix(a.T @ a)).solve(a.T @ rhs)
     full = np.zeros(2 * n)
     full[free] = sol
     full[pin_idx] = pin_val
     return np.column_stack([full[:n], full[n:]])
+
+
+def _best_rotations(cov: FloatArray) -> tuple[FloatArray, FloatArray]:
+    r"""Cosine and sine of the rotation :math:`R` maximising :math:`\operatorname{tr}(R^T C)`
+    for each 2 x 2 matrix :math:`C` of ``cov`` (shape (m, 2, 2)):
+    :math:`\theta = \operatorname{atan2}(C_{10} - C_{01}, C_{00} + C_{11})`, the rotation an
+    SVD of :math:`C` gives (with its reflection removed)."""
+    theta = np.arctan2(cov[:, 1, 0] - cov[:, 0, 1], cov[:, 0, 0] + cov[:, 1, 1])
+    return np.cos(theta), np.sin(theta)
 
 
 def _arap(
@@ -298,8 +341,14 @@ def _arap(
     heavy: set[tuple[int, int]],
     fixed: IntArray | None = None,
 ) -> FloatArray:
-    """As-rigid-as-possible flattening [Liu]_ from ``init`` (heavy edges weighted up;
-    ``fixed`` vertices keep their ``init`` positions)."""
+    r"""As-rigid-as-possible flattening [Liu]_ from ``init`` (heavy edges weighted up;
+    ``fixed`` vertices keep their ``init`` positions).
+
+    The local step's best rotation of each triangle is closed-form in 2D: for the
+    cotangent-weighted covariance :math:`C = \sum c_{ij} \Delta u\,\Delta x^T`, the
+    rotation by :math:`\theta = \operatorname{atan2}(C_{10} - C_{01}, C_{00} + C_{11})`
+    maximises :math:`\operatorname{tr}(R^T C)` (the polar factor an SVD would give).
+    """
     n = len(x)
     loc = _local_frames(x, tri)
     cot = np.zeros((len(tri), 3))
@@ -308,11 +357,13 @@ def _arap(
         cross = a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]
         cot[:, k] = np.einsum("mi,mi->m", a, b) / np.maximum(np.abs(cross), 1e-300)
     cot = np.clip(cot, 1e-3, None)
-    for t in range(len(tri)):
+    if heavy:
+        # Edge (i, j) as one integer i * n + j (i < j), looked up in the heavy set.
+        heavy_keys = np.fromiter((i * n + j for i, j in heavy), dtype=np.int64)
         for k in range(3):
-            i, j = tri[t, (k + 1) % 3], tri[t, (k + 2) % 3]
-            if (min(i, j), max(i, j)) in heavy:
-                cot[t, k] *= EDGE_WEIGHT
+            i, j = tri[:, (k + 1) % 3], tri[:, (k + 2) % 3]
+            keys = np.minimum(i, j).astype(np.int64) * n + np.maximum(i, j)
+            cot[np.isin(keys, heavy_keys), k] *= EDGE_WEIGHT
     rows, cols, vals = [], [], []
     for k in range(3):
         i, j = tri[:, (k + 1) % 3], tri[:, (k + 2) % 3]
@@ -326,29 +377,41 @@ def _arap(
     pinned = np.array([0]) if fixed is None or not len(fixed) else np.asarray(fixed)
     free = np.setdiff1d(np.arange(n), pinned)
     solver = splu(csc_matrix(lap[free][:, free]))
+    lap_fp = lap[free][:, pinned]
+    # Gather (edge k of triangle t -> its two vertices) as one sparse matrix, so the right
+    # hand side is a product instead of a scatter.
+    m = len(tri)
+    gather = coo_matrix(
+        (
+            np.concatenate([np.ones(3 * m), -np.ones(3 * m)]),
+            (
+                np.concatenate([tri[:, [1, 2, 0]].T.ravel(), tri[:, [2, 0, 1]].T.ravel()]),
+                np.concatenate([np.arange(3 * m), np.arange(3 * m)]),
+            ),
+        ),
+        shape=(n, 3 * m),
+    ).tocsr()
+    dxs = [loc[:, (k + 1) % 3] - loc[:, (k + 2) % 3] for k in range(3)]
     u = init.copy()
     for _ in range(ARAP_ITERATIONS):
-        rot = np.zeros((len(tri), 2, 2))
-        cov = np.zeros((len(tri), 2, 2))
+        cov = np.zeros((m, 2, 2))
         for k in range(3):
             i, j = tri[:, (k + 1) % 3], tri[:, (k + 2) % 3]
             du = u[i] - u[j]
-            dx = loc[:, (k + 1) % 3] - loc[:, (k + 2) % 3]
-            cov += cot[:, k][:, None, None] * np.einsum("mi,mj->mij", du, dx)
-        uu, _, vt = np.linalg.svd(cov)
-        rot = uu @ vt
-        bad = np.linalg.det(rot) < 0
-        uu[bad, :, 1] *= -1.0
-        rot[bad] = uu[bad] @ vt[bad]
-        rhs = np.zeros((n, 2))
-        for k in range(3):
-            i, j = tri[:, (k + 1) % 3], tri[:, (k + 2) % 3]
-            dx = loc[:, (k + 1) % 3] - loc[:, (k + 2) % 3]
-            r = cot[:, k][:, None] * np.einsum("mij,mj->mi", rot, dx)
-            np.add.at(rhs, i, r)
-            np.add.at(rhs, j, -r)
-        rhs_f = rhs[free] - lap[free][:, pinned] @ u[pinned]
-        u[free] = np.column_stack([solver.solve(rhs_f[:, 0]), solver.solve(rhs_f[:, 1])])
+            cov += cot[:, k][:, None, None] * du[:, :, None] * dxs[k][:, None, :]
+        c, sn = _best_rotations(cov)
+        r = np.concatenate(
+            [
+                cot[:, k][:, None]
+                * np.column_stack(
+                    [c * dxs[k][:, 0] - sn * dxs[k][:, 1], sn * dxs[k][:, 0] + c * dxs[k][:, 1]]
+                )
+                for k in range(3)
+            ]
+        )
+        rhs = gather @ r
+        rhs_f = rhs[free] - lap_fp @ u[pinned]
+        u[free] = solver.solve(np.ascontiguousarray(rhs_f))
     return u
 
 
@@ -497,19 +560,24 @@ def build_mesh_skin(
     local = np.asarray(shape.mesh.vertices, dtype=np.float64)
     world = base + local[:, :1] * b1 + local[:, 1:2] * b2 + local[:, 2:3] * axis
 
-    def refine(a: FloatArray, b: FloatArray, s: float) -> FloatArray:
-        lo, hi = 0.0, 1.0
-        sa = surface.signed_distance(a[None])[0]
+    def refine(a: FloatArray, b: FloatArray, _s: FloatArray) -> FloatArray:
+        """Crossings of edges ``ab`` with the envelope, by bisection (all at once)."""
+        lo, hi = np.zeros(len(a)), np.ones(len(a))
+        sa = surface.signed_distance(a) > 0
+        length = np.linalg.norm(b - a, axis=1)
+        active = np.ones(len(a), dtype=bool)
         for _ in range(60):
-            mid = 0.5 * (lo + hi)
-            sm = surface.signed_distance((a + mid * (b - a))[None])[0]
-            if (sm > 0) == (sa > 0):
-                lo = mid
-            else:
-                hi = mid
-            if (hi - lo) * float(np.linalg.norm(b - a)) < ROOT_TOLERANCE:
+            idx = np.flatnonzero(active)
+            if not len(idx):
                 break
-        return a + 0.5 * (lo + hi) * (b - a)
+            mid = 0.5 * (lo[idx] + hi[idx])
+            sm = surface.signed_distance(a[idx] + mid[:, None] * (b[idx] - a[idx])) > 0
+            same = sm == sa[idx]
+            lo[idx[same]] = mid[same]
+            hi[idx[~same]] = mid[~same]
+            active[idx[(hi[idx] - lo[idx]) * length[idx] < ROOT_TOLERANCE]] = False
+        out: FloatArray = a + (0.5 * (lo + hi))[:, None] * (b - a)
+        return out
 
     tri = np.asarray(shape.mesh.triangles, dtype=np.int64)
     sd = surface.signed_distance(world)
@@ -557,7 +625,7 @@ def build_mesh_skin(
             f,
             "both",
             tol,
-            accept=lambda p, d=d: float((p - base) @ d) > 0.0,
+            accept=lambda p, d=d: (p - base) @ d > 0.0,
             parents=parents,
         )
         cap_tri = cap_tri[np.asarray(parents, dtype=np.int64)]
@@ -731,16 +799,16 @@ def _cut_cap(
     in_comp[list(comp)] = True
     f = np.where(in_comp, r - radius, np.abs(r - radius))
 
-    def point(a: FloatArray, b: FloatArray, s: float) -> FloatArray:
-        lo, hi = 0.0, 1.0
-        a_in = float(rho(a)[0]) < radius
+    def point(a: FloatArray, b: FloatArray, _s: FloatArray) -> FloatArray:
+        lo, hi = np.zeros(len(a)), np.ones(len(a))
+        a_in = rho(a) < radius
         for _ in range(60):
             mid = 0.5 * (lo + hi)
-            if (float(rho(a + mid * (b - a))[0]) < radius) == a_in:
-                lo = mid
-            else:
-                hi = mid
-        return a + 0.5 * (lo + hi) * (b - a)
+            same = (rho(a + mid[:, None] * (b - a)) < radius) == a_in
+            lo = np.where(same, mid, lo)
+            hi = np.where(same, hi, mid)
+        out: FloatArray = a + (0.5 * (lo + hi))[:, None] * (b - a)
+        return out
 
     x, tri = _cut(x, tri, f, "both", tol * max(radius, 1.0), point)
     f = np.concatenate([f, np.zeros(len(x) - len(f))])

@@ -189,7 +189,12 @@ cotangent-weighted Laplace system
 \lVert (\mathbf{u}_i - \mathbf{u}_j) - R_t(\mathbf{x}_i - \mathbf{x}_j) \rVert^2,
 \]
 
-with the seam and footprint edges weighted up. The boundary is then rebuilt with
+with the seam and footprint edges weighted up. In 2D the best rotation of each triangle has
+a closed form: for its weighted covariance
+\( C = \sum c_{ij}\,\Delta\mathbf{u}\,\Delta\mathbf{x}^T \),
+\( \theta = \operatorname{atan2}(C_{10} - C_{01},\ C_{00} + C_{11}) \), the rotation an SVD
+of \(C\) gives once its reflection is removed. The starting conformal map is solved
+directly from its normal equations (sparse LU). The boundary is then rebuilt with
 every edge at its exact 3D length. Its edge directions come from that solution, and the
 closure gap is removed by the least-norm change of the edge angles, which changes no
 length. The interior is relaxed again with the boundary held. Footprint and seams
@@ -254,8 +259,11 @@ cloth round the cap's edge wrinkles. The preview solver converges more slowly th
 not at all for some caps and mesh sizes (measured: a 16-gore dome of
 \(a = 0.8\), \(h = 0.6\) m converged with \(r_c = 0.25\) m at 0.15 m elements, but not with
 \(r_c = 0.4\) m; the flat tube tip disc behaves the same). An unconverged solve is
-reported as such, never as a result. A free-form test shape (16 panels, \(r_c = 0.15\) m)
-converged 14 mm (1.2 %) lower than designed, within its cap's sagitta.
+reported as such, never as a result. A free-form test shape (16 panels, 1.10 m high)
+converged 6 mm (0.6 %) lower than designed with \(r_c = 0.10\) m and 14 mm (1.2 %) lower
+with \(r_c = 0.15\) m, within its cap's sagitta. How many iterations a slow case needs can
+depend on rounding: the 0.15 m cap took 111,000 or 283,000 iterations when a handful of
+nodes were numbered differently.
 
 ## Sub-model with an as-cut skin
 

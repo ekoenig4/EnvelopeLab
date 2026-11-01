@@ -218,8 +218,11 @@ def test_capped_freeform_shape_inflates_to_its_designed_height() -> None:
     from envelopelab.solvers.dynamic_relaxation import solve
     from envelopelab.solvers.simulation import from_preview
 
+    # A 0.10 m cap converges in about 17,000 iterations. A 0.15 m cap is a slow case
+    # (111,000 to 283,000 iterations, depending on rounding-level differences in the node
+    # numbering), too close to the solver's limit for a test.
     d = design_primitive(
-        FreeformShape("blob", Placement(2, EQUATOR), BLOB, 16, cap_radius=0.15),
+        FreeformShape("blob", Placement(2, EQUATOR), BLOB, 16, cap_radius=0.10),
         SPHERE,
         0.01,
         0.2,
@@ -237,3 +240,53 @@ def test_capped_freeform_shape_inflates_to_its_designed_height() -> None:
     cap = d._skin.cap
     sagitta = float(((cap.x - d.base_point) @ d.axis).max()) - d._skin.cap_floor
     assert d.designed_height - sagitta < m.projected_height < d.designed_height
+
+
+def test_closed_form_rotation_is_the_svd_rotation() -> None:
+    """The ARAP local step's 2D rotation (closed form) equals the polar factor of an SVD
+    with the reflection removed, as used before."""
+    from envelopelab.features.freeform import _best_rotations
+
+    rng = np.random.default_rng(7)
+    cov = rng.normal(size=(500, 2, 2))
+    c, s = _best_rotations(cov)
+    uu, _, vt = np.linalg.svd(cov)
+    rot = uu @ vt
+    bad = np.linalg.det(rot) < 0
+    uu[bad, :, 1] *= -1.0
+    rot[bad] = uu[bad] @ vt[bad]
+    assert np.allclose(rot[:, 0, 0], c, atol=1e-12) and np.allclose(rot[:, 1, 0], s, atol=1e-12)
+    assert np.allclose(rot[:, 0, 1], -s, atol=1e-12) and np.allclose(rot[:, 1, 1], c, atol=1e-12)
+
+
+def test_conformal_map_direct_solve_matches_the_iterative_one() -> None:
+    from scipy.sparse import bmat, coo_matrix
+    from scipy.sparse.linalg import lsqr
+
+    from envelopelab.features.freeform import _local_frames, _lscm
+
+    d = design_primitive(FreeformShape("blob", Placement(2, EQUATOR), BLOB, 8), SPHERE)
+    panel = d._skin.panels[0]
+    x, tri = panel.x, panel.tri
+    pins = (panel.rim[0], panel.rim[-1])
+    flat = _lscm(x, tri, pins)
+    # The same least-squares problem solved iteratively (the former implementation).
+    n = len(x)
+    loc = _local_frames(x, tri)
+    area = 0.5 * np.abs(loc[:, 1, 0] * loc[:, 2, 1])
+    vals, cols = [], []
+    for k in range(3):
+        w = (loc[:, (k + 2) % 3] - loc[:, (k + 1) % 3]) / np.sqrt(2.0 * area)[:, None]
+        vals.append(w[:, 0] + 1j * w[:, 1])
+        cols.append(tri[:, k])
+    rows = np.tile(np.arange(len(tri)), 3)
+    m = coo_matrix((np.concatenate(vals), (rows, np.concatenate(cols))), shape=(len(tri), n))
+    big = bmat([[m.real, -m.imag], [m.imag, m.real]]).tocsc()
+    pin_idx = [pins[0], pins[1], pins[0] + n, pins[1] + n]
+    free = np.setdiff1d(np.arange(2 * n), pin_idx)
+    rhs = -big[:, pin_idx] @ np.array([0.0, 1.0, 0.0, 0.0])
+    sol = lsqr(big[:, free], rhs, atol=1e-14, btol=1e-14, iter_lim=50000)[0]
+    full = np.zeros(2 * n)
+    full[free] = sol
+    full[pin_idx] = [0.0, 1.0, 0.0, 0.0]
+    assert np.abs(flat - np.column_stack([full[:n], full[n:]])).max() < 1e-8

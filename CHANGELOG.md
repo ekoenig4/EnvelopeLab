@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: special shapes from meshes are placed about 7 times faster (the alien design's
+  four shapes: 31 s to 4 s; an eye pod 10.2 s to 1.3 s). Mesh cuts split only the
+  triangles they cross and find every crossing in one vectorised bisection, the
+  flattening uses the closed-form 2D rotation and pre-built sparse matrices, and the
+  conformal start is solved directly. Patterns are unchanged (largest difference
+  0.000001 mm). The app shows each shape as soon as it is placed, and an edit made while
+  shapes are being placed no longer waits for the out-of-date ones to finish.
 - Changed: the Special shapes screen is reorganised so it is no longer squeezed. It uses
   the whole window (design tree and properties folded away, warnings strip compact but
   always shown, both restored in the other modes) and has three columns: the shape list
