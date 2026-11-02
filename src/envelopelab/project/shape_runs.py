@@ -12,15 +12,13 @@ the footprint length :math:`L_f`,
 
 .. math:: h = \\min\\bigl(\\max(L_f / N_f,\\ h_{min}),\\ h_{max}\\bigr),
 
-so that the rim has about :data:`AUTO_MESH_RIM_ELEMENTS` elements (ADR-0034). On the
-Smalley 90K alien design the shape's height then differs by at most 0.3 % from much finer
-meshes (antenna 150, 120, 90 and 60 mm: 3.263, 3.260, 3.258, 3.254 m; eye pod 400, 300,
-229 and 160 mm: 1.180, 1.178, 1.176, 1.178 m) at a fraction of the solve time (antenna
-24 s at 150 mm against 333 s at 60 mm). Peak values are local and keep changing with the
-mesh (the largest rim-tape tension rose 8-13 % on the antenna and 5 % on the eye pod
-between the finest two sizes), so every shape result carries a
-``peak_values_mesh_dependent`` warning. The constants are **assumed**, set from that
-study; a builder can always solve with a chosen size.
+so that the rim has about :data:`AUTO_MESH_RIM_ELEMENTS` elements. A mesh study on a
+full-size design (ADR-0034, which lists it) found the shape's height within 0.3 % of much
+finer meshes at these sizes, at a fraction of the solve time, while peak values are local
+and keep changing with the mesh (the largest rim-tape tension moved 5-13 % between the
+finest two sizes). Every shape result therefore carries a ``peak_values_mesh_dependent``
+warning. The constants are **assumed**, set from that study; a builder can always solve
+with a chosen size.
 """
 
 from __future__ import annotations
