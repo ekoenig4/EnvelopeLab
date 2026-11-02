@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: colour a run by fabric factor of safety (warp or weft), principal, warp and weft
+  resultants, wrinkle state or displacement. Factors below the required factor (5,
+  assumed) are always orange and labelled FAIL. Fields a run cannot give are listed but
+  disabled with the reason. Preview runs now store their warp/weft resultants
+  (`fabric_resultants`, ADR-0033); existing results are unchanged, older runs and
+  CalculiX runs cannot be coloured by factor of safety.
 - Changed: special shapes from meshes are placed about 7 times faster (the alien design's
   four shapes: 31 s to 4 s; an eye pod 10.2 s to 1.3 s). Mesh cuts split only the
   triangles they cross and find every crossing in one vectorised bisection, the

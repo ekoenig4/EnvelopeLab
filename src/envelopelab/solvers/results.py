@@ -528,6 +528,62 @@ def factors_of_safety(
     return rows
 
 
+def triangle_factors_of_safety(model: SolverModel, fabric_resultants: FloatArray) -> FloatArray:
+    r"""Fabric factor of safety of every membrane triangle, along warp and weft.
+
+    .. math:: \mathrm{FoS}_{warp} = \frac{N_{ult,warp}}{N_{warp}}, \qquad
+              \mathrm{FoS}_{weft} = \frac{N_{ult,weft}}{N_{weft}}
+
+    with :math:`N` the Cauchy resultant along the deformed yarn direction and
+    :math:`N_{ult}` the strength of the triangle's material zone. This is the per-element
+    form of the zone rows of :func:`factors_of_safety`: the minimum over a zone's triangles
+    equals that zone's factor. A yarn direction that is unloaded or in compression has no
+    tensile demand and gets ``inf``.
+
+    Assumptions: as :func:`factors_of_safety` (uniaxial strength per yarn direction, no
+    biaxial interaction, no shear failure criterion). Seams and tapes are not included.
+
+    Parameters
+    ----------
+    model : SolverModel
+        The solved model (material zone per triangle and zone strengths).
+    fabric_resultants : ndarray, shape (m, 2) or (m, 3)
+        Warp and weft resultants per triangle (a third column, shear, is ignored), N/m.
+
+    Returns
+    -------
+    ndarray, shape (m, 2)
+        Warp and weft factor of safety per triangle, dimensionless (``inf`` where the
+        direction carries no tension).
+
+    Raises
+    ------
+    ValueError
+        When the resultants do not have one row per triangle of the model.
+
+    References
+    ----------
+    EASA CS-31HB, "Factor of safety"; the module docstring gives the required factor.
+    """
+    n = np.asarray(fabric_resultants, dtype=np.float64)
+    if n.ndim != 2 or n.shape[0] != len(model.triangles) or n.shape[1] < 2:
+        raise ValueError(
+            f"fabric resultants of shape {n.shape} do not match {len(model.triangles)} triangles"
+        )
+    strengths = np.array(
+        [
+            (model.materials[z].strength_warp.value, model.materials[z].strength_weft.value)
+            for z in model.zone_names
+        ],
+        dtype=np.float64,
+    ).reshape(-1, 2)
+    capacity = strengths[np.asarray(model.tri_zone, dtype=np.int64)]
+    demand = n[:, :2]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        fos = np.where(demand > 0.0, capacity / np.where(demand > 0.0, demand, 1.0), np.inf)
+    return np.asarray(fos, dtype=np.float64)
+
+
 # --------------------------------------------------------------------------------------
 # Summary and export
 # --------------------------------------------------------------------------------------

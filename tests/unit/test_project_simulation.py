@@ -93,6 +93,8 @@ def test_preview_run_record(tmp_path: Path) -> None:
     assert record.design_content_hash == s.content_hash()
     assert 140.0 < record.volume < 175.0  # the design's profile holds 160.7 m^3
     assert s.run_status(record) == "current"
+    # Warp/weft resultants are kept, so the 3D view can colour by factor of safety.
+    assert arrays["fabric_resultants"].shape == (record.n_elements, 3)
 
 
 def test_calculix_final_residual_is_the_last_out_of_balance() -> None:

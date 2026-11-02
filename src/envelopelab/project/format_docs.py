@@ -86,7 +86,9 @@ around it:
 {table}
 
 Result arrays of each run (positions, initial positions and triangles in m, principal
-resultants in N/m, wrinkle state) are stored next to the project in
+resultants in N/m, wrinkle state, and for preview runs the warp, weft and shear
+resultants in N/m, `fabric_resultants`, optional: older runs and CalculiX runs have
+none) are stored next to the project in
 `<name>{PROJECT_SUFFIX}.runs/<run_id>.npz` (NumPy archive, no pickled objects);
 `runs[].result_file` gives the relative path. A shape run's file holds the skin as solved
 in the envelope frame (m): `points`, `triangles`, the cut `piece` of every triangle and

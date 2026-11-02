@@ -23,7 +23,9 @@ around it:
 | `shape_runs` | The latest simulation of every special shape (version 3): shape name, the **simulation key** of its inputs (shape, envelope, load case, materials, tapes) that decides whether it is still current, solver and version, status, convergence, final residual and what it measures, iterations, run time, mesh size, material sources, load case, design content hash, number of pieces, metrics (heights m, chamber pressure Pa, wrinkled fraction, rim tape tension N), factor of safety per region, findings and the run manifest. Version 1 and 2 files read as having none. |
 
 Result arrays of each run (positions, initial positions and triangles in m, principal
-resultants in N/m, wrinkle state) are stored next to the project in
+resultants in N/m, wrinkle state, and for preview runs the warp, weft and shear
+resultants in N/m, `fabric_resultants`, optional: older runs and CalculiX runs have
+none) are stored next to the project in
 `<name>.elproj.runs/<run_id>.npz` (NumPy archive, no pickled objects);
 `runs[].result_file` gives the relative path. A shape run's file holds the skin as solved
 in the envelope frame (m): `points`, `triangles`, the cut `piece` of every triangle and

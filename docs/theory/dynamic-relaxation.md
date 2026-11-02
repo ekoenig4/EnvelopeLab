@@ -217,6 +217,20 @@ Factors of safety: fabric zone \(N_{ult}/\max N\) along warp and weft separately
 to the seam edge and \(\eta\) the seam efficiency; tape \(T_{ult}/\max T\). The required
 factor defaults to 5 (tagged *assumed*: take it from the applicable airworthiness code).
 
+The 3D view colours a run by the same fabric factor per triangle,
+\[ \mathrm{FoS}_{warp,i} = \frac{N_{ult,warp}(z_i)}{N_{warp,i}}, \qquad
+   \mathrm{FoS}_{weft,i} = \frac{N_{ult,weft}(z_i)}{N_{weft,i}} \]
+with \(z_i\) the material zone of triangle \(i\)
+(`envelopelab.solvers.results.triangle_factors_of_safety`); a yarn direction with no
+tension gets \(\infty\). The smallest value over a zone's triangles is that zone's factor
+above, so the colours and the factor-of-safety table always agree. Valid for the same
+assumptions (uniaxial strength per yarn direction, no biaxial or shear failure
+criterion); seams and tapes are not coloured. Check: on a pressurized sphere
+\(N = pr/2\) in every direction, so \(\mathrm{FoS} = 2N_{ult}/(pr)\) (unit test
+`test_triangle_fos_of_a_pressurized_sphere_matches_hand_calculation`, within 2 %). It
+needs the warp/weft resultants, which only the preview solver reports and which runs
+store from this version on (ADR-0033).
+
 ## Assumptions
 
 - Membrane only: no bending stiffness; fabric folds and wrinkles are represented by the
