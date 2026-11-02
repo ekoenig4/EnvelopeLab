@@ -478,6 +478,9 @@ class _Gmsh:
     def __enter__(self) -> _Gmsh:
         import gmsh
 
+        from envelopelab.assembly.mesh import GMSH_LOCK
+
+        GMSH_LOCK.acquire()
         self.owner = not gmsh.isInitialized()
         if self.owner:
             gmsh.initialize(interruptible=False)
@@ -490,9 +493,14 @@ class _Gmsh:
     def __exit__(self, *exc: object) -> None:
         import gmsh
 
-        gmsh.clear()
-        if self.owner:
-            gmsh.finalize()
+        from envelopelab.assembly.mesh import GMSH_LOCK
+
+        try:
+            gmsh.clear()
+            if self.owner:
+                gmsh.finalize()
+        finally:
+            GMSH_LOCK.release()
 
 
 def _read_mesh() -> tuple[FloatArray, IntArray]:

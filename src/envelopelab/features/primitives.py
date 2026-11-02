@@ -161,7 +161,7 @@ is microns for usual shapes (source: assumed)."""
 
 MARK_EASE_SAMPLES = 48
 """Integration steps per match-mark interval when measuring the attachment ease
-(:func:`_mark_ease`; a few mm per step for usual mark spacings)."""
+(:func:`_even_marks`; a few mm per step for usual mark spacings)."""
 
 FEED_HOLE_SEAM_CLEARANCE = 0.05
 """Default least distance from a feed hole's finished edge to a seam of its panel, m: room
@@ -801,7 +801,7 @@ class MatchMark:
     number : int
         Mark number, from 1 at the top of the feature (:math:`\\phi = 0`).
     phi_deg : float
-        Angle round the axis, deg.
+        Angle round the axis of the mark on the skin rim, deg.
     gore, row : int, str
         Host panel carrying the mark.
     host_xy : tuple of float
@@ -810,6 +810,10 @@ class MatchMark:
         Skin piece carrying the mark on its rim.
     piece_xy : tuple of float
         Mark in the skin piece's pattern coordinates, m.
+    host_phi_deg : float or None
+        Angle round the axis of the mark on the envelope panel, deg (None: ``phi_deg``).
+        The envelope marks divide the marked line in the proportions in which the rim
+        marks divide the rim, so the ease is spread evenly (:func:`_even_marks`).
     """
 
     number: int
@@ -819,6 +823,7 @@ class MatchMark:
     host_xy: tuple[float, float]
     piece: str
     piece_xy: tuple[float, float]
+    host_phi_deg: float | None = None
 
 
 @dataclass(frozen=True)
@@ -959,7 +964,7 @@ class PrimitiveDesign:
         Pattern checks.
     mark_ease : ndarray
         Skin rim length minus marked attachment-line length (on the flat envelope
-        panels) between match mark ``j`` and the next one, m (see :func:`_mark_ease`).
+        panels) between match mark ``j`` and the next one, m (see :func:`_even_marks`).
     extra_feed_holes : tuple of FeedHoleMark
         More holes cut in the envelope under the feature, anywhere inside the footprint.
     """
@@ -1043,6 +1048,7 @@ class PrimitiveDesign:
                 {
                     "number": m.number,
                     "phi_deg": m.phi_deg,
+                    "host_phi_deg": m.phi_deg if m.host_phi_deg is None else m.host_phi_deg,
                     "gore": m.gore,
                     "row": m.row,
                     "host_xy_m": list(m.host_xy),
@@ -1596,34 +1602,40 @@ def _panel_xy(
     return np.column_stack([2.0 * across * half, y])
 
 
-def _mark_ease(
+def _even_marks(
     surface: EnvelopeSurface,
     g_centre: float,
-    mark_phi: FloatArray,
+    count: int,
     rim_point: Callable[[FloatArray], FloatArray],
     rim_flat: Callable[[FloatArray], tuple[IntArray, FloatArray]],
     corners: FloatArray | None = None,
     samples: int = MARK_EASE_SAMPLES,
-) -> FloatArray:
-    r"""Skin rim length minus marked attachment-line length between match marks.
+) -> tuple[FloatArray, FloatArray]:
+    r"""Envelope-side match marks that spread the attachment ease evenly, and the ease.
 
     Both edges of the attachment seam are cut cloth: the skin rim on its pieces and the
     footprint line marked on the flat envelope panels. Flattening the envelope gores
     makes the marked line slightly longer or shorter than the footprint on the designed
     surface, which the rim matches, so the two sides differ by an *ease* that the
-    builder works in between match marks. For mark interval :math:`j`
+    builder works in between match marks; across a gore and along it the flat panel
+    differs in opposite senses, so the difference changes sign round the rim.
 
-    .. math::
+    With :math:`R(\phi)` the rim length on the flat skin pieces and :math:`H(\phi)` the
+    marked-line length on the flat panels from :math:`\phi = 0`, the rim marks stay at
+    :math:`\phi_j = 2\pi j / n` and the envelope marks go to :math:`\psi_j` with
 
-        e_j = \int_{\phi_j}^{\phi_{j+1}} \left|\frac{d\mathbf{r}}{d\phi}\right| d\phi
-            - \int_{\phi_j}^{\phi_{j+1}} \left|\frac{d\mathbf{h}}{d\phi}\right| d\phi,
+    .. math:: H(\psi_j) = R(\phi_j)\, \frac{H(2\pi)}{R(2\pi)},
 
-    with :math:`\mathbf{r}(\phi)` the rim on its flat skin piece and
-    :math:`\mathbf{h}(\phi)` the footprint point in its envelope panel's pattern
-    coordinates, summed over ``samples`` steps per interval plus the ``corners`` of a
-    polyline rim (so a free-form rim's chords are followed exactly). A step that crosses
-    from one piece or panel to the next uses its 3D length (both sides are sewn there,
-    and the step is a few mm).
+    so every interval eases the same fraction of its length:
+
+    .. math:: e_j = \bigl(R(\phi_{j+1}) - R(\phi_j)\bigr)\Bigl(1 - \frac{H(2\pi)}{R(2\pi)}\Bigr).
+
+    Placing both marks at the same angle instead lets the ease of one interval reach many
+    times the average. Lengths are summed over ``samples`` steps per interval plus the
+    ``corners`` of a polyline rim (so a free-form rim's chords are followed exactly); a
+    step that crosses from one piece or panel to the next uses its 3D length (both sides
+    are sewn there, and the step is a few mm). :math:`\psi_j` is interpolated linearly
+    within a step.
 
     Parameters
     ----------
@@ -1631,8 +1643,8 @@ def _mark_ease(
         Envelope.
     g_centre : float
         Gore position of the base point, gore widths (fixes the panel numbering).
-    mark_phi : ndarray
-        Increasing mark angles round the axis in :math:`[0, 2\pi)`, rad.
+    count : int
+        Number of match marks.
     rim_point : callable
         Angles (rad) to 3D rim points, m.
     rim_flat : callable
@@ -1644,27 +1656,16 @@ def _mark_ease(
 
     Returns
     -------
-    ndarray
-        :math:`e_j` per mark interval, m (positive: the rim is longer).
+    psi : ndarray, shape (count,)
+        Angles of the envelope-side marks, rad (``psi[0] = 0``).
+    ease : ndarray, shape (count,)
+        :math:`e_j`: rim length minus marked-line length between mark ``j`` and the
+        next, m (positive: the rim is longer).
     """
-    n = len(mark_phi)
-    nxt = np.append(mark_phi[1:], mark_phi[0] + 2.0 * math.pi)
-    extra = np.zeros(0) if corners is None else np.mod(np.asarray(corners, float), 2.0 * math.pi)
-    parts, owner = [], []
-    for j in range(n):
-        a, b = float(mark_phi[j]), float(nxt[j])
-        inside = np.concatenate([extra, extra + 2.0 * math.pi])
-        grid = np.unique(
-            np.concatenate([np.linspace(a, b, samples + 1), inside[(inside > a) & (inside < b)]])
-        )
-        parts.append(grid)
-        owner.append(np.full(len(grid) - 1, j))
-    phi = np.concatenate(parts)
-    interval = np.concatenate(owner)
-    # Steps between consecutive samples of the same interval (not across intervals).
-    ends = np.cumsum([len(g) for g in parts])
-    step = np.ones(len(phi) - 1, dtype=bool)
-    step[ends[:-1] - 1] = False
+    two_pi = 2.0 * math.pi
+    phi_m = two_pi * np.arange(count) / count
+    extra = np.zeros(0) if corners is None else np.mod(np.asarray(corners, float), two_pi)
+    phi = np.unique(np.concatenate([np.linspace(0.0, two_pi, count * samples + 1), extra]))
     p3 = rim_point(phi)
     piece, rim_xy = rim_flat(phi)
     s, theta, _ = surface.locate(p3)
@@ -1681,14 +1682,21 @@ def _mark_ease(
         host_xy[sel] = _panel_xy(surface, s[sel], g[sel], c, r)
     d3 = np.linalg.norm(np.diff(p3, axis=0), axis=1)
 
-    def length(group: IntArray, xy: FloatArray) -> FloatArray:
+    def cumulative(group: IntArray, xy: FloatArray) -> FloatArray:
         d_flat = np.linalg.norm(np.diff(xy, axis=0), axis=1)
-        d = np.where(group[1:] == group[:-1], d_flat, d3)[step]
-        out: FloatArray = np.bincount(interval, weights=d, minlength=n).astype(np.float64)
+        d = np.where(group[1:] == group[:-1], d_flat, d3)
+        out: FloatArray = np.concatenate([[0.0], np.cumsum(d)])
         return out
 
-    ease: FloatArray = length(piece, rim_xy) - length(panel, host_xy)
-    return ease
+    rim = cumulative(piece, rim_xy)
+    line = cumulative(panel, host_xy)
+    rim_marks = np.interp(phi_m, phi, rim)
+    target = rim_marks * (line[-1] / rim[-1])
+    psi: FloatArray = np.interp(target, line, phi)
+    rim_next = np.append(rim_marks[1:], rim[-1])
+    target_next = np.append(target[1:], line[-1])
+    ease: FloatArray = (rim_next - rim_marks) - (target_next - target)
+    return psi, ease
 
 
 def _attachment(
@@ -1860,15 +1868,30 @@ def design_primitive(
             )
         )
 
-    marks = []
+    phi_0 = pieces[0].phi_a
+    bounds = np.array([p.phi_b for p in pieces])
+
+    def rim_flat(phi: FloatArray) -> tuple[IntArray, FloatArray]:
+        pm = phi_0 + np.mod(phi - phi_0, 2.0 * math.pi)
+        k = np.minimum(np.searchsorted(bounds, pm), len(pieces) - 1)
+        xy = np.zeros((len(pm), 2))
+        for kk in np.unique(k):
+            sel = k == kk
+            xy[sel] = pieces[int(kk)].flat(np.zeros(int(sel.sum())), pm[sel])
+        return k, xy
+
     count = primitive.pieces * primitive.marks_per_piece
+    psi, mark_ease = _even_marks(
+        surface, g_centre, count, lambda phi: skin.at(np.zeros(len(phi)), phi), rim_flat
+    )
+    marks = []
     seams = _seams(primitive)
     for j in range(count):
         phi = 2.0 * math.pi * j / count
         k = min(int((phi - seams[0]) // (2.0 * math.pi / primitive.pieces)), len(pieces) - 1)
         if phi > pieces[k].phi_b:  # the last piece reaches past 2 pi - pi/M
             phi -= 2.0 * math.pi
-        point = skin.at(np.zeros(1), np.array([phi]))
+        point = skin.at(np.zeros(1), np.array([psi[j]]))
         s_m, th_m, _ = surface.locate(point)
         gore, row, host_xy = _host_location(surface, float(s_m[0]), float(th_m[0]), g_centre)
         pxy = pieces[k].flat(np.zeros(1), np.array([phi]))[0]
@@ -1881,6 +1904,7 @@ def design_primitive(
                 host_xy=host_xy,
                 piece=_piece_label(primitive, k),
                 piece_xy=(float(pxy[0]), float(pxy[1])),
+                host_phi_deg=math.degrees(float(psi[j])),
             )
         )
 
@@ -1911,25 +1935,7 @@ def design_primitive(
         checks=[],
         _skin=skin,
     )
-    phi_0 = pieces[0].phi_a
-    bounds = np.array([p.phi_b for p in pieces])
-
-    def rim_flat(phi: FloatArray) -> tuple[IntArray, FloatArray]:
-        pm = phi_0 + np.mod(phi - phi_0, 2.0 * math.pi)
-        k = np.minimum(np.searchsorted(bounds, pm), len(pieces) - 1)
-        xy = np.zeros((len(pm), 2))
-        for kk in np.unique(k):
-            sel = k == kk
-            xy[sel] = pieces[int(kk)].flat(np.zeros(int(sel.sum())), pm[sel])
-        return k, xy
-
-    design.mark_ease = _mark_ease(
-        surface,
-        g_centre,
-        2.0 * math.pi * np.arange(count) / count,
-        lambda phi: skin.at(np.zeros(len(phi)), phi),
-        rim_flat,
-    )
+    design.mark_ease = mark_ease
     design.extra_feed_holes = _extra_feed_holes(design, feed_holes, g_centre)
     design.checks = _checks(design, pieces, tolerance)
     design.checks += _seam_clearance_checks(design, seam_clearance)
@@ -2677,11 +2683,23 @@ def _design_freeform(
                 seam_points=skin.cap_seam_points() if cap else (),
             )
         )
-    marks = []
+
+    def rim_flat(phi: FloatArray) -> tuple[IntArray, FloatArray]:
+        k = np.array([skin.panel_of(float(p)) for p in phi], dtype=np.int64)
+        xy = np.zeros((len(phi), 2))
+        for kk in np.unique(k):
+            sel = k == kk
+            xy[sel] = skin.rim_flat(int(kk), phi[sel])
+        return k, xy
+
     count = shape.pieces * shape.marks_per_piece
+    psi, mark_ease = _even_marks(
+        surface, g_centre, count, skin.rim_points, rim_flat, corners=skin.rim_phi
+    )
+    marks = []
     for j in range(count):
         phi = 2.0 * math.pi * j / count
-        point = skin.rim_points(np.array([phi]))
+        point = skin.rim_points(np.array([psi[j]]))
         s_m, th_m, _ = surface.locate(point)
         gore, row, host_xy = _host_location(surface, float(s_m[0]), float(th_m[0]), g_centre)
         k = skin.panel_of(phi)
@@ -2695,6 +2713,7 @@ def _design_freeform(
                 host_xy=host_xy,
                 piece=_piece_label(shape, k),
                 piece_xy=(float(pxy[0]), float(pxy[1])),
+                host_phi_deg=math.degrees(float(psi[j])),
             )
         )
     feed = None
@@ -2724,22 +2743,7 @@ def _design_freeform(
         _skin=skin,
     )
 
-    def rim_flat(phi: FloatArray) -> tuple[IntArray, FloatArray]:
-        k = np.array([skin.panel_of(float(p)) for p in phi], dtype=np.int64)
-        xy = np.zeros((len(phi), 2))
-        for kk in np.unique(k):
-            sel = k == kk
-            xy[sel] = skin.rim_flat(int(kk), phi[sel])
-        return k, xy
-
-    design.mark_ease = _mark_ease(
-        surface,
-        g_centre,
-        2.0 * math.pi * np.arange(count) / count,
-        skin.rim_points,
-        rim_flat,
-        corners=skin.rim_phi,
-    )
+    design.mark_ease = mark_ease
     design.extra_feed_holes = _extra_feed_holes(design, feed_holes, g_centre)
     checks = _checks(design, skin.panels, tolerance)  # type: ignore[arg-type]
     checks.append(

@@ -476,9 +476,11 @@ def render_markdown(data: SpecialShapeData) -> str:
     lines += ["", f"## {data.fixture_name} (regression fixture)", ""]
     for name, entry in sorted(data.fixture.items()):
         lines += [f"### {name}", "", "| quantity | value |", "|---|---|"]
-        for k, v in entry["geometry"].items():
+        # Sorted: the saved JSON has sorted keys, so a page rendered from fresh results
+        # and one rendered from the saved data are the same.
+        for k, v in sorted(entry["geometry"].items()):
             lines.append(f"| {k} | {_fmt(v)} |")
-        for k, v in entry["preview"].items():
+        for k, v in sorted(entry["preview"].items()):
             lines.append(f"| preview {k} | {_fmt(v)} |")
         lines.append(f"| verified | {_fmt(entry['verified'])} |")
         lines += ["", "| construction check | result |", "|---|---|"]

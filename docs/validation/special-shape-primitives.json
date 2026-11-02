@@ -5,11 +5,11 @@
     "nodes": 471,
     "status": "converged",
     "converged": true,
-    "projected_height_m": 1.2040879656402257,
+    "projected_height_m": 1.2044534759745484,
     "designed_height_m": 1.1999999916752064,
-    "area_distortion": 0.008061848179887199,
-    "skin_wrinkled_fraction": 0.6175029676550525,
-    "lowest_fos": 90.56130052022782,
+    "area_distortion": 0.00806184817988742,
+    "skin_wrinkled_fraction": 0.6242921555054165,
+    "lowest_fos": 90.53274734830909,
     "chamber_pressure_pa": 17.55519427922236
   },
   {
@@ -18,11 +18,11 @@
     "nodes": 853,
     "status": "converged",
     "converged": true,
-    "projected_height_m": 1.2088047224207665,
+    "projected_height_m": 1.2094198840690382,
     "designed_height_m": 1.1999999916752064,
-    "area_distortion": 0.008061848179887199,
-    "skin_wrinkled_fraction": 0.727603994087373,
-    "lowest_fos": 81.06853465015966,
+    "area_distortion": 0.00806184817988742,
+    "skin_wrinkled_fraction": 0.7239599367570511,
+    "lowest_fos": 80.9067749373723,
     "chamber_pressure_pa": 17.55519427922236
   },
   {
@@ -31,24 +31,24 @@
     "nodes": 853,
     "status": "converged",
     "converged": true,
-    "projected_height_m": 1.2018990934327511,
+    "projected_height_m": 1.2018990226254287,
     "designed_height_m": 1.1999999916752064,
-    "area_distortion": 0.008061848179887199,
+    "area_distortion": 0.00806184817988742,
     "skin_wrinkled_fraction": 0.0,
-    "lowest_fos": 80.33660298277215,
+    "lowest_fos": 80.3388000063758,
     "chamber_pressure_pa": 17.55519427922236
   },
   {
     "skin_rest": "cut pattern",
     "mesh_size_m": 0.15,
-    "nodes": 1435,
+    "nodes": 1432,
     "status": "converged",
     "converged": true,
-    "projected_height_m": 1.206380123820197,
+    "projected_height_m": 1.2067809297138161,
     "designed_height_m": 1.1999999916752064,
-    "area_distortion": 0.008061848179887199,
-    "skin_wrinkled_fraction": 0.6129469290057963,
-    "lowest_fos": 119.19427685324027,
-    "chamber_pressure_pa": 17.55519427986274
+    "area_distortion": 0.00806184817988742,
+    "skin_wrinkled_fraction": 0.601525352272219,
+    "lowest_fos": 119.55976045496834,
+    "chamber_pressure_pa": 17.55519427971419
   }
 ]

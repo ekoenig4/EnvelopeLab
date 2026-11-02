@@ -4,20 +4,20 @@
     "caught": {
       "converged": true,
       "elements": 1445,
-      "host_rim_max_n1_n_per_m": 173.7255803804806,
-      "min_host_fos": 80.58686561494433,
+      "host_rim_max_n1_n_per_m": 173.7256670113578,
+      "min_host_fos": 80.58682542911008,
       "nodes": 751,
-      "protrusion_m": 0.5001960574000037,
-      "rim_tape_max_tension_n": 92.102725721388
+      "protrusion_m": 0.5001956992181498,
+      "rim_tape_max_tension_n": 92.10489843117786
     },
     "not_caught": {
       "converged": true,
       "elements": 1445,
-      "host_rim_max_n1_n_per_m": 326.7782784418795,
-      "min_host_fos": 42.842504914199885,
+      "host_rim_max_n1_n_per_m": 326.8047612703581,
+      "min_host_fos": 42.83903314498567,
       "nodes": 751,
-      "protrusion_m": 0.5044987223749295,
-      "rim_tape_max_tension_n": 75.75912138563234
+      "protrusion_m": 0.5044955199034309,
+      "rim_tape_max_tension_n": 75.81374339298286
     }
   },
   "description": "CalculiX (verification solver) result of envelopelab.validation.special_shapes.load_transfer_model: pressure-fed pod on a spherical host patch with the rim tape caught into the host tapes or not."

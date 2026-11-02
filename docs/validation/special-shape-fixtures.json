@@ -137,8 +137,8 @@
       ],
       "geometry": {
         "base_edge_m": 2.7508719773386385,
-        "footprint_rim_m": 2.7495944254750104,
-        "reference_projected_height_m": 0.011045473766311709,
+        "footprint_rim_m": 2.74959442547501,
+        "reference_projected_height_m": 0.011055975903917492,
         "side_a_m": 2.27,
         "side_b_m": 2.27,
         "side_difference_m": 0.0
@@ -150,13 +150,13 @@
         ]
       ],
       "preview": {
-        "chamber_volume_m3": 0.661620872613478,
+        "chamber_volume_m3": 0.6619326942373154,
         "converged": true,
         "elements": 1250,
-        "lean_deg": 0.18739531902744855,
+        "lean_deg": 0.20513924054559668,
         "nodes": 692,
-        "projected_height_m": 2.2351249868969987,
-        "skin_wrinkled_fraction": 0.3570221945624344,
+        "projected_height_m": 2.2357259538973544,
+        "skin_wrinkled_fraction": 0.350872160995185,
         "status": "converged"
       },
       "verified": false
@@ -195,7 +195,7 @@
         "footprint_rim_m": 23.18499002731682,
         "footprint_width_m": 7.96440658503959,
         "match_points": 16,
-        "reference_projected_height_m": 1.3875329854909308,
+        "reference_projected_height_m": 1.3864864442304468,
         "rim_ease_fraction": 0.053532400507740635,
         "rim_ease_m": 1.2411481719102966,
         "skin_area_m2": 39.50455540370467,
@@ -207,12 +207,12 @@
       },
       "geometry_findings": [],
       "preview": {
-        "chamber_volume_m3": 10.817596206852887,
+        "chamber_volume_m3": 10.35568703382523,
         "converged": true,
         "elements": 1510,
         "nodes": 782,
-        "projected_height_m": 0.3864719612733536,
-        "skin_wrinkled_fraction": 0.7729114783196801,
+        "projected_height_m": 0.37154360951108334,
+        "skin_wrinkled_fraction": 0.7633313414490124,
         "status": "converged"
       },
       "verified": false
@@ -223,45 +223,45 @@
     {
       "converged": true,
       "elements": 1445,
-      "host_rim_max_n1_n_per_m": 173.725552341059,
-      "min_host_fos": 80.58687862171892,
+      "host_rim_max_n1_n_per_m": 173.7256147432934,
+      "min_host_fos": 80.5868496749151,
       "nodes": 751,
-      "protrusion_m": 0.5001960558242473,
+      "protrusion_m": 0.50019569920015,
       "rim_tape_caught": true,
-      "rim_tape_max_tension_n": 92.10272395916431,
+      "rim_tape_max_tension_n": 92.10489476476624,
       "solver": "preview"
     },
     {
       "converged": true,
       "elements": 1445,
-      "host_rim_max_n1_n_per_m": 173.7255803804806,
-      "min_host_fos": 80.58686561494433,
+      "host_rim_max_n1_n_per_m": 173.7256670113578,
+      "min_host_fos": 80.58682542911008,
       "nodes": 751,
-      "protrusion_m": 0.5001960574000037,
+      "protrusion_m": 0.5001956992181498,
       "rim_tape_caught": true,
-      "rim_tape_max_tension_n": 92.102725721388,
+      "rim_tape_max_tension_n": 92.10489843117786,
       "solver": "calculix"
     },
     {
       "converged": true,
       "elements": 1445,
-      "host_rim_max_n1_n_per_m": 326.7781670304801,
-      "min_host_fos": 42.842519520877765,
+      "host_rim_max_n1_n_per_m": 326.80474201656085,
+      "min_host_fos": 42.83903566885988,
       "nodes": 751,
-      "protrusion_m": 0.5044987159941705,
+      "protrusion_m": 0.504495519882175,
       "rim_tape_caught": false,
-      "rim_tape_max_tension_n": 75.75909634255362,
+      "rim_tape_max_tension_n": 75.8137445828977,
       "solver": "preview"
     },
     {
       "converged": true,
       "elements": 1445,
-      "host_rim_max_n1_n_per_m": 326.7782784418795,
-      "min_host_fos": 42.842504914199885,
+      "host_rim_max_n1_n_per_m": 326.8047612703581,
+      "min_host_fos": 42.83903314498567,
       "nodes": 751,
-      "protrusion_m": 0.5044987223749295,
+      "protrusion_m": 0.5044955199034309,
       "rim_tape_caught": false,
-      "rim_tape_max_tension_n": 75.75912138563234,
+      "rim_tape_max_tension_n": 75.81374339298286,
       "solver": "calculix"
     }
   ],

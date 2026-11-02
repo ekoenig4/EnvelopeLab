@@ -79,7 +79,7 @@ both come back when you change mode. The screen has three columns:
 5. Every placed shape that has a feed hole is **simulated with the envelope**: **Run
    Preview** and **Run CalculiX** solve the envelope and then each shape with the same
    solver, its skin sewn from the cut pieces and inflated, at an element size of about
-   1/100 of the footprint length (60 to 300 mm; see
+   1/40 of the footprint length (100 to 300 mm; see
    [Running simulations](running-simulations.md)). On the **Simulation** tab,
    **Simulate shape (preview solver)**
    solves the selected shape on its own, with the element size you choose (finer is
@@ -230,10 +230,13 @@ partner on a skin piece's rim edge (`piece`, `piece_xy`).
   true length.
 * *attachment ease*: the skin's rim is sewn to the line marked on the **flat** envelope
   panels, which is a little longer or shorter than the rim (the flat gore includes the
-  bulge of the lobe). The difference is worked in between match marks; the check gives
-  the largest difference between two neighbouring marks and the total. Above 3 mm it is
-  an error: add match marks (*marks per piece*), use more envelope gores, or a smaller
-  shape. Small shapes on most envelopes ease well under 1 mm.
+  bulge of the lobe). The difference is worked in between match marks. The marks on the
+  envelope panels are placed so that they divide the marked line in the same proportions
+  as the rim marks divide the rim, so every interval eases the same small fraction of
+  its length (they are therefore not exactly at the rim marks' angles round the shape).
+  The check gives the largest difference between two neighbouring marks and the total.
+  Above 3 mm it is an error: add match marks (*marks per piece*), use more envelope
+  gores, or a smaller shape.
 * *area distortion*: a dome's gores cannot be flattened without changing their area.
   Above 1 % the check warns. Use more gores: the distortion drops about four times when
   you double them (3.7 % at 8, 0.9 % at 16, 0.2 % at 32 gores for a hemisphere).
@@ -372,5 +375,8 @@ default.
   different element size can help; an unconverged result is never a prediction.
 * In the desktop application, shape simulations use the preview solver with assumed
   stiffness values, and those solved with the envelope use an automatic element size
-  (footprint length / 100, between 60 and 300 mm, assumed). Solve with a chosen size to
-  check that a result does not depend on the mesh.
+  (footprint length / 40, between 100 and 300 mm, assumed; ADR-0034). At that size the
+  shape and its volume are settled to a fraction of a per cent, but peak values (the
+  largest tape tension or fabric resultant, and the factors of safety from them) still
+  change with the mesh; every result says so. Solve with a chosen, finer size, or compare
+  two sizes, before relying on a peak value.

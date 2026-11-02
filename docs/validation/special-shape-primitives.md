@@ -28,7 +28,7 @@ Primitives on a generic sphere of radius 8 m with 24 gores, axis along the envel
 | Free-form sphere mesh r=1 m (48 x 96), 12 panels: footprint length | 6.26922 | 6.2709 | m | 0.00027 | 0.001 | pass |
 | Free-form sphere mesh r=1 m (48 x 96), 12 panels: designed height | 1 | 1 | m | < 1e-06 m | 1 mm | pass |
 | Free-form sphere mesh r=1 m (48 x 96), 12 panels: rim length | 0 | 0 | m | < 1e-06 m | 1 mm | pass |
-| Free-form sphere mesh r=1 m (48 x 96), 12 panels: skin seam sides | 8.88178e-16 | 0 | m | < 1e-06 m | 1 mm | pass |
+| Free-form sphere mesh r=1 m (48 x 96), 12 panels: skin seam sides | 1.11022e-15 | 0 | m | < 1e-06 m | 1 mm | pass |
 | Dome on load tape and row seam (4 panel runs): attachment marks off the footprint | 1.03143e-06 | 0 | m | 0.001 mm | 1 mm | pass |
 
 ## Inflated dome, preview solver
@@ -37,10 +37,10 @@ A 16-gore dome (base radius 1 m, height 1.2 m) on the same envelope, fed through
 
 | Skin rest | Mesh (m) | Nodes | Status | Projected height (m) | Designed (m) | Deviation | Skin wrinkled | Lowest FoS | Chamber (Pa) |
 |---|---|---|---|---|---|---|---|---|---|
-| cut pattern | 0.3 | 471 | converged | 1.2041 | 1.2000 | +0.3 % | 62 % | 91 | 17.6 |
-| cut pattern | 0.2 | 853 | converged | 1.2088 | 1.2000 | +0.7 % | 73 % | 81 | 17.6 |
+| cut pattern | 0.3 | 471 | converged | 1.2045 | 1.2000 | +0.4 % | 62 % | 91 | 17.6 |
+| cut pattern | 0.2 | 853 | converged | 1.2094 | 1.2000 | +0.8 % | 72 % | 81 | 17.6 |
 | designed shape | 0.2 | 853 | converged | 1.2019 | 1.2000 | +0.2 % | 0 % | 80 | 17.6 |
-| cut pattern | 0.15 | 1435 | converged | 1.2064 | 1.2000 | +0.5 % | 61 % | 119 | 17.6 |
+| cut pattern | 0.15 | 1432 | converged | 1.2068 | 1.2000 | +0.6 % | 60 % | 120 | 17.6 |
 
 At the pressures of a hot-air envelope (tens of Pa) fabric strains are of order
 1e-4, so any difference of a cut pattern from its designed shape larger than that

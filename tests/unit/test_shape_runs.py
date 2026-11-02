@@ -62,12 +62,23 @@ def solved() -> tuple[ShapeRunRecord, dict[str, np.ndarray]]:
     return record, arrays
 
 
-def test_auto_mesh_size_aims_for_a_hundred_rim_elements() -> None:
+def test_auto_mesh_size_aims_for_forty_rim_elements() -> None:
     small = design_primitive(Dome("a", Placement(2, EQUATOR), 0.3, 0.2), SPHERE)
-    big = design_primitive(Dome("b", Placement(2, EQUATOR), 2.5, 1.0), SPHERE)
+    mid = design_primitive(Dome("b", Placement(2, EQUATOR), 1.0, 0.6), SPHERE)
+    big = design_primitive(Dome("c", Placement(2, EQUATOR), 2.5, 1.0), SPHERE)
+    assert (AUTO_MESH_MIN, AUTO_MESH_MAX) == (0.10, 0.30)
     assert auto_mesh_size(small) == AUTO_MESH_MIN  # 1.9 m rim
-    assert auto_mesh_size(big) == pytest.approx(round(big.footprint_length / 100, 3))
-    assert AUTO_MESH_MIN < auto_mesh_size(big) < AUTO_MESH_MAX
+    assert auto_mesh_size(mid) == pytest.approx(round(mid.footprint_length / 40, 3))
+    assert AUTO_MESH_MIN < auto_mesh_size(mid) < AUTO_MESH_MAX
+    assert auto_mesh_size(big) == AUTO_MESH_MAX  # 15.7 m rim / 40 = 0.39 m
+
+
+def test_every_shape_result_warns_that_its_peaks_depend_on_the_mesh(
+    solved: tuple[ShapeRunRecord, dict[str, np.ndarray]],
+) -> None:
+    record, _ = solved
+    warning = [f for f in record.findings if f.code == "peak_values_mesh_dependent"]
+    assert len(warning) == 1 and warning[0].severity == "warning"
 
 
 def test_record_carries_the_solve_and_its_provenance(

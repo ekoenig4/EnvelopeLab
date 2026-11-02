@@ -25,7 +25,9 @@ airworthiness.
 `tests/regression/test_flat_chord_pattern.py` checks that the generated files are current
 and that the designs are complete and consistent.
 
-The shapes' design checks report the flat-panel attachment ease: 3–6 mm per match-mark
-interval, above the 3 mm sewn-edge default, so they are **errors**. The blister and the
-dome also flatten with warnings. These findings come from the shapes as drawn and are
-asserted as they are.
+The shapes' design checks report the flat-panel attachment ease, spread evenly between
+the match marks: at most 1.35 mm (dome), 0.39 mm (horn) and 1.05 mm (blister) per
+match-mark interval, below the 3 mm sewn-edge default. (With the envelope marks at the
+same angles as the rim marks it was 3–6 mm, an error.) The blister and the dome also
+flatten with warnings. These findings come from the shapes as drawn and are asserted as
+they are.

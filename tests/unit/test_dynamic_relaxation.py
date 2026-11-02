@@ -230,7 +230,9 @@ def test_orthotropic_grain_direction_controls_stiffness() -> None:
         assert result.converged
         forces.append(result.loads.reactions["right"][0])
     assert forces[0] / forces[1] == pytest.approx(2.0, rel=1e-3)
-    assert forces[0] == pytest.approx(1.0e5 * 1.0e-3 * (1 + 0.5e-3), rel=1e-3)
+    # Reaction per unit width = first Piola resultant (1 + eps) S11 with the St. Venant-
+    # Kirchhoff S11 = E (eps + eps^2 / 2): E eps (1 + eps / 2)(1 + eps).
+    assert forces[0] == pytest.approx(1.0e5 * 1.0e-3 * (1 + 0.5e-3) * (1 + 1.0e-3), rel=1e-4)
 
 
 def test_cable_point_load_and_self_weight_balance() -> None:

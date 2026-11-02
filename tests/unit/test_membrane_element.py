@@ -20,6 +20,7 @@ from envelopelab.solvers.membrane import (
     internal_forces,
     rest_geometry,
     tension_field,
+    wrinkle_direction,
 )
 
 TRI_UV = np.array([[[0.0, 0.0], [1.0, 0.0], [0.2, 0.9]]])
@@ -152,6 +153,97 @@ def test_disabled_tension_field_carries_compression() -> None:
     stress, state, _ = tension_field(_strain(-0.01, 0.0, 0.0), c, _inv(c), 1e-3, False)
     assert state[0] == TAUT
     assert stress[0, 0, 0] < 0.0
+
+
+def _relaxed_energy(e: FloatArray, c: FloatArray) -> FloatArray:
+    """Relaxed energy density (kappa = 0): W taut, max_n E_n eps_n^2 / 2 wrinkled (by a
+    fine scan), 0 slack; ``e`` Voigt (engineering shear), shape (k, 3)."""
+    s = e @ c.T
+    s_min = 0.5 * (s[:, 0] + s[:, 1]) - np.hypot(0.5 * (s[:, 0] - s[:, 1]), s[:, 2])
+    theta = np.linspace(0.0, np.pi, 200_001)[:-1]
+    w = np.stack([np.cos(theta) ** 2, np.sin(theta) ** 2, np.cos(theta) * np.sin(theta)], 1)
+    e_n = 1.0 / np.einsum("ti,ij,tj->t", w, np.linalg.inv(c), w)
+    eps = e @ w.T
+    uni = 0.5 * (e_n[None] * np.where(eps > 0.0, eps, 0.0) ** 2).max(axis=1)
+    out: FloatArray = np.where(s_min > 0.0, 0.5 * np.einsum("ki,ki->k", e, s), uni)
+    return out
+
+
+def _batch(e: FloatArray) -> FloatArray:
+    out = np.zeros((len(e), 2, 2))
+    out[:, 0, 0], out[:, 1, 1] = e[:, 0], e[:, 1]
+    out[:, 0, 1] = out[:, 1, 0] = 0.5 * e[:, 2]
+    return out
+
+
+def test_wrinkled_stress_is_the_gradient_of_the_relaxed_energy() -> None:
+    """Orthotropic fabric with a soft shear: the wrinkled stress is dW*/dE (Pipkin), which
+    the trial-stress wrinkle direction is not; that mismatch kept the solver cycling."""
+    c = _material(1.08e5, 0.86e5, 5.0e3).plane_stress_matrix()
+    rng = np.random.default_rng(7)
+    e = 0.01 * rng.normal(size=(300, 3))
+    k = len(e)
+    stress, state, _ = tension_field(_batch(e), np.broadcast_to(c, (k, 3, 3)).copy(),
+                                     np.broadcast_to(_inv(c), (k, 3, 3)).copy(), 0.0)  # fmt: skip
+    wr = state == WRINKLED
+    assert wr.sum() > 50
+    s = np.stack([stress[:, 0, 0], stress[:, 1, 1], stress[:, 0, 1]], axis=1)[wr]
+    h = 1e-7
+    numeric = np.zeros_like(s)
+    for j in range(3):
+        d = np.zeros(3)
+        d[j] = h
+        numeric[:, j] = (_relaxed_energy(e[wr] + d, c) - _relaxed_energy(e[wr] - d, c)) / (2 * h)
+    scale = np.abs(s).max(axis=1, keepdims=True)
+    assert np.abs(numeric - s).max() <= 2e-4 * scale.max()  # scan resolution 1e-5 rad
+
+
+def test_wrinkle_direction_maximises_the_uniaxial_energy() -> None:
+    c = _material(1.08e5, 0.86e5, 5.0e3).plane_stress_matrix()
+    ci = _inv(c)
+    rng = np.random.default_rng(8)
+    e = 0.01 * rng.normal(size=(400, 3))
+    e_max = 0.5 * (e[:, 0] + e[:, 1]) + np.hypot(0.5 * (e[:, 0] - e[:, 1]), 0.5 * e[:, 2])
+    e = e[e_max > 0.0]
+    k = len(e)
+    s = e @ c.T
+    angle = 0.5 * np.arctan2(2.0 * s[:, 2], s[:, 0] - s[:, 1])
+    trial = np.column_stack([np.cos(angle), np.sin(angle)])
+    cs, sn, eps = wrinkle_direction(e, np.broadcast_to(ci, (k, 3, 3)).copy(), trial)
+    assert np.allclose(cs * cs + sn * sn, 1.0, rtol=1e-12)
+    w = np.stack([cs * cs, sn * sn, cs * sn], axis=1)
+    found = 0.5 * eps**2 / np.einsum("ki,ij,kj->k", w, ci, w)
+    assert np.allclose(eps, np.einsum("ki,ki->k", w, e), rtol=1e-12)
+    scan = _relaxed_energy(e, c)  # >= the true maximum minus the scan resolution
+    s_min = 0.5 * (s[:, 0] + s[:, 1]) - np.hypot(0.5 * (s[:, 0] - s[:, 1]), s[:, 2])
+    wr = s_min <= 0.0
+    assert np.all(found[wr] >= scan[wr] * (1.0 - 1e-9))
+
+
+def test_isotropic_wrinkle_direction_is_the_trial_stress_direction() -> None:
+    mat = MembraneMaterial.isotropic("iso", 1.0e5, 0.3)
+    c = mat.plane_stress_matrix()
+    rng = np.random.default_rng(9)
+    e = 0.01 * rng.normal(size=(500, 3))
+    k = len(e)
+    stress, state, _ = tension_field(_batch(e), np.broadcast_to(c, (k, 3, 3)).copy(),
+                                     np.broadcast_to(_inv(c), (k, 3, 3)).copy(), 0.0)  # fmt: skip
+    wr = state == WRINKLED
+    s = e[wr] @ c.T
+    angle = 0.5 * np.arctan2(2.0 * s[:, 2], s[:, 0] - s[:, 1])
+    n = np.stack([np.cos(angle), np.sin(angle)], axis=1)
+    eps_n = np.einsum("ki,kij,kj->k", n, _batch(e[wr]), n)
+    expected = (1.0e5 * eps_n)[:, None, None] * np.einsum("ki,kj->kij", n, n)
+    assert np.abs(stress[wr] - expected).max() <= 1e-10 * np.abs(expected).max()
+
+
+def test_orthotropic_stress_is_continuous_at_the_slack_boundary() -> None:
+    mat = _material(1.08e5, 0.86e5, 5.0e3)
+    # Largest principal strain just above and just below zero (along the bisector).
+    for sign in (1.0, -1.0):
+        stress, state, _ = _stress(_strain(sign * 1e-9, -0.01, 0.0), mat, kappa=0.0)
+        assert state[0] == (WRINKLED if sign > 0 else SLACK)
+        assert np.abs(stress).max() <= 1.08e5 * 1e-9 * 1.01  # E_n eps_n -> 0 with eps_n
 
 
 def _energy(xe: FloatArray, rest: RestGeometry, c: FloatArray) -> float:

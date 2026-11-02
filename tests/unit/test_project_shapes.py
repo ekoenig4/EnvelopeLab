@@ -220,9 +220,11 @@ def test_base_radius_of_every_kind(session: ProjectSession) -> None:
     assert base_radius(blob) == pytest.approx(0.3, rel=1e-9)
 
 
-def test_attachment_ease_is_checked_per_mark_interval(session: ProjectSession) -> None:
+def test_attachment_ease_is_spread_evenly_between_match_marks(session: ProjectSession) -> None:
     """On the 8-gore fixture the flat panels carry the lobe width, so a large dome low on
-    the envelope differs from its marked line by more than 3 mm between marks."""
+    the envelope differs from its marked line by several mm. Envelope marks placed at the
+    same angle as the rim marks let one interval take most of it (more than 3 mm here);
+    marks dividing the marked line in the rim's proportions spread it evenly."""
     surface = envelope_surface(session.design, session.patterns)
     small = shape_design(_dome(session), surface)
     ease = next(c for c in small.checks if c.name == "attachment ease")
@@ -236,12 +238,50 @@ def test_attachment_ease_is_checked_per_mark_interval(session: ProjectSession) -
     )
     placed = shape_design(big, surface)
     check = next(c for c in placed.checks if c.name == "attachment ease")
-    assert check.severity == "error" and check.value > 3e-3
     assert "eased over 32 mark intervals" in check.message
+    e = placed.mark_ease
+    assert check.value == pytest.approx(float(np.abs(e).max()))
+    mean = abs(float(e.sum())) / len(e)
+    assert mean > 1e-4  # the shape does ease
+    assert np.all(np.sign(e) == np.sign(e.sum()))  # one sense all round, not +/-
+    assert float(np.abs(e).max()) <= 1.5 * mean
+    assert check.severity == "info" and check.value < 3e-3
     # More match marks spread the same ease over shorter intervals.
     finer = shape_design(big.model_copy(update={"marks_per_piece": 4}), surface)
     assert float(np.abs(finer.mark_ease).max()) < 0.6 * check.value
-    assert float(finer.mark_ease.sum()) == pytest.approx(float(placed.mark_ease.sum()), abs=3e-4)
+    assert float(finer.mark_ease.sum()) == pytest.approx(float(e.sum()), abs=3e-4)
+
+
+def test_envelope_match_marks_lie_on_the_marked_line(session: ProjectSession) -> None:
+    """The moved envelope-side marks stay on the attachment line of their panel."""
+    surface = envelope_surface(session.design, session.patterns)
+    big = _dome(session).model_copy(
+        update={
+            "base_radius": 0.5,
+            "height": 0.5,
+            "placement": ShapePlacement(gore=1, tape_position=2.0),
+        }
+    )
+    placed = shape_design(big, surface)
+    moved = [m for m in placed.marks if abs(m.host_phi_deg - m.phi_deg) > 1e-6]  # type: ignore[operator]
+    assert moved  # the envelope marks are not at the rim marks' angles
+    for mark in placed.marks:
+        lines = [a.points for a in placed.attachment if (a.gore, a.row) == (mark.gore, mark.row)]
+        assert lines, f"mark {mark.number}: no attachment line on its panel"
+        q = np.asarray(mark.host_xy)
+        gap = min(
+            float(np.min(np.linalg.norm(pts - q, axis=1)))
+            for pts in (_densify(line) for line in lines)
+        )
+        assert gap < 1e-3, f"mark {mark.number} is {gap * 1000:.2f} mm off the marked line"
+
+
+def _densify(points: np.ndarray, step: float = 2e-4) -> np.ndarray:
+    out = [points[:1]]
+    for a, b in zip(points[:-1], points[1:], strict=True):
+        n = max(1, int(np.ceil(np.linalg.norm(b - a) / step)))
+        out.append(a + (b - a) * np.linspace(0.0, 1.0, n + 1)[1:, None])
+    return np.concatenate(out)
 
 
 def test_feed_holes_are_moved_clear_of_the_seams_in_one_undo_step(

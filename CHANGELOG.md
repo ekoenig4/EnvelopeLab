@@ -3,6 +3,33 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: the *attachment ease* check failed on most special shapes (on the Smalley 90K
+  alien design 6.5 mm per match-mark interval on the antennae and 20.5 mm on the eye pods,
+  against a 3 mm limit) although the rim and the marked line differed by only 0.5 % and
+  0.12 % in total: the envelope marks sat at the same angles as the rim marks, so the
+  difference bunched into a few intervals. The envelope marks now divide the marked line
+  in the rim marks' proportions and the ease is spread evenly (1.2 mm and 2.5 mm at most
+  there; the marks move round the shape by at most 1.5°). Marking sheets change
+  accordingly; match marks carry `host_phi_deg`.
+- Changed: special shapes solved with the envelope use an element size of footprint
+  length / 40 (100 to 300 mm) instead of / 100 (60 to 300 mm), set from a mesh study on the
+  Smalley 90K alien design (ADR-0034): its four shapes solve in 105 s instead of 374 s
+  (four threads), with shape heights within 0.15 % of the 60/229 mm results (antenna
+  3.258 against 3.254 m, eye pod 1.178 against 1.176 m). Peak values still change with the
+  mesh, so every shape result now carries a `peak_values_mesh_dependent` warning.
+- Changed (physics): wrinkled fabric now carries its tension along the direction that
+  maximises the uniaxial energy (Pipkin–Steigmann relaxed energy), instead of the major
+  direction of the trial stress, and is slack only when no direction is stretched. For
+  isotropic fabric nothing changes; for orthotropic fabric the law is now the gradient of
+  an energy, so the preview solver no longer cycles on wrinkled caps: special shapes that
+  never converged at their automatic element size now do (Smalley 90K eye pod at 232 mm in
+  14,956 iterations, antenna at 60 mm in 15,762; before, both stopped at a residual of
+  about 0.3 after 200,000). Results move slightly: Smalley 90K at 800 mm volume −0.025 %,
+  maximum tape tension +0.004 %; the generic validation envelope at 600 mm volume −0.07 %,
+  mean tape tension −11 %, 99th-percentile fabric tension +8 % (ADR-0033).
+- Changed: a run's special shapes are solved in parallel threads (one per shape, leaving
+  one processor for the window; at most two for CalculiX), each reported as soon as it is
+  ready.
 - Changed: special shapes from meshes are placed about 7 times faster (the alien design's
   four shapes: 31 s to 4 s; an eye pod 10.2 s to 1.3 s). Mesh cuts split only the
   triangles they cross and find every crossing in one vectorised bisection, the

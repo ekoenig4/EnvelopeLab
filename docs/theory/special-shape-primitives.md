@@ -148,25 +148,33 @@ the designed surface. A panel's pattern coordinates are
 width \(2w(s)\) from the centreline, tape position \(s\)), and the flat gore is wider
 than the hoop arc \(r\,\Delta\theta\) of the load-tape surface because it carries the
 lobe's bulge. So the marked line differs from the rim by an *ease* that the builder
-works in between match marks. Both sides are measured per mark interval \(j\) by
-integrating along the footprint, \(\phi\) round the shape's axis:
+works in between match marks. With \(R(\phi)\) the rim length on the flat skin pieces and
+\(H(\phi)\) the marked-line length in the panels' pattern coordinates from \(\phi = 0\)
+(\(\phi\) round the shape's axis; 48 steps per mark interval plus the vertices of a
+free-form rim; a step crossing a piece or panel boundary uses its 3D length), the rim
+marks sit at \(\phi_j = 2\pi j/n\) and the envelope marks at \(\psi_j\) with
 
 \[
-e_j = \int_{\phi_j}^{\phi_{j+1}} \left|\frac{d\mathbf{r}}{d\phi}\right| d\phi
-    - \int_{\phi_j}^{\phi_{j+1}} \left|\frac{d\mathbf{h}}{d\phi}\right| d\phi
+H(\psi_j) = R(\phi_j)\,\frac{H(2\pi)}{R(2\pi)} ,
 \]
 
-with \(\mathbf{r}\) the rim on its flat skin piece and \(\mathbf{h}\) the footprint in
-its panel's pattern coordinates (48 steps per interval plus the vertices of a free-form
-rim; a step crossing a piece or panel boundary uses its 3D length). The sum of
-\(e_j\) equals the rim length minus the drawn lines' length to about 0.1 mm.
+so the marks divide the marked line in the proportions in which they divide the rim, and
+every interval eases the same fraction of its length:
 
-The ease is largest where the gores are few and strongly lobed and the shape is large:
-on an 8-gore envelope a 0.5 m radius dome low on the envelope eases 4.7 mm into one
-10 cm mark interval (−9 mm in total), above the 3 mm limit, while a 0.18 m dome eases
-under 1 mm. More match marks per piece shorten the intervals and reduce \(|e_j|\). The
-build pack lists the rim and the marked lines as a sewn pair with the total ease, so
-the output QA checks the files against it.
+\[
+e_j = \bigl(R(\phi_{j+1}) - R(\phi_j)\bigr)\Bigl(1 - \frac{H(2\pi)}{R(2\pi)}\Bigr).
+\]
+
+The flat panel is longer than the surface across a gore and shorter along it, so the
+local difference changes sign round the rim. With the envelope marks at the same angles as
+the rim marks (\(\psi_j = \phi_j\)), one interval could take several times the average: on
+an 8-gore envelope a 0.5 m radius dome low on the envelope eased 4.7 mm into one 10 cm
+interval (−9 mm in total), above the 3 mm limit. With even marks every interval of that
+dome eases the same fraction of the total, under the limit. The envelope marks move along
+the footprint by a small fraction of a mark interval (on a full-size eye pod at most
+0.46°, an antenna 1.5°). More match marks per piece shorten the intervals further. The
+build pack lists the rim and the marked lines as a sewn pair with the total ease, so the
+output QA checks the files against it.
 
 ## Free-form shapes from a mesh
 

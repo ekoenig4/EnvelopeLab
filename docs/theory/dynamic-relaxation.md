@@ -58,28 +58,52 @@ true (Cauchy) resultants \(\sigma = J^{-1} F S F^\mathsf{T}\), \(J = A/A_0\).
 
 ### Tension field (wrinkling)
 
-Fabric carries tension but no compression. With the trial stress \(S^\ast = \mathbb{C}:E\),
-its principal values \(s_1 \ge s_2\) and major direction \(n\),
-\(\varepsilon_n = n^\mathsf{T} E n\), each triangle is
+Fabric carries tension but no compression. With the trial stress \(S^\ast = \mathbb{C}:E\)
+and its principal values \(s_1 \ge s_2\), each triangle is
 
 | State | Condition | Stress |
 |---|---|---|
 | taut | \(s_2 > 0\) | \(S = S^\ast\) |
-| wrinkled | \(s_2 \le 0\), \(\varepsilon_n > 0\) | \(S = E_n\varepsilon_n\, n\otimes n + \kappa(S^\ast - E_n\varepsilon_n\, n\otimes n)\) |
-| slack | \(s_2 \le 0\), \(\varepsilon_n \le 0\) | \(S = \kappa S^\ast\) |
+| wrinkled | \(s_2 \le 0\), \(\varepsilon_{max} > 0\) | \(S = E_n\varepsilon_n\, n\otimes n + \kappa(S^\ast - E_n\varepsilon_n\, n\otimes n)\) |
+| slack | \(s_2 \le 0\), \(\varepsilon_{max} \le 0\) | \(S = \kappa S^\ast\) |
 
-\(E_n = (v^\mathsf{T}\mathbb{C}^{-1}v)^{-1}\), \(v = (n_1^2, n_2^2, n_1 n_2)\), is the
-uniaxial stiffness along \(n\) with free lateral contraction, so the stress is continuous
-across both state changes. \(\kappa\) (`slack_stiffness_ratio`, default \(10^{-3}\)) keeps a
-small stiffness in released directions so slack fabric has no zero-energy modes; the
-residual compression it leaves is at most \(\kappa|s_2^\ast|\) and is reported
-(`compression_residual` warning above `wrinkle_tolerance`, default 1 % of the largest
-tension). Triangles in the wrinkled or slack state are the **probable wrinkle zones**; the
-released compression \(\max(-s_2^\ast, 0)\) is available as a field.
+with \(\varepsilon_{max}\) the largest principal strain, \(\varepsilon_n = n^\mathsf{T}En\)
+and \(E_n = (v^\mathsf{T}\mathbb{C}^{-1}v)^{-1}\), \(v = (n_1^2, n_2^2, n_1 n_2)\), the
+uniaxial stiffness along \(n\) with free lateral contraction.
 
-The criterion is the mixed stress–strain criterion of Kang and Im; the wrinkle direction
-is taken from the trial stress, which is exact for isotropic fabric and an approximation for
-strongly orthotropic fabric.
+The tension direction \(n\) of a wrinkled triangle maximises the uniaxial energy:
+
+\[
+n = \arg\max_{\varepsilon_n > 0} \tfrac12 E_n \varepsilon_n^2,
+\qquad W^\ast(E) = \max_{\varepsilon_n > 0} \tfrac12 E_n \varepsilon_n^2 .
+\]
+
+\(W^\ast\) is the relaxed (tension-field) energy of Pipkin and Steigmann: the least energy
+of the fabric over all wrinkling strains. By the envelope theorem its gradient is exactly
+the uniaxial stress above, so the wrinkled law is the gradient of an energy. For isotropic
+fabric \(E_n\) does not depend on \(n\) and the maximiser is the major direction of the
+trial stress, so the law is the mixed stress–strain criterion of Kang and Im. For
+orthotropic fabric the trial-stress direction is not the maximiser, and the stress it gives
+is not the gradient of any energy. With the soft shear of coated nylon (shear stiffness
+about 1/20 of the warp stiffness) that mismatch made dynamic relaxation cycle without
+converging on wrinkled caps and domes; see
+[ADR-0033](../adr/ADR-0033-energy-consistent-wrinkle-direction.md).
+
+The maximiser is found per triangle (`envelopelab.solvers.membrane.wrinkle_direction`):
+the best of the trial-stress direction, the major strain direction and 4 evenly spaced
+angles, refined by Newton steps on \(\ln(\varepsilon_n^2/q)\), \(q = v^\mathsf{T}\mathbb{C}^{-1}v\),
+with analytic derivatives (up to 8 steps, stopping below \(10^{-12}\) rad). The stress
+depends on \(n\) to first order, so the angle is converged to round-off.
+
+The stress is continuous across both state changes: at \(s_2 = 0\) the trial stress is
+uniaxial along its major direction, which then maximises the uniaxial energy; at
+\(\varepsilon_{max} = 0\) the uniaxial stress is zero. \(\kappa\)
+(`slack_stiffness_ratio`, default \(10^{-3}\)) keeps a small stiffness in released
+directions so slack fabric has no zero-energy modes; the residual compression it leaves is
+at most \(\kappa|s_2^\ast|\) and is reported (`compression_residual` warning above
+`wrinkle_tolerance`, default 1 % of the largest tension). Triangles in the wrinkled or
+slack state are the **probable wrinkle zones**; the released compression
+\(\max(-s_2^\ast, 0)\) is available as a field.
 
 ## Loads
 
@@ -243,7 +267,6 @@ factor defaults to 5 (tagged *assumed*: take it from the applicable airworthines
   determinate position. The 8-gore generic fixture (up to 4.5 % ease there) does not
   converge at 800 mm with such tapes. The 20-gore full-size fixture (0.7 %) converges at
   800 and 1600 mm.
-- Wrinkle direction is approximate for strongly orthotropic fabric.
 - Explicit iterations grow roughly linearly with the number of elements across the
   envelope; very fine meshes are slow in pure NumPy.
 - No contact (fabric self-contact, basket, ground), no dynamic response, no deflation.
@@ -268,6 +291,9 @@ fabric strains below 10 %, meshes with well-shaped triangles (quality \(\ge 0.3\
   (1997) 263–269.
 - R. K. Miller and J. M. Hedgepeth, "An algorithm for finite element analysis of partly
   wrinkled membranes", *AIAA J.* 20 (1982) 1761–1763.
+- A. C. Pipkin, "The relaxed energy density for isotropic elastic membranes", *IMA J. Appl.
+  Math.* 36 (1986) 85–99.
+- D. J. Steigmann, "Tension-field theory", *Proc. R. Soc. Lond. A* 429 (1990) 141–173.
 - J. Bonet and R. D. Wood, *Nonlinear Continuum Mechanics for Finite Element Analysis*,
   2nd ed., Cambridge University Press (2008).
 - R. M. Jones, *Mechanics of Composite Materials*, 2nd ed., Taylor & Francis (1999).

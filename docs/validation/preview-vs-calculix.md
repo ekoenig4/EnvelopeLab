@@ -19,11 +19,11 @@ of the adapter is shown as *not converged* and fails.
 | CalculiX cylinder R0=1 m, p=1 kPa, 48x16: converged (0 = yes) | - | - | - | 0 | 0 | pass |
 | CalculiX cylinder R0=1 m, p=1 kPa, 48x16: relative out-of-balance | - | - | - | < 1e-05 | 1e-05 | pass |
 | Envelope, 600 mm mesh: CalculiX vs preview, height | 14.25 | 14.25 | m | < 1e-05 | 0.05 | pass |
-| Envelope, 600 mm mesh: CalculiX vs preview, volume | 1348 | 1348 | m^3 | < 1e-05 | 0.05 | pass |
-| Envelope, 600 mm mesh: CalculiX vs preview, maximum tape tension | 147.3 | 147.3 | N | < 1e-05 | 0.05 | pass |
+| Envelope, 600 mm mesh: CalculiX vs preview, volume | 1347 | 1347 | m^3 | < 1e-05 | 0.05 | pass |
+| Envelope, 600 mm mesh: CalculiX vs preview, maximum tape tension | 156.2 | 156.2 | N | < 1e-05 | 0.05 | pass |
 | Envelope: levels not converged (preview or CalculiX) | - | - | - | 0 | 0 | pass |
 | Envelope, CalculiX, last two levels: height | 14.25 | 14.24 | m | 0.0003 | 0.02 | pass |
-| Envelope, CalculiX, last two levels: volume | 1348 | 1349 | m^3 | 0.0008 | 0.02 | pass |
+| Envelope, CalculiX, last two levels: volume | 1347 | 1348 | m^3 | 0.0009 | 0.02 | pass |
 
 In the envelope rows *Computed* is the preview value and *Reference* the CalculiX
 value.
@@ -47,14 +47,14 @@ known differences below.
 | Quantity | Preview | CalculiX | Unit | Difference | Status |
 |---|---|---|---|---|---|
 | height | 14.25 | 14.25 | m | 0.0 % | within 5 % |
-| maximum width | 14.06 | 14.06 | m | 0.0 % | within 5 % |
-| volume | 1348 | 1348 | m^3 | 0.0 % | within 5 % |
-| maximum displacement | 0.9556 | 0.9556 | m | 0.0 % | within 5 % |
+| maximum width | 14.05 | 14.05 | m | 0.0 % | within 5 % |
+| volume | 1347 | 1347 | m^3 | 0.0 % | within 5 % |
+| maximum displacement | 0.964 | 0.964 | m | 0.0 % | within 5 % |
 | nodal displacement difference (RMS / max displacement) | 0 | < 1e-06 | - | 0.0 % | within 5 % |
-| mean N1 (area-weighted) | 132 | 132 | N/m | 0.0 % | within 5 % |
-| N1, 99th percentile | 467.1 | 467.1 | N/m | 0.0 % | within 5 % |
-| maximum tape tension | 147.3 | 147.3 | N | 0.0 % | within 5 % |
-| mean tape tension | 38.17 | 38.17 | N | 0.0 % | within 5 % |
+| mean N1 (area-weighted) | 133.9 | 133.9 | N/m | 0.0 % | within 5 % |
+| N1, 99th percentile | 505 | 505 | N/m | 0.0 % | within 5 % |
+| maximum tape tension | 156.2 | 156.2 | N | 0.0 % | within 5 % |
+| mean tape tension | 33.91 | 33.91 | N | 0.0 % | within 5 % |
 
 ## Mesh convergence (CalculiX)
 
@@ -62,20 +62,20 @@ known differences below.
 
 | Target edge (mm) | Nodes | Triangles | Converged | Passes | Largest CalculiX movement from the preview (mm) | Height (m) | Max width (m) | Volume (m^3) | Max tape tension (N) | Tape peak: distance from nearest fixed node (m) |
 |---|---|---|---|---|---|---|---|---|---|---|
-| 1200 | 1164 | 2292 | yes | 1 | < 0.01 | 14.25 | 14.05 | 1346 | 101.7 | 14 |
-| 850 | 1908 | 3768 | yes | 1 | < 0.01 | 14.24 | 14.06 | 1349 | 108.8 | 14 |
-| 600 | 3036 | 6012 | yes | 1 | < 0.01 | 14.25 | 14.06 | 1348 | 147.3 | 0.15 |
+| 1200 | 1164 | 2292 | yes | 1 | < 0.01 | 14.25 | 14.03 | 1345 | 101.7 | 14 |
+| 850 | 1908 | 3768 | yes | 1 | < 0.01 | 14.24 | 14.05 | 1348 | 108.7 | 14 |
+| 600 | 3036 | 6012 | yes | 1 | < 0.01 | 14.25 | 14.05 | 1347 | 156.2 | 0.15 |
 
 Richardson extrapolation (mean refinement ratio 1.41):
 
 | Quantity | Observed order | Extrapolated | Finest level | Estimated error |
 |---|---|---|---|---|
-| height | not in the asymptotic range (spread 0.027 %) | - | 14.25 | - |
-| volume | not in the asymptotic range (spread 0.19 %) | - | 1348 | - |
-| maximum tape tension | not in the asymptotic range (spread 31 %) | - | 147.3 | - |
+| height | not in the asymptotic range (spread 0.029 %) | - | 14.25 | - |
+| volume | not in the asymptotic range (spread 0.18 %) | - | 1347 | - |
+| maximum tape tension | not in the asymptotic range (spread 35 %) | - | 156.2 | - |
 
 !!! warning "Maximum tape tension is not mesh-converged"
-    It changes by 35 % between the last two levels; the two
+    It changes by 44 % between the last two levels; the two
     solvers agree on each level, but the value itself depends on the mesh (see
     *Known differences and limitations*).
 
@@ -92,7 +92,7 @@ Richardson extrapolation (mean refinement ratio 1.41):
   stiffness against buckling. The sphere and cylinder benchmarks do start from their
   initial shape.
 * **Maximum tape tension is not mesh-converged** (either solver; both agree on every
-  level): 101.7, 108.8, 147.3 N at 1200, 850, 600 mm, with the peak 14, 14, 0.15 m from the nearest fixed node.
+  level): 101.7, 108.7, 156.2 N at 1200, 850, 600 mm, with the peak 14, 14, 0.15 m from the nearest fixed node.
   Where the peak sits on the tapes next to the fixed mouth nodes it grows with refinement,
   like a stress at an idealised point support; on the crown ring it changes by a few per
   cent between levels. Do not read a tape factor of safety at the mouth from one mesh:
