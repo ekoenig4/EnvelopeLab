@@ -79,18 +79,18 @@ alien: 0 seam errors.
 |---|---|
 | base_edge_m | 2.751 |
 | footprint_rim_m | 2.75 |
+| reference_projected_height_m | 0.01106 |
 | side_a_m | 2.27 |
 | side_b_m | 2.27 |
 | side_difference_m | 0 |
-| reference_projected_height_m | 0.01106 |
-| preview status | converged |
-| preview converged | yes |
-| preview nodes | 692 |
-| preview elements | 1250 |
-| preview projected_height_m | 2.236 |
 | preview chamber_volume_m3 | 0.6619 |
-| preview skin_wrinkled_fraction | 0.3509 |
+| preview converged | yes |
+| preview elements | 1250 |
 | preview lean_deg | 0.2051 |
+| preview nodes | 692 |
+| preview projected_height_m | 2.236 |
+| preview skin_wrinkled_fraction | 0.3509 |
+| preview status | converged |
 | verified | no |
 
 | construction check | result |
@@ -106,28 +106,28 @@ alien: 0 seam errors.
 
 | quantity | value |
 |---|---|
-| footprint_rim_m | 23.18 |
-| skin_rim_m | 24.43 |
-| rim_ease_m | 1.241 |
-| rim_ease_fraction | 0.05353 |
-| skin_offset_mean_m | 0.2237 |
-| skin_offset_min_m | 0.2076 |
-| skin_offset_max_m | 0.2394 |
+| ease_per_segment_m | 0.07757 |
 | footprint_area_m2 | 34.2 |
+| footprint_height_m | 6.813 |
+| footprint_rim_m | 23.18 |
+| footprint_width_m | 7.964 |
+| match_points | 16 |
+| reference_projected_height_m | 1.386 |
+| rim_ease_fraction | 0.05353 |
+| rim_ease_m | 1.241 |
 | skin_area_m2 | 39.5 |
 | skin_area_ratio | 1.155 |
-| match_points | 16 |
-| ease_per_segment_m | 0.07757 |
-| footprint_width_m | 7.964 |
-| footprint_height_m | 6.813 |
-| reference_projected_height_m | 1.386 |
-| preview status | converged |
-| preview converged | yes |
-| preview nodes | 782 |
-| preview elements | 1510 |
-| preview projected_height_m | 0.3715 |
+| skin_offset_max_m | 0.2394 |
+| skin_offset_mean_m | 0.2237 |
+| skin_offset_min_m | 0.2076 |
+| skin_rim_m | 24.43 |
 | preview chamber_volume_m3 | 10.36 |
+| preview converged | yes |
+| preview elements | 1510 |
+| preview nodes | 782 |
+| preview projected_height_m | 0.3715 |
 | preview skin_wrinkled_fraction | 0.7633 |
+| preview status | converged |
 | verified | no |
 
 | construction check | result |
