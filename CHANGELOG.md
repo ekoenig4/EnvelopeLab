@@ -13,6 +13,9 @@ All notable changes to this project will be documented in this file.
   about 0.3 after 200,000). Results move slightly: Smalley 90K at 800 mm volume −0.025 %,
   maximum tape tension +0.004 %; the generic validation envelope at 600 mm volume −0.07 %,
   mean tape tension −11 %, 99th-percentile fabric tension +8 % (ADR-0033).
+- Changed: a run's special shapes are solved in parallel threads (one per shape, leaving
+  one processor for the window; at most two for CalculiX), each reported as soon as it is
+  ready.
 - Changed: special shapes from meshes are placed about 7 times faster (the alien design's
   four shapes: 31 s to 4 s; an eye pod 10.2 s to 1.3 s). Mesh cuts split only the
   triangles they cross and find every crossing in one vectorised bisection, the
