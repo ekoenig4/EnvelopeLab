@@ -112,8 +112,8 @@ from envelopelab.solvers.membrane import (
     TAUT,
     WRINKLED,
     tension_field,
-    trial_principal,
     uniaxial_stiffness,
+    wrinkle_principal,
 )
 from envelopelab.solvers.model import SolverModel, SolverSettings
 from envelopelab.solvers.simulation import (
@@ -367,8 +367,10 @@ class _Problem:
 
         Elements with (numerically) zero strain are taut: a stress-free element is not a
         wrinkle. Without ``previous`` the preview solver's criteria decide: released
-        where the minor trial resultant :math:`s_2 \le 0`, and then wrinkled where the
-        stretch along the wrinkle direction :math:`\varepsilon_n > 0`, else slack.
+        where the minor trial resultant :math:`s_2 \le 0`, and then wrinkled where some
+        direction is stretched (:func:`~envelopelab.solvers.membrane.wrinkle_principal`:
+        the stretch :math:`\varepsilon_n > 0` along the law's tension direction), else
+        slack.
 
         With ``previous`` (the state of the last pass) an element keeps its state while
         its criterion lies within the band :math:`\pm\beta S` of the switch point
@@ -383,7 +385,7 @@ class _Problem:
         :math:`O(\beta S)`. Without the band, elements whose criterion sits at the switch
         point flip state every pass and the passes do not settle.
         """
-        s1, s2, direction, eps_n = trial_principal(strain, self.C)
+        s1, s2, direction, eps_n = wrinkle_principal(strain, self.C, self.Cinv)
         state = np.full(self.m, TAUT, dtype=np.int8)
         if not self.settings.tension_field:
             return state, direction

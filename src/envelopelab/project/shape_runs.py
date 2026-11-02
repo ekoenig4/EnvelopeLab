@@ -12,10 +12,13 @@ the footprint length :math:`L_f`,
 
 .. math:: h = \\min\\bigl(\\max(L_f / N_f,\\ h_{min}),\\ h_{max}\\bigr),
 
-so that the rim has about :data:`AUTO_MESH_RIM_ELEMENTS` elements: fine enough for the
-preview solver to follow the skin's shape (a 23 m rim with 0.25 m elements converged
-for a 1.3 m pod) and coarse enough to solve in minutes. All three constants are
-**assumed** (no study fixes them); a builder can always solve with a chosen size.
+so that the rim has about :data:`AUTO_MESH_RIM_ELEMENTS` elements. A mesh study on a
+full-size design (ADR-0034, which lists it) found the shape's height within 0.3 % of much
+finer meshes at these sizes, at a fraction of the solve time, while peak values are local
+and keep changing with the mesh (the largest rim-tape tension moved 5-13 % between the
+finest two sizes). Every shape result therefore carries a ``peak_values_mesh_dependent``
+warning. The constants are **assumed**, set from that study; a builder can always solve
+with a chosen size.
 """
 
 from __future__ import annotations
@@ -34,11 +37,18 @@ if TYPE_CHECKING:
     from envelopelab.features.primitives import PrimitiveDesign
     from envelopelab.solvers.simulation import SimulationResult
 
-#: Rim elements an automatic shape simulation aims for (source: assumed).
-AUTO_MESH_RIM_ELEMENTS = 100
-#: Smallest and largest automatic element size, m (source: assumed).
-AUTO_MESH_MIN = 0.06
+#: Rim elements an automatic shape simulation aims for (source: assumed, ADR-0034).
+AUTO_MESH_RIM_ELEMENTS = 40
+#: Smallest and largest automatic element size, m (source: assumed, ADR-0034).
+AUTO_MESH_MIN = 0.10
 AUTO_MESH_MAX = 0.30
+#: Warning every shape result carries: its peaks depend on the element size.
+PEAK_MESH_WARNING = (
+    "peak values (largest tape tension, largest fabric resultant and the factors of safety "
+    "from them) are local and depend on the element size; solve again with a finer size, "
+    "or compare two sizes, before relying on them (the shape and its volume converge at "
+    "coarser sizes)"
+)
 
 
 def auto_mesh_size(design: PrimitiveDesign) -> float:
@@ -126,6 +136,9 @@ def shape_run_record(
                 code="not_converged", severity="error", message=f"not converged: {result.status}"
             )
         )
+    findings.append(
+        RunFinding(code="peak_values_mesh_dependent", severity="warning", message=PEAK_MESH_WARNING)
+    )
     stamp = utc_now()
     record = ShapeRunRecord(
         run_id=f"{stamp.strftime('%Y%m%dT%H%M%S')}-shape-{uuid.uuid4().hex[:6]}",

@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -374,6 +375,12 @@ def _gmsh_triangulate(geom: _PanelGeometry, opts: MeshOptions) -> tuple[FloatArr
     return xy, tris
 
 
+#: Gmsh keeps one global model and is not thread-safe: every use in EnvelopeLab
+#: (sewing panels here, appendage sub-models in ``envelopelab.features.builder``) holds
+#: this lock, so solves of several special shapes can run in parallel threads.
+GMSH_LOCK = threading.RLock()
+
+
 class _GmshSession:
     def __init__(self, opts: MeshOptions) -> None:
         self.opts = opts
@@ -382,6 +389,7 @@ class _GmshSession:
     def __enter__(self) -> _GmshSession:
         import gmsh
 
+        GMSH_LOCK.acquire()
         if not gmsh.isInitialized():
             try:
                 gmsh.initialize(readConfigFiles=False, interruptible=False)
@@ -401,8 +409,11 @@ class _GmshSession:
     def __exit__(self, *exc: object) -> None:
         import gmsh
 
-        if self.started:
-            gmsh.finalize()
+        try:
+            if self.started:
+                gmsh.finalize()
+        finally:
+            GMSH_LOCK.release()
 
 
 # --------------------------------------------------------------------------------------

@@ -51,8 +51,8 @@ The CalculiX rows are the golden output of
 |---|---|---|---|---|---|---|
 | yes | preview | yes | 173.7 | 92.1 | 80.59 | 0.5002 |
 | yes | calculix | yes | 173.7 | 92.1 | 80.59 | 0.5002 |
-| no | preview | yes | 326.8 | 75.76 | 42.84 | 0.5045 |
-| no | calculix | yes | 326.8 | 75.76 | 42.84 | 0.5045 |
+| no | preview | yes | 326.8 | 75.81 | 42.84 | 0.5045 |
+| no | calculix | yes | 326.8 | 75.81 | 42.84 | 0.5045 |
 
 | check | result | detail |
 |---|---|---|
@@ -79,17 +79,17 @@ alien: 0 seam errors.
 |---|---|
 | base_edge_m | 2.751 |
 | footprint_rim_m | 2.75 |
-| reference_projected_height_m | 0.01105 |
+| reference_projected_height_m | 0.01106 |
 | side_a_m | 2.27 |
 | side_b_m | 2.27 |
 | side_difference_m | 0 |
-| preview chamber_volume_m3 | 0.6616 |
+| preview chamber_volume_m3 | 0.6619 |
 | preview converged | yes |
 | preview elements | 1250 |
-| preview lean_deg | 0.1874 |
+| preview lean_deg | 0.2051 |
 | preview nodes | 692 |
-| preview projected_height_m | 2.235 |
-| preview skin_wrinkled_fraction | 0.357 |
+| preview projected_height_m | 2.236 |
+| preview skin_wrinkled_fraction | 0.3509 |
 | preview status | converged |
 | verified | no |
 
@@ -112,7 +112,7 @@ alien: 0 seam errors.
 | footprint_rim_m | 23.18 |
 | footprint_width_m | 7.964 |
 | match_points | 16 |
-| reference_projected_height_m | 1.388 |
+| reference_projected_height_m | 1.386 |
 | rim_ease_fraction | 0.05353 |
 | rim_ease_m | 1.241 |
 | skin_area_m2 | 39.5 |
@@ -121,12 +121,12 @@ alien: 0 seam errors.
 | skin_offset_mean_m | 0.2237 |
 | skin_offset_min_m | 0.2076 |
 | skin_rim_m | 24.43 |
-| preview chamber_volume_m3 | 10.82 |
+| preview chamber_volume_m3 | 10.36 |
 | preview converged | yes |
 | preview elements | 1510 |
 | preview nodes | 782 |
-| preview projected_height_m | 0.3865 |
-| preview skin_wrinkled_fraction | 0.7729 |
+| preview projected_height_m | 0.3715 |
+| preview skin_wrinkled_fraction | 0.7633 |
 | preview status | converged |
 | verified | no |
 

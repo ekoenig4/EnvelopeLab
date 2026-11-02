@@ -1,4 +1,4 @@
-# ADR-0033: Preview runs store warp/weft resultants for per-element factor of safety
+# ADR-0035: Preview runs store warp/weft resultants for per-element factor of safety
 
 - Status: Accepted
 - Date: 2026-11-02

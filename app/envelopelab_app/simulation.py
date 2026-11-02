@@ -15,14 +15,19 @@ After the envelope, the same run solves every placed special shape that can be f
 a feed hole) with the same solver and load case: each shape's own sub-model, its skin sewn
 from the cut pieces on a patch of the envelope round it, at the automatic element size of
 :func:`envelopelab.project.shape_runs.auto_mesh_size` (CalculiX from a preview of the same
-sub-model). Each result is kept with the project, linked to the envelope run. A shape that
+sub-model). The shapes are solved in parallel threads (:func:`shape_workers`; the
+compiled preview solver releases the GIL, and Gmsh is used under
+``envelopelab.assembly.mesh.GMSH_LOCK``), and each result is reported as soon as it is
+ready. Each result is kept with the project, linked to the envelope run. A shape that
 cannot be solved is reported and does not stop the others.
 """
 
 from __future__ import annotations
 
+import os
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -56,6 +61,19 @@ PREVIEW = "envelopelab-preview"
 BUILD_SHARE = 0.1
 FORM_FINDING_END = 0.75
 CALCULIX = "calculix"
+
+
+def shape_workers(count: int, solver: str) -> int:
+    """Threads that solve the special shapes of a run in parallel.
+
+    One per shape, at most one fewer than the processor count (one is left for the GUI);
+    at most 2 for CalculiX, which runs several threads of its own.
+    """
+    cpus = os.cpu_count() or 2
+    limit = max(1, cpus - 1)
+    if solver != PREVIEW:
+        limit = min(limit, 2)
+    return max(1, min(count, limit))
 
 
 @dataclass
@@ -136,37 +154,37 @@ class SolveWorker(QThread):
         """Solve the run's special shapes after the envelope (module docstring)."""
         req = self.request
         n = len(req.shapes)
-        for i, shape in enumerate(req.shapes):
-            if self.token.cancelled:
-                self.failed.emit("run cancelled before every special shape was solved")
-                return
-            head = f"Special shape {i + 1} of {n}"
+        if not n:
+            return
 
-            def say(message: str, fraction: float, head: str = head) -> None:
+        def one(i: int, shape: ShapeSolveRequest) -> Any:
+            head = f"Special shape {i + 1} of {n} ({shape.name})"
+
+            def say(message: str, fraction: float) -> None:
                 self.progress.emit(f"{head}: {message}", fraction)
 
-            try:
-                sim = solve_shape(
-                    shape,
-                    req.solver,
-                    say,
-                    self.token,
-                    req.ccx_path,
-                    str(tmp / f"shape-{i}"),
-                    run_id,
-                )
-            except ShapeSolveError as exc:
-                if self.token.cancelled:
-                    self.failed.emit(str(exc))
-                    return
-                self.shape_failed.emit(str(exc))
-                continue
-            except Exception as exc:  # report it, go on with the other shapes
-                self.shape_failed.emit(
-                    f"Shape {shape.name}: simulation failed: {type(exc).__name__}: {exc}"
-                )
-                continue
-            self.shape_solved.emit(sim)
+            return solve_shape(
+                shape, req.solver, say, self.token, req.ccx_path, str(tmp / f"shape-{i}"), run_id
+            )
+
+        with ThreadPoolExecutor(max_workers=shape_workers(n, req.solver)) as pool:
+            jobs = {pool.submit(one, i, shape): shape for i, shape in enumerate(req.shapes)}
+            for job in as_completed(jobs):
+                shape = jobs[job]
+                try:
+                    sim = job.result()
+                except ShapeSolveError as exc:
+                    if not self.token.cancelled:
+                        self.shape_failed.emit(str(exc))
+                    continue
+                except Exception as exc:  # report it, go on with the other shapes
+                    self.shape_failed.emit(
+                        f"Shape {shape.name}: simulation failed: {type(exc).__name__}: {exc}"
+                    )
+                    continue
+                self.shape_solved.emit(sim)
+        if self.token.cancelled:
+            self.failed.emit("run cancelled before every special shape was solved")
 
     def _preview(
         self, built: BuiltModel, span: tuple[float, float], prefix: str = "Preview"
