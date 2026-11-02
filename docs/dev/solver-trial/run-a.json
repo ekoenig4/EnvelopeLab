@@ -1,0 +1,763 @@
+{
+ "benchmark": "Smalley 90K (tests/fixtures/smalley_90k/shape.yaml), 12 rows",
+ "tolerance": 1e-06,
+ "time_limit_s": 1800.0,
+ "git_commit": "bb4843807444d2b046c31dcd5aae099834e7e05b",
+ "versions": {
+  "python": "3.13.18",
+  "numpy": "2.5.4",
+  "scipy": "1.18.1",
+  "numba": "0.68.1"
+ },
+ "machine": "x86_64, Linux",
+ "levels": [
+  {
+   "mesh_mm": 3200.0,
+   "nodes": 680,
+   "triangles": 1320,
+   "build_time_s": 3.683515558000181
+  },
+  {
+   "mesh_mm": 1600.0,
+   "nodes": 1920,
+   "triangles": 3800,
+   "build_time_s": 3.7581126230002155
+  },
+  {
+   "mesh_mm": 800.0,
+   "nodes": 4300,
+   "triangles": 8520,
+   "build_time_s": 4.009960998999759
+  },
+  {
+   "mesh_mm": 400.0,
+   "nodes": 10700,
+   "triangles": 21260,
+   "build_time_s": 4.769921182000417
+  },
+  {
+   "mesh_mm": 283.0,
+   "nodes": 17780,
+   "triangles": 35380,
+   "build_time_s": 5.552905392999946
+  },
+  {
+   "mesh_mm": 200.0,
+   "nodes": 30340,
+   "triangles": 60440,
+   "build_time_s": 6.666835248000098
+  }
+ ],
+ "runs": [
+  {
+   "solver": "dr",
+   "mesh_mm": 3200.0,
+   "nodes": 680,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 0.8927540409999892,
+   "residual": 8.090805410768401e-07,
+   "app_residual": 8.090805410745296e-07,
+   "counts": {
+    "iterations": 3834
+   },
+   "metrics": {
+    "volume_m3": 2530.96462260973,
+    "crown_height_m": 15.633183526938472,
+    "max_diameter_m": 17.783524418994674,
+    "max_tape_tension_n": 409.48664493670736,
+    "max_fabric_n1_n_m": 907.58619985324,
+    "wrinkled_fraction": 0.8333333333333334,
+    "max_node_distance_to_dr_mm": 0.0
+   },
+   "notes": []
+  },
+  {
+   "solver": "dr",
+   "mesh_mm": 1600.0,
+   "nodes": 1920,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 4.787212486000044,
+   "residual": 9.615638925180662e-07,
+   "app_residual": 9.615638925254962e-07,
+   "counts": {
+    "iterations": 8991
+   },
+   "metrics": {
+    "volume_m3": 2536.01365428667,
+    "crown_height_m": 15.60865980842658,
+    "max_diameter_m": 17.82382584204097,
+    "max_tape_tension_n": 447.71453656766715,
+    "max_fabric_n1_n_m": 989.1586863941438,
+    "wrinkled_fraction": 0.8157894736842105,
+    "max_node_distance_to_dr_mm": 0.0
+   },
+   "notes": []
+  },
+  {
+   "solver": "dr",
+   "mesh_mm": 800.0,
+   "nodes": 4300,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 13.907429428999876,
+   "residual": 8.97182299294525e-07,
+   "app_residual": 8.971822992975605e-07,
+   "counts": {
+    "iterations": 10988
+   },
+   "metrics": {
+    "volume_m3": 2539.2641698863977,
+    "crown_height_m": 15.615543207056866,
+    "max_diameter_m": 17.84401632174973,
+    "max_tape_tension_n": 466.27448922835765,
+    "max_fabric_n1_n_m": 990.295229309877,
+    "wrinkled_fraction": 0.8145539906103286,
+    "max_node_distance_to_dr_mm": 0.0
+   },
+   "notes": []
+  },
+  {
+   "solver": "dr",
+   "mesh_mm": 400.0,
+   "nodes": 10700,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 166.9175850270003,
+   "residual": 9.94659477229307e-07,
+   "app_residual": 9.946594772432008e-07,
+   "counts": {
+    "iterations": 50808
+   },
+   "metrics": {
+    "volume_m3": 2540.2610746441487,
+    "crown_height_m": 15.619716064353248,
+    "max_diameter_m": 17.83649747977717,
+    "max_tape_tension_n": 485.8302953851812,
+    "max_fabric_n1_n_m": 1133.361005481541,
+    "wrinkled_fraction": 0.7958607714016933,
+    "max_node_distance_to_dr_mm": 0.0
+   },
+   "notes": []
+  },
+  {
+   "solver": "dr",
+   "mesh_mm": 283.0,
+   "nodes": 17780,
+   "status": "time_limit",
+   "converged": false,
+   "wall_time": 1800.8015757370003,
+   "residual": 0.01432179110996543,
+   "app_residual": 0.01432179110996546,
+   "counts": {
+    "iterations": 338400
+   },
+   "metrics": {
+    "volume_m3": 2539.9569872231173,
+    "crown_height_m": 15.624478696538507,
+    "max_diameter_m": 17.833184575789705,
+    "max_tape_tension_n": 491.71065913473643,
+    "max_fabric_n1_n_m": 1325.940758250846,
+    "wrinkled_fraction": 0.7828434143583946,
+    "max_node_distance_to_dr_mm": 0.0
+   },
+   "notes": []
+  },
+  {
+   "solver": "dr",
+   "mesh_mm": 200.0,
+   "nodes": 30340,
+   "status": "time_limit",
+   "converged": false,
+   "wall_time": 1801.2357085799995,
+   "residual": 1.1959085125504238e-05,
+   "app_residual": 1.1959085125509952e-05,
+   "counts": {
+    "iterations": 194600
+   },
+   "metrics": {
+    "volume_m3": 2539.350138743765,
+    "crown_height_m": 15.628885870033033,
+    "max_diameter_m": 17.82913119136868,
+    "max_tape_tension_n": 496.0622091662037,
+    "max_fabric_n1_n_m": 1551.770146880266,
+    "wrinkled_fraction": 0.771343481138319,
+    "max_node_distance_to_dr_mm": 0.0
+   },
+   "notes": []
+  },
+  {
+   "solver": "dr-ml",
+   "mesh_mm": 3200.0,
+   "nodes": 680,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 0.7347098449999976,
+   "residual": 8.090805410768401e-07,
+   "app_residual": 8.090805410745296e-07,
+   "counts": {
+    "iterations": 3834,
+    "level_time_s": 0.7347098449999976
+   },
+   "metrics": {
+    "volume_m3": 2530.96462260973,
+    "crown_height_m": 15.633183526938472,
+    "max_diameter_m": 17.783524418994674,
+    "max_tape_tension_n": 409.48664493670736,
+    "max_fabric_n1_n_m": 907.58619985324,
+    "wrinkled_fraction": 0.8333333333333334,
+    "max_node_distance_to_dr_mm": 0.0
+   },
+   "notes": []
+  },
+  {
+   "solver": "dr-ml",
+   "mesh_mm": 1600.0,
+   "nodes": 1920,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 5.440799719999632,
+   "residual": 9.982122654472016e-07,
+   "app_residual": 9.982122654447342e-07,
+   "counts": {
+    "iterations": 9000,
+    "level_time_s": 4.706089874999634
+   },
+   "metrics": {
+    "volume_m3": 2536.013618755424,
+    "crown_height_m": 15.608659798205444,
+    "max_diameter_m": 17.82382607218504,
+    "max_tape_tension_n": 447.714547866096,
+    "max_fabric_n1_n_m": 989.1587103636708,
+    "wrinkled_fraction": 0.8157894736842105,
+    "max_node_distance_to_dr_mm": 0.0013581431968398778
+   },
+   "notes": []
+  },
+  {
+   "solver": "dr-ml",
+   "mesh_mm": 800.0,
+   "nodes": 4300,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 23.731102093000118,
+   "residual": 9.67351736403198e-07,
+   "app_residual": 9.67351736388708e-07,
+   "counts": {
+    "iterations": 14648,
+    "level_time_s": 18.290302373000486
+   },
+   "metrics": {
+    "volume_m3": 2539.2640434574337,
+    "crown_height_m": 15.615543244116505,
+    "max_diameter_m": 17.84401676091648,
+    "max_tape_tension_n": 466.2744840770006,
+    "max_fabric_n1_n_m": 990.2952245186189,
+    "wrinkled_fraction": 0.8145539906103286,
+    "max_node_distance_to_dr_mm": 0.005799564387492696
+   },
+   "notes": []
+  },
+  {
+   "solver": "dr-ml",
+   "mesh_mm": 400.0,
+   "nodes": 10700,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 252.7118069039998,
+   "residual": 9.956687095361754e-07,
+   "app_residual": 9.956687095439408e-07,
+   "counts": {
+    "iterations": 72460,
+    "level_time_s": 228.98070481099967
+   },
+   "metrics": {
+    "volume_m3": 2540.2611005949966,
+    "crown_height_m": 15.619716131332096,
+    "max_diameter_m": 17.83649713430902,
+    "max_tape_tension_n": 485.83028337010336,
+    "max_fabric_n1_n_m": 1133.3605789175872,
+    "wrinkled_fraction": 0.7958607714016933,
+    "max_node_distance_to_dr_mm": 0.0006392574305094279
+   },
+   "notes": []
+  },
+  {
+   "solver": "dr-ml",
+   "mesh_mm": 283.0,
+   "nodes": 17780,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 1449.041217989,
+   "residual": 9.885166612298967e-07,
+   "app_residual": 9.885166612407928e-07,
+   "counts": {
+    "iterations": 224309,
+    "level_time_s": 1196.3294110850002
+   },
+   "metrics": {
+    "volume_m3": 2539.9570323101016,
+    "crown_height_m": 15.624478385461316,
+    "max_diameter_m": 17.833183408109214,
+    "max_tape_tension_n": 491.673995904407,
+    "max_fabric_n1_n_m": 1325.891501179384,
+    "wrinkled_fraction": 0.7817976257772753,
+    "max_node_distance_to_dr_mm": 0.0372073724908841
+   },
+   "notes": []
+  },
+  {
+   "solver": "dr-ml",
+   "mesh_mm": 200.0,
+   "nodes": 30340,
+   "status": "time_limit",
+   "converged": false,
+   "wall_time": 3250.142151219,
+   "residual": 3.2175824806541545e-06,
+   "app_residual": 3.217582480629181e-06,
+   "counts": {
+    "iterations": 200600,
+    "level_time_s": 1801.10093323
+   },
+   "metrics": {
+    "volume_m3": 2539.349603643074,
+    "crown_height_m": 15.628888420207247,
+    "max_diameter_m": 17.829127854243172,
+    "max_tape_tension_n": 496.0623406042419,
+    "max_fabric_n1_n_m": 1551.8117063300651,
+    "wrinkled_fraction": 0.771343481138319,
+    "max_node_distance_to_dr_mm": 0.006778695940912946
+   },
+   "notes": []
+  },
+  {
+   "solver": "newton-ml",
+   "mesh_mm": 3200.0,
+   "nodes": 680,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 0.8485352099996817,
+   "residual": 1.465814482620863e-07,
+   "app_residual": 1.4658144824863886e-07,
+   "counts": {
+    "dr_iterations": 1591,
+    "newton_iterations": 10,
+    "residual_evaluations": 430,
+    "newton_reached": 1.465814482620863e-07,
+    "level_time_s": 0.8485352099996817
+   },
+   "metrics": {
+    "volume_m3": 2530.9647223616257,
+    "crown_height_m": 15.633183197070728,
+    "max_diameter_m": 17.783525951516538,
+    "max_tape_tension_n": 409.48665878174364,
+    "max_fabric_n1_n_m": 907.5862282704879,
+    "wrinkled_fraction": 0.8333333333333334,
+    "max_node_distance_to_dr_mm": 0.0026033171951818875
+   },
+   "notes": []
+  },
+  {
+   "solver": "newton-ml",
+   "mesh_mm": 1600.0,
+   "nodes": 1920,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 4.579314489999888,
+   "residual": 8.878072006917446e-08,
+   "app_residual": 8.878072006558278e-08,
+   "counts": {
+    "dr_iterations": 2132,
+    "newton_iterations": 14,
+    "residual_evaluations": 560,
+    "newton_reached": 8.878072006917446e-08,
+    "level_time_s": 3.730779280000206
+   },
+   "metrics": {
+    "volume_m3": 2536.0136185050533,
+    "crown_height_m": 15.608659734835488,
+    "max_diameter_m": 17.823826126153133,
+    "max_tape_tension_n": 447.71453178644725,
+    "max_fabric_n1_n_m": 989.1586750156588,
+    "wrinkled_fraction": 0.8157894736842105,
+    "max_node_distance_to_dr_mm": 0.00803405725613037
+   },
+   "notes": []
+  },
+  {
+   "solver": "newton-ml",
+   "mesh_mm": 800.0,
+   "nodes": 4300,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 50.627447512999424,
+   "residual": 9.607883416293215e-07,
+   "app_residual": 9.60788341625023e-07,
+   "counts": {
+    "dr_iterations": 3248,
+    "newton_iterations": 60,
+    "residual_evaluations": 2400,
+    "newton_reached": 0.002398202329289366,
+    "dr_finish_iterations": 6395,
+    "level_time_s": 46.04813302299954
+   },
+   "metrics": {
+    "volume_m3": 2539.264045271989,
+    "crown_height_m": 15.615543469807882,
+    "max_diameter_m": 17.844016283610788,
+    "max_tape_tension_n": 466.27451461751514,
+    "max_fabric_n1_n_m": 990.2952866037201,
+    "wrinkled_fraction": 0.8145539906103286,
+    "max_node_distance_to_dr_mm": 0.0017466546748762981
+   },
+   "notes": [
+    "Newton stalled at 2.4e-03; dynamic relaxation finished"
+   ]
+  },
+  {
+   "solver": "newton-ml",
+   "mesh_mm": 400.0,
+   "nodes": 10700,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 353.03163335799945,
+   "residual": 9.660243515080282e-07,
+   "app_residual": 9.66024351507477e-07,
+   "counts": {
+    "dr_iterations": 5950,
+    "newton_iterations": 60,
+    "residual_evaluations": 2400,
+    "newton_reached": 0.0004002605627004105,
+    "dr_finish_iterations": 65596,
+    "level_time_s": 302.40418584500003
+   },
+   "metrics": {
+    "volume_m3": 2540.2610921785213,
+    "crown_height_m": 15.61971608654777,
+    "max_diameter_m": 17.836497244717894,
+    "max_tape_tension_n": 485.8302844758411,
+    "max_fabric_n1_n_m": 1133.3606711681327,
+    "wrinkled_fraction": 0.7958607714016933,
+    "max_node_distance_to_dr_mm": 0.0006102505185880139
+   },
+   "notes": [
+    "Newton stalled at 4.0e-04; dynamic relaxation finished"
+   ]
+  },
+  {
+   "solver": "newton-ml",
+   "mesh_mm": 283.0,
+   "nodes": 17780,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 1419.6727153209995,
+   "residual": 9.680009667414128e-07,
+   "app_residual": 9.680009667113694e-07,
+   "counts": {
+    "dr_iterations": 10659,
+    "newton_iterations": 60,
+    "residual_evaluations": 2400,
+    "newton_reached": 0.004017450171805637,
+    "dr_finish_iterations": 159884,
+    "level_time_s": 1066.641081963
+   },
+   "metrics": {
+    "volume_m3": 2539.9570117660896,
+    "crown_height_m": 15.624478615417573,
+    "max_diameter_m": 17.833183387966876,
+    "max_tape_tension_n": 491.67412797933576,
+    "max_fabric_n1_n_m": 1325.890574573154,
+    "wrinkled_fraction": 0.7817976257772753,
+    "max_node_distance_to_dr_mm": 0.03724711841506951
+   },
+   "notes": [
+    "Newton stalled at 4.0e-03; dynamic relaxation finished"
+   ]
+  },
+  {
+   "solver": "newton-ml",
+   "mesh_mm": 200.0,
+   "nodes": 30340,
+   "status": "time_limit",
+   "converged": false,
+   "wall_time": 3220.2418516949983,
+   "residual": 1.027261145727533e-05,
+   "app_residual": 1.027261145729028e-05,
+   "counts": {
+    "dr_iterations": 9639,
+    "newton_iterations": 60,
+    "residual_evaluations": 2400,
+    "newton_reached": 0.005307869252508093,
+    "dr_finish_iterations": 141800,
+    "level_time_s": 1800.5691363739988
+   },
+   "metrics": {
+    "volume_m3": 2539.351166382972,
+    "crown_height_m": 15.628880823170306,
+    "max_diameter_m": 17.829136252358207,
+    "max_tape_tension_n": 496.0619551046763,
+    "max_fabric_n1_n_m": 1551.8363847696078,
+    "wrinkled_fraction": 0.771343481138319,
+    "max_node_distance_to_dr_mm": 0.011774280242586144
+   },
+   "notes": [
+    "Newton stalled at 5.3e-03; dynamic relaxation finished"
+   ]
+  },
+  {
+   "solver": "energy-newton-ml",
+   "mesh_mm": 3200.0,
+   "nodes": 680,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 3.1102733589996205,
+   "residual": 3.9253907076650347e-07,
+   "app_residual": 0.143580984995965,
+   "counts": {
+    "newton_iterations": 14,
+    "gradient_evaluations": 618,
+    "factorisations": 14,
+    "colours": 14,
+    "level_time_s": 3.1102733589996205
+   },
+   "metrics": {
+    "volume_m3": 2531.568446099878,
+    "crown_height_m": 15.632519898434024,
+    "max_diameter_m": 17.778717292105732,
+    "max_tape_tension_n": 409.47141705597323,
+    "max_fabric_n1_n_m": 907.5520623521402,
+    "wrinkled_fraction": 0.8333333333333334,
+    "max_node_distance_to_dr_mm": 4.177885325156644
+   },
+   "notes": []
+  },
+  {
+   "solver": "energy-newton-ml",
+   "mesh_mm": 1600.0,
+   "nodes": 1920,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 10.593407246000424,
+   "residual": 4.602499368959575e-07,
+   "app_residual": 0.17814674583097348,
+   "counts": {
+    "newton_iterations": 15,
+    "gradient_evaluations": 605,
+    "factorisations": 15,
+    "colours": 13,
+    "level_time_s": 7.483133887000804
+   },
+   "metrics": {
+    "volume_m3": 2536.1538005428883,
+    "crown_height_m": 15.609175613236847,
+    "max_diameter_m": 17.819243228741986,
+    "max_tape_tension_n": 447.7231644275714,
+    "max_fabric_n1_n_m": 989.1689283090216,
+    "wrinkled_fraction": 0.8315789473684211,
+    "max_node_distance_to_dr_mm": 4.997182813601026
+   },
+   "notes": []
+  },
+  {
+   "solver": "energy-newton-ml",
+   "mesh_mm": 800.0,
+   "nodes": 4300,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 37.69499834999988,
+   "residual": 6.772767532705363e-07,
+   "app_residual": 0.56199169893049,
+   "counts": {
+    "newton_iterations": 21,
+    "gradient_evaluations": 859,
+    "factorisations": 25,
+    "colours": 13,
+    "level_time_s": 27.101591103999453
+   },
+   "metrics": {
+    "volume_m3": 2538.627724751543,
+    "crown_height_m": 15.615872161494329,
+    "max_diameter_m": 17.834971012814723,
+    "max_tape_tension_n": 466.2825860027531,
+    "max_fabric_n1_n_m": 990.2978641061072,
+    "wrinkled_fraction": 0.8192488262910798,
+    "max_node_distance_to_dr_mm": 18.17229307763663
+   },
+   "notes": []
+  },
+  {
+   "solver": "energy-newton-ml",
+   "mesh_mm": 400.0,
+   "nodes": 10700,
+   "status": "max_iterations",
+   "converged": false,
+   "wall_time": 1620.48524876,
+   "residual": 0.00033621589165476966,
+   "app_residual": 0.8256065564075793,
+   "counts": {
+    "newton_iterations": 500,
+    "gradient_evaluations": 21169,
+    "factorisations": 549,
+    "colours": 13,
+    "level_time_s": 1582.7902504100002
+   },
+   "metrics": {
+    "volume_m3": 2539.746494811447,
+    "crown_height_m": 15.618949633499776,
+    "max_diameter_m": 17.829547365545316,
+    "max_tape_tension_n": 485.7731176779456,
+    "max_fabric_n1_n_m": 1042.927864170321,
+    "wrinkled_fraction": 0.8035277516462841,
+    "max_node_distance_to_dr_mm": 28.727084030544013
+   },
+   "notes": []
+  },
+  {
+   "solver": "energy-newton-ml",
+   "mesh_mm": 283.0,
+   "nodes": 17780,
+   "status": "time_limit",
+   "converged": false,
+   "wall_time": 3421.6120548259987,
+   "residual": 0.0019046376651451536,
+   "app_residual": 0.988507740664395,
+   "counts": {
+    "newton_iterations": 302,
+    "gradient_evaluations": 12797,
+    "factorisations": 307,
+    "colours": 13,
+    "level_time_s": 1801.1268060659986
+   },
+   "metrics": {
+    "volume_m3": 2539.92745000641,
+    "crown_height_m": 15.622147284089527,
+    "max_diameter_m": 17.831022005575626,
+    "max_tape_tension_n": 491.5689273515045,
+    "max_fabric_n1_n_m": 1066.9155746281024,
+    "wrinkled_fraction": 0.7973713962690786,
+    "max_node_distance_to_dr_mm": 45.7951744491703
+   },
+   "notes": []
+  },
+  {
+   "solver": "energy-newton-ml",
+   "mesh_mm": 200.0,
+   "nodes": 30340,
+   "status": "time_limit",
+   "converged": false,
+   "wall_time": 5230.102044215999,
+   "residual": 0.04757088389388023,
+   "app_residual": 1.2529527241994445,
+   "counts": {
+    "newton_iterations": 150,
+    "gradient_evaluations": 6452,
+    "factorisations": 154,
+    "colours": 13,
+    "level_time_s": 1808.4899893900001
+   },
+   "metrics": {
+    "volume_m3": 2540.1047872429735,
+    "crown_height_m": 15.623265835941535,
+    "max_diameter_m": 17.829357082330546,
+    "max_tape_tension_n": 495.72600978520234,
+    "max_fabric_n1_n_m": 1205.36386195979,
+    "wrinkled_fraction": 0.7816346790205162,
+    "max_node_distance_to_dr_mm": 49.65530308119291
+   },
+   "notes": []
+  },
+  {
+   "solver": "calculix",
+   "mesh_mm": 3200.0,
+   "nodes": 680,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 5.997012853000342,
+   "residual": 3.9230354268229e-07,
+   "app_residual": 1.4553770349297277e-06,
+   "counts": {
+    "passes": 40
+   },
+   "metrics": {
+    "volume_m3": 2530.964622740682,
+    "crown_height_m": 15.633183526762112,
+    "max_diameter_m": 17.78352440691063,
+    "max_tape_tension_n": 409.4866443909884,
+    "max_fabric_n1_n_m": 907.5861970556173,
+    "wrinkled_fraction": 0.8333333333333334,
+    "max_node_distance_to_dr_mm": 4.2806487800069905e-05
+   },
+   "notes": []
+  },
+  {
+   "solver": "calculix",
+   "mesh_mm": 1600.0,
+   "nodes": 1920,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 17.206867556997167,
+   "residual": 7.064403829074354e-07,
+   "app_residual": 1.0558842347149866e-06,
+   "counts": {
+    "passes": 40
+   },
+   "metrics": {
+    "volume_m3": 2536.013653417948,
+    "crown_height_m": 15.608659808497812,
+    "max_diameter_m": 17.82382584160759,
+    "max_tape_tension_n": 447.7145341977962,
+    "max_fabric_n1_n_m": 989.1586807458134,
+    "wrinkled_fraction": 0.8157894736842105,
+    "max_node_distance_to_dr_mm": 2.336695127474734e-05
+   },
+   "notes": []
+  },
+  {
+   "solver": "calculix",
+   "mesh_mm": 800.0,
+   "nodes": 4300,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 39.89405359100056,
+   "residual": 7.86844406725153e-07,
+   "app_residual": 1.2779879039039003e-06,
+   "counts": {
+    "passes": 40
+   },
+   "metrics": {
+    "volume_m3": 2539.2641696795376,
+    "crown_height_m": 15.61554320768503,
+    "max_diameter_m": 17.84401632920094,
+    "max_tape_tension_n": 466.274492637464,
+    "max_fabric_n1_n_m": 990.2952364752881,
+    "wrinkled_fraction": 0.8145539906103286,
+    "max_node_distance_to_dr_mm": 1.7465940309235572e-05
+   },
+   "notes": []
+  },
+  {
+   "solver": "calculix",
+   "mesh_mm": 400.0,
+   "nodes": 10700,
+   "status": "converged",
+   "converged": true,
+   "wall_time": 107.49831282200103,
+   "residual": 7.111995477156133e-07,
+   "app_residual": 2.4672637993763094e-06,
+   "counts": {
+    "passes": 40
+   },
+   "metrics": {
+    "volume_m3": 2540.261074677211,
+    "crown_height_m": 15.619716066024154,
+    "max_diameter_m": 17.836497473899698,
+    "max_tape_tension_n": 485.83029457108796,
+    "max_fabric_n1_n_m": 1133.360962815635,
+    "wrinkled_fraction": 0.7958607714016933,
+    "max_node_distance_to_dr_mm": 2.3523413064375366e-05
+   },
+   "notes": []
+  }
+ ]
+}

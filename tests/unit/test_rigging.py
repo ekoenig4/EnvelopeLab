@@ -7,7 +7,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from hypothesis import given, settings
+from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
 from envelopelab.design.model import DesignDocument
@@ -211,6 +211,9 @@ def test_with_default_rigging_keeps_existing_values(design: DesignDocument) -> N
     depth=st.floats(1.0, 8.0),
     billow=st.floats(0.0, 0.3),
 )
+# Found by CI: the full-open crossing lay between the last two path samples, 1.9 um of
+# pull beyond the sampled kinematic limit.
+@example(overlap=1.0, attach=1.044921875, depth=1.0, billow=0.0)
 def test_opening_keeps_line_lengths(
     overlap: float, attach: float, depth: float, billow: float
 ) -> None:
