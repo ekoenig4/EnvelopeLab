@@ -405,9 +405,11 @@ For the selected row you can set the label, grain direction, zone, seam allowanc
 rows or this row), add notches, tape paths across the panel and feature locations (drag a
 feature to move it). *Marks on this row* lists them; *Remove selected mark* deletes one.
 
-Patterns are drawn **as last generated**. When the design has changed since, a red
-**STALE** banner says so and the panels are greyed until you press **Regenerate patterns**
-(F5), or enable automatic regeneration in the preferences.
+Patterns are drawn **as last generated**. A status banner over the view, with the same
+symbols as the other windows, always says which: ✓ **Patterns are current**, i **not
+generated yet**, or ◷ **Patterns are STALE** when the design has changed since. Stale
+panels are greyed until you press **Regenerate patterns** (on the banner, in the toolbar
+or F5), or enable automatic regeneration in the preferences.
 
 ### Manual outline overrides
 

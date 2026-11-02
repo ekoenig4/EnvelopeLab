@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QGraphicsEllipseItem,
     QGraphicsItem,
     QGraphicsPathItem,
@@ -77,6 +78,7 @@ from envelopelab.rigging.parachute import CentrePanel
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.pattern_layout import shelf_layout
 from envelopelab_app.refresh import Refresher
+from envelopelab_app.theme import StatusBanner
 
 GAP = 0.4  # m between rows in the layout
 ZONE_FALLBACK = "#d9e7f5"
@@ -199,6 +201,10 @@ class PatternView(QGraphicsView):
         )
 
 
+#: Text of the banner's action.
+REGENERATE = "Regenerate patterns"
+
+
 class PatternPanel(QWidget):
     """2D pattern editor panel."""
 
@@ -206,11 +212,12 @@ class PatternPanel(QWidget):
         super().__init__()
         self.controller = controller
         self._updating = False
-        self.banner = QLabel()
-        self.banner.setObjectName("patternBanner")
-        self.banner.setWordWrap(True)
+        self.banner = StatusBanner()
+        self.banner.setObjectName("statusBanner")
+        self.banner.actionTriggered.connect(self.regenerate)
         self.view = PatternView(self)
         toolbar = QToolBar()
+        toolbar.setObjectName("panelToolbar")
         self.regenerate_action = toolbar.addAction("Regenerate patterns")
         self.regenerate_action.triggered.connect(self.regenerate)
         fit = toolbar.addAction("Fit view")
@@ -322,9 +329,15 @@ class PatternPanel(QWidget):
         form.addRow(clear_ann)
         form.addRow(self.clear_override)
 
+        form_holder = QWidget()
+        form_holder.setObjectName("sidePanel")  # the shared theme draws its box as a card
+        holder_layout = QVBoxLayout(form_holder)
+        holder_layout.setContentsMargins(8, 0, 8, 8)
+        holder_layout.addWidget(form_box)
         scroll = QScrollArea()
-        scroll.setWidget(form_box)
+        scroll.setWidget(form_holder)
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.setObjectName("patternPanelSplitter")
         splitter.setChildrenCollapsible(False)
@@ -335,6 +348,8 @@ class PatternPanel(QWidget):
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([700, 250])
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         layout.addWidget(toolbar)
         layout.addWidget(self.banner)
         layout.addWidget(splitter)
@@ -416,22 +431,26 @@ class PatternPanel(QWidget):
         session = self.controller.session
         status = self.controller.artifact_status("patterns")
         if session is None or not self.controller.is_gore:
-            self.banner.setText("No standard-gore design: nothing to draw.")
-            self.banner.setStyleSheet("")
+            self.banner.set_status("info", "No standard-gore design: nothing to draw.")
             return
         if status == "not built":
-            self.banner.setText("Patterns have not been generated yet — press Regenerate patterns.")
-            self.banner.setStyleSheet("background: #fff3cd; padding: 4px;")
+            self.banner.set_status(
+                "info",
+                "Patterns have not been generated yet.",
+                "Regenerate them to draw the cut pieces.",
+                REGENERATE,
+            )
             return
         if status == "stale":
-            self.banner.setText(
-                "Patterns are STALE: the design changed since they were generated (shown "
-                "greyed). Press Regenerate patterns before using them."
+            self.banner.set_status(
+                "stale",
+                "Patterns are STALE.",
+                "The design changed since they were generated (shown greyed). Regenerate "
+                "them before using them.",
+                REGENERATE,
             )
-            self.banner.setStyleSheet("background: #f8d7da; color: #721c24; padding: 4px;")
         else:
-            self.banner.setText("Patterns are current.")
-            self.banner.setStyleSheet("background: #d4edda; color: #155724; padding: 4px;")
+            self.banner.set_status("ok", "Patterns are current.")
         stale = status == "stale"
         design = session.design
         assert design.gores is not None

@@ -3,6 +3,9 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the 2D pattern view uses the shared design: its state (current, not
+  generated, STALE) is the shared status banner with a *Regenerate patterns* button on it
+  when needed, and the *Selected row* form is drawn as a card. Display only.
 - Changed: the standard-gore editor uses the shared design: the key figures (volume,
   height, maximum diameter, gross lift) and a lift-margin chip in its title bar, a status
   banner stating the worst design problem (errors, compression under load, negative lift
