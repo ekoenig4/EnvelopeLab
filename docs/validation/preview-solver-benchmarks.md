@@ -37,15 +37,15 @@ not change the page.
 | Simple shear 12x12, gamma=0.002: top-edge reaction vs E t gamma / 4 | 50.18 | 50 | N/m | 0.004 | 0.02 | pass |
 | Simple shear 12x12, gamma=0.002: relative residual | - | - | - | < 1e-05 | 1e-06 | pass |
 | Simple shear 12x12, gamma=0.002, no tension field (control): N_xy vs G t gamma | 76.92 | 76.92 | N/m | < 1e-05 | 0.02 | pass |
-| Spherical envelope, 100 degC, mouth fixed, no weight: pressure force vs mouth reaction | 3642 | 3642 | N | < 1e-05 | 0.005 | pass |
-| Spherical envelope, 100 degC, mouth fixed, no weight: pressure force vs lift V (rho_a - rho_i) g | 3642 | 3642 | N | < 1e-05 | 0.005 | pass |
+| Spherical envelope, 100 degC, mouth fixed, no weight: pressure force vs mouth reaction | 3641 | 3641 | N | < 1e-05 | 0.005 | pass |
+| Spherical envelope, 100 degC, mouth fixed, no weight: pressure force vs lift V (rho_a - rho_i) g | 3641 | 3641 | N | < 1e-05 | 0.005 | pass |
 | Spherical envelope, 100 degC, mouth fixed, no weight: relative residual | - | - | - | < 1e-05 | 1e-06 | pass |
 | Spherical envelope, 100 degC, mouth fixed, with weight: global force imbalance | - | - | - | < 1e-05 | 0.005 | pass |
 | Spherical envelope, 100 degC, mouth fixed, with weight: relative residual | - | - | - | < 1e-05 | 1e-06 | pass |
-| Refinement, last two levels: total volume | 1348 | 1349 | m^3 | 0.0008 | 0.02 | pass |
-| Refinement, last two levels: max displacement (all nodes) | 0.9556 | 0.9543 | m | 0.001 | 0.02 | pass |
-| Refinement, last two levels: max displacement (load tapes) | 0.7607 | 0.754 | m | 0.009 | 0.02 | pass |
-| Refinement, last two levels: crown rise | 0.7352 | 0.7309 | m | 0.006 | 0.02 | pass |
+| Refinement, last two levels: total volume | 1347 | 1348 | m^3 | 0.0009 | 0.02 | pass |
+| Refinement, last two levels: max displacement (all nodes) | 0.964 | 0.9602 | m | 0.004 | 0.02 | pass |
+| Refinement, last two levels: max displacement (load tapes) | 0.7507 | 0.742 | m | 0.01 | 0.02 | pass |
+| Refinement, last two levels: crown rise | 0.7366 | 0.732 | m | 0.006 | 0.02 | pass |
 | Refinement: all levels converged | - | - | - | < 1e-05 | 0 | pass |
 
 ## Mesh refinement: generic spherical envelope
@@ -59,13 +59,13 @@ those symmetry planes. Generic fabric and tapes (assumed values).
 
 | Target edge (mm) | Nodes | Triangles | Converged | Max displacement, all nodes (m) | Max displacement, load tapes (m) | Crown rise (m) | Volume (m^3) |
 |---|---|---|---|---|---|---|---|
-| 2400 | 612 | 1200 | yes | 0.93 | 0.748 | 0.748 | 1347 |
-| 1700 | 696 | 1368 | yes | 0.931 | 0.76 | 0.76 | 1345 |
-| 1200 | 1164 | 2292 | yes | 0.985 | 0.76 | 0.741 | 1346 |
-| 850 | 1908 | 3768 | yes | 0.954 | 0.754 | 0.731 | 1349 |
-| 600 | 3036 | 6012 | yes | 0.956 | 0.761 | 0.735 | 1348 |
+| 2400 | 612 | 1200 | yes | 0.955 | 0.747 | 0.746 | 1347 |
+| 1700 | 696 | 1368 | yes | 0.938 | 0.758 | 0.758 | 1345 |
+| 1200 | 1164 | 2292 | yes | 0.993 | 0.749 | 0.741 | 1345 |
+| 850 | 1908 | 3768 | yes | 0.96 | 0.742 | 0.732 | 1348 |
+| 600 | 3036 | 6012 | yes | 0.964 | 0.751 | 0.737 | 1347 |
 
-Change of the all-node maximum displacement between consecutive levels: 0.1 %, 5.7 %, 3.1 %, 0.1 %.
+Change of the all-node maximum displacement between consecutive levels: 1.7 %, 5.8 %, 3.3 %, 0.4 %.
 
 !!! warning "Maximum displacement is not mesh-converged in wrinkled fabric"
     The largest displacements (over all nodes and over tape nodes) occur in the

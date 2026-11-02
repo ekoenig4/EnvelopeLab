@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed (physics): wrinkled fabric now carries its tension along the direction that
+  maximises the uniaxial energy (Pipkin–Steigmann relaxed energy), instead of the major
+  direction of the trial stress, and is slack only when no direction is stretched. For
+  isotropic fabric nothing changes; for orthotropic fabric the law is now the gradient of
+  an energy, so the preview solver no longer cycles on wrinkled caps: special shapes that
+  never converged at their automatic element size now do (Smalley 90K eye pod at 232 mm in
+  14,956 iterations, antenna at 60 mm in 15,762; before, both stopped at a residual of
+  about 0.3 after 200,000). Results move slightly: Smalley 90K at 800 mm volume −0.025 %,
+  maximum tape tension +0.004 %; the generic validation envelope at 600 mm volume −0.07 %,
+  mean tape tension −11 %, 99th-percentile fabric tension +8 % (ADR-0033).
 - Changed: special shapes from meshes are placed about 7 times faster (the alien design's
   four shapes: 31 s to 4 s; an eye pod 10.2 s to 1.3 s). Mesh cuts split only the
   triangles they cross and find every crossing in one vectorised bisection, the
