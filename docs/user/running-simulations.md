@@ -32,13 +32,20 @@ the status bar says so. The envelope's own solve does not include the shapes.
 ## Telling results apart
 
 * Every run row names its solver — **Preview (dynamic relaxation)** or **CalculiX
-  verification** — on a solver-coloured background; the 3D view uses the same colours
+  verification** — with a solver-coloured swatch; the 3D view uses the same colours
   (preview blue, CalculiX orange, rest mesh olive, reference mesh green; the design
   surface in its fabric colours with dark seams) and the same names in its layer list and
   legend.
-* Each run shows its **state** (CURRENT or STALE), whether it **converged**, the final
-  **residual** (hover for what it measures), iterations, run time, nodes/elements, mesh
-  size, volume, lift and material sources.
+* Each run shows its **state** as a chip with the same symbols and colours as the 3D
+  view's banner (i *Current*, ✓ *Current* for CalculiX, ◷ *Stale*, ▲ *FoS fail*, ✕ *Not
+  converged*), whether it **converged**, the **Min FoS** (the lowest fabric factor of
+  safety, warp or weft, of a current converged preview run, marked **FAIL** in bold below
+  the required 5; "—" otherwise, hover for why), the final **residual** (hover for what it
+  measures), iterations, run time, nodes/elements, mesh size, volume, lift and material
+  sources. With no run yet, the panel says how to start one.
+* The toolbar starts runs (**Run Preview** is the main action). A chip beside it shows the
+  CalculiX version found; without CalculiX a banner says where it looked and why
+  *Run CalculiX* is disabled.
 * A run whose inputs differ from the current design is **STALE**: greyed and italic in
   the table, `[STALE]` in the 3D layer name and in the panel titles, and listed in
   Validation. It is never shown as current. Undoing the edit makes it current again.

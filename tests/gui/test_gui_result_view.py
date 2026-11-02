@@ -99,6 +99,14 @@ def test_preview_run_colours_by_fos_and_goes_grey_when_stale(
     for fact in ("Iterations", "Residual", "nodes", "Load case", "Materials", "Run time"):
         assert fact in details
     assert f"{record.iterations}" in details
+    # The runs table gives the same lowest factor as the colours.
+    from envelopelab_app.panels.runs import FOS_COLUMN
+    from envelopelab_app.result_view import lowest_fos
+
+    low = lowest_fos(view.fields)
+    assert low is not None
+    cell = w.runs.table.item(0, FOS_COLUMN)
+    assert cell is not None and cell.text().startswith(f"{low:.2f}")
     if os.environ.get("ENVELOPELAB_TEST_3D") and view.plotter is not None:
         view.redraw()
         assert view.plotter.scalar_bars  # the colour scale is drawn

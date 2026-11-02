@@ -104,6 +104,11 @@ def stylesheet() -> str:
         f" color: {t['accent_text']}; }}",
         f"QWidget#panelToolbar {{ background: {t['panel']};"
         f" border-bottom: 1px solid {t['border']}; }}",
+        f"QPushButton#primaryAction {{ background: {t['accent']}; color: {t['accent_text']};"
+        f" border: 1px solid {t['accent']}; border-radius: 4px; padding: 3px 12px;"
+        " font-weight: 600; }",
+        "QPushButton#primaryAction:disabled { background: #9db6d6; border-color: #9db6d6; }",
+        f"QLabel#emptyState {{ color: {t['muted']}; padding: 24px; }}",
         f"QWidget#cameraBar {{ background: {t['panel']}; border-top: 1px solid {t['border']}; }}",
     ]
     for kind, s in STATUS_STYLES.items():

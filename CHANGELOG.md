@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the Simulation Runs panel uses the shared design: an action toolbar (*Run
+  Preview* as the main action), the CalculiX version as a status chip or a banner saying
+  why it is disabled, a status chip per run (current, stale, FoS fail, not converged), a
+  solver colour swatch, a *Min FoS* column (lowest fabric factor of safety of a current
+  converged preview run, FAIL below 5) and an empty-state message. Display only.
 - Changed: the 3D view is reorganised (approved mockup): a toolbar chooses the run, the
   field to colour by and the display mode (shaded, with mesh edges, wireframe), with a
   screenshot button; a status banner across the view states the run's state worst first

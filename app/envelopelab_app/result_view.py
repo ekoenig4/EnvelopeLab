@@ -9,10 +9,13 @@ coloured, and an unconverged result is never coloured as a normal one.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import numpy as np
 
+from envelopelab.project.run_fields import SAFETY_FIELDS
+from envelopelab.solvers.results import ResultField
 from envelopelab_app.theme import FAIL_COLOR
 
 #: Factor-of-safety bands above the limit, as multiples of the limit (with a limit of 5:
@@ -209,3 +212,17 @@ def failing_zone_names(
     """Zones (named ``"<zone> (<direction>)"``) with a triangle below ``limit``."""
     below = np.asarray(fos) < limit
     return sorted({f"{zone_of_triangle[i]} ({direction})" for i in np.flatnonzero(below)})
+
+
+def lowest_fos(fields: Mapping[str, ResultField]) -> float | None:
+    """Lowest finite fabric factor of safety of a run's fields (None when the run has
+    none: no warp/weft resultants, not current, or every element unloaded)."""
+    lows = []
+    for name in SAFETY_FIELDS:
+        field = fields.get(name)
+        if field is None:
+            continue
+        finite = field.values[np.isfinite(field.values)]
+        if finite.size:
+            lows.append(float(finite.min()))
+    return min(lows) if lows else None
