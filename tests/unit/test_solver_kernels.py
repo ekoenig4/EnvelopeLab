@@ -32,11 +32,23 @@ def _case(seed: int, n_tri: int = 400) -> tuple[np.ndarray, ...]:
     return x, tri, rest_uv, p
 
 
+#: Strongly orthotropic plane-stress matrix (ripstop-like: low shear stiffness), N/m.
+ORTHOTROPIC = np.array([[107758.6, 25862.1, 0.0], [25862.1, 86206.9, 0.0], [0.0, 0.0, 5000.0]])
+
+
+@pytest.mark.parametrize("fabric", ["generic", "orthotropic"])
 @pytest.mark.parametrize("enabled", [True, False])
-def test_compiled_kernel_matches_numpy(enabled: bool) -> None:
+def test_compiled_kernel_matches_numpy(enabled: bool, fabric: str) -> None:
     x, tri, rest_uv, p = _case(3)
-    rest = rest_geometry(rest_uv, np.tile([1.0, 0.0], (len(tri), 1)))
-    c = np.broadcast_to(GENERIC_FABRIC.plane_stress_matrix(), (len(tri), 3, 3)).copy()
+    if fabric == "generic":
+        grain = np.tile([1.0, 0.0], (len(tri), 1))
+        matrix = GENERIC_FABRIC.plane_stress_matrix()
+    else:  # random grain directions: the wrinkle direction search runs off-axis
+        angle = np.random.default_rng(4).uniform(0.0, np.pi, len(tri))
+        grain = np.column_stack([np.cos(angle), np.sin(angle)])
+        matrix = ORTHOTROPIC
+    rest = rest_geometry(rest_uv, grain)
+    c = np.broadcast_to(matrix, (len(tri), 3, 3)).copy()
     ci = np.asarray(np.linalg.inv(c), dtype=np.float64)
     scatter = csr_matrix(
         (np.ones(tri.size), (tri.ravel(), np.arange(tri.size))), shape=(len(x), tri.size)
@@ -59,3 +71,15 @@ def test_pressure_corner_forces_sum_to_pressure_times_area() -> None:
     xe = np.array([[[0.0, 0.0, 0.0], [2.0, 0.0, 0.0], [0.0, 1.0, 0.0]]])
     f = pressure_corner_forces(xe, np.full((1, 3), 10.0))
     assert f.sum(axis=(0, 1)) == pytest.approx([0.0, 0.0, 10.0 * 1.0])
+
+
+def test_wrinkle_search_constants_match_the_numpy_law() -> None:
+    import envelopelab.solvers.kernels as k
+    import envelopelab.solvers.membrane as m
+
+    assert (k.WRINKLE_SCAN, k.WRINKLE_NEWTON_STEPS, k.WRINKLE_ANGLE_TOLERANCE) == (
+        m.WRINKLE_SCAN,
+        m.WRINKLE_NEWTON_STEPS,
+        m.WRINKLE_ANGLE_TOLERANCE,
+    )
+    assert np.array_equal(k._SCAN_C2, m._SCAN_C2) and np.array_equal(k._SCAN_S2, m._SCAN_S2)

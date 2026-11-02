@@ -41,6 +41,16 @@ from envelopelab.solvers.membrane import (
     tension_field,
 )
 
+# Wrinkle-direction search constants. They are repeated here, not imported, so that a
+# change also changes this file and invalidates Numba's on-disk cache (which tracks this
+# module's source, not the values of imported names); tests/unit/test_solver_kernels.py
+# checks that they equal envelopelab.solvers.membrane's.
+WRINKLE_SCAN = 4
+WRINKLE_NEWTON_STEPS = 8
+WRINKLE_ANGLE_TOLERANCE = 1e-12
+_SCAN_C2 = np.cos(2.0 * np.arange(WRINKLE_SCAN) * np.pi / WRINKLE_SCAN)
+_SCAN_S2 = np.sin(2.0 * np.arange(WRINKLE_SCAN) * np.pi / WRINKLE_SCAN)
+
 numba: Any
 try:  # Optional accelerator (extra "fast").
     import numba
@@ -148,6 +158,91 @@ def element_forces_numpy(
     return ElementForces(xe, f, strain, stress, state, trial_minor, f_int, f_p, r, ext)
 
 
+def _energy_terms_scalar(  # pragma: no cover - compiled; see membrane._uniaxial_energy_terms
+    c2: float, s2: float, e0: float, e1: float, e2: float, d: Any
+) -> tuple[float, float, float, float, float, float]:
+    w0, w1, w2 = 0.5 * (1.0 + c2), 0.5 * (1.0 - c2), 0.5 * s2
+    p0, p1, p2 = -s2, s2, c2
+    r0, r1, r2 = -2.0 * c2, 2.0 * c2, -2.0 * s2
+    eps = w0 * e0 + w1 * e1 + w2 * e2
+    deps = p0 * e0 + p1 * e1 + p2 * e2
+    ddeps = r0 * e0 + r1 * e1 + r2 * e2
+    dw0 = d[0, 0] * w0 + d[0, 1] * w1 + d[0, 2] * w2
+    dw1 = d[1, 0] * w0 + d[1, 1] * w1 + d[1, 2] * w2
+    dw2 = d[2, 0] * w0 + d[2, 1] * w1 + d[2, 2] * w2
+    dp0 = d[0, 0] * p0 + d[0, 1] * p1 + d[0, 2] * p2
+    dp1 = d[1, 0] * p0 + d[1, 1] * p1 + d[1, 2] * p2
+    dp2 = d[2, 0] * p0 + d[2, 1] * p1 + d[2, 2] * p2
+    q = w0 * dw0 + w1 * dw1 + w2 * dw2
+    dq = 2.0 * (p0 * dw0 + p1 * dw1 + p2 * dw2)
+    ddq = 2.0 * (r0 * dw0 + r1 * dw1 + r2 * dw2) + 2.0 * (p0 * dp0 + p1 * dp1 + p2 * dp2)
+    return eps, deps, ddeps, q, dq, ddq
+
+
+def _eps_q_scalar(  # pragma: no cover - compiled by numba; see membrane._eps_q
+    c2: float, s2: float, e0: float, e1: float, e2: float, d: Any
+) -> tuple[float, float]:
+    w0, w1, w2 = 0.5 * (1.0 + c2), 0.5 * (1.0 - c2), 0.5 * s2
+    eps = w0 * e0 + w1 * e1 + w2 * e2
+    dw0 = d[0, 0] * w0 + d[0, 1] * w1 + d[0, 2] * w2
+    dw1 = d[1, 0] * w0 + d[1, 1] * w1 + d[1, 2] * w2
+    dw2 = d[2, 0] * w0 + d[2, 1] * w1 + d[2, 2] * w2
+    return eps, w0 * dw0 + w1 * dw1 + w2 * dw2
+
+
+def _wrinkle_dir_scalar(  # pragma: no cover - compiled by numba; see membrane.wrinkle_direction
+    e0: float, e1: float, e2: float, d: Any, ct: float, st: float
+) -> tuple[float, float, float]:
+    """One triangle of :func:`envelopelab.solvers.membrane.wrinkle_direction`, with the
+    same arithmetic in the same order (``ct, st``: unit trial-stress direction)."""
+    c2, s2 = ct * ct - st * st, 2.0 * ct * st
+    eps, q = _eps_q_scalar(c2, s2, e0, e1, e2, d)
+    best = eps * eps / q if eps > 0.0 else -1.0
+    half = 0.5 * (e0 - e1)
+    norm = np.sqrt(half * half + 0.25 * e2 * e2)
+    if norm > 0.0:
+        sc2, ss2 = half / norm, 0.5 * e2 / norm
+    else:
+        sc2, ss2 = 1.0, 0.0
+    eps, q = _eps_q_scalar(sc2, ss2, e0, e1, e2, d)
+    g = eps * eps / q if eps > 0.0 else -1.0
+    if g > best:
+        c2, s2, best = sc2, ss2, g
+    for j in range(WRINKLE_SCAN):
+        eps, q = _eps_q_scalar(_SCAN_C2[j], _SCAN_S2[j], e0, e1, e2, d)
+        g = eps * eps / q if eps > 0.0 else -1.0
+        if g > best:
+            c2, s2, best = _SCAN_C2[j], _SCAN_S2[j], g
+    for _ in range(WRINKLE_NEWTON_STEPS):
+        eps, deps, ddeps, q, dq, ddq = _energy_terms_scalar(c2, s2, e0, e1, e2, d)
+        grad = 2.0 * deps / eps - dq / q
+        curv = 2.0 * (ddeps * eps - deps * deps) / (eps * eps) - (ddq * q - dq * dq) / (q * q)
+        step = -grad / curv if curv < 0.0 else 0.05 * grad
+        step = min(max(step, -0.2), 0.2)
+        if not abs(step) > WRINKLE_ANGLE_TOLERANCE:
+            break
+        accepted = False
+        for _ in range(4):
+            t = step
+            den = 1.0 + t * t
+            cr, sr = (1.0 - t * t) / den, 2.0 * t / den
+            tc2 = c2 * cr - s2 * sr
+            ts2 = s2 * cr + c2 * sr
+            te, tq = _eps_q_scalar(tc2, ts2, e0, e1, e2, d)
+            tg = te * te / tq if te > 0.0 else -1.0
+            if tg >= best:
+                c2, s2, best = tc2, ts2, tg
+                accepted = True
+                break
+            step = 0.5 * step
+        if not accepted:
+            break
+    eps, _ = _eps_q_scalar(c2, s2, e0, e1, e2, d)
+    c = np.sqrt(max(0.5 * (1.0 + c2), 0.0))
+    sn = np.copysign(np.sqrt(max(0.5 * (1.0 - c2), 0.0)), s2)
+    return c, sn, eps
+
+
 def _element_loop(  # pragma: no cover - compiled by numba; the NumPy path is the reference
     x: Any,
     tri: Any,
@@ -199,15 +294,14 @@ def _element_loop(  # pragma: no cover - compiled by numba; the NumPy path is th
         o0, o1, o2 = s0, s1, s2
         st = 0
         if enabled and minor_s <= 0.0:
-            angle = 0.5 * np.arctan2(2.0 * s2, s0 - s1)
-            cs = np.cos(angle)
-            sn = np.sin(angle)
-            eps_n = cs * cs * v0 + sn * sn * v1 + cs * sn * v2
-            if eps_n <= 0.0:
+            e_max = 0.5 * (v0 + v1) + np.sqrt((0.5 * (v0 - v1)) ** 2 + (0.5 * v2) ** 2)
+            if e_max <= 0.0:
                 st = 2
                 o0, o1, o2 = kappa * s0, kappa * s1, kappa * s2
             else:
                 st = 1
+                angle = 0.5 * np.arctan2(2.0 * s2, s0 - s1)
+                cs, sn, eps_n = _wrinkle_dir_scalar(v0, v1, v2, ci[t], np.cos(angle), np.sin(angle))
                 w0, w1, w2 = cs * cs, sn * sn, cs * sn
                 q0 = ci[t, 0, 0] * w0 + ci[t, 0, 1] * w1 + ci[t, 0, 2] * w2
                 q1 = ci[t, 1, 0] * w0 + ci[t, 1, 1] * w1 + ci[t, 1, 2] * w2
@@ -255,7 +349,11 @@ def _kernel() -> Any:
     global _compiled
     if _compiled is None:
         assert numba is not None
-        _compiled = numba.njit(cache=True, nogil=True)(_element_loop)
+        jit = numba.njit(cache=True, nogil=True)
+        globals()["_energy_terms_scalar"] = jit(_energy_terms_scalar)
+        globals()["_eps_q_scalar"] = jit(_eps_q_scalar)
+        globals()["_wrinkle_dir_scalar"] = jit(_wrinkle_dir_scalar)
+        _compiled = jit(_element_loop)
     return _compiled
 
 
