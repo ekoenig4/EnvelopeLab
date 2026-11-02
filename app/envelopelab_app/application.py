@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QApplication
 from envelopelab_app.diagnostics import environment_report, install_crash_log, opengl_report
 from envelopelab_app.graphics import configure_graphics, select_qt_platform
 from envelopelab_app.main_window import MainWindow
+from envelopelab_app.theme import apply_theme
 
 ORGANIZATION = "EnvelopeLab"
 APPLICATION = "EnvelopeLab"
@@ -25,6 +26,7 @@ def create_application(argv: list[str]) -> QApplication:
     app = QApplication(argv)
     app.setOrganizationName(ORGANIZATION)
     app.setApplicationName(APPLICATION)
+    apply_theme(app)
     return app
 
 
