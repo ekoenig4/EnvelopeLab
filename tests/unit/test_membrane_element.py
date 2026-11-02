@@ -165,7 +165,8 @@ def _relaxed_energy(e: FloatArray, c: FloatArray) -> FloatArray:
     e_n = 1.0 / np.einsum("ti,ij,tj->t", w, np.linalg.inv(c), w)
     eps = e @ w.T
     uni = 0.5 * (e_n[None] * np.where(eps > 0.0, eps, 0.0) ** 2).max(axis=1)
-    return np.where(s_min > 0.0, 0.5 * np.einsum("ki,ki->k", e, s), uni)
+    out: FloatArray = np.where(s_min > 0.0, 0.5 * np.einsum("ki,ki->k", e, s), uni)
+    return out
 
 
 def _batch(e: FloatArray) -> FloatArray:
