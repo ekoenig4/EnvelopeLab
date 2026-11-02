@@ -49,14 +49,17 @@ from envelopelab.project.session import (
     EVENT_STATE,
     ProjectSession,
 )
-from envelopelab.project.shapes import envelope_surface
+from envelopelab.project.shape_runs import auto_mesh_size
+from envelopelab.project.shapes import envelope_surface, shape_fabrics
 from envelopelab.project.simulation import BuiltModel
 from envelopelab.rigging import RiggingOutputs, rigging_polylines
 from envelopelab_app.settings import Preferences
-from envelopelab_app.shapes_service import ShapeService, ShapeSimulator
+from envelopelab_app.shapes_service import ShapeService, ShapeSimulator, ShapeSolveRequest
 
 #: Input groups of the envelope a special shape reads (its key, see ``shape_host_hash``).
-SHAPE_HOST_GROUPS = ("geometry", "row_zones", "materials")
+#: Inputs a placed shape reads: the envelope, its row fabrics, and the seam allowances and
+#: hole tape the feed holes must clear (feed_hole_clearance).
+SHAPE_HOST_GROUPS = ("geometry", "seam_allowance", "row_zones", "tapes", "materials")
 
 T = TypeVar("T")
 
@@ -117,6 +120,7 @@ class WorkspaceController(QObject):
         self.shapes = ShapeService()
         self.shapes.updated.connect(self._shapes_updated)
         self.shape_simulator = ShapeSimulator(self.shapes)
+        self.shape_simulator.finished.connect(self._shape_solved)
 
     def bump(self) -> None:
         """Start a new change (call before emitting the signals that announce it)."""
@@ -205,6 +209,7 @@ class WorkspaceController(QObject):
         self.shapes.reset()
         if session is not None:
             session.set_fabric_lookup(self.fabric_lookup)
+            self.shapes.restore(session)
         self._refresh_outputs()
         self.sync_shapes()
         if session is not None:
@@ -365,6 +370,34 @@ class WorkspaceController(QObject):
         self.bump()
         self.shapesChanged.emit()
 
+    def shape_solve_request(
+        self, name: str, mesh_mm: float | None = None
+    ) -> ShapeSolveRequest | None:
+        """What simulating shape ``name`` now needs (None: not placed yet or cannot be).
+
+        ``mesh_mm`` is the target element size, mm; None takes the automatic size
+        (:func:`envelopelab.project.shape_runs.auto_mesh_size`).
+        """
+        s = self.session
+        spec = None if s is None else next((x for x in s.state.shapes if x.name == name), None)
+        result = self.shapes.result(name)
+        key = self.shapes.current_simulation_key(name)
+        if s is None or spec is None or result is None or result.design is None or key is None:
+            return None
+        placed = result.design
+        host, skin = shape_fabrics(spec, s.design, s.patterns, placed)
+        size = mesh_mm if mesh_mm is not None else 1000.0 * auto_mesh_size(placed)
+        return ShapeSolveRequest(
+            name, key, placed, s.design, host, skin, self.fabrics.catalog(), size
+        )
+
+    def _shape_solved(self, name: str) -> None:
+        """Keep a new shape simulation with the project."""
+        sim = self.shapes.simulations.get(name)
+        if self.session is not None and sim is not None and sim.arrays is not None:
+            self.session.add_shape_run(sim.record, sim.arrays)
+            sim.arrays = None
+
     def shape_findings(self) -> list[DesignFinding]:
         """Findings of the special shapes: placement errors, pattern checks, simulations."""
         s = self.session
@@ -406,7 +439,7 @@ class WorkspaceController(QObject):
                         target,
                     )
                 )
-            m = sim.metrics
+            m = sim.record
             if not m.converged:
                 out.append(
                     DesignFinding(

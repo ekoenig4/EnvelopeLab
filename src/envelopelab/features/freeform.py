@@ -61,7 +61,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 from scipy.sparse import coo_matrix, csc_matrix
-from scipy.sparse.linalg import lsqr, splu
+from scipy.sparse.linalg import splu
 from scipy.spatial import cKDTree
 
 from envelopelab.features.builder import DesignedSkin, FeatureBuildError, HostSurface, _mesh_disc
@@ -89,67 +89,104 @@ def _cut(
     tol: float,
     point: Any = None,
     accept: Any = None,
+    parents: list[int] | None = None,
 ) -> tuple[FloatArray, IntArray]:
     """Split a triangle mesh along ``value = 0``.
 
-    Vertices with ``|value| <= tol`` lie on the cut and are never split. ``point(a, b, s)``
-    places the crossing on edge ``ab`` (default linear), ``accept(p)`` says whether a
-    crossing at ``p`` is cut at all (a half-plane). ``keep="pos"`` drops the negative side,
-    ``"both"`` keeps both sides.
+    Vertices with ``|value| <= tol`` lie on the cut and are never split.
+    ``point(A, B, S)`` places the crossings on edges ``AB`` (arrays of edge ends, shape
+    (k, 3), and linear fractions, shape (k,); default linear), ``accept(P)`` says which
+    crossings at ``P`` (shape (k, 3)) are cut at all (a half-plane). ``keep="pos"``
+    drops the negative side, ``"both"`` keeps both sides. ``parents``, when given,
+    receives the input triangle of every output triangle.
+
+    Only the triangles the cut crosses are split, one by one; the others are copied as
+    they are. New vertices are numbered in the order the triangles first use their edges.
     """
     sign = np.where(value > tol, 1, np.where(value < -tol, -1, 0))
-    verts = list(x)
-    cache: dict[tuple[int, int], int | None] = {}
+    st = sign[tri]
+    pos, neg = (st > 0).any(axis=1), (st < 0).any(axis=1)
+    crossed = np.flatnonzero(pos & neg)
+    side = np.where(pos, 1, np.where(neg, -1, 0))
 
-    def cross(a: int, b: int) -> int | None:
+    # Each crossed triangle: one vertex on the cut (one crossing) or none (two).
+    plans: list[tuple[int, int, int, int, int]] = []
+    edge_index: dict[tuple[int, int], int] = {}
+    ends: list[tuple[int, int]] = []
+
+    def edge(a: int, b: int) -> int:
         key = (min(a, b), max(a, b))
-        if key not in cache:
-            s = value[a] / (value[a] - value[b])
-            p = x[a] + s * (x[b] - x[a]) if point is None else point(x[a], x[b], s)
-            if accept is not None and not accept(p):
-                cache[key] = None
-            else:
-                cache[key] = len(verts)
-                verts.append(p)
-        return cache[key]
+        if key not in edge_index:
+            edge_index[key] = len(ends)
+            ends.append((a, b))  # oriented as first used, as the crossing is computed
+        return edge_index[key]
 
-    out: list[list[int]] = []
-    side: list[int] = []
-    for t in tri:
-        st = sign[t]
-        if not ((st > 0).any() and (st < 0).any()):
-            out.append(list(t))
-            side.append(1 if (st > 0).any() else (-1 if (st < 0).any() else 0))
-            continue
-        zero = np.flatnonzero(st == 0)
+    for t in crossed.tolist():
+        tt, s3 = tri[t], st[t]
+        zero = np.flatnonzero(s3 == 0)
         if len(zero) == 1:
             z = int(zero[0])
-            a, b, c = t[z], t[(z + 1) % 3], t[(z + 2) % 3]
-            m = cross(b, c)
-            if m is None:
-                out.append(list(t))
-                side.append(2)
-                continue
-            out += [[a, b, m], [a, m, c]]
-            side += [int(sign[b]), int(sign[c])]
+            a, b, c = int(tt[z]), int(tt[(z + 1) % 3]), int(tt[(z + 2) % 3])
+            edge(b, c)
+            plans.append((t, 1, a, b, c))
+        else:
+            n_pos = int((s3 > 0).sum())
+            odd = int(np.flatnonzero(s3 > 0 if n_pos == 1 else s3 < 0)[0])
+            a, b, c = int(tt[odd]), int(tt[(odd + 1) % 3]), int(tt[(odd + 2) % 3])
+            edge(a, b)
+            edge(a, c)
+            plans.append((t, 2, a, b, c))
+
+    # Every crossing at once.
+    vertex = np.full(len(ends), -1, dtype=np.int64)
+    new_points = np.zeros((0, 3))
+    if ends:
+        ea = np.array([e[0] for e in ends], dtype=np.int64)
+        eb = np.array([e[1] for e in ends], dtype=np.int64)
+        frac = value[ea] / (value[ea] - value[eb])
+        pa, pb = x[ea], x[eb]
+        pts = pa + frac[:, None] * (pb - pa) if point is None else point(pa, pb, frac)
+        ok = np.ones(len(ends), dtype=bool) if accept is None else np.asarray(accept(pts))
+        vertex[ok] = len(x) + np.arange(int(ok.sum()))
+        new_points = np.asarray(pts)[ok]
+
+    # The pieces of each crossed triangle (a crossing that is not cut leaves it whole).
+    pieces: dict[int, tuple[list[list[int]], list[int]]] = {}
+    for t, kind, a, b, c in plans:
+        if kind == 1:
+            m = int(vertex[edge_index[(min(b, c), max(b, c))]])
+            if m < 0:
+                pieces[t] = ([[a, b, c]], [2])
+            else:
+                pieces[t] = ([[a, b, m], [a, m, c]], [int(sign[b]), int(sign[c])])
             continue
-        n_pos = int((st > 0).sum())
-        odd = int(np.flatnonzero(st > 0 if n_pos == 1 else st < 0)[0])
-        a, b, c = t[odd], t[(odd + 1) % 3], t[(odd + 2) % 3]
-        ab, ac = cross(a, b), cross(a, c)
-        if ab is None and ac is None:
-            out.append(list(t))
-            side.append(2)
+        ab = int(vertex[edge_index[(min(a, b), max(a, b))]])
+        ac = int(vertex[edge_index[(min(a, c), max(a, c))]])
+        if ab < 0 and ac < 0:
+            pieces[t] = ([[a, b, c]], [2])
             continue
-        if ab is None or ac is None:
+        if ab < 0 or ac < 0:
             raise FeatureBuildError("a seam cut ends inside a triangle (axis not through the pole)")
-        out += [[a, ab, ac], [ab, b, c], [ab, c, ac]]
-        side += [int(sign[a]), int(sign[b]), int(sign[b])]
-    tri_out = np.asarray(out, dtype=np.int64)
-    if keep == "pos":
-        keep_mask = np.asarray(side) > 0
-        tri_out = tri_out[keep_mask]
-    return np.asarray(verts), tri_out
+        pieces[t] = (
+            [[a, ab, ac], [ab, b, c], [ab, c, ac]],
+            [int(sign[a]), int(sign[b]), int(sign[b])],
+        )
+
+    # Assemble in the input order.
+    counts = np.ones(len(tri), dtype=np.int64)
+    for t, (tris, _) in pieces.items():
+        counts[t] = len(tris)
+    first = np.concatenate([[0], np.cumsum(counts)[:-1]])
+    out = np.repeat(tri, counts, axis=0)
+    out_side = np.repeat(side, counts)
+    for t, (tris, sides) in pieces.items():
+        out[first[t] : first[t] + len(tris)] = tris
+        out_side[first[t] : first[t] + len(tris)] = sides
+    src = np.repeat(np.arange(len(tri)), counts)
+    keep_mask = out_side > 0 if keep == "pos" else np.ones(len(out), dtype=bool)
+    if parents is not None:
+        parents[:] = src[keep_mask].tolist()
+    return np.vstack([x, new_points]), out[keep_mask]
 
 
 def _insert_pole(
@@ -278,11 +315,23 @@ def _lscm(x: FloatArray, tri: IntArray, pins: tuple[int, int]) -> FloatArray:
     pin_val = np.array([0.0, 1.0, 0.0, 0.0])
     free = np.setdiff1d(np.arange(2 * n), pin_idx)
     rhs = -big[:, pin_idx] @ pin_val
-    sol = lsqr(big[:, free], rhs, atol=1e-12, btol=1e-12, iter_lim=20000)[0]
+    # The least-squares solution from the normal equations, factorised directly (the
+    # system is small and sparse; an iterative solver needs thousands of products).
+    a = big[:, free]
+    sol = splu(csc_matrix(a.T @ a)).solve(a.T @ rhs)
     full = np.zeros(2 * n)
     full[free] = sol
     full[pin_idx] = pin_val
     return np.column_stack([full[:n], full[n:]])
+
+
+def _best_rotations(cov: FloatArray) -> tuple[FloatArray, FloatArray]:
+    r"""Cosine and sine of the rotation :math:`R` maximising :math:`\operatorname{tr}(R^T C)`
+    for each 2 x 2 matrix :math:`C` of ``cov`` (shape (m, 2, 2)):
+    :math:`\theta = \operatorname{atan2}(C_{10} - C_{01}, C_{00} + C_{11})`, the rotation an
+    SVD of :math:`C` gives (with its reflection removed)."""
+    theta = np.arctan2(cov[:, 1, 0] - cov[:, 0, 1], cov[:, 0, 0] + cov[:, 1, 1])
+    return np.cos(theta), np.sin(theta)
 
 
 def _arap(
@@ -292,8 +341,14 @@ def _arap(
     heavy: set[tuple[int, int]],
     fixed: IntArray | None = None,
 ) -> FloatArray:
-    """As-rigid-as-possible flattening [Liu]_ from ``init`` (heavy edges weighted up;
-    ``fixed`` vertices keep their ``init`` positions)."""
+    r"""As-rigid-as-possible flattening [Liu]_ from ``init`` (heavy edges weighted up;
+    ``fixed`` vertices keep their ``init`` positions).
+
+    The local step's best rotation of each triangle is closed-form in 2D: for the
+    cotangent-weighted covariance :math:`C = \sum c_{ij} \Delta u\,\Delta x^T`, the
+    rotation by :math:`\theta = \operatorname{atan2}(C_{10} - C_{01}, C_{00} + C_{11})`
+    maximises :math:`\operatorname{tr}(R^T C)` (the polar factor an SVD would give).
+    """
     n = len(x)
     loc = _local_frames(x, tri)
     cot = np.zeros((len(tri), 3))
@@ -302,11 +357,13 @@ def _arap(
         cross = a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]
         cot[:, k] = np.einsum("mi,mi->m", a, b) / np.maximum(np.abs(cross), 1e-300)
     cot = np.clip(cot, 1e-3, None)
-    for t in range(len(tri)):
+    if heavy:
+        # Edge (i, j) as one integer i * n + j (i < j), looked up in the heavy set.
+        heavy_keys = np.fromiter((i * n + j for i, j in heavy), dtype=np.int64)
         for k in range(3):
-            i, j = tri[t, (k + 1) % 3], tri[t, (k + 2) % 3]
-            if (min(i, j), max(i, j)) in heavy:
-                cot[t, k] *= EDGE_WEIGHT
+            i, j = tri[:, (k + 1) % 3], tri[:, (k + 2) % 3]
+            keys = np.minimum(i, j).astype(np.int64) * n + np.maximum(i, j)
+            cot[np.isin(keys, heavy_keys), k] *= EDGE_WEIGHT
     rows, cols, vals = [], [], []
     for k in range(3):
         i, j = tri[:, (k + 1) % 3], tri[:, (k + 2) % 3]
@@ -320,35 +377,52 @@ def _arap(
     pinned = np.array([0]) if fixed is None or not len(fixed) else np.asarray(fixed)
     free = np.setdiff1d(np.arange(n), pinned)
     solver = splu(csc_matrix(lap[free][:, free]))
+    lap_fp = lap[free][:, pinned]
+    # Gather (edge k of triangle t -> its two vertices) as one sparse matrix, so the right
+    # hand side is a product instead of a scatter.
+    m = len(tri)
+    gather = coo_matrix(
+        (
+            np.concatenate([np.ones(3 * m), -np.ones(3 * m)]),
+            (
+                np.concatenate([tri[:, [1, 2, 0]].T.ravel(), tri[:, [2, 0, 1]].T.ravel()]),
+                np.concatenate([np.arange(3 * m), np.arange(3 * m)]),
+            ),
+        ),
+        shape=(n, 3 * m),
+    ).tocsr()
+    dxs = [loc[:, (k + 1) % 3] - loc[:, (k + 2) % 3] for k in range(3)]
     u = init.copy()
     for _ in range(ARAP_ITERATIONS):
-        rot = np.zeros((len(tri), 2, 2))
-        cov = np.zeros((len(tri), 2, 2))
+        cov = np.zeros((m, 2, 2))
         for k in range(3):
             i, j = tri[:, (k + 1) % 3], tri[:, (k + 2) % 3]
             du = u[i] - u[j]
-            dx = loc[:, (k + 1) % 3] - loc[:, (k + 2) % 3]
-            cov += cot[:, k][:, None, None] * np.einsum("mi,mj->mij", du, dx)
-        uu, _, vt = np.linalg.svd(cov)
-        rot = uu @ vt
-        bad = np.linalg.det(rot) < 0
-        uu[bad, :, 1] *= -1.0
-        rot[bad] = uu[bad] @ vt[bad]
-        rhs = np.zeros((n, 2))
-        for k in range(3):
-            i, j = tri[:, (k + 1) % 3], tri[:, (k + 2) % 3]
-            dx = loc[:, (k + 1) % 3] - loc[:, (k + 2) % 3]
-            r = cot[:, k][:, None] * np.einsum("mij,mj->mi", rot, dx)
-            np.add.at(rhs, i, r)
-            np.add.at(rhs, j, -r)
-        rhs_f = rhs[free] - lap[free][:, pinned] @ u[pinned]
-        u[free] = np.column_stack([solver.solve(rhs_f[:, 0]), solver.solve(rhs_f[:, 1])])
+            cov += cot[:, k][:, None, None] * du[:, :, None] * dxs[k][:, None, :]
+        c, sn = _best_rotations(cov)
+        r = np.concatenate(
+            [
+                cot[:, k][:, None]
+                * np.column_stack(
+                    [c * dxs[k][:, 0] - sn * dxs[k][:, 1], sn * dxs[k][:, 0] + c * dxs[k][:, 1]]
+                )
+                for k in range(3)
+            ]
+        )
+        rhs = gather @ r
+        rhs_f = rhs[free] - lap_fp @ u[pinned]
+        u[free] = solver.solve(np.ascontiguousarray(rhs_f))
     return u
 
 
 @dataclass
 class _Panel:
-    """One flattened panel: 3D triangles, flat coordinates and its boundary runs."""
+    """One flattened panel: 3D triangles, flat coordinates and its boundary runs.
+
+    ``top`` runs from the top of the right seam to the top of the left one (the pole alone
+    without a cap); ``glob`` maps the panel's vertices to the skin's. The cap is a
+    ``_Panel`` too, with only a ``top``: its closed loop.
+    """
 
     x: FloatArray
     tri: IntArray
@@ -358,6 +432,8 @@ class _Panel:
     left: list[int]
     phi_a: float
     phi_b: float
+    top: list[int] = field(default_factory=list)
+    glob: IntArray = field(default_factory=lambda: np.zeros(0, dtype=np.int64))
 
     def arc(self, run: list[int], world: bool) -> FloatArray:
         p = self.x[run] if world else self.flat[run]
@@ -413,6 +489,9 @@ class _MeshSkin:
     rim_phi: FloatArray
     panels: list[_Panel] = field(default_factory=list)
     pole: FloatArray = field(default_factory=lambda: np.zeros(3))
+    cap: _Panel | None = None
+    cap_mask: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=bool))
+    cap_floor: float = 0.0
 
     def phi_of(self, points: FloatArray) -> FloatArray:
         rel = np.asarray(points).reshape(-1, 3) - self.base
@@ -452,6 +531,18 @@ class _MeshSkin:
             [np.interp(q, ang[order], p.flat[p.rim][order, c]) for c in range(2)]
         )
 
+    def cap_seam_points(self) -> tuple[tuple[float, float], ...]:
+        """Where every seam meets the flattened cap's edge, m, seam 1 first."""
+        cap = self.cap
+        if cap is None:
+            return ()
+        local = {int(g): i for i, g in enumerate(cap.glob)}
+        out = []
+        for p in self.panels:
+            xy = cap.flat[local[int(p.glob[p.top[-1]])]]
+            out.append((float(xy[0]), float(xy[1])))
+        return tuple(out)
+
     def factory(self, design: PrimitiveDesign, host: HostSurface) -> _MeshFactory:
         return _MeshFactory(design, self)
 
@@ -469,19 +560,24 @@ def build_mesh_skin(
     local = np.asarray(shape.mesh.vertices, dtype=np.float64)
     world = base + local[:, :1] * b1 + local[:, 1:2] * b2 + local[:, 2:3] * axis
 
-    def refine(a: FloatArray, b: FloatArray, s: float) -> FloatArray:
-        lo, hi = 0.0, 1.0
-        sa = surface.signed_distance(a[None])[0]
+    def refine(a: FloatArray, b: FloatArray, _s: FloatArray) -> FloatArray:
+        """Crossings of edges ``ab`` with the envelope, by bisection (all at once)."""
+        lo, hi = np.zeros(len(a)), np.ones(len(a))
+        sa = surface.signed_distance(a) > 0
+        length = np.linalg.norm(b - a, axis=1)
+        active = np.ones(len(a), dtype=bool)
         for _ in range(60):
-            mid = 0.5 * (lo + hi)
-            sm = surface.signed_distance((a + mid * (b - a))[None])[0]
-            if (sm > 0) == (sa > 0):
-                lo = mid
-            else:
-                hi = mid
-            if (hi - lo) * float(np.linalg.norm(b - a)) < ROOT_TOLERANCE:
+            idx = np.flatnonzero(active)
+            if not len(idx):
                 break
-        return a + 0.5 * (lo + hi) * (b - a)
+            mid = 0.5 * (lo[idx] + hi[idx])
+            sm = surface.signed_distance(a[idx] + mid[:, None] * (b[idx] - a[idx])) > 0
+            same = sm == sa[idx]
+            lo[idx[same]] = mid[same]
+            hi[idx[~same]] = mid[~same]
+            active[idx[(hi[idx] - lo[idx]) * length[idx] < ROOT_TOLERANCE]] = False
+        out: FloatArray = a + (0.5 * (lo + hi))[:, None] * (b - a)
+        return out
 
     tri = np.asarray(shape.mesh.triangles, dtype=np.int64)
     sd = surface.signed_distance(world)
@@ -507,6 +603,12 @@ def build_mesh_skin(
     if not np.allclose(surface.signed_distance(x[loops[0]]), 0.0, atol=1e-5):
         raise FeatureBuildError(f"{name}: the mesh has holes above the envelope")
     x, tri, pole_index = _insert_pole(x, tri, base, axis)
+    rim0 = set(loops[0])
+
+    rc = float(shape.cap_radius)
+    cap_tri = np.zeros(len(tri), dtype=bool)
+    if rc > 0.0:
+        x, tri, cap_tri = _cut_cap(name, x, tri, pole_index, rim0, base, axis, rc, tol)
 
     # Cut along the seam half-planes (each ends at the pole, which lies on every plane).
     m = shape.panels
@@ -516,7 +618,17 @@ def build_mesh_skin(
         n = -math.sin(ph) * b1 + math.cos(ph) * b2
         f = (x - base) @ n
         f[pole_index] = 0.0
-        x, tri = _cut(x, tri, f, "both", tol, accept=lambda p, d=d: float((p - base) @ d) > 0.0)
+        parents: list[int] = []
+        x, tri = _cut(
+            x,
+            tri,
+            f,
+            "both",
+            tol,
+            accept=lambda p, d=d: (p - base) @ d > 0.0,
+            parents=parents,
+        )
+        cap_tri = cap_tri[np.asarray(parents, dtype=np.int64)]
 
     rim = _boundary_loops(tri)[0]
     rel = x - base
@@ -527,13 +639,26 @@ def build_mesh_skin(
     if turns < 0:
         rim = rim[::-1]
     skin = _MeshSkin(shape, surface, base, axis, b1, b2, x, tri, rim, phi[rim])
-    # Assign triangles to panels by centroid angle.
+    skin.cap_mask = cap_tri
+    # The panels end on the cap circle, or at the pole without a cap.
+    on_top = np.zeros(len(x), dtype=bool)
+    if rc > 0.0:
+        cap_loop = _boundary_loops(tri[cap_tri])
+        if len(cap_loop) != 1:
+            raise FeatureBuildError(
+                f"{name}: the cap of diameter {2 * rc:.3f} m is not a disc on the top of the "
+                "shape; make it smaller"
+            )
+        on_top[cap_loop[0]] = True
+    else:
+        on_top[pole_index] = True
+    # Assign the other triangles to panels by centroid angle.
     cen = x[tri].mean(axis=1) - base
     cphi = np.mod(np.arctan2(cen @ b2, cen @ b1) - seams[0], 2 * math.pi)
     which = np.minimum((cphi // (2 * math.pi / m)).astype(int), m - 1)
+    which[cap_tri] = -1
     on_rim = np.zeros(len(x), dtype=bool)
     on_rim[rim] = True
-    pole_cand = []
     for k in range(m):
         sel = tri[which == k]
         if not len(sel):
@@ -555,16 +680,20 @@ def build_mesh_skin(
         fb_phi = seams[(k + 1) % m]
         fb = rel @ (-math.sin(fb_phi) * b1 + math.cos(fb_phi) * b2)
         rimmed = on_rim[used]
+        topped = on_top[used]
         seam_tol = 1e-7 * scale
-        # Orient the loop with the rim running in increasing angle, then split it.
-        lr = [i for i in loop if rimmed[i]]
-        if len(lr) < 2:
+        # Orient the loop with the rim running in increasing angle, then split it. The
+        # loop is first rotated to start where the rim does, so the rim is one run.
+        if sum(1 for v in loop if rimmed[v]) < 2:
             raise FeatureBuildError(f"{name}: panel {k + 1} does not reach the footprint")
-        ang = np.unwrap(np.arctan2(rel[lr] @ b2, rel[lr] @ b1))
-        if ang[-1] < ang[0]:
+        for _ in range(2):
+            start = next(i for i, v in enumerate(loop) if rimmed[v] and not rimmed[loop[i - 1]])
+            loop = loop[start:] + loop[:start]
+            lr = [v for v in loop if rimmed[v]]
+            ang = np.unwrap(np.arctan2(rel[lr] @ b2, rel[lr] @ b1))
+            if ang[-1] > ang[0]:
+                break
             loop = loop[::-1]
-        start = next(i for i, v in enumerate(loop) if rimmed[v] and not rimmed[loop[i - 1]])
-        loop = loop[start:] + loop[:start]
         n_rim = next(i for i, v in enumerate(loop) if not rimmed[v])
         rim_run = loop[:n_rim]
         rest = loop[n_rim:]
@@ -574,44 +703,31 @@ def build_mesh_skin(
         on_a = (np.abs(fa) < seam_tol) & (
             rel @ (math.cos(seams[k]) * b1 + math.sin(seams[k]) * b2) >= -seam_tol
         )
-        # The rest runs up seam b to the pole and back down seam a.
-        right = [rim_run[-1]] + [v for v in rest if on_b[v] and not on_a[v]]
-        left_part = [v for v in rest if on_a[v] and not on_b[v]]
-        poles = [v for v in rest if on_a[v] and on_b[v]]
-        if len(right) + len(left_part) + len(poles) != len(rest) + 1:
-            raise FeatureBuildError(
-                f"{name}: panel {k + 1} is bounded by more than the footprint and two seams; "
-                "the shape's axis must pass through its top"
-            )
-        pole = poles[0] if poles else None
-        if pole is None:
+        # The rest runs up seam b to the top (pole or cap circle), across the top and back
+        # down seam a.
+        at_top = [i for i, v in enumerate(rest) if topped[v]]
+        if not at_top:
             raise FeatureBuildError(f"{name}: the shape's axis does not leave the mesh at its top")
-        right = right + [pole]
-        left = [rim_run[0]] + left_part[::-1] + [pole]
-        pole_cand.append(px[pole])
-        # Flatten.
-        heavy = set()
-        for run in (rim_run, right, left):
-            for a, b in zip(run[:-1], run[1:], strict=True):
-                heavy.add((min(a, b), max(a, b)))
-        far = (rim_run[0], rim_run[-1])
-        flat = _arap(px, pt, _lscm(px, pt, far), heavy)
-        # Sewn edges at their true lengths: fix the boundary, relax the interior.
-        flat = _true_length_boundary(px, flat, loop)
-        flat = _arap(px, pt, flat, heavy, np.asarray(loop))
-        # Orientation: flat CCW must match outward normals; rim at the bottom.
-        if signed_area(flat[loop]) < 0:
-            flat[:, 0] *= -1.0
+        i0, i1 = at_top[0], at_top[-1]
+        if (
+            at_top != list(range(i0, i1 + 1))
+            or not all(on_b[v] for v in rest[: i0 + 1])
+            or not all(on_a[v] for v in rest[i1:])
+        ):
+            raise FeatureBuildError(
+                f"{name}: panel {k + 1} is bounded by more than the footprint, two seams and "
+                "the top; the shape's axis must pass through its top"
+            )
+        right = [rim_run[-1], *rest[: i0 + 1]]
+        top = rest[i0 : i1 + 1]
+        left = [rim_run[0], *rest[i1:][::-1]]
+        flat = _flatten(name, f"panel {k + 1}", px, pt, loop, (rim_run, right, top, left))
+        # Rim at the bottom.
         chord = flat[rim_run[-1]] - flat[rim_run[0]]
         c, s = chord / np.linalg.norm(chord)
         rot = np.array([[c, s], [-s, c]])
         flat = flat @ rot.T
         flat -= np.array([flat[rim_run].mean(axis=0)[0], flat[rim_run][:, 1].min()])
-        tri_area = (flat[pt][:, 1, 0] - flat[pt][:, 0, 0]) * (
-            flat[pt][:, 2, 1] - flat[pt][:, 0, 1]
-        ) - (flat[pt][:, 1, 1] - flat[pt][:, 0, 1]) * (flat[pt][:, 2, 0] - flat[pt][:, 0, 0])
-        if np.any(tri_area <= 0):
-            raise FeatureBuildError(f"{name}: panel {k + 1} folds when flattened; use more panels")
         skin.panels.append(
             _Panel(
                 px,
@@ -622,11 +738,147 @@ def build_mesh_skin(
                 left,
                 float(seams[k]),
                 float(seams[k]) + 2 * math.pi / m,
+                top=top,
+                glob=used,
             )
         )
     skin.pole = x[pole_index]
-    _ = pole_cand
+    if rc > 0.0:
+        skin.cap = _flatten_cap(name, x, tri[cap_tri], base, b1, b2, axis, skin.panels[0])
+        skin.cap_floor = float(((x[on_top] - base) @ axis).min())
     return skin
+
+
+def _cut_cap(
+    name: str,
+    x: FloatArray,
+    tri: IntArray,
+    pole: int,
+    rim: set[int],
+    base: FloatArray,
+    axis: FloatArray,
+    radius: float,
+    tol: float,
+) -> tuple[FloatArray, IntArray, np.ndarray]:
+    r"""Cut the cap off the top of a mesh skin: the part round the pole inside the cylinder
+    :math:`\rho = r_c` about the axis.
+
+    Only the region joined to the pole is cut (a narrow neck lower down stays whole).
+    Crossings are placed on the cylinder by bisection along each edge (:math:`\rho` is
+    convex along a straight edge, so it crosses once).
+
+    Returns
+    -------
+    (ndarray, ndarray, ndarray of bool)
+        Vertices, triangles and the cap-triangle mask.
+    """
+
+    def rho(p: FloatArray) -> FloatArray:
+        rel = np.asarray(p).reshape(-1, 3) - base
+        return np.asarray(np.linalg.norm(rel - np.outer(rel @ axis, axis), axis=1))
+
+    r = rho(x)
+    inside = r < radius
+    nbr: dict[int, set[int]] = {}
+    for a, b in np.concatenate([tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [2, 0]]]):
+        nbr.setdefault(int(a), set()).add(int(b))
+        nbr.setdefault(int(b), set()).add(int(a))
+    comp = {pole}
+    stack = [pole]
+    while stack:
+        v = stack.pop()
+        for w in nbr.get(v, ()):
+            if w not in comp and inside[w]:
+                comp.add(w)
+                stack.append(w)
+    if comp & rim:
+        raise FeatureBuildError(
+            f"{name}: the cap of diameter {2 * radius:.3f} m reaches the footprint; make it smaller"
+        )
+    in_comp = np.zeros(len(x), dtype=bool)
+    in_comp[list(comp)] = True
+    f = np.where(in_comp, r - radius, np.abs(r - radius))
+
+    def point(a: FloatArray, b: FloatArray, _s: FloatArray) -> FloatArray:
+        lo, hi = np.zeros(len(a)), np.ones(len(a))
+        a_in = rho(a) < radius
+        for _ in range(60):
+            mid = 0.5 * (lo + hi)
+            same = (rho(a + mid[:, None] * (b - a)) < radius) == a_in
+            lo = np.where(same, mid, lo)
+            hi = np.where(same, hi, mid)
+        out: FloatArray = a + (0.5 * (lo + hi))[:, None] * (b - a)
+        return out
+
+    x, tri = _cut(x, tri, f, "both", tol * max(radius, 1.0), point)
+    f = np.concatenate([f, np.zeros(len(x) - len(f))])
+    cap = np.all(f[tri] <= tol * max(radius, 1.0), axis=1)
+    return x, tri, cap
+
+
+def _flatten(
+    name: str,
+    what: str,
+    px: FloatArray,
+    pt: IntArray,
+    loop: list[int],
+    runs: tuple[list[int], ...],
+    pins: tuple[int, int] | None = None,
+) -> FloatArray:
+    """Flatten a disc-shaped piece: LSCM, ARAP, true-length boundary, ARAP (CCW)."""
+    heavy = set()
+    for run in runs:
+        for a, b in zip(run[:-1], run[1:], strict=True):
+            heavy.add((min(a, b), max(a, b)))
+    far = pins if pins is not None else (runs[0][0], runs[0][-1])
+    flat = _arap(px, pt, _lscm(px, pt, far), heavy)
+    # Sewn edges at their true lengths: fix the boundary, relax the interior.
+    flat = _true_length_boundary(px, flat, loop)
+    flat = _arap(px, pt, flat, heavy, np.asarray(loop))
+    # Orientation: flat CCW must match outward normals.
+    if signed_area(flat[loop]) < 0:
+        flat[:, 0] *= -1.0
+    q = flat[pt]
+    tri_area = (q[:, 1, 0] - q[:, 0, 0]) * (q[:, 2, 1] - q[:, 0, 1]) - (q[:, 1, 1] - q[:, 0, 1]) * (
+        q[:, 2, 0] - q[:, 0, 0]
+    )
+    if np.any(tri_area <= 0):
+        raise FeatureBuildError(f"{name}: {what} folds when flattened; use more panels")
+    return flat
+
+
+def _flatten_cap(
+    name: str,
+    x: FloatArray,
+    cap_tri: IntArray,
+    base: FloatArray,
+    b1: FloatArray,
+    b2: FloatArray,
+    axis: FloatArray,
+    first: _Panel,
+) -> _Panel:
+    """Flatten the cap; its loop (``top``) runs round the axis in increasing angle from the
+    top of seam 1, centred on the origin with that point on the +x axis."""
+    used = np.unique(cap_tri)
+    remap = np.full(len(x), -1, dtype=np.int64)
+    remap[used] = np.arange(len(used))
+    pt = remap[cap_tri]
+    px = x[used]
+    loop = _boundary_loops(pt)[0]
+    rel = px[loop] - base
+    ang = np.unwrap(np.arctan2(rel @ b2, rel @ b1))
+    if ang[-1] < ang[0]:
+        loop = loop[::-1]
+    corner = int(remap[first.glob[first.left[-1]]])
+    i = loop.index(corner)
+    loop = loop[i:] + loop[:i]
+    half = loop[len(loop) // 2]
+    flat = _flatten(name, "the cap", px, pt, loop, (loop + loop[:1],), (loop[0], half))
+    # Centre the cap; the top of seam 1 on +x.
+    flat -= flat[loop].mean(axis=0)
+    c, s = flat[corner] / np.linalg.norm(flat[corner])
+    flat = flat @ np.array([[c, s], [-s, c]]).T
+    return _Panel(px, pt, flat, [], [], [], 0.0, 2 * math.pi, top=loop, glob=used)
 
 
 @dataclass
@@ -661,6 +913,10 @@ class _MeshFactory:
             length = skin.seam_length(j)
             count = max(2, int(math.ceil(length / size)))
             seam_frac.append(np.linspace(0.0, 1.0, count + 1))
+        top_frac = []
+        for panel in skin.panels:
+            length = float(panel.arc(panel.top, True)[-1])
+            top_frac.append(np.linspace(0.0, 1.0, max(1, int(math.ceil(length / size))) + 1))
         keys: dict[tuple[Any, ...], int] = {}
         positions: list[FloatArray] = []
         tris, rests, grains = [], [], []
@@ -694,7 +950,16 @@ class _MeshFactory:
             pb = panel.run_flat_at(panel.right, fr_b)
             wb = skin.panels[j_b].run_world_at(skin.panels[j_b].left, fr_b)
             entries += [(("seam", j_b, q), pb[q - 1], wb[q - 1]) for q in range(1, len(fr_b) + 1)]
-            entries.append((("apex",), panel.flat[panel.right[-1]], skin.pole))
+            if skin.cap is None:
+                entries.append((("apex",), panel.flat[panel.right[-1]], skin.pole))
+            else:
+                # Corners at the tops of both seams and the cap circle between them.
+                g = top_frac[k][1:-1]
+                pt_ = panel.run_flat_at(panel.top, g)
+                wt = panel.run_world_at(panel.top, g)
+                entries.append((("corner", j_b), panel.flat[panel.top[0]], panel.x[panel.top[0]]))
+                entries += [(("top", k, q), pt_[q - 1], wt[q - 1]) for q in range(1, len(g) + 1)]
+                entries.append((("corner", k), panel.flat[panel.top[-1]], panel.x[panel.top[-1]]))
             fr_a = seam_frac[k][1:-1]
             pa = panel.run_flat_at(panel.left, fr_a)
             wa = panel.run_world_at(panel.left, fr_a)
@@ -722,10 +987,12 @@ class _MeshFactory:
             grains.append(np.tile([0.0, 1.0], (len(tri), 1)))
             chain = [keys[("rim", seam_node[j_b])]]
             chain += [keys[("seam", j_b, q)] for q in range(1, len(fr_b) + 1)]
-            chain.append(keys[("apex",)])
+            chain.append(keys[("apex",) if skin.cap is None else ("corner", j_b)])
             seam_edges[f"{design.primitive.name}:seam {j_b + 1}"] = np.column_stack(
                 [chain[:-1], chain[1:]]
             )
+        if skin.cap is not None:
+            self._cap(keys, positions, tris, rests, grains, seam_edges, top_frac, size)
         rim_index = np.array([keys[("rim", i)] for i in range(len(rim_chart))], dtype=np.int64)
         return DesignedSkin(
             positions=_to_host_frame(design, np.array(positions)),
@@ -737,14 +1004,78 @@ class _MeshFactory:
             notes=notes,
         )
 
+    def _cap(
+        self,
+        keys: dict[tuple[Any, ...], int],
+        positions: list[FloatArray],
+        tris: list[IntArray],
+        rests: list[FloatArray],
+        grains: list[FloatArray],
+        seam_edges: dict[str, IntArray],
+        top_frac: list[FloatArray],
+        size: float,
+    ) -> None:
+        """Mesh the cap round the panels' top nodes and add its seam (the cap circle)."""
+        skin = self.skin
+        cap = skin.cap
+        assert cap is not None
+        m = len(skin.panels)
+        # 3D arc length round the cap loop (closed), and where each seam's top is on it.
+        loop = [*cap.top, cap.top[0]]
+        arc = cap.arc(loop, True)
+        where = {int(cap.glob[v]): float(arc[i]) for i, v in enumerate(cap.top)}
+        total = float(arc[-1])
+        flat_loop = cap.flat[loop]
+        ring_keys: list[tuple[Any, ...]] = []
+        ring_flat: list[FloatArray] = []
+        for k, panel in enumerate(skin.panels):
+            s_a = where[int(panel.glob[panel.top[-1]])]  # top of seam k (left)
+            s_b = where[int(panel.glob[panel.top[0]])]  # top of seam k + 1 (right)
+            span = (s_b - s_a) % total if m > 1 else total
+            g = top_frac[k][1:-1]
+            ring_keys.append(("corner", k))
+            ring_keys += [("top", k, q) for q in reversed(range(1, len(g) + 1))]
+            at = np.mod(s_a + (1.0 - np.concatenate([[1.0], g[::-1]])) * span, total)
+            ring_flat += list(
+                np.column_stack([np.interp(at, arc, flat_loop[:, c]) for c in (0, 1)])
+            )
+        flat_b = np.array(ring_flat)
+        xy, tri = _mesh_disc(flat_b, size)
+        dist, hit = cKDTree(xy).query(flat_b)
+        if np.any(dist > 1e-6 * max(1.0, float(np.ptp(flat_b)))) or len(set(hit.tolist())) != len(
+            hit
+        ):
+            raise FeatureBuildError(f"{self.design.primitive.name}: cap boundary was not kept")
+        local = np.full(len(xy), -1, dtype=np.int64)
+        for key, h in zip(ring_keys, hit, strict=True):
+            local[h] = keys[key]
+        free = np.flatnonzero(local < 0)
+        if len(free):
+            local[free] = len(positions) + np.arange(len(free))
+            positions.extend(cap.to_world(xy[free]))
+        tris.append(local[tri])
+        rests.append(xy[tri])
+        grains.append(np.tile([1.0, 0.0], (len(tri), 1)))
+        ids = np.array([keys[key] for key in ring_keys], dtype=np.int64)
+        seam_edges[f"{self.design.primitive.name}:tip seam"] = np.column_stack(
+            [ids, np.roll(ids, -1)]
+        )
+
 
 def panel_outline(panel: _Panel) -> tuple[FloatArray, dict[str, FloatArray]]:
     """Finished outline (CCW) and edges of a flattened panel, m."""
     rim = panel.flat[panel.rim]
     right = panel.flat[panel.right]
     left = panel.flat[panel.left]
-    ring = np.vstack([rim[:-1], right[:-1], left[::-1][:-1]])
-    return ring, {"rim": rim, "right": right, "left": left, "top": right[-1:]}
+    top = panel.flat[panel.top]
+    ring = np.vstack([rim[:-1], right[:-1], top[:-1], left[::-1][:-1]])
+    return ring, {"rim": rim, "right": right, "left": left, "top": top}
+
+
+def cap_outline(cap: _Panel) -> tuple[FloatArray, dict[str, FloatArray]]:
+    """Finished outline (CCW) of the flattened cap and its edge (closed), m."""
+    ring = cap.flat[cap.top]
+    return ring, {"top": np.vstack([ring, ring[:1]])}
 
 
 def cut_outline(finished: FloatArray, allowance: float) -> FloatArray:

@@ -6,8 +6,15 @@ A build pack holds one *sheet* per piece to cut or mark:
 * the parachute's radial panel (cut once per radial panel) and, when it has one, its
   circular centre panel (cut once);
 * every piece of every special shape's skin (its gores or panels and a tip disc);
-* a *marking* sheet for every envelope panel a shape crosses: the panel with the
-  footprint line, the numbered match marks and the feed hole drawn on it.
+* a *marking* sheet for every envelope panel a shape crosses or lies over: the panel with
+  the footprint line (the shape's rim is sewn on it; short ticks point into the shape),
+  the numbered match marks (each naming the skin piece that carries the same number) and
+  the feed holes, drawn at their cut and finished sizes.
+
+Sewing directions are written on the sheets from the same data: each skin piece says what
+every edge is sewn to (the rim to the envelope line with its mark numbers, each seam to
+the neighbouring piece, the top to the tip disc or the apex), and each envelope row says
+which of its gores carry a marking sheet or a feed hole.
 
 Each sheet is written as a DXF file in millimetres (``$INSUNITS`` = 4) and as one or more
 pages of ``pattern.pdf``, whose pages are as wide as the fabric roll; a sheet wider than
@@ -19,10 +26,12 @@ Sheet contents (DXF layers)
 ---------------------------
 ``CUT`` cut outline (with seam allowance); ``SEW`` finished outline; ``EDGE_<NAME>`` each
 finished edge on its own (for the sewn-edge check); ``MARKS`` match marks and their
-numbers; ``ATTACH`` footprint line on a marking sheet; ``HOLE`` feed hole; ``GRAIN``
-warp direction; ``LABEL`` the header; ``CAL`` the calibration line, its ticks and its
-label. The header and the calibration label are generated from the same values that
-draw the geometry, never typed.
+numbers; ``ATTACH`` footprint line on a marking sheet; ``ATTACH_SIDE`` ticks on the side
+of the footprint line the shape covers; ``HOLE`` feed hole, finished; ``HOLE_CUT`` feed
+hole as cut (before the hem is turned); ``NOTES`` sewing directions placed on the piece;
+``GRAIN`` warp direction; ``LABEL`` the header and the notes under it; ``CAL`` the
+calibration line, its ticks and its label. The header and the calibration label are
+generated from the same values that draw the geometry, never typed.
 """
 
 from __future__ import annotations
@@ -35,6 +44,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
+from ezdxf.enums import TextEntityAlignment
 
 from envelopelab.geometry.polygon import offset_polygon
 from envelopelab.report.pdf import PdfCanvas
@@ -88,9 +98,17 @@ class Sheet:
     lines : list of ndarray
         Lines to draw (footprint runs), m.
     holes : list of (float, float, float)
-        Holes: centre and radius, m.
+        Holes: centre and finished radius, m.
     note : str
         Extra line in the header.
+    hole_cuts : list of (float, float, float)
+        Holes as cut: centre and radius, m.
+    ticks : list of ndarray, shape (2, 2)
+        Short lines on the side of a footprint line the shape covers, m.
+    texts : list of (float, float, str)
+        Directions placed on the sheet: position (m) and text.
+    notes : list of str
+        More lines under the header.
     """
 
     name: str
@@ -105,6 +123,10 @@ class Sheet:
     lines: list[FloatArray] = field(default_factory=list)
     holes: list[tuple[float, float, float]] = field(default_factory=list)
     note: str = ""
+    hole_cuts: list[tuple[float, float, float]] = field(default_factory=list)
+    ticks: list[FloatArray] = field(default_factory=list)
+    texts: list[tuple[float, float, str]] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
 
     @property
     def finished_size(self) -> tuple[float, float]:
@@ -288,7 +310,11 @@ def parachute_seam_pairs(sheets: Sequence[Sheet]) -> list[SeamPair]:
 
 
 def primitive_sheets(
-    design: PrimitiveDesign, fabric: str = "skin", seam_allowance: float | None = None
+    design: PrimitiveDesign,
+    fabric: str = "skin",
+    seam_allowance: float | None = None,
+    hole_hem: float = 0.0,
+    hole_tape: str = "",
 ) -> list[Sheet]:
     """Sheets of a placed primitive: its skin pieces and its envelope marking sheets.
 
@@ -300,6 +326,11 @@ def primitive_sheets(
         Fabric name of the skin.
     seam_allowance : float, optional
         Allowance of the marking sheets' cut outline, m (default: none drawn).
+    hole_hem : float
+        Width of cloth turned back round a feed hole, m: the hole is cut that much smaller
+        in radius than finished (0: cut at the finished size).
+    hole_tape : str
+        Tape class the feed-hole hem is turned over (named on the sheet).
 
     Returns
     -------
@@ -308,15 +339,21 @@ def primitive_sheets(
     """
     name = design.primitive.name
     out: list[Sheet] = []
+    rim_pieces = [p for p in design.pieces if p.rim is not None]
+    tip = [p for p in design.pieces if p.rim is None]
+    order = {p.label: k for k, p in enumerate(rim_pieces)}
     for piece in design.pieces:
-        marks = [
-            (m.piece_xy[0], m.piece_xy[1], str(m.number))
-            for m in design.marks
-            if m.piece == piece.label
-        ]
+        own = [m for m in design.marks if m.piece == piece.label]
+        marks = [(m.piece_xy[0], m.piece_xy[1], str(m.number)) for m in own]
         edges = {k: v for k, v in piece.edges.items()}
         if piece.rim is not None:
             edges["rim"] = piece.rim
+        texts, notes = _piece_directions(piece, own, rim_pieces, tip, order, name)
+        ticks = [
+            np.vstack([pt, pt + TICK_LENGTH * (piece.finished.mean(axis=0) - pt) / d])
+            for pt in (np.asarray(q, dtype=np.float64) for q in piece.seam_points)
+            if (d := float(np.linalg.norm(piece.finished.mean(axis=0) - pt))) > 0.0
+        ]
         out.append(
             Sheet(
                 name=piece.label,
@@ -328,6 +365,11 @@ def primitive_sheets(
                 cut=piece.cut,
                 edges=edges,
                 marks=marks,
+                note=f"part of {name}: sew the seams between the pieces first, then the rim "
+                "to the envelope",
+                texts=texts,
+                notes=notes,
+                ticks=ticks,
             )
         )
     from envelopelab.features.primitives import band_outline
@@ -335,11 +377,31 @@ def primitive_sheets(
     surface = design.surface
     holes = design.feed_holes
     panels = {(a.gore, a.row) for a in design.attachment} | {(h.gore, h.row) for h in holes}
-    order = {b.label: i for i, b in enumerate(surface.rows)}
+    row_order = {b.label: i for i, b in enumerate(surface.rows)}
+    inside = _inside_sign(design)
     for gore, row in sorted(panels):
-        index = order[row]
+        index = row_order[row]
         finished = band_outline(surface, index)
         cut = offset_polygon(finished, seam_allowance) if seam_allowance else finished.copy()
+        lines = [a.points for a in design.attachment if (a.gore, a.row) == (gore, row)]
+        here = [h for h in holes if (h.gore, h.row) == (gore, row)]
+        texts = [
+            (
+                h.centre_xy[0],
+                h.centre_xy[1] + h.radius + 0.04,
+                _hole_text(h.radius, hole_hem, hole_tape),
+            )
+            for h in here
+        ]
+        if lines:
+            notes = [
+                f"sew the rim of {name} on the footprint line (ATTACH); the ticks point into "
+                f"{name}",
+                "match each number to the same number on the skin piece named beside it; "
+                "work any ease in between the numbers",
+            ]
+        else:
+            notes = [f"this panel lies under {name}: mark and cut the feed hole only"]
         out.append(
             Sheet(
                 name=_marking_name(design, gore, row),
@@ -350,19 +412,194 @@ def primitive_sheets(
                 finished=finished,
                 cut=cut,
                 marks=[
-                    (m.host_xy[0], m.host_xy[1], str(m.number))
+                    (m.host_xy[0], m.host_xy[1], f"{m.number} ({_short(m.piece, name)})")
                     for m in design.marks
                     if (m.gore, m.row) == (gore, row)
                 ],
-                lines=[a.points for a in design.attachment if (a.gore, a.row) == (gore, row)],
-                holes=[
-                    (hole.centre_xy[0], hole.centre_xy[1], hole.radius)
-                    for hole in holes
-                    if (hole.gore, hole.row) == (gore, row)
+                lines=lines,
+                holes=[(h.centre_xy[0], h.centre_xy[1], h.radius) for h in here],
+                hole_cuts=[
+                    (h.centre_xy[0], h.centre_xy[1], max(h.radius - hole_hem, 0.0)) for h in here
                 ],
+                ticks=[tick for line in lines for tick in _side_ticks(line, inside)],
+                texts=texts,
                 note=f"mark {name} on this panel before assembly",
+                notes=notes,
             )
         )
+    return out
+
+
+def default_hole_hem(design: DesignDocument) -> tuple[float, str]:
+    """Hem turned back round a feed hole by default, m, and the tape it is turned over.
+
+    A double fold over the design's hole tape: twice the tape width (source: design tape
+    width; the double fold is the usual hem of a hole, assumed).
+    """
+    tape = design.tapes.hole
+    return 2.0 * tape.width, tape.tape_class
+
+
+#: Spacing and length of the ticks on the shape's side of a footprint line, m.
+TICK_SPACING = 0.15
+TICK_LENGTH = 0.04
+#: How far a direction is placed inside a piece from the edge it names, m.
+TEXT_INSET = 0.08
+
+
+def _short(label: str, name: str) -> str:
+    """A piece label without its shape name (``ear-G3`` -> ``G3``)."""
+    prefix = f"{name}-"
+    return label[len(prefix) :] if label.startswith(prefix) else label
+
+
+def _hole_text(radius: float, hem: float, tape: str) -> str:
+    finished = 2.0 * radius * MM
+    if hem <= 0.0:
+        return f"FEED HOLE: cut and finished diameter {finished:.0f} mm"
+    cut = 2.0 * max(radius - hem, 0.0) * MM
+    over = f" over {tape}" if tape else ""
+    return (
+        f"FEED HOLE: cut diameter {cut:.0f} mm, turn a {hem * MM:.0f} mm hem{over} to "
+        f"{finished:.0f} mm finished"
+    )
+
+
+def _inside_sign(design: PrimitiveDesign) -> float:
+    """+1 when the shape lies to the left of its footprint lines as drawn, else -1.
+
+    The footprint lines run round the footprint in the order of its points; panel
+    coordinates grow with the gore position and the tape position, so the shape is on the
+    left of the lines where the footprint runs counter-clockwise in (gore, tape) position.
+    """
+    surface = design.surface
+    n = surface.gore_count
+    g_centre = design.primitive.placement.gore - 0.5 + design.primitive.placement.across
+    g = surface.gore_position(design.footprint_theta)
+    g = g_centre + np.mod(g - g_centre + 0.5 * n, n) - 0.5 * n
+    s = design.footprint_s
+    area = 0.5 * float(np.sum(g * np.roll(s, -1) - np.roll(g, -1) * s))
+    return 1.0 if area > 0.0 else -1.0
+
+
+def _side_ticks(line: FloatArray, sign: float) -> list[FloatArray]:
+    """Short ticks every :data:`TICK_SPACING` on the ``sign`` side (+1 left) of a line."""
+    pts = np.asarray(line, dtype=np.float64)
+    seg = np.diff(pts, axis=0)
+    lengths = np.linalg.norm(seg, axis=1)
+    if len(pts) < 2 or lengths.sum() <= 0.0:
+        return []
+    arc = np.concatenate([[0.0], np.cumsum(lengths)])
+    out = []
+    for at in np.arange(0.5 * TICK_SPACING, arc[-1], TICK_SPACING):
+        k = min(int(np.searchsorted(arc, at, side="right")) - 1, len(seg) - 1)
+        if lengths[k] <= 0.0:
+            continue
+        d = seg[k] / lengths[k]
+        p = pts[k] + (at - arc[k]) * d
+        normal = sign * np.array([-d[1], d[0]])
+        out.append(np.vstack([p, p + TICK_LENGTH * normal]))
+    return out
+
+
+def _piece_directions(
+    piece: Any,
+    own_marks: Sequence[Any],
+    rim_pieces: Sequence[Any],
+    tip: Sequence[Any],
+    order: dict[str, int],
+    name: str,
+) -> tuple[list[tuple[float, float, str]], list[str]]:
+    """What every edge of a skin piece is sewn to: texts placed on the piece, and notes."""
+    centre = piece.finished.mean(axis=0)
+
+    def at(points: FloatArray) -> tuple[float, float]:
+        pts = np.asarray(points, dtype=np.float64)
+        mid = pts[len(pts) // 2]
+        toward = centre - mid
+        norm = float(np.linalg.norm(toward))
+        p = mid + (TEXT_INSET * toward / norm if norm > 0.0 else 0.0)
+        return float(p[0]), float(p[1])
+
+    texts: list[tuple[float, float, str]] = []
+    notes: list[str] = []
+    if piece.rim is None:  # the tip disc or cap
+        texts.append((float(centre[0]), float(centre[1]), "TIP DISC"))
+        notes.append(f"TIP DISC: sew round the tops of all {name} panels")
+        if piece.seam_points:
+            # Each panel's top is sewn along the edge between the ticks of its two seams.
+            for k, mid in enumerate(_between(piece.finished, piece.seam_points)):
+                inward = centre - mid
+                norm = float(np.linalg.norm(inward))
+                p = mid + (0.6 * TEXT_INSET * inward / norm if norm > 0.0 else 0.0)
+                label = _short(rim_pieces[k % len(rim_pieces)].label, name)
+                texts.append((float(p[0]), float(p[1]), label))
+            notes.append(
+                "the ticks on the edge are where the seams between the panels meet it: sew "
+                "each panel's top between the ticks either side of its name"
+            )
+        return texts, notes
+    k, m = order[piece.label], len(rim_pieces)
+    nxt = _short(rim_pieces[(k + 1) % m].label, name)
+    prv = _short(rim_pieces[(k - 1) % m].label, name)
+    numbers = sorted(mk.number for mk in own_marks)
+    span = f", marks {numbers[0]}-{numbers[-1]}" if numbers else ""
+    texts.append((*at(piece.rim), f"RIM: sew to the envelope{span}"))
+    texts.append((*at(piece.edges["right"]), f"sew to {nxt} (its left side)"))
+    texts.append((*at(piece.edges["left"]), f"sew to {prv} (its right side)"))
+    top = np.asarray(piece.edges.get("top", np.zeros((0, 2))))
+    if tip and len(top) > 1:
+        texts.append((*at(top), "TOP: sew to the tip disc"))
+    elif len(top):
+        texts.append((float(top[0][0]), float(top[0][1]) - TEXT_INSET, f"APEX of {name}"))
+    panels = sorted({(mk.gore, mk.row) for mk in own_marks})
+    if panels:
+        where = ", ".join(f"gore {g} row {r}" for g, r in panels)
+        notes.append(f"rim marks {numbers[0]}-{numbers[-1]} lie on the envelope at {where}")
+    return texts, notes
+
+
+def _between(ring: FloatArray, points: Sequence[tuple[float, float]]) -> list[FloatArray]:
+    """Midpoints along a closed outline (CCW) between successive points on it, m."""
+    pts = np.vstack([ring, ring[:1]])
+    seg = np.diff(pts, axis=0)
+    lengths = np.linalg.norm(seg, axis=1)
+    arc = np.concatenate([[0.0], np.cumsum(lengths)])
+    total = float(arc[-1])
+
+    def param(q: FloatArray) -> float:
+        rel = q - pts[:-1]
+        t = np.clip(np.einsum("ij,ij->i", rel, seg) / np.maximum(lengths**2, 1e-30), 0.0, 1.0)
+        d = np.linalg.norm(pts[:-1] + t[:, None] * seg - q, axis=1)
+        k = int(np.argmin(d))
+        return float(arc[k] + t[k] * lengths[k])
+
+    at = [param(np.asarray(q, dtype=np.float64)) for q in points]
+    out = []
+    for j, a in enumerate(at):
+        b = at[(j + 1) % len(at)]
+        mid = (a + 0.5 * ((b - a) % total or total)) % total
+        out.append(np.array([np.interp(mid, arc, pts[:, c]) for c in (0, 1)]))
+    return out
+
+
+def shape_row_notes(primitives: Sequence[PrimitiveDesign]) -> dict[str, list[str]]:
+    """Per envelope row, which gores carry a shape's marking sheet or feed hole."""
+    out: dict[str, list[str]] = {}
+    for design in primitives:
+        name = design.primitive.name
+        rows: dict[str, set[int]] = {}
+        holes: dict[str, set[int]] = {}
+        for a in design.attachment:
+            rows.setdefault(a.row, set()).add(a.gore)
+        for h in design.feed_holes:
+            rows.setdefault(h.row, set()).add(h.gore)
+            holes.setdefault(h.row, set()).add(h.gore)
+        for row, gores in rows.items():
+            text = f"{name}: mark gores {', '.join(str(g) for g in sorted(gores))} of this row"
+            if row in holes:
+                text += "; feed hole in gore " + ", ".join(str(g) for g in sorted(holes[row]))
+            out.setdefault(row, []).append(text + f" (sheets {name}-mark-G<gore>-{row})")
     return out
 
 
@@ -444,7 +681,8 @@ def write_dxf(sheet: Sheet, path: str | Path) -> Path:
     doc = new_dxf("R2010", setup=False)
     doc.header["$INSUNITS"] = 4  # millimetres
     doc.header["$MEASUREMENT"] = 1  # metric
-    layers = ["CUT", "SEW", "MARKS", "ATTACH", "HOLE", "GRAIN", "LABEL", "CAL"]
+    layers = ["CUT", "SEW", "MARKS", "ATTACH", "ATTACH_SIDE", "HOLE", "HOLE_CUT", "NOTES"]
+    layers += ["GRAIN", "LABEL", "CAL"]
     layers += [f"EDGE_{e.upper()}" for e in sheet.edges]
     for layer in layers:
         doc.layers.add(layer)
@@ -468,19 +706,27 @@ def write_dxf(sheet: Sheet, path: str | Path) -> Path:
         msp.add_lwpolyline(pts(line), dxfattribs={"layer": "ATTACH"})
     for x, y, r in sheet.holes:
         msp.add_circle((x * MM, y * MM), r * MM, dxfattribs={"layer": "HOLE"})
+    for x, y, r in sheet.hole_cuts:
+        if r > 0.0:
+            msp.add_circle((x * MM, y * MM), r * MM, dxfattribs={"layer": "HOLE_CUT"})
+    for seg in sheet.ticks:
+        (ax, ay), (bx, by) = seg * MM
+        msp.add_line((ax, ay), (bx, by), dxfattribs={"layer": "ATTACH_SIDE"})
+    for x, y, text in sheet.texts:  # centred on their point
+        msp.add_text(text, height=25.0, dxfattribs={"layer": "NOTES"}).set_placement(
+            (x * MM, y * MM), align=TextEntityAlignment.MIDDLE_CENTER
+        )
     lo, hi = sheet.finished.min(axis=0), sheet.finished.max(axis=0)
     cx, cy = 0.5 * (lo[0] + hi[0]) * MM, 0.5 * (lo[1] + hi[1]) * MM
     g = 0.25 * (hi[1] - lo[1]) * MM
     msp.add_line((cx, cy - g), (cx, cy + g), dxfattribs={"layer": "GRAIN"})
     msp.add_line((cx, cy + g), (cx - 15, cy + g - 40), dxfattribs={"layer": "GRAIN"})
     msp.add_line((cx, cy + g), (cx + 15, cy + g - 40), dxfattribs={"layer": "GRAIN"})
-    lines = [sheet.header()] + ([sheet.note] if sheet.note else [])
+    lines = [sheet.header()] + ([sheet.note] if sheet.note else []) + sheet.notes
+    # Header first (also the first LABEL text, which the QA reads), the notes under it.
     for k, text in enumerate(lines):
-        msp.add_text(
-            text,
-            height=30.0,
-            dxfattribs={"layer": "LABEL", "insert": (lo[0] * MM, (hi[1] + 0.08) * MM + 45 * k)},
-        )
+        y = (hi[1] + 0.08) * MM + 45 * (len(lines) - 1 - k)
+        msp.add_text(text, height=30.0, dxfattribs={"layer": "LABEL", "insert": (lo[0] * MM, y)})
     width = float(sheet.cut[:, 0].max() - sheet.cut[:, 0].min())
     length, tick = calibration(width)
     x0, y0 = _cal_origin(sheet)
@@ -550,12 +796,24 @@ def write_pdf(sheets: Sequence[Sheet], path: str | Path, roll_width: float) -> l
                 q = [p(x, y) for x, y in line]
                 for a, b in zip(q[:-1], q[1:], strict=True):
                     canvas.line(*a, *b, color=(0.8, 0.1, 0.1), width=0.8)
+            ang = np.linspace(0.0, 2 * math.pi, 73)
             for x, y, r in sheet.holes:
-                ang = np.linspace(0.0, 2 * math.pi, 73)
                 canvas.polygon(
                     [p(x + r * math.cos(t), y + r * math.sin(t)) for t in ang],
                     stroke=(0.8, 0.1, 0.1),
                 )
+            for x, y, r in sheet.hole_cuts:
+                if r > 0.0:
+                    canvas.polygon(
+                        [p(x + r * math.cos(t), y + r * math.sin(t)) for t in ang],
+                        stroke=(0.0, 0.0, 0.0),
+                    )
+            for seg in sheet.ticks:
+                (ax, ay), (bx, by) = (p(float(u), float(v)) for u, v in seg)
+                canvas.line(ax, ay, bx, by, color=(0.8, 0.1, 0.1), width=0.8)
+            for x, y, text in sheet.texts:  # centred on their point (Helvetica ~0.52 em)
+                tx, ty = p(x, y)
+                canvas.text(tx - 0.26 * 10 * len(text), ty - 3.5, text, size=10)
             for x, y, text in sheet.marks:
                 cx, cy = p(x, y)
                 canvas.line(cx - 8, cy, cx + 8, cy, width=0.8)
@@ -564,8 +822,9 @@ def write_pdf(sheets: Sequence[Sheet], path: str | Path, roll_width: float) -> l
             hx, hy = p(float(sheet.cut[:, 0].min()), float(sheet.cut[:, 1].max()) + 0.06)
             strip = f"  [strip {k + 1} of {len(strips)}]" if len(strips) > 1 else ""
             canvas.text(max(hx, 10.0), hy, sheet.header() + strip, size=12, bold=True)
-            if sheet.note:
-                canvas.text(max(hx, 10.0), hy + 16, sheet.note, size=10)
+            extra = ([sheet.note] if sheet.note else []) + sheet.notes
+            for j, extra_line in enumerate(extra):
+                canvas.text(max(hx, 10.0), hy + 16 * (j + 1), extra_line, size=10)
             # Calibration line at the left of every page: its label comes from the same
             # length and tick that draw it; the comment lets the QA find and measure it.
             length, tick = calibration(min(roll_width - 2 * PDF_MARGIN, 0.5))
@@ -670,6 +929,7 @@ def export_build_pack(
     skin_fabric: str | dict[str, str] = "skin",
     roll_width: float = DEFAULT_ROLL_WIDTH,
     marking_allowance: float | None = None,
+    hole_hem: float | None = None,
 ) -> Path:
     """Export the envelope rows, the parachute, and every primitive's pieces and marking
     sheets.
@@ -690,13 +950,21 @@ def export_build_pack(
         Fabric roll width, m.
     marking_allowance : float, optional
         Seam allowance drawn round the marking sheets, m.
+    hole_hem : float, optional
+        Hem turned back round each feed hole, m (default: a double fold over the design's
+        hole tape, twice its width).
 
     Returns
     -------
     Path
         ``index.json``.
     """
+    hem, hole_tape = default_hole_hem(design)
+    hem = hem if hole_hem is None else hole_hem
     sheets = envelope_sheets(design, patterns)
+    row_notes = shape_row_notes(primitives)
+    for sheet in sheets:
+        sheet.notes += row_notes.get(sheet.piece.removeprefix("row "), [])
     pairs = envelope_seam_pairs(sheets)
     chute = parachute_sheets(design)
     sheets += chute
@@ -704,6 +972,6 @@ def export_build_pack(
     for p in primitives:
         name = p.primitive.name
         fabric = skin_fabric if isinstance(skin_fabric, str) else skin_fabric.get(name, "skin")
-        sheets += primitive_sheets(p, fabric, marking_allowance)
+        sheets += primitive_sheets(p, fabric, marking_allowance, hem, hole_tape)
         pairs += primitive_seam_pairs(p)
     return write_pack(sheets, out_dir, pairs, roll_width, title=design.meta.name)

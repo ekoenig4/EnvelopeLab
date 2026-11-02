@@ -296,3 +296,158 @@ def test_attachment_ease_adds_up_to_rim_minus_marked_line(primitive: Dome | Tube
     assert check.value == pytest.approx(float(np.abs(d.mark_ease).max()))
     assert check.severity == ("info" if check.value <= DEFAULT_TOLERANCE else "error")
     assert d.as_dict()["mark_ease_m"] == pytest.approx(d.mark_ease.tolist())
+
+
+def _distance_to_loop(points: np.ndarray, loop: np.ndarray) -> np.ndarray:
+    """Distance of 3D points to a closed 3D polyline, m."""
+    a, b = loop, np.roll(loop, -1, axis=0)
+    ab = b - a
+    t = np.einsum("pij,ij->pi", points[:, None, :] - a[None], ab) / np.einsum("ij,ij->i", ab, ab)
+    proj = a[None] + np.clip(t, 0.0, 1.0)[..., None] * ab[None]
+    out: np.ndarray = np.linalg.norm(points[:, None, :] - proj, axis=2).min(axis=1)
+    return out
+
+
+@pytest.mark.parametrize("kind", ["dome", "mesh"])
+def test_sub_model_rim_lies_on_the_footprint_where_host_tapes_cross_it(kind: str) -> None:
+    """Rim nodes the host mesh adds where load tapes and row seams cross the footprint lie
+    on the designed footprint, not on the chord between two footprint nodes, and every
+    rim edge has the same length in the flat cut pieces as on the envelope."""
+    from envelopelab.features.primitives import FreeformShape, _to_host_frame
+    from envelopelab.validation.primitives import ellipsoid_mesh
+
+    s_row = SPHERE.rows[1].s_top
+    place = Placement(5, s_row, across=0.5)
+    prim: Dome | FreeformShape = (
+        Dome("x", place, 0.9, 0.6, gores=6)
+        if kind == "dome"
+        else FreeformShape("x", place, ellipsoid_mesh(0.9, 0.7, 0.6, -0.3), 6)
+    )
+    d = design_primitive(prim, SPHERE, feed_hole_radius=0.2)
+    spec = primitive_appendage(d, 0.3, load_tape=GENERIC_TAPE, row_tape=GENERIC_TAPE)
+    assert {t.name.split()[0] for t in spec.host_tapes} == {"load", "row"}
+    am = build_appendage(spec, HOT, {"host": GENERIC_FABRIC, "skin": GENERIC_FABRIC})
+    model = am.model
+    loop = _to_host_frame(d, d.footprint_points)
+    off = _distance_to_loop(model.positions[am.rim_nodes], loop)
+    assert off.max() < 5e-4
+    # Rim edges of the skin: flat (rest) length against the envelope (3D) length.
+    rim = set(am.rim_nodes.tolist())
+    tri = model.triangles[am.skin_triangles]
+    rest = model.rest_uv[am.skin_triangles]
+    worst = 0.0
+    for k in range(3):
+        i, j = (k + 1) % 3, (k + 2) % 3
+        on_rim = np.array(
+            [a in rim and b in rim for a, b in zip(tri[:, i], tri[:, j], strict=True)]
+        )
+        l3 = np.linalg.norm(
+            model.positions[tri[on_rim, i]] - model.positions[tri[on_rim, j]], axis=1
+        )
+        lf = np.linalg.norm(rest[on_rim, i] - rest[on_rim, j], axis=1)
+        if len(l3):
+            worst = max(worst, float(np.abs(lf / l3 - 1.0).max()))
+    assert worst < 0.01
+
+
+def test_feed_holes_must_clear_the_seams_and_can_be_moved_clear() -> None:
+    """A feed hole reaching over a row seam fails *feed hole clear of seams*; the nearest
+    clear position in its panel, inside the footprint, passes."""
+    from envelopelab.features.primitives import clear_feed_hole, feed_hole_seam_clearance
+
+    seam = SPHERE.rows[1].s_top  # between rows B and C
+    theta = SPHERE.theta_at(5)
+    dome = Dome("pod", Placement(5, seam), 1.0, 0.6, gores=8)
+    required = 0.05
+    # One hole reaching over the row seam below it, one well inside row C.
+    on_seam = (seam + 0.03, theta, 0.1)
+    inside = (seam + 0.5, theta, 0.1)
+    d = design_primitive(dome, SPHERE, feed_holes=[on_seam, inside], seam_clearance=required)
+    checks = [c for c in d.checks if c.name == "feed hole clear of seams"]
+    assert [c.severity for c in checks] == ["error", "info"]
+    assert checks[0].value < 0.0  # over the seam
+    hole = d.extra_feed_holes[1]
+    assert checks[1].value == pytest.approx(
+        feed_hole_seam_clearance(SPHERE, hole.row, hole.centre_xy, hole.radius)
+    )
+    found = clear_feed_hole(d, *on_seam, required)
+    assert found is not None
+    s, th = found
+    moved = design_primitive(
+        dome, SPHERE, feed_holes=[(s, th, 0.1), inside], seam_clearance=required
+    )
+    after = [c for c in moved.checks if c.name.startswith("feed hole")]
+    assert all(c.severity == "info" for c in after), [c.message for c in after]
+    # The least move: up the tape to just clear of the seam (10 mm search grid).
+    assert seam + 0.1 + required <= s <= seam + 0.1 + required + 0.02
+    assert (
+        abs(SPHERE.gore_position(np.array([th]))[0] - SPHERE.gore_position(np.array([theta]))[0])
+        < 0.01
+    )
+    # A hole too large for its panel cannot be cleared.
+    big = (seam + 0.5, theta, 1.2)
+    d_big = design_primitive(dome, SPHERE, feed_holes=[big], seam_clearance=required)
+    assert clear_feed_hole(d_big, *big, required) is None
+
+
+def test_a_capped_dome_stops_where_it_is_as_wide_as_its_cap() -> None:
+    """A cap of radius r_c closes the half-spheroid where rho = r_c, at height
+    h sqrt(1 - (r_c / a)^2); the gores end on the cap's circle."""
+    from envelopelab.features.primitives import Revolved
+
+    a, h, rc = 0.8, 0.6, 0.2
+    dome = Dome("ear", Placement(3, EQUATOR), a, h, gores=8, cap_radius=rc)
+    assert dome.closed_tip and dome.tip_radius == rc
+    assert dome.tip_height == pytest.approx(h * math.sqrt(1.0 - (rc / a) ** 2), rel=1e-12)
+    rho, zeta = dome.meridian()
+    assert rho[-1] == pytest.approx(rc, rel=1e-12) and zeta[-1] == pytest.approx(dome.tip_height)
+    d = design_primitive(dome, SPHERE)
+    assert [p.label for p in d.pieces][-2:] == ["ear-G8", "ear-TIP"]
+    tops = sum(_length(p.edges["top"]) for p in d.pieces[:-1])
+    assert tops == pytest.approx(2.0 * math.pi * rc, rel=1e-3)
+    assert d.pieces[-1].flat_area == pytest.approx(math.pi * rc**2, rel=1e-3)
+    with pytest.raises(PrimitiveError, match="cap radius"):
+        design_primitive(Dome("ear", Placement(3, EQUATOR), a, h, cap_radius=a), SPHERE)
+    # A revolved profile ending on the axis is cut the same way; one ending off it is not.
+    w = np.linspace(0.0, 0.5 * math.pi, 9)
+    profile = tuple((float(a * math.cos(t)), float(h * math.sin(t))) for t in w[:-1]) + ((0.0, h),)
+    rev = Revolved("bulb", Placement(3, EQUATOR), profile, 8, cap_radius=rc)
+    rho, _ = rev.meridian()
+    assert rev.closed_tip and rho[-1] == pytest.approx(rc, rel=1e-9)
+    assert rho.min() == pytest.approx(rc, rel=1e-9)
+    assert design_primitive(rev, SPHERE).pieces[-1].label == "bulb-TIP"
+    open_tip = (*profile[:-1], (0.1, h))
+    with pytest.raises(PrimitiveError, match="cap closes only a profile that ends on the axis"):
+        design_primitive(Revolved("x", Placement(3, EQUATOR), open_tip, 8, cap_radius=rc), SPHERE)
+
+
+def test_a_cap_starts_on_the_designed_top_in_the_sub_model() -> None:
+    """The cap is cut flat, but its sub-model nodes start on the dome's top (taut and
+    curved), so the solve starts near the inflated shape."""
+    a, h, rc = 0.8, 0.6, 0.25
+    d = design_primitive(
+        Dome("ear", Placement(3, EQUATOR), a, h, 8, cap_radius=rc), SPHERE, feed_hole_radius=0.2
+    )
+    am = build_appendage(
+        primitive_appendage(d, 0.1, load_tape=GENERIC_TAPE),
+        HOT,
+        {"host": GENERIC_FABRIC, "skin": GENERIC_FABRIC},
+    )
+    model = am.model
+    tip = next(s for s in model.seams if s.name == "ear:tip seam")
+    skin = model.triangles[am.skin_triangles]
+    ring = set(np.unique(tip.edges).tolist())
+    # Cap triangles are the grain-across ones; their inner nodes lie on the spheroid.
+    cap = skin[np.all(np.isclose(model.grain[am.skin_triangles], [1.0, 0.0]), axis=1)]
+    inner = sorted(set(np.unique(cap).tolist()) - ring)
+    assert inner
+    from envelopelab.features.scene import to_envelope_frame
+
+    x = to_envelope_frame(d, model.positions[inner]) - d.base_point
+    edge = to_envelope_frame(d, model.positions[sorted(ring)]) - d.base_point
+    assert np.allclose(edge @ d.axis, d.primitive.tip_height, atol=1e-9)
+    # Each inner node on the spheroid: zeta = h sqrt(1 - (rho / a)^2) above the base.
+    height = x @ d.axis
+    rho = np.linalg.norm(x - np.outer(height, d.axis), axis=1)
+    assert np.all(height > d.primitive.tip_height)
+    assert height == pytest.approx(h * np.sqrt(1.0 - (rho / a) ** 2), abs=2e-4)

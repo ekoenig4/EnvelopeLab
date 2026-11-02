@@ -154,9 +154,20 @@ FOOTPRINT_GRID = 241
 """Path samples per skin meridian that bracket the footprint crossing before bisection
 (about 1 % of the path; a second crossing finer than that is not detected)."""
 
+FOOTPRINT_CURVE_SAMPLES = 256
+"""Samples of the designed footprint per skin piece given to the sub-model
+(:attr:`~envelopelab.features.builder.AppendageSpec.footprint_curve`): its chord sagitta
+is microns for usual shapes (source: assumed)."""
+
 MARK_EASE_SAMPLES = 48
 """Integration steps per match-mark interval when measuring the attachment ease
 (:func:`_mark_ease`; a few mm per step for usual mark spacings)."""
+
+FEED_HOLE_SEAM_CLEARANCE = 0.05
+"""Default least distance from a feed hole's finished edge to a seam of its panel, m: room
+for the hole's hem band and the seam's fell side by side (source: assumed; a project uses
+its own hole-tape width and seam allowance, :func:`envelopelab.project.shapes.
+feed_hole_clearance`)."""
 
 DEFAULT_TOLERANCE = 0.003
 """Default length tolerance of the pattern checks, m (AGENTS.md sewn-edge default, 3 mm;
@@ -436,6 +447,9 @@ class Dome:
         Number of skin gores M (>= 3).
     marks_per_piece : int
         Match marks per gore on the rim (>= 1).
+    cap_radius : float
+        Radius :math:`r_c` of a flat cap that closes the top, m (0: the gores meet in a
+        point). The meridian stops where :math:`\\rho = r_c`.
     """
 
     name: str
@@ -444,32 +458,37 @@ class Dome:
     height: float
     gores: int = 8
     marks_per_piece: int = 2
+    cap_radius: float = 0.0
 
     kind: PrimitiveKind = field(default="dome", init=False)
 
     @property
     def pieces(self) -> int:
-        """Number of skin pieces round the axis."""
+        """Number of skin pieces round the axis (a cap is extra)."""
         return self.gores
 
     @property
     def closed_tip(self) -> bool:
-        """False: the gores meet in a point at the apex."""
-        return False
+        """True when a flat cap closes the top (otherwise the gores meet in a point)."""
+        return self.cap_radius > 0.0
 
     @property
     def tip_radius(self) -> float:
         """Radius of the tip circle, m (0: an apex)."""
-        return 0.0
+        return self.cap_radius
+
+    @property
+    def _w_tip(self) -> float:
+        return math.acos(min(self.cap_radius / self.base_radius, 1.0))
 
     @property
     def tip_height(self) -> float:
         """Height of the tip above the base circle along the axis, m."""
-        return self.height
+        return self.height * math.sin(self._w_tip)
 
     def meridian(self, count: int = 2001) -> tuple[FloatArray, FloatArray]:
         """Dense skin meridian :math:`(\\rho, \\zeta)` from the base circle to the tip, m."""
-        w = np.linspace(0.0, 0.5 * math.pi, count)
+        w = np.linspace(0.0, self._w_tip, count)
         return self.base_radius * np.cos(w), self.height * np.sin(w)
 
     def validate(self) -> None:
@@ -477,6 +496,8 @@ class Dome:
         _check_common(self.name, self.placement, self.marks_per_piece)
         if self.base_radius <= 0.0 or self.height <= 0.0:
             raise PrimitiveError(f"{self.name}: dome radius and height must be positive")
+        if not 0.0 <= self.cap_radius < self.base_radius:
+            raise PrimitiveError(f"{self.name}: cap radius must be between 0 and the base radius")
         if self.gores < 3:
             raise PrimitiveError(f"{self.name}: a dome needs at least 3 gores")
 
@@ -559,14 +580,18 @@ class Revolved:
     profile : tuple of (float, float)
         Meridian points :math:`(\rho, \zeta)` from the base circle (:math:`\zeta = 0`,
         :math:`\rho > 0`) to the tip, m: distance from the axis and height along it. The
-        last point on the axis (:math:`\rho = 0`) closes the shape in an apex; otherwise
-        a flat disc of the last radius closes it.
+        last point on the axis (:math:`\rho = 0`) closes the shape in an apex (or a cap,
+        see ``cap_radius``); otherwise a flat disc of the last radius closes it.
     gores : int
         Number of skin gores M (>= 3).
     smooth : bool
         Interpolate the points with a cubic spline (otherwise straight segments).
     marks_per_piece : int
         Match marks per gore on the rim (>= 1).
+    cap_radius : float
+        For a profile ending on the axis: radius :math:`r_c` of a flat cap that closes the
+        top instead of an apex, m (0: an apex). The meridian stops where it last comes in
+        to :math:`\rho = r_c`.
     """
 
     name: str
@@ -575,6 +600,7 @@ class Revolved:
     gores: int = 12
     smooth: bool = True
     marks_per_piece: int = 2
+    cap_radius: float = 0.0
 
     kind: PrimitiveKind = field(default="revolved", init=False)
 
@@ -584,9 +610,13 @@ class Revolved:
         return self.gores
 
     @property
+    def _capped(self) -> bool:
+        return float(self.profile[-1][0]) <= 0.0 and self.cap_radius > 0.0
+
+    @property
     def tip_radius(self) -> float:
         """Radius of the tip circle, m (0: an apex)."""
-        return float(self.profile[-1][0])
+        return self.cap_radius if self._capped else float(self.profile[-1][0])
 
     @property
     def closed_tip(self) -> bool:
@@ -596,10 +626,26 @@ class Revolved:
     @property
     def tip_height(self) -> float:
         """Height of the tip above the base circle along the axis, m."""
+        if self._capped:
+            return float(self.meridian(4001)[1][-1])
         return float(self.profile[-1][1])
 
     def meridian(self, count: int = 2001) -> tuple[FloatArray, FloatArray]:
-        """Dense skin meridian from the base circle to the tip, m."""
+        """Dense skin meridian from the base circle to the tip (or the cap), m."""
+        if not self._capped:
+            return self._full_meridian(count)
+        rho, zeta = self._full_meridian(max(count, 4001))
+        rc = self.cap_radius
+        # Cut where the meridian last comes in to the cap radius, then resample evenly.
+        i = int(np.flatnonzero(rho >= rc)[-1])
+        f = (rho[i] - rc) / (rho[i] - rho[i + 1])
+        r = np.append(rho[: i + 1], rc)
+        z = np.append(zeta[: i + 1], zeta[i] + f * (zeta[i + 1] - zeta[i]))
+        arc = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(r), np.diff(z)))])
+        t = np.linspace(0.0, arc[-1], count)
+        return np.interp(t, arc, r), np.interp(t, arc, z)
+
+    def _full_meridian(self, count: int) -> tuple[FloatArray, FloatArray]:
         pts = np.asarray(self.profile, dtype=np.float64)
         chord = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))])
         t = np.linspace(0.0, chord[-1], count)
@@ -625,9 +671,15 @@ class Revolved:
             raise PrimitiveError(f"{self.name}: profile points must be distinct")
         if self.gores < 3:
             raise PrimitiveError(f"{self.name}: a revolved shape needs at least 3 gores")
-        rho, _ = self.meridian()
+        rho, _ = self._full_meridian(2001)
         if np.any(rho[:-1] <= 0.0):
             raise PrimitiveError(f"{self.name}: the smoothed profile crosses the axis")
+        if self.cap_radius < 0.0:
+            raise PrimitiveError(f"{self.name}: cap radius must not be negative")
+        if self.cap_radius > 0.0 and pts[-1, 0] > 0.0:
+            raise PrimitiveError(f"{self.name}: a cap closes only a profile that ends on the axis")
+        if self.cap_radius >= float(rho.max()):
+            raise PrimitiveError(f"{self.name}: cap radius must be less than the widest radius")
 
 
 @dataclass(frozen=True)
@@ -650,6 +702,11 @@ class FreeformShape:
         Number of skin panels M (>= 2), cut along half-planes through the axis.
     marks_per_piece : int
         Match marks per panel on the rim (>= 1).
+    cap_radius : float
+        Radius :math:`r_c` of the cap round the pole, m (0: the panels meet in a point at
+        the pole). The part of the mesh round the pole inside the cylinder
+        :math:`\\rho = r_c` about the axis is cut off as one more piece, the cap, and the
+        panels end on its edge.
     """
 
     name: str
@@ -657,23 +714,24 @@ class FreeformShape:
     mesh: ReferenceMesh = field(repr=False)
     panels: int = 6
     marks_per_piece: int = 2
+    cap_radius: float = 0.0
 
     kind: PrimitiveKind = field(default="mesh", init=False)
 
     @property
     def pieces(self) -> int:
-        """Number of skin panels."""
+        """Number of skin panels (a cap is extra)."""
         return self.panels
 
     @property
     def closed_tip(self) -> bool:
-        """False: the panels meet at the pole where the axis leaves the mesh."""
-        return False
+        """True with a cap; otherwise the panels meet at the pole."""
+        return self.cap_radius > 0.0
 
     @property
     def tip_radius(self) -> float:
-        """0: the panels meet in a point."""
-        return 0.0
+        """Radius of the cap circle, m (0: the panels meet in a point)."""
+        return self.cap_radius
 
     @property
     def tip_height(self) -> float:
@@ -687,6 +745,8 @@ class FreeformShape:
             raise PrimitiveError(f"{self.name}: the mesh has too few triangles")
         if self.panels < 2:
             raise PrimitiveError(f"{self.name}: a free-form shape needs at least 2 panels")
+        if self.cap_radius < 0.0:
+            raise PrimitiveError(f"{self.name}: cap radius must not be negative")
 
 
 Primitive = Dome | Tube | Revolved | FreeformShape
@@ -795,7 +855,7 @@ class CutPiece:
     ----------
     label : str
         Piece label (``<name>-G1`` dome gores, ``<name>-P1`` tube panels,
-        ``<name>-TIP`` tip disc).
+        ``<name>-TIP`` tip disc or cap).
     finished : ndarray, shape (n, 2)
         Finished (sewn-line) outline, m, counter-clockwise, ``y`` up the piece.
     cut : ndarray, shape (m, 2)
@@ -808,6 +868,9 @@ class CutPiece:
         Area of the piece on the designed 3D shape, m^2.
     cut_count : int
         Pieces to cut.
+    seam_points : tuple of (float, float)
+        Of a tip disc or cap: where every skin seam meets its edge, m, seam 1 first (seam
+        ``j`` joins pieces ``j - 1`` and ``j``, seam 1 the last piece and the first).
     """
 
     label: str
@@ -817,6 +880,7 @@ class CutPiece:
     edges: dict[str, FloatArray] = field(repr=False)
     surface_area: float
     cut_count: int = 1
+    seam_points: tuple[tuple[float, float], ...] = ()
 
     @property
     def flat_area(self) -> float:
@@ -1379,6 +1443,136 @@ def band_outline(surface: EnvelopeSurface, row: int, samples: int = 97) -> Float
     return np.vstack([right, top[1:-1], right[::-1] * np.array([-1.0, 1.0]), bottom[1:-1]])
 
 
+def feed_hole_seam_clearance(
+    surface: EnvelopeSurface, row: str, centre_xy: Sequence[float], radius: float
+) -> float:
+    """Distance from a feed hole's finished edge to the nearest finished seam of its panel.
+
+    The panel is the row's finished outline (:func:`band_outline`: both gore seams and
+    both row seams, in panel-pattern coordinates); the hole is a circle of ``radius``
+    round ``centre_xy`` in the same coordinates.
+
+    Parameters
+    ----------
+    surface : EnvelopeSurface
+        Envelope.
+    row : str
+        Row label of the panel the hole is cut in.
+    centre_xy : sequence of float
+        Hole centre in panel-pattern coordinates, m.
+    radius : float
+        Finished hole radius, m.
+
+    Returns
+    -------
+    float
+        Clearance, m: negative when the hole reaches over a seam (or its centre is outside
+        the panel).
+    """
+    from envelopelab.geometry.polygon import distance_to_polyline
+
+    index = next(i for i, b in enumerate(surface.rows) if b.label == row)
+    outline = band_outline(surface, index)
+    centre = np.asarray(centre_xy, dtype=np.float64).reshape(1, 2)
+    distance = float(distance_to_polyline(centre, outline, True)[0])
+    if not bool(points_in_polygon(centre, outline)[0]):
+        distance = -distance
+    return distance - radius
+
+
+def clear_feed_hole(
+    design: PrimitiveDesign,
+    s: float,
+    theta: float,
+    radius: float,
+    required: float,
+    step: float = 0.01,
+) -> tuple[float, float] | None:
+    """The nearest position of a feed hole, in the same envelope panel, clear of its seams.
+
+    Candidate centres on a grid of about ``step`` across the panel (in tape position and
+    across the gore) are kept when the hole's edge is at least ``required`` from every
+    finished seam of the panel (:func:`feed_hole_seam_clearance`); the nearest of them (in
+    the panel pattern) whose hole lies wholly inside the shape's footprint is returned.
+
+    Parameters
+    ----------
+    design : PrimitiveDesign
+        The placed shape the hole feeds.
+    s, theta : float
+        Tape position (m) and azimuth (rad) of the hole's centre now.
+    radius : float
+        Finished hole radius, m.
+    required : float
+        Least distance from the hole's edge to a seam, m.
+    step : float
+        Grid spacing, m.
+
+    Returns
+    -------
+    (float, float) or None
+        Tape position (m) and azimuth (rad) of the new centre, or None when no position
+        in the panel is clear of the seams and inside the footprint.
+    """
+    from envelopelab.geometry.polygon import distance_to_polyline
+
+    surface = design.surface
+    n = surface.gore_count
+    g0 = float(surface.gore_position(np.array([theta]))[0])
+    g_centre = design.primitive.placement.gore - 0.5 + design.primitive.placement.across
+    g0 = g_centre + ((g0 - g_centre + 0.5 * n) % n) - 0.5 * n
+    cell = math.floor(g0)
+    index = int(surface.row_index(np.array([s]))[0])
+    band = surface.rows[index]
+    outline = band_outline(surface, index)
+    here = _panel_xy(surface, np.array([s]), np.array([g0]), cell, index)[0]
+    width = 2.0 * float(surface.half_width(np.array([0.5 * (band.s_bottom + band.s_top)]))[0])
+    ss = np.linspace(
+        band.s_bottom, band.s_top, max(int((band.s_top - band.s_bottom) / step), 2) + 1
+    )
+    aa = np.linspace(0.0, 1.0, max(int(width / step), 2) + 1)
+    grid_s, grid_a = np.meshgrid(ss, aa, indexing="ij")
+    cand_s, cand_g = grid_s.ravel(), cell + grid_a.ravel()
+    xy = _panel_xy(surface, cand_s, cand_g, cell, index)
+    inside = points_in_polygon(xy, outline)
+    clear = distance_to_polyline(xy, outline, True) - radius >= required
+    ok = np.flatnonzero(inside & clear)
+    if not len(ok):
+        return None
+    order = ok[np.argsort(np.linalg.norm(xy[ok] - here, axis=1))]
+    loop = _chart(design, design.footprint_s, design.footprint_theta)
+    ang = np.linspace(0.0, 2.0 * math.pi, 64, endpoint=False)
+    ring = radius * np.column_stack([np.cos(ang), np.sin(ang)])
+    for k in order:
+        th = float(cand_g[k]) * surface.gore_angle
+        centre = _chart(design, np.array([cand_s[k]]), np.array([th]))[0]
+        if bool(points_in_polygon(centre + ring, loop).all()):
+            return float(cand_s[k]), th
+    return None
+
+
+def _seam_clearance_checks(design: PrimitiveDesign, required: float) -> list[DesignCheck]:
+    """Check *feed hole clear of seams* for every feed hole of a placed shape."""
+    out = []
+    for hole in design.feed_holes:
+        clearance = feed_hole_seam_clearance(design.surface, hole.row, hole.centre_xy, hole.radius)
+        ok = clearance >= required
+        out.append(
+            DesignCheck(
+                "feed hole clear of seams",
+                clearance,
+                required,
+                "m",
+                "info" if ok else "error",
+                f"feed hole of radius {hole.radius:.3f} m in gore {hole.gore} row {hole.row}: "
+                f"{clearance * 1000:.0f} mm from its edge to the nearest seam of the panel "
+                f"(at least {required * 1000:.0f} mm needed"
+                + (")" if ok else "; move it into the panel)"),
+            )
+        )
+    return out
+
+
 def _panel_xy(
     surface: EnvelopeSurface, s: FloatArray, g: FloatArray, cell: int, row: int
 ) -> FloatArray:
@@ -1566,6 +1760,7 @@ def design_primitive(
     tolerance: float = DEFAULT_TOLERANCE,
     samples: int = 720,
     feed_holes: Sequence[tuple[float, float, float]] = (),
+    seam_clearance: float = FEED_HOLE_SEAM_CLEARANCE,
 ) -> PrimitiveDesign:
     """Place a primitive on the envelope and derive its attachment and cutting pattern.
 
@@ -1586,6 +1781,10 @@ def design_primitive(
     feed_holes : sequence of (float, float, float)
         More holes cut in the envelope inside the footprint: tape position (m), azimuth
         (rad) and finished radius (m) of each.
+    seam_clearance : float
+        Least distance from a feed hole's finished edge to the finished seams of the
+        envelope panel it is cut in, m (check *feed hole clear of seams*; see
+        :func:`feed_hole_seam_clearance`).
 
     Returns
     -------
@@ -1608,7 +1807,7 @@ def design_primitive(
     s0, theta0 = pl.tape_position, surface.theta_at(pl.gore, pl.across)
     base, axis, b1, b2 = _axis_frame(surface, pl, s0, theta0)
     if isinstance(primitive, FreeformShape):
-        return _design_freeform(
+        placed = _design_freeform(
             primitive,
             surface,
             s0,
@@ -1622,6 +1821,8 @@ def design_primitive(
             tolerance,
             feed_holes,
         )
+        placed.checks += _seam_clearance_checks(placed, seam_clearance)
+        return placed
     skin = _Skin(primitive, surface, base, axis, b1, b2, samples)
     fp = skin.at(np.zeros(samples), skin.phi)
     fp_s, fp_theta, _ = surface.locate(fp)
@@ -1652,6 +1853,10 @@ def design_primitive(
                 rim=None,
                 edges={"top": np.vstack([disc, disc[:1]])},
                 surface_area=math.pi * primitive.tip_radius**2,
+                seam_points=tuple(
+                    (primitive.tip_radius * math.cos(a), primitive.tip_radius * math.sin(a))
+                    for a in _seams(primitive)[:-1]
+                ),
             )
         )
 
@@ -1727,6 +1932,7 @@ def design_primitive(
     )
     design.extra_feed_holes = _extra_feed_holes(design, feed_holes, g_centre)
     design.checks = _checks(design, pieces, tolerance)
+    design.checks += _seam_clearance_checks(design, seam_clearance)
     return design
 
 
@@ -1812,6 +2018,18 @@ def _checks(design: PrimitiveDesign, pieces: list[_Piece], tol: float) -> list[D
     if m == 1:  # a single tube panel is sewn to itself along one seam
         c = design.pieces[0]
         worst_pair = abs(_length(c.edges["right"]) - _length(c.edges["left"]))
+    if p.closed_tip and isinstance(p, FreeformShape):
+        # The panel tops are sewn round the cap's edge.
+        tops = sum(_length(c.edges["top"]) for c in design.pieces[:m])
+        edge = _length(design.pieces[m].edges["top"])
+        check(
+            "cap seam match",
+            abs(tops - edge),
+            tol,
+            "m",
+            "error",
+            f"panel tops {tops:.4f} m against the cap's edge {edge:.4f} m",
+        )
     check(
         "skin seam match",
         worst_pair,
@@ -2230,7 +2448,10 @@ class _SkinFactory:
             centre = design.base_point + prim.tip_height * design.axis
             local[free] = len(positions) + np.arange(len(free))
             positions.extend(
-                centre + np.outer(xy[free, 0], design.b1) + np.outer(xy[free, 1], design.b2)
+                centre
+                + np.outer(xy[free, 0], design.b1)
+                + np.outer(xy[free, 1], design.b2)
+                + np.outer(_cap_rise(prim, np.hypot(xy[free, 0], xy[free, 1])), design.axis)
             )
             tris.append(local[tri])
             rests.append(xy[tri])
@@ -2247,6 +2468,27 @@ class _SkinFactory:
             seams=seam_edges,
             notes=notes,
         )
+
+
+def _cap_rise(prim: Primitive, rho: FloatArray) -> FloatArray:
+    """Height of the designed surface above a cap's plane at radii ``rho`` (m) inside it.
+
+    A cap closes a shape that comes to a point; its nodes start on that pointed surface
+    (curved and taut), not on the flat cap, so the solve starts near the inflated shape. A
+    tip disc of the shape itself (a tube's or a profile's last radius) starts flat (0).
+    """
+    import dataclasses
+
+    if not isinstance(prim, Dome | Revolved) or prim.cap_radius <= 0.0:
+        return np.zeros(len(rho))
+    if isinstance(prim, Revolved) and not prim._capped:
+        return np.zeros(len(rho))
+    r_full, z_full = dataclasses.replace(prim, cap_radius=0.0).meridian(4001)
+    inner = r_full <= prim.cap_radius
+    order = np.argsort(r_full[inner])
+    rise = np.interp(rho, r_full[inner][order], z_full[inner][order]) - prim.tip_height
+    out: FloatArray = np.maximum(rise, 0.0)
+    return out
 
 
 def primitive_appendage(
@@ -2306,6 +2548,16 @@ def primitive_appendage(
     s, theta, _ = design.surface.locate(skin.rim_points(phi))
     host = host_surface_at(design)
     chart = _chart(design, s, theta)
+    on_seam = np.isin(phi, seams[:-1])
+    # The designed footprint, densely, so host-mesh nodes between these lie on it too.
+    dense = np.concatenate(
+        [
+            np.linspace(a, b, FOOTPRINT_CURVE_SAMPLES, endpoint=False)
+            for a, b in zip(seams[:-1], seams[1:], strict=True)
+        ]
+    )
+    s_c, theta_c, _ = design.surface.locate(skin.rim_points(dense))
+    curve = _chart(design, s_c, theta_c)
     lo, hi = chart.min(axis=0), chart.max(axis=0)
     margin = margin if margin is not None else 0.5 * float((hi - lo).max())
     rect = (lo[0] - margin, lo[1] - margin, hi[0] + margin, hi[1] + margin)
@@ -2348,6 +2600,8 @@ def primitive_appendage(
     return AppendageSpec(
         name=prim.name,
         footprint=chart,
+        footprint_curve=curve,
+        footprint_fixed=chart[on_seam],
         skin_mode="designed",
         skin_mesh=skin.factory(design, host),
         match_points=prim.pieces * prim.marks_per_piece,
@@ -2383,6 +2637,7 @@ def _design_freeform(
     from envelopelab.features.freeform import (
         EDGE_STRAIN_LIMIT,
         build_mesh_skin,
+        cap_outline,
         cut_outline,
         panel_outline,
     )
@@ -2398,8 +2653,10 @@ def _design_freeform(
     g_centre = shape.placement.gore - 0.5 + shape.placement.across
     pieces: list[CutPiece] = []
     strain = 0.0
-    for k, panel in enumerate(skin.panels):
-        finished, edges = panel_outline(panel)
+    flat_pieces = [*skin.panels, *([skin.cap] if skin.cap is not None else [])]
+    for k, panel in enumerate(flat_pieces):
+        cap = k == len(skin.panels)
+        finished, edges = cap_outline(panel) if cap else panel_outline(panel)
         e3 = panel.x[panel.tri]
         ef = panel.flat[panel.tri]
         for a, b in ((0, 1), (1, 2), (2, 0)):
@@ -2411,12 +2668,13 @@ def _design_freeform(
         )
         pieces.append(
             CutPiece(
-                label=_piece_label(shape, k),
+                label=f"{shape.name}-TIP" if cap else _piece_label(shape, k),
                 finished=finished,
                 cut=cut_outline(finished, seam_allowance),
-                rim=edges.pop("rim"),
+                rim=edges.pop("rim", None),
                 edges=edges,
                 surface_area=area,
+                seam_points=skin.cap_seam_points() if cap else (),
             )
         )
     marks = []

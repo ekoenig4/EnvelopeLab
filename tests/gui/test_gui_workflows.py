@@ -148,7 +148,7 @@ def test_seam_allowance_marks_patterns_stale_but_not_the_rest_mesh(
     status = w.controller.artifact_statuses()
     assert status["patterns"] == "stale"
     assert status["rest_mesh"] == "current" and status["assembly"] == "current"
-    assert invalidated_by({"seam_allowance"}) == {"patterns", "nesting", "export"}
+    assert invalidated_by({"seam_allowance"}) == {"patterns", "nesting", "export", "shapes"}
     assert "STALE" in w.patterns.banner.text()
     titles = panel_titles(w)
     assert "[STALE]" in titles["patterns"] and "[STALE]" not in titles["view3d"]

@@ -373,6 +373,14 @@ and its circular centre panel. **Layout** in the toolbar chooses how they are ar
 * *Assembled gore*: stacked up one gore as they are sewn, the scoop at the bottom and the
   parachute's centre panel on top, so you can see how the rows meet.
 
+With **Show special shapes** on (the default), every envelope panel a special shape is
+sewn on, or lies under, follows the parachute as its own piece, gore by gore (for
+example *GORE 3 ROW D: ear*), as on the build pack's marking sheets: the footprint line
+the shape's rim is sewn on, with short ticks on the shape's side; the numbered match
+marks, each naming the skin piece with the same number; and every feed hole, cut
+(dashed) and finished (solid), with its sizes. Each row says which of its gores carry
+such a panel. Hover a panel or a row's list for the full sewing directions.
+
 The layout is for display only: it does not change the cut files. Each panel row is drawn as cut (dashed) and finished (solid,
 filled with the zone's fabric colour) outlines with its label, grain arrow, notches, tapes
 and features; the parachute and scoop panels are read-only here (edit them in the

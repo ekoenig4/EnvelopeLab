@@ -55,7 +55,8 @@ def test_version_1_file_reads_without_shapes() -> None:
     raw = json.loads(FIXTURE.read_text(encoding="utf-8"))
     assert raw["format_version"] == 1
     project = load_project(FIXTURE)
-    assert project.format_version == PROJECT_FORMAT_VERSION == 2
+    assert project.format_version == PROJECT_FORMAT_VERSION == 3
+    assert project.shape_runs == []
     assert project.state.shapes == []
 
 
@@ -71,8 +72,8 @@ def test_version_1_snapshots_are_migrated_too(session: ProjectSession) -> None:
 
 def test_unknown_version_is_refused(session: ProjectSession) -> None:
     data = json.loads(dump_project(session.project))
-    data["format_version"] = 3
-    with pytest.raises(ValueError, match="unsupported project format version 3"):
+    data["format_version"] = 4
+    with pytest.raises(ValueError, match="unsupported project format version 4"):
         load_project_text(json.dumps(data))
 
 
@@ -241,3 +242,105 @@ def test_attachment_ease_is_checked_per_mark_interval(session: ProjectSession) -
     finer = shape_design(big.model_copy(update={"marks_per_piece": 4}), surface)
     assert float(np.abs(finer.mark_ease).max()) < 0.6 * check.value
     assert float(finer.mark_ease.sum()) == pytest.approx(float(placed.mark_ease.sum()), abs=3e-4)
+
+
+def test_feed_holes_are_moved_clear_of_the_seams_in_one_undo_step(
+    session: ProjectSession,
+) -> None:
+    from envelopelab.features.primitives import feed_hole_seam_clearance
+    from envelopelab.project.edits import move_feed_holes_clear
+    from envelopelab.project.shapes import (
+        FeedHole,
+        envelope_surface,
+        feed_hole_clearance,
+        shape_design,
+    )
+
+    surface = envelope_surface(session.design, session.patterns)
+    band = surface.rows[1]
+    dome = _dome(session).model_copy(
+        update={
+            "placement": _dome(session).placement.model_copy(update={"tape_position": band.s_top}),
+            "base_radius": 0.9,
+            "feed_holes": [
+                FeedHole(gore=1, tape_position=band.s_top - 0.02, across=0.0, radius=0.08)
+            ],
+        }
+    )
+    edits.add_shape(session, dome)
+    clearance = feed_hole_clearance(session.design, session.patterns)
+    assert clearance == pytest.approx(
+        session.design.tapes.hole.width + session.design.seam_types[0].allowance
+    )
+    before = shape_design(session.state.shapes[0], surface, clearance)
+    assert any(
+        c.name == "feed hole clear of seams" and c.severity == "error" for c in before.checks
+    )
+    notes = move_feed_holes_clear(session)
+    assert any("moved clear of the seams" in n for n in notes), notes
+    after = shape_design(session.state.shapes[0], surface, clearance)
+    hole = after.extra_feed_holes[0]
+    assert feed_hole_seam_clearance(surface, hole.row, hole.centre_xy, hole.radius) >= clearance
+    assert all(c.severity == "info" for c in after.checks if c.name.startswith("feed hole"))
+    assert session.stack.history()[-1] == "Move feed holes clear of seams"
+    session.undo()
+    assert session.state.shapes[0].feed_holes == dome.feed_holes
+    assert move_feed_holes_clear(session) and move_feed_holes_clear(session) == []
+
+
+def test_cap_diameter_gives_every_piece_a_top_at_least_100_mm_wide(
+    session: ProjectSession,
+) -> None:
+    """Automatic caps: M pieces of tops >= 100 mm, d = M w / pi (20 panels: 637 mm, 16:
+    509 mm), at most half the base diameter; 0 means a point; set values are kept."""
+    import math
+
+    from envelopelab.features.primitives import Dome, FreeformShape, Revolved, Tube
+    from envelopelab.project.shapes import (
+        CAP_PANEL_TOP_WIDTH,
+        auto_cap_diameter,
+        cap_diameter,
+        to_primitive,
+    )
+
+    placement = ShapePlacement(gore=1, tape_position=5.0)
+    ball = ellipsoid_mesh(1.5, 1.5, 1.5, -0.2)
+    eye = mesh_shape("eye", ball.vertices, ball.triangles, placement, panels=20)
+    antenna = eye.model_copy(update={"panels": 16})
+    assert CAP_PANEL_TOP_WIDTH == 0.10
+    assert auto_cap_diameter(eye) == pytest.approx(0.637)
+    assert auto_cap_diameter(antenna) == pytest.approx(0.509)
+    assert math.pi * auto_cap_diameter(eye) / 20 == pytest.approx(0.1, abs=1e-3)
+    prim = to_primitive(eye)
+    assert isinstance(prim, FreeformShape) and prim.cap_radius == pytest.approx(0.3185)
+    # Small shapes: at most half the base diameter.
+    small = DomeShape(name="d", placement=placement, base_radius=0.2, height=0.2, gores=16)
+    assert cap_diameter(small) == pytest.approx(0.2)
+    # Chosen values and no cap at all.
+    assert cap_diameter(small.model_copy(update={"cap_diameter": 0.1})) == 0.1
+    point = to_primitive(small.model_copy(update={"cap_diameter": 0.0}))
+    assert isinstance(point, Dome) and not point.closed_tip
+    # A pointed tube is cut off where it is as wide as its cap; a tube with a tip disc and
+    # a profile ending off the axis are closed already.
+    horn = TubeShape(
+        name="h", placement=placement, base_radius=0.5, tip_radius=0.0, length=2.0, panels=8
+    )
+    cut = to_primitive(horn.model_copy(update={"cap_diameter": 0.2}))
+    assert isinstance(cut, Tube) and cut.tip_radius == 0.1
+    assert cut.length == pytest.approx(2.0 * (1.0 - 0.1 / 0.5))
+    disc = horn.model_copy(update={"tip_radius": 0.2, "cap_diameter": 0.3})
+    assert cap_diameter(disc) == 0.0 and to_primitive(disc).tip_radius == 0.2
+    nose = RevolvedShape(name="n", placement=placement, profile=[(0.5, 0.0), (0.2, 0.4)])
+    assert cap_diameter(nose) == 0.0
+    bulb = RevolvedShape(name="b", placement=placement, profile=[(0.5, 0.0), (0.3, 0.3), (0, 0.5)])
+    assert isinstance(to_primitive(bulb), Revolved) and to_primitive(bulb).closed_tip
+
+
+def test_cap_diameter_survives_save_and_load(session: ProjectSession, tmp_path: Path) -> None:
+    spec = _dome(session).model_copy(update={"cap_diameter": 0.12})
+    assert edits.add_shape(session, spec)
+    path = session.save(tmp_path / "cap.elproj")
+    back = ProjectSession.open(path).state.shapes[0]
+    assert back.cap_diameter == 0.12
+    auto = _dome(session, "Auto")
+    assert auto.cap_diameter is None  # new shapes are capped automatically

@@ -86,7 +86,10 @@ def test_dxf_is_in_millimetres_and_carries_the_marks(pack: Path) -> None:
     marks = [
         e.dxf.text for e in top.modelspace() if e.dxftype() == "TEXT" and e.dxf.layer == "MARKS"
     ]
-    assert sorted(set(texts) | set(marks), key=int) == [str(k) for k in range(1, 33)]
+    # Each number names the skin piece that carries it: "12 (G6)".
+    numbers = {x.split()[0] for x in [*texts, *marks]}
+    assert sorted(numbers, key=int) == [str(k) for k in range(1, 33)]
+    assert all(x.split()[1].startswith("(G") for x in [*texts, *marks])
 
 
 def test_calibration_label_comes_from_the_drawn_length() -> None:
@@ -231,3 +234,148 @@ def test_a_parachute_that_cannot_be_cut_stops_the_export(tmp_path: Path) -> None
     broken.parachute.centre_panel_diameter = 2.0 * broken.gores.parachute_hole_diameter
     with pytest.raises(BuildPackError, match="parachute pattern cannot be made"):
         export_build_pack(broken, [], tmp_path / "broken")
+
+
+def _texts(path: Path, layer: str) -> list[str]:
+    return [
+        e.dxf.text
+        for e in readfile(path).modelspace()
+        if e.dxftype() == "TEXT" and e.dxf.layer == layer
+    ]
+
+
+def _inside(point: tuple[float, float], poly: np.ndarray) -> bool:
+    x, y = point
+    inside = False
+    for (x1, y1), (x2, y2) in zip(poly, np.roll(poly, -1, axis=0), strict=True):
+        if (y1 > y) != (y2 > y) and x < (x2 - x1) * (y - y1) / (y2 - y1) + x1:
+            inside = not inside
+    return inside
+
+
+def test_marking_sheets_say_where_and_how_the_shape_is_sewn(pack: Path) -> None:
+    """Feed holes at cut and finished size, ticks on the side the shape covers, and the
+    instructions; panels under a shape say so."""
+    from envelopelab.export.build_pack import TICK_LENGTH, primitive_sheets
+
+    ear = SHAPES[0]
+    hem = 2.0 * DESIGN.tapes.hole.width
+    hole = ear.feed_hole
+    assert hole is not None
+    sheets = {s.name: s for s in primitive_sheets(ear, "skin", None, hem, "hole tape")}
+    marking = sheets[f"ear-mark-G{hole.gore}-{hole.row}"]
+    assert marking.hole_cuts[0][2] == pytest.approx(hole.radius - hem)
+    text = next(t for _, _, t in marking.texts if t.startswith("FEED HOLE"))
+    assert f"cut diameter {2000 * (hole.radius - hem):.0f} mm" in text
+    assert f"{2000 * hole.radius:.0f} mm finished" in text and "hole tape" in text
+    # Every tick ends inside the footprint (the ear lies on that side of the line). The
+    # generic design has lobe gores: x = 2 tau w(s), y = s - s_row.
+    surface = ear.surface
+    n = surface.gore_count
+    g_centre = ear.primitive.placement.gore - 0.5 + ear.primitive.placement.across
+    g = surface.gore_position(ear.footprint_theta)
+    g = g_centre + np.mod(g - g_centre + 0.5 * n, n) - 0.5 * n
+    loop = np.column_stack([g, ear.footprint_s])
+    bottoms = {b.label: b.s_bottom for b in surface.rows}
+    ticked = 0
+    for sheet in sheets.values():
+        if sheet.kind != "marking":
+            continue
+        gore = int(sheet.piece.split()[1])
+        row = sheet.piece.split()[3]
+        cell = g_centre + np.mod(gore - 0.5 - g_centre + 0.5 * n, n) - 0.5 * n - 0.5
+        if not sheet.lines:
+            assert any("lies under ear" in note for note in sheet.notes)
+            continue
+        assert any("ticks point into ear" in note for note in sheet.notes)
+        for tick in sheet.ticks:
+            assert np.linalg.norm(tick[1] - tick[0]) == pytest.approx(TICK_LENGTH)
+            x, y = tick[1]
+            s = y + bottoms[row]
+            across = x / (2.0 * float(surface.half_width(np.array([s]))[0]))
+            assert _inside((cell + 0.5 + across, s), loop)
+            ticked += 1
+    assert ticked > 20
+    assert {"ATTACH_SIDE", "HOLE_CUT", "NOTES"} <= {
+        e.dxf.layer for e in readfile(pack / f"{marking.name}.dxf").modelspace()
+    }
+
+
+def test_skin_pieces_say_what_each_edge_is_sewn_to(pack: Path) -> None:
+    ear = _texts(pack / "ear-G5.dxf", "NOTES")
+    assert "sew to G6 (its left side)" in ear and "sew to G4 (its right side)" in ear
+    assert any(t.startswith("RIM: sew to the envelope, marks") for t in ear)
+    assert "APEX of ear" in ear
+    first = _texts(pack / "ear-G1.dxf", "NOTES")
+    assert "sew to G16 (its right side)" in first  # round the shape
+    horn = _texts(pack / "horn-P1.dxf", "NOTES")
+    assert "TOP: sew to the tip disc" in horn
+    assert "TIP DISC" in _texts(pack / "horn-TIP.dxf", "NOTES")
+    tip = _texts(pack / "horn-TIP.dxf", "LABEL")
+    assert any(t.startswith("TIP DISC: sew round the tops") for t in tip)
+    label = _texts(pack / "ear-G5.dxf", "LABEL")
+    assert any(t.startswith("rim marks") and "lie on the envelope at gore" in t for t in label)
+
+
+def test_row_sheets_list_the_gores_to_mark(pack: Path) -> None:
+    ear = SHAPES[0]
+    rows = {a.row for a in ear.attachment}
+    for row in rows:
+        gores = sorted(
+            {a.gore for a in ear.attachment if a.row == row}
+            | {h.gore for h in ear.feed_holes if h.row == row}
+        )
+        label = _texts(pack / f"envelope-row-{row}.dxf", "LABEL")
+        assert any(
+            t.startswith(f"ear: mark gores {', '.join(str(g) for g in gores)} of this row")
+            for t in label
+        ), label
+    assert check_pack(pack) == []
+
+
+def test_the_tip_disc_shows_where_every_seam_meets_it() -> None:
+    """A tick on the tip disc's edge (pointing in) and the two panels' names at every seam,
+    so the panel tops are sewn round it in place."""
+    from envelopelab.export.build_pack import TICK_LENGTH, primitive_sheets
+
+    horn = SHAPES[1]
+    sheets = {s.name: s for s in primitive_sheets(horn)}
+    tip = sheets["horn-TIP"]
+    m = horn.primitive.pieces
+    assert len(tip.ticks) == m
+    radius = horn.primitive.tip_radius
+    for tick in tip.ticks:
+        assert np.linalg.norm(tick[0]) == pytest.approx(radius, abs=1e-9)
+        assert np.linalg.norm(tick[1]) == pytest.approx(radius - TICK_LENGTH, abs=1e-9)
+    names = [t[2] for t in tip.texts]
+    assert names == ["TIP DISC", *(f"P{k}" for k in range(1, m + 1))]
+    # Each panel's name sits inside its stretch of edge, between the ticks of its seams.
+    for k, (x, y, _) in enumerate(tip.texts[1:]):
+        a = 2.0 * math.pi * k / m - math.pi / m
+        turn = (math.atan2(y, x) - (a + math.pi / m) + math.pi) % (2.0 * math.pi) - math.pi
+        assert turn == pytest.approx(0.0, abs=1e-6)
+        assert math.hypot(x, y) < radius
+    assert any("sew each panel's top between the ticks" in n for n in tip.notes)
+    assert any(n.startswith("TIP DISC: sew round the tops of all horn") for n in tip.notes)
+
+
+def test_a_capped_dome_is_sewn_round_its_cap() -> None:
+    from envelopelab.export.build_pack import primitive_seam_pairs, primitive_sheets
+
+    ear = design_primitive(
+        Dome("ear", Placement(3, 12.0, across=0.5), 1.0, 1.2, gores=16, cap_radius=0.25),
+        SURFACE,
+    )
+    assert ear.pieces[-1].label == "ear-TIP"
+    sheets = {s.name: s for s in primitive_sheets(ear)}
+    assert any(t[2] == "TOP: sew to the tip disc" for t in sheets["ear-G5"].texts)
+    assert len(sheets["ear-TIP"].ticks) == 16
+    # The gore tops add up to the cap's edge (3 mm sewing tolerance of the QA).
+    pair = next(p for p in primitive_seam_pairs(ear) if p.b == (("ear-TIP", "top"),))
+    tops = sum(_polyline_length(ear.pieces[k].edges["top"]) for k in range(16))
+    cap = _polyline_length(ear.pieces[-1].edges["top"])
+    assert len(pair.a) == 16 and abs(tops - cap) < 3e-3
+
+
+def _polyline_length(points: np.ndarray) -> float:
+    return float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())

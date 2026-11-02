@@ -37,9 +37,9 @@ from envelopelab.design.model import DesignDocument, load_design_document
 from envelopelab.project.shapes import ShapeSpec
 
 PROJECT_FORMAT: Literal["envelopelab.project"] = "envelopelab.project"
-PROJECT_FORMAT_VERSION: Literal[2] = 2
+PROJECT_FORMAT_VERSION: Literal[3] = 3
 #: Older versions :func:`load_project_text` still reads (see :func:`migrate_project_data`).
-READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2)
+READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3)
 PROJECT_SUFFIX = ".elproj"
 
 NotchEdge = Literal["left", "right", "bottom", "top"]
@@ -374,6 +374,94 @@ class RunRecord(BaseModel):
         return sum(f.severity == "error" for f in self.findings)
 
 
+class ShapeRunRecord(BaseModel):
+    """Summary and provenance of one special-shape simulation (version 3).
+
+    The shape's sub-model solved with its skin sewn from the cut pieces
+    (:func:`envelopelab.features.primitives.primitive_appendage`). The skin as solved is
+    kept in the result file for display (:mod:`envelopelab.project.shape_runs`).
+
+    Attributes
+    ----------
+    run_id : str
+        Unique id (also the result file name).
+    shape : str
+        Name of the special shape.
+    simulation_key : str
+        Key of the inputs the shape was solved with (its specification, the envelope it
+        sits on and the envelope's load case, materials and tapes); the result is current
+        while the shape's key now is the same.
+    solver, solver_version : str
+        Solver identifier and version.
+    status : str
+        ``converged`` or why the solve stopped.
+    converged : bool
+        True only when every convergence criterion was met.
+    residual : float
+        Final residual (see ``residual_measure``), dimensionless.
+    residual_measure : str
+        What the residual means.
+    iterations : int
+        Solver iterations.
+    run_time : float
+        Wall time, s.
+    n_nodes, n_elements : int
+        Mesh size of the sub-model.
+    mesh_target_mm : float
+        Target edge length, mm (a boundary format).
+    load_case : str
+        Operating-condition label.
+    material_sources : list of str
+        Distinct source tags of the materials and tapes used.
+    design_content_hash : str
+        Design document hash at solve time.
+    pieces : int
+        Number of skin gores or panels.
+    metrics : dict of str to float
+        ``projected_height_m``, ``initial_projected_height_m`` (m),
+        ``chamber_pressure_pa`` (Pa), ``skin_wrinkled_fraction`` (-),
+        ``rim_tape_max_tension_n`` (N), ``footprint_max_normal_displacement_m`` (m).
+    fos : dict of str to float
+        Lowest factor of safety per region (dimensionless).
+    findings : list of RunFinding
+        Warnings and errors.
+    manifest : dict
+        Run manifest (git commit, dependency versions, seed, ...).
+    result_file : str, optional
+        Skin as solved (display arrays), relative to the project directory.
+    envelope_run_id : str, optional
+        The envelope run the shape was solved with (None: solved on its own).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    created: datetime
+    shape: str
+    simulation_key: str
+    solver: str
+    solver_version: str
+    status: str
+    converged: bool
+    residual: float
+    residual_measure: str
+    iterations: int
+    run_time: float
+    n_nodes: int
+    n_elements: int
+    mesh_target_mm: float
+    load_case: str
+    material_sources: list[str]
+    design_content_hash: str
+    pieces: int
+    metrics: dict[str, float]
+    fos: dict[str, float]
+    findings: list[RunFinding] = Field(default_factory=list)
+    manifest: dict[str, Any] = Field(default_factory=dict)
+    result_file: str | None = None
+    envelope_run_id: str | None = None
+
+
 class ReferenceProfile(BaseModel):
     """A profile drawn over the design for comparison (``envelopelab.project.references``).
 
@@ -413,12 +501,12 @@ class ReferenceProfile(BaseModel):
 
 
 class Project(BaseModel):
-    """An EnvelopeLab project file (``envelopelab.project`` v2)."""
+    """An EnvelopeLab project file (``envelopelab.project`` v3)."""
 
     model_config = ConfigDict(extra="forbid")
 
     format: Literal["envelopelab.project"] = PROJECT_FORMAT
-    format_version: Literal[2] = PROJECT_FORMAT_VERSION
+    format_version: Literal[3] = PROJECT_FORMAT_VERSION
     state: DesignState
     locks: ConstraintLocks = Field(default_factory=ConstraintLocks)
     profile_target: ProfileTarget | None = None
@@ -426,6 +514,7 @@ class Project(BaseModel):
     versions: list[DesignVersion] = Field(default_factory=list)
     provenance: list[ProvenanceEntry] = Field(default_factory=list)
     runs: list[RunRecord] = Field(default_factory=list)
+    shape_runs: list[ShapeRunRecord] = Field(default_factory=list)
     references: list[ReferenceProfile] = Field(default_factory=list)
 
 
@@ -454,6 +543,8 @@ def migrate_project_data(raw: dict[str, Any]) -> dict[str, Any]:
     """Bring project file data of any readable version to the current version.
 
     Version 1 states have no ``shapes``; they read as states without special shapes.
+    Versions 1 and 2 have no ``shape_runs``; they read as projects without saved shape
+    simulations.
 
     Raises
     ------
@@ -469,6 +560,8 @@ def migrate_project_data(raw: dict[str, Any]) -> dict[str, Any]:
         ]
         for state in states:
             state.setdefault("shapes", [])
+    if version in (1, 2):
+        raw.setdefault("shape_runs", [])
     raw["format_version"] = PROJECT_FORMAT_VERSION
     return raw
 

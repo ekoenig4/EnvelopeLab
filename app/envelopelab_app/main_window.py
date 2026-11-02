@@ -6,7 +6,7 @@ import uuid
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from PySide6.QtCore import QSettings, Qt, QTimer
+from PySide6.QtCore import QByteArray, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -86,6 +86,8 @@ class MainWindow(QMainWindow):
     ) -> None:
         super().__init__()
         self.settings = settings
+        #: Splitter states to restore when a wide mode is left (None: not in one).
+        self._before_wide: dict[str, QByteArray] | None = None
         self.prefs: Preferences = load_preferences(settings)
         self.interactive = interactive
         self.instance_id = uuid.uuid4().hex
@@ -446,6 +448,7 @@ class MainWindow(QMainWindow):
 
     def _mode_changed(self, index: int) -> None:
         self.mode_stack.setCurrentIndex(index)
+        self._wide_view(MODE_KEYS[index])
         action = getattr(self, "mode_actions", {}).get(MODE_KEYS[index])
         if action is not None:
             action.setChecked(True)
@@ -461,6 +464,30 @@ class MainWindow(QMainWindow):
             if any(p.stale() for p in panels):
                 text += " [STALE]"
             self.mode_tabs.setTabText(i, text)
+
+    def _wide_view(self, mode: str) -> None:
+        """Give a wide mode (``layout.WIDE_MODES``) the whole window: collapse the sidebar
+        and shrink the Validation / Warnings strip to ``layout.COMPACT_WARNINGS_PX`` (never
+        hidden). Leaving it restores both as they were."""
+        splitters = layout_state.named_splitters(self)
+        side, outer = splitters["sideSplitter"], splitters["outerSplitter"]
+        wide = mode in layout_state.WIDE_MODES
+        saved = self._before_wide
+        if wide and saved is None:
+            self._before_wide = {
+                "sideSplitter": side.saveState(),
+                "outerSplitter": outer.saveState(),
+            }
+            side.setSizes([0, max(1, sum(side.sizes()))])
+            total = max(1, sum(outer.sizes()))
+            strip = min(layout_state.COMPACT_WARNINGS_PX, total // 3)
+            outer.setSizes([total - strip, strip])
+        elif not wide and saved is not None:
+            side.restoreState(saved["sideSplitter"])
+            outer.restoreState(saved["outerSplitter"])
+            self._before_wide = None
+        if hasattr(self, "sidebar_action"):
+            self.sidebar_action.setChecked(self.sidebar_visible())
 
     def _side_splitter(self) -> QSplitter:
         return layout_state.named_splitters(self)["sideSplitter"]
@@ -488,15 +515,22 @@ class MainWindow(QMainWindow):
         )
 
     def capture_layout(self) -> layout_state.LayoutState:
-        """The current mode, splitter sizes and window geometry."""
-        return layout_state.capture(self, self.mode(), self.saveGeometry())
+        """The current mode, splitter sizes and window geometry (in a wide mode, the
+        sidebar and warnings strip as they are in the other modes)."""
+        state = layout_state.capture(self, self.mode(), self.saveGeometry())
+        saved = self._before_wide
+        if saved is not None:
+            state.splitters.update(saved)
+        return state
 
     def apply_layout(self, state: layout_state.LayoutState, geometry: bool = False) -> None:
         """Show ``state``'s mode and splitter sizes (and window geometry if asked)."""
         if geometry and not state.geometry.isEmpty():
             self.restoreGeometry(state.geometry)
+        self._before_wide = None
         layout_state.apply_splitters(self, state)
         self.set_mode(state.mode)
+        self._wide_view(state.mode)
         self.sidebar_action.setChecked(self.sidebar_visible())
 
     def save_layout(self) -> None:
@@ -516,6 +550,7 @@ class MainWindow(QMainWindow):
 
     def reset_layout(self) -> None:
         """View ▸ Reset layout: default splitter sizes and the Shape mode."""
+        self._before_wide = None
         layout_state.apply_defaults(self)
         self.set_mode(MODE_KEYS[0])
         self.sidebar_action.setChecked(True)

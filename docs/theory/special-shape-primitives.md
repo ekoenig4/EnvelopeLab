@@ -130,7 +130,15 @@ gores (see [Special-shape primitives](../validation/special-shape-primitives.md)
 | skin seam match | largest length difference of the two sides of a seam, m | 3 mm (assumed) |
 | seam flattening | largest relative difference of a flat seam edge from its 3D seam | 2 % (assumed) |
 | area distortion | largest relative difference of a piece's flat and designed area | 1 % (assumed) |
+| cap seam match | panel tops summed − the cap's edge, m (mesh shapes; a parametric tip disc is a circle of the tops' radius) | 3 mm (assumed) |
 | feed hole inside footprint | — | inside (every hole: the centred one and each extra one) |
+| feed hole clear of seams | distance from the hole's finished edge to the nearest finished seam of its panel (both gore seams, both row seams), m | \(w_{hole\,tape} + \max a_{row}\): the hem band beside the fell (assumed rule, design values; 50 mm without a design) |
+
+A hole that fails the last check can be moved by `clear_feed_hole`: centres on a 10 mm grid
+over the hole's panel (tape position and fraction across the gore) are kept where the
+hole clears every seam by the required distance, and the nearest of them in the panel
+pattern whose hole lies wholly inside the footprint is taken. The hole under the base
+point moves only with the shape.
 
 ### Attachment ease
 
@@ -170,7 +178,7 @@ side of the envelope is cut where the signed distance is zero (bisection to
 one loop turning once round the axis. The point where the axis leaves the mesh (the
 *pole*) is inserted as a vertex. The skin is then cut along the half-planes
 \( \phi_j = 2\pi j/M - \pi/M \), so every panel is a disc bounded by the footprint, two seams
-and the pole.
+and the pole (or the cap's edge, see [Caps](#caps)).
 
 **Flattening** [Levy, Liu]. Each panel is mapped by least-squares conformal maps, then
 by as-rigid-as-possible iterations that fit every triangle's best rotation and solve the
@@ -181,7 +189,12 @@ cotangent-weighted Laplace system
 \lVert (\mathbf{u}_i - \mathbf{u}_j) - R_t(\mathbf{x}_i - \mathbf{x}_j) \rVert^2,
 \]
 
-with the seam and footprint edges weighted up. The boundary is then rebuilt with
+with the seam and footprint edges weighted up. In 2D the best rotation of each triangle has
+a closed form: for its weighted covariance
+\( C = \sum c_{ij}\,\Delta\mathbf{u}\,\Delta\mathbf{x}^T \),
+\( \theta = \operatorname{atan2}(C_{10} - C_{01},\ C_{00} + C_{11}) \), the rotation an SVD
+of \(C\) gives once its reflection is removed. The starting conformal map is solved
+directly from its normal equations (sparse LU). The boundary is then rebuilt with
 every edge at its exact 3D length. Its edge directions come from that solution, and the
 closure gap is removed by the least-norm change of the edge angles, which changes no
 length. The interior is relaxed again with the boundary held. Footprint and seams
@@ -194,6 +207,63 @@ The sub-model meshes every flat panel round the footprint nodes like the paramet
 shapes. Its interior nodes start on the mesh (barycentric in the flat panel), and every
 triangle rests in its flat panel. No faceting correction is applied: the mesh is taken as
 the designed surface.
+
+## Caps
+
+Pieces that meet in a point are hard to sew: \(M\) seams and \(M\) seam allowances pile
+up in one spot. Balloon practice sews their tops round a circle of measurable diameter
+instead, closed by a round *cap*. A shape that would otherwise come to a point (a dome, a
+revolved profile ending on the axis, a pointed tube, a mesh) can therefore be closed by a
+cap of radius \(r_c\) (`cap_radius`; 0 keeps the point).
+
+**Parametric shapes.** The meridian stops where it last comes in to \( \rho = r_c \), and a
+flat disc of radius \(r_c\) closes it (the tip disc of a tube). A dome stops at
+\( \omega_c = \arccos(r_c/a) \), at height
+
+\[
+\zeta_c = h\sqrt{1 - (r_c/a)^2};
+\]
+
+a pointed tube becomes the frustum to \( r_t = r_c \) over \( L(1 - r_c/r_b) \). The disc is
+flat, so the cap takes the point off the designed shape: the designed height drops by
+\( h - \zeta_c \) and the inflated top is as flat as the disc's strain allows.
+
+**Mesh shapes.** The part of the mesh round the pole inside the cylinder \( \rho = r_c \)
+about the axis is cut off (crossings found by bisection along each edge, where
+\( \rho \) is convex, to \(10^{-7}\) m relative to the cap). Only the part joined to the
+pole is cut, so a narrower neck lower down stays whole. The cap is flattened like a panel,
+its edge at its true 3D length; the panels end on that edge and the *cap seam match*
+check compares the tops with it. The designed surface is unchanged (the cap is the mesh's
+own top), but a doubly curved top cannot be flattened exactly: held at its edge's true
+length, the flat cap is smaller in area than the top it stands for (*area distortion*
+check), so it flattens the inflated top as above.
+
+**Automatic diameter (projects).** A project shape's `cap_diameter` is None (automatic),
+0 (a point) or a chosen diameter. The automatic one gives each of the \(M\) pieces a top
+at least \( w_{top} = 100 \) mm wide (assumed: a top that can still be sewn and taped),
+
+\[
+d = \frac{M\,w_{top}}{\pi},
+\]
+
+at most half the base diameter (assumed): 637 mm for 20 panels, 509 mm for 16.
+
+**Sub-model.** The panels share the nodes of the cap's edge with the cap, which is meshed
+as one more piece and sewn round by the `tip seam`. A parametric cap rests in its flat
+disc but its nodes start on the pointed shape it replaced, so the solve starts taut near
+the inflated shape instead of from a slack flat disc; a mesh cap starts on the mesh.
+
+**What to expect.** A flat cap on a curved top cannot take the curvature without
+stretching. At envelope pressures the cloth hardly stretches, so the top flattens and the
+cloth round the cap's edge wrinkles. The preview solver converges more slowly there, and
+not at all for some caps and mesh sizes (measured: a 16-gore dome of
+\(a = 0.8\), \(h = 0.6\) m converged with \(r_c = 0.25\) m at 0.15 m elements, but not with
+\(r_c = 0.4\) m; the flat tube tip disc behaves the same). An unconverged solve is
+reported as such, never as a result. A free-form test shape (16 panels, 1.10 m high)
+converged 6 mm (0.6 %) lower than designed with \(r_c = 0.10\) m and 14 mm (1.2 %) lower
+with \(r_c = 0.15\) m, within its cap's sagitta. How many iterations a slow case needs can
+depend on rounding: the 0.15 m cap took 111,000 or 283,000 iterations when a handful of
+nodes were numbered differently.
 
 ## Sub-model with an as-cut skin
 
@@ -220,6 +290,23 @@ and optionally the row seams, cross the patch. The far-field prestress of the pa
 the local radii at the base point (\(R_1\) from the meridian's curvature over
 \( \pm 0.25 \) m, \( R_2 = r/\cos\beta \)) in the membrane theory of shells of revolution.
 
+**Footprint nodes on the designed footprint.** The skin rim and the host footprint share
+their nodes, and every rim node rests on its piece's flat rim at the point of the designed
+footprint it stands for. The host mesh adds footprint nodes of its own where a host tape
+crosses the footprint. On the straight segment between two sampled nodes such a node would
+lie up to the segment's sagitta \( L^2/(8\rho) \) inside a curved footprint (\(L\): segment
+length, \(\rho\): footprint radius of curvature; up to 10 mm, measured, on a 9 m long
+teardrop pod at 0.25 m mesh size), and the skin next to it would rest up to 20 % longer
+or shorter than it sits before any pressure is applied. `primitive_appendage` therefore
+passes the designed footprint, sampled densely
+(`AppendageSpec.footprint_curve`, `FOOTPRINT_CURVE_SAMPLES` per piece), and the nodes where
+the skin seams end (`footprint_fixed`). The builder moves every crossing onto the curve
+together with the tape vertex it shares, keeps every footprint segment one element, and
+lets a crossing within \(0.3\,h\) of a seam end meet the footprint at the seam end. The
+tape then meets the rim up to \(0.3\,h\) from its true crossing (\(h\): mesh size), a
+small error in the host's load path in exchange for an unstrained skin. Imported pods
+(build packs) give no curve: their footprint polyline is the marked line itself.
+
 **Feed holes.** A shape is fed through a hole under its base point
 (`feed_hole_radius`) and any number of extra holes anywhere inside the footprint
 (`feed_holes`, each given by its tape position, azimuth and radius). Every hole is a hemmed
@@ -228,7 +315,7 @@ at least one hole.
 
 **Assumptions.** Seam allowances, stitching and tape widths are not modelled as material.
 The patch edge is held on the designed envelope (keep the margin at least half the
-footprint size). The tip disc of a tube is flat as cut.
+footprint size). The tip disc of a tube, and every cap, is flat as cut.
 
 ## What the solver shows
 

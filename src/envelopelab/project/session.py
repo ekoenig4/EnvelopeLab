@@ -36,6 +36,7 @@ from envelopelab.project.model import (
     Project,
     ProvenanceEntry,
     RunRecord,
+    ShapeRunRecord,
     Snapshot,
     load_project,
     load_result_arrays,
@@ -571,6 +572,26 @@ class ProjectSession:
         self._aux_dirty = True
         self._emit(EVENT_RUNS)
 
+    def add_shape_run(
+        self, record: ShapeRunRecord, arrays: dict[str, np.ndarray] | None = None
+    ) -> None:
+        """Keep a special-shape simulation (the latest per shape replaces older ones) and
+        its display arrays, written with the project."""
+        for old in [r for r in self.project.shape_runs if r.shape == record.shape]:
+            self._arrays.pop(old.run_id, None)
+            self._pending_arrays.pop(old.run_id, None)
+        self.project.shape_runs = [r for r in self.project.shape_runs if r.shape != record.shape]
+        self.project.shape_runs.append(record)
+        if arrays is not None:
+            self._arrays[record.run_id] = arrays
+            self._pending_arrays[record.run_id] = arrays
+        self._aux_dirty = True
+        self._emit(EVENT_RUNS)
+
+    def shape_run(self, shape: str) -> ShapeRunRecord | None:
+        """The kept simulation of special shape ``shape`` (None: never solved)."""
+        return next((r for r in self.project.shape_runs if r.shape == shape), None)
+
     def run_status(self, record: RunRecord) -> ArtifactStatus:
         """``current`` when the run's inputs equal the current design's, else ``stale``."""
         return (
@@ -581,7 +602,8 @@ class ProjectSession:
         """Result arrays of a run (loaded from the project's run directory on demand)."""
         if run_id in self._arrays:
             return self._arrays[run_id]
-        record = next((r for r in self.project.runs if r.run_id == run_id), None)
+        records: list[RunRecord | ShapeRunRecord] = [*self.project.runs, *self.project.shape_runs]
+        record = next((r for r in records if r.run_id == run_id), None)
         if record is None or record.result_file is None or self.path is None:
             return None
         file = self.path.parent / record.result_file
@@ -599,7 +621,8 @@ class ProjectSession:
             raise ValueError("no file name: use save(path)")
         folder = runs_dir(target)
         moved = self.path is not None and target != self.path
-        for record in self.project.runs:
+        records: list[RunRecord | ShapeRunRecord] = [*self.project.runs, *self.project.shape_runs]
+        for record in records:
             arrays = self._pending_arrays.get(record.run_id)
             if arrays is None and moved:
                 arrays = self.run_arrays(record.run_id)

@@ -65,11 +65,12 @@ def test_each_mode_shows_its_panels_and_always_the_warnings(gore_window: MainWin
         w.set_mode(key)
         assert w.mode() == key and w.mode_actions[key].isChecked()
         assert w.panels["validation"].isVisible()  # safety warnings are never hidden
-        assert w.panels["tree"].isVisible() and w.panels["properties"].isVisible()
+        assert w.panel_visible("validation")
+        # The sidebar shows in every mode but a wide one (Special shapes).
+        assert w.sidebar_visible() == (key not in layout.WIDE_MODES)
         for panel, mode in w.panel_modes.items():
-            assert w.panels[panel].isVisible() == w.panel_visible(panel)
             if mode is not None:
-                assert w.panels[panel].isVisible() == (mode == key)
+                assert w.panels[panel].isVisible() == w.panel_visible(panel) == (mode == key)
     w.show_panel("runs")
     assert w.mode() == "simulate"
 
@@ -170,9 +171,39 @@ def test_unreadable_or_old_layouts_are_ignored(
 def test_every_named_splitter_has_a_default() -> None:
     names = set(layout.DEFAULT_SIZES)
     assert {"outerSplitter", "sideSplitter", "goreEditorSplitter"} <= names
-    assert all(len(v) == 2 and min(v) > 0 for v in layout.DEFAULT_SIZES.values())
+    assert all(len(v) in (2, 3) and min(v) > 0 for v in layout.DEFAULT_SIZES.values())
 
 
 def test_all_layout_splitters_exist_in_the_window(window: MainWindow) -> None:
     found = {s.objectName() for s in window.findChildren(QSplitter)}
     assert set(layout.DEFAULT_SIZES) <= found
+
+
+def test_special_shapes_mode_takes_the_whole_window(gore_window: MainWindow) -> None:
+    """Special shapes is a wide mode: the sidebar is collapsed and the warnings strip is
+    compact but still shown; both come back as they were in the other modes, and a saved
+    layout keeps them as they are there."""
+    w = gore_window
+    splitters = layout.named_splitters(w)
+    side, outer = splitters["sideSplitter"], splitters["outerSplitter"]
+    w.set_mode("patterns")
+    before_side, before_outer = side.sizes(), outer.sizes()
+    assert before_side[0] > 0
+    w.set_mode("shapes")
+    assert side.sizes()[0] == 0 and not w.sidebar_action.isChecked()
+    strip = outer.sizes()[1]
+    # Compact, but never below what the strip needs to show its counts and a few lines
+    # (where the strip already sits at that minimum, as on macOS, it stays there).
+    floor = w.panels["validation"].minimumSizeHint().height()
+    assert 0 < strip <= max(layout.COMPACT_WARNINGS_PX, floor)
+    assert strip <= before_outer[1]
+    assert w.panels["validation"].isVisible()
+    stored = w.capture_layout()
+    w.set_mode("history")
+    assert side.sizes() == before_side and outer.sizes() == before_outer
+    assert w.sidebar_action.isChecked()
+    # The layout captured in the wide mode keeps the normal sidebar and strip.
+    w.apply_layout(stored)
+    assert w.mode() == "shapes" and side.sizes()[0] == 0
+    w.set_mode("patterns")
+    assert side.sizes() == before_side and outer.sizes() == before_outer

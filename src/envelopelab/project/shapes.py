@@ -27,6 +27,12 @@ SHAPE_KINDS: tuple[ShapeKind, ...] = ("dome", "tube", "revolved", "mesh")
 #: A dragged base point stays this far inside the ends of the load tape, m (source:
 #: assumed; a placement needs 0 < tape position < tape length).
 DRAG_MARGIN = 1e-3
+#: Least finished width of a panel's top where it is sewn to the cap, m (source: assumed:
+#: a top edge this wide can still be sewn and taped by hand).
+CAP_PANEL_TOP_WIDTH = 0.10
+#: An automatic cap's diameter is at most this fraction of the shape's base diameter
+#: (source: assumed; keeps the cap on the top of small shapes).
+CAP_MAX_FRACTION = 0.5
 
 
 class ShapePlacement(BaseModel):
@@ -99,6 +105,11 @@ class _ShapeBase(BaseModel):
         Seam allowance round the skin pieces, m.
     fabric : str or None
         Fabric id of the skin (None: the fabric of the envelope row it sits on).
+    cap_diameter : float or None
+        Diameter of the cap the tops of the skin pieces are sewn round, m, where they
+        would otherwise meet in a point (a dome, a revolved profile ending on the axis, a
+        pointed tube, a mesh). None: automatic (:func:`cap_diameter`); 0: no cap, the
+        pieces meet in a point.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -110,6 +121,7 @@ class _ShapeBase(BaseModel):
     feed_holes: list[FeedHole] = Field(default_factory=list)
     seam_allowance: float = Field(default=0.0125, ge=0.0)
     fabric: str | None = None
+    cap_diameter: float | None = Field(default=None, ge=0.0)
 
 
 class DomeShape(_ShapeBase):
@@ -173,9 +185,13 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
     pl = spec.placement
     placement = Placement(pl.gore, pl.tape_position, pl.across, pl.lean_deg, pl.lean_toward_deg)
     marks = spec.marks_per_piece
+    rc = 0.5 * cap_diameter(spec)
     if isinstance(spec, DomeShape):
-        return Dome(spec.name, placement, spec.base_radius, spec.height, spec.gores, marks)
+        return Dome(spec.name, placement, spec.base_radius, spec.height, spec.gores, marks, rc)
     if isinstance(spec, TubeShape):
+        if rc > 0.0:  # a pointed tube cut off where it is as wide as the cap
+            length = spec.length * (1.0 - rc / spec.base_radius)
+            return Tube(spec.name, placement, spec.base_radius, rc, length, spec.panels, marks)
         return Tube(
             spec.name, placement, spec.base_radius, spec.tip_radius, spec.length, spec.panels, marks
         )
@@ -187,24 +203,72 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
             spec.gores,
             spec.smooth,
             marks,
+            rc,
         )
     mesh = ReferenceMesh(
         np.asarray(spec.vertices, dtype=np.float64),
         np.asarray(spec.triangles, dtype=np.int64),
         spec.source,
     )
-    return FreeformShape(spec.name, placement, mesh, spec.panels, marks)
+    return FreeformShape(spec.name, placement, mesh, spec.panels, marks, rc)
 
 
-def shape_design(spec: ShapeSpec, surface: EnvelopeSurface) -> PrimitiveDesign:
+def piece_count(spec: ShapeSpec) -> int:
+    """Number of gores or panels round a shape's axis."""
+    if isinstance(spec, DomeShape | RevolvedShape):
+        return spec.gores
+    return spec.panels
+
+
+def pointed(spec: ShapeSpec) -> bool:
+    """True when a shape's skin pieces would meet in a point (so a cap can close it)."""
+    if isinstance(spec, TubeShape):
+        return spec.tip_radius <= 0.0
+    if isinstance(spec, RevolvedShape):
+        return float(spec.profile[-1][0]) <= 0.0
+    return True
+
+
+def auto_cap_diameter(spec: ShapeSpec) -> float:
+    r"""Automatic cap diameter of a pointed shape, m.
+
+    Every one of the M pieces' tops is at least :data:`CAP_PANEL_TOP_WIDTH` wide, so
+    :math:`d = M\,w_{top}/\pi`, but at most :data:`CAP_MAX_FRACTION` of the base diameter
+    (both assumed). Rounded to 1 mm.
+    """
+    d = piece_count(spec) * CAP_PANEL_TOP_WIDTH / math.pi
+    d = min(d, CAP_MAX_FRACTION * 2.0 * base_radius(spec))
+    return round(d, 3)
+
+
+def cap_diameter(spec: ShapeSpec) -> float:
+    """Diameter of the cap that closes a shape's top, m (0: none).
+
+    ``spec.cap_diameter`` when set, otherwise :func:`auto_cap_diameter`; always 0 for a
+    shape that does not come to a point (a tube with a tip disc, a profile ending off the
+    axis).
+    """
+    if not pointed(spec):
+        return 0.0
+    if spec.cap_diameter is not None:
+        return float(spec.cap_diameter)
+    return auto_cap_diameter(spec)
+
+
+def shape_design(
+    spec: ShapeSpec, surface: EnvelopeSurface, seam_clearance: float | None = None
+) -> PrimitiveDesign:
     """Place a shape on an envelope and derive its attachment and cutting pattern.
+
+    ``seam_clearance`` is the least distance from a feed hole's edge to a seam of its
+    envelope panel, m (:func:`feed_hole_clearance`; None: the library default).
 
     Raises
     ------
     PrimitiveError
         When the shape does not fit (the message says why).
     """
-    from envelopelab.features.primitives import design_primitive
+    from envelopelab.features.primitives import FEED_HOLE_SEAM_CLEARANCE, design_primitive
 
     return design_primitive(
         to_primitive(spec),
@@ -214,7 +278,80 @@ def shape_design(spec: ShapeSpec, surface: EnvelopeSurface) -> PrimitiveDesign:
         feed_holes=[
             (h.tape_position, surface.theta_at(h.gore, h.across), h.radius) for h in spec.feed_holes
         ],
+        seam_clearance=FEED_HOLE_SEAM_CLEARANCE if seam_clearance is None else seam_clearance,
     )
+
+
+def feed_hole_clearance(design: DesignDocument, patterns: PatternSet) -> float:
+    r"""Least distance from a feed hole's finished edge to a seam of its panel, m.
+
+    The hole's hem band (the hole tape's width) and the widest seam allowance of the rows
+    (the fell beside the seam) must fit side by side:
+    :math:`c = w_{hole\,tape} + \max_{rows} a_{row}` (source: design values; the rule is
+    assumed).
+    """
+    from envelopelab.project.gore_design import row_allowance
+
+    rows = [r.letter for r in design.gores.panel_rows] if design.gores is not None else []
+    allowance = max((row_allowance(design, patterns, r) for r in rows), default=0.0)
+    return float(design.tapes.hole.width + allowance)
+
+
+def clear_feed_holes(
+    spec: ShapeSpec,
+    surface: EnvelopeSurface,
+    clearance: float,
+    placed: PrimitiveDesign | None = None,
+) -> tuple[ShapeSpec, list[str]]:
+    """Move a shape's extra feed holes clear of the seams of their panels.
+
+    Every extra feed hole closer than ``clearance`` to a seam moves to the nearest position
+    in its panel that is clear of the seams and inside the footprint
+    (:func:`envelopelab.features.primitives.clear_feed_hole`). The hole under the base
+    point moves with the shape, so it is only reported. ``placed`` is the shape already
+    placed on ``surface`` from ``spec`` (placed here when None).
+
+    Returns
+    -------
+    (ShapeSpec, list of str)
+        The shape with its holes moved (unchanged when none needed moving), and what was
+        done or could not be done.
+    """
+    from envelopelab.features.primitives import clear_feed_hole, feed_hole_seam_clearance
+
+    if placed is None:
+        placed = shape_design(spec, surface, clearance)
+    notes: list[str] = []
+    holes = list(spec.feed_holes)
+    for i, (hole, mark) in enumerate(zip(spec.feed_holes, placed.extra_feed_holes, strict=True)):
+        if feed_hole_seam_clearance(surface, mark.row, mark.centre_xy, mark.radius) >= clearance:
+            continue
+        theta = surface.theta_at(hole.gore, hole.across)
+        found = clear_feed_hole(placed, hole.tape_position, theta, hole.radius, clearance)
+        where = f"{spec.name}: feed hole in gore {mark.gore} row {mark.row}"
+        if found is None:
+            notes.append(f"{where} cannot be moved clear of the seams inside its panel")
+            continue
+        s, th = found
+        g = float(surface.gore_position(np.array([th]))[0])
+        gore = int(math.floor(g)) % surface.gore_count + 1
+        across = round(g - math.floor(g) - 0.5, 4)
+        holes[i] = hole.model_copy(
+            update={"gore": gore, "tape_position": round(s, 4), "across": across}
+        )
+        notes.append(
+            f"{where} moved clear of the seams (tape position {hole.tape_position:.3f} "
+            f"-> {s:.3f} m, across {hole.across:+.3f} -> {across:+.3f})"
+        )
+    if spec.feed_hole_radius is not None and placed.feed_hole is not None:
+        centre = placed.feed_hole
+        c = feed_hole_seam_clearance(surface, centre.row, centre.centre_xy, centre.radius)
+        if c < clearance:
+            notes.append(
+                f"{spec.name}: the feed hole under the base point is {c * 1000:.0f} mm from a "
+                "seam; move the shape or make that hole smaller"
+            )
+    return spec.model_copy(update={"feed_holes": holes}), notes
 
 
 def envelope_surface(design: DesignDocument, patterns: PatternSet) -> EnvelopeSurface:

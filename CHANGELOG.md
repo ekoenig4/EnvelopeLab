@@ -3,6 +3,80 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: special shapes from meshes are placed about 7 times faster (the alien design's
+  four shapes: 31 s to 4 s; an eye pod 10.2 s to 1.3 s). Mesh cuts split only the
+  triangles they cross and find every crossing in one vectorised bisection, the
+  flattening uses the closed-form 2D rotation and pre-built sparse matrices, and the
+  conformal start is solved directly. Patterns are unchanged (largest difference
+  0.000001 mm). The app shows each shape as soon as it is placed, and an edit made while
+  shapes are being placed no longer waits for the out-of-date ones to finish.
+- Changed: the Special shapes screen is reorganised so it is no longer squeezed. It uses
+  the whole window (design tree and properties folded away, warnings strip compact but
+  always shown, both restored in the other modes) and has three columns: the shape list
+  with its buttons; the editor in tabs (*Placement & size*, *Profile* for revolved shapes,
+  *Feed holes & cap*, *Simulation*); and the results in tabs (*Cut pieces*, *Checks*,
+  *Attachment*). The cut-piece drawing lays the pieces out in rows to fill its area,
+  names each one, zooms with the mouse wheel, pans by dragging and fits on a double
+  click. Stored window layouts from earlier versions are reset once (layout version 2).
+  Display only; no pattern or result changes.
+- Changed: special shapes whose gores or panels met in a point (domes, revolved profiles
+  ending on the axis, pointed tubes, mesh shapes) now have their tops sewn round a
+  **cap**, a round piece of measurable diameter, as points are made in practice
+  (ADR-0032). Each shape's *Cap diameter* (project field `cap_diameter`) is automatic by
+  default: every piece's top at least 100 mm wide, d = M x 100 mm / pi (637 mm for 20
+  panels, 509 mm for 16), at most half the base diameter; 0 brings the pieces to a point.
+  Existing projects get automatic caps when opened. Results change: a capped dome or
+  revolved shape stops where it is as wide as the cap (designed height
+  h sqrt(1 - (r_c/a)^2), e.g. 0.600 to 0.585 m for the special-shape fixture's dome) and
+  gains a `-TIP` piece; a mesh shape keeps its designed surface and gains a cap piece
+  cut from its top, so its panels lose that area. The flat cap flattens the inflated top
+  (a free-form test shape stood 14 mm, 1.2 %, lower than designed) and the preview solver
+  converges more slowly, or not at all for some large caps, round its edge. The tip
+  disc's sheet ticks where every seam meets it and names each piece between its ticks.
+- Fixed: a mesh shape's panel was split the wrong way round when its boundary loop
+  started part-way along the rim (the rim's direction was tested before the loop was
+  turned to start at the rim).
+- Added: special shapes check that every feed hole is clear of the seams of the envelope
+  panel it is cut in, by the hole tape's width plus the seam allowance (*feed hole clear
+  of seams*, an error when too close), and **Move feed holes clear of seams** moves the
+  extra holes that are too close the least distance, inside their panels and footprints
+  (one undo step). Shapes are placed again when the seam allowance or the tapes change.
+- Added: *Show special shapes* in the 2D pattern view (on by default) adds every envelope
+  panel a special shape is sewn on, gore by gore, with the footprint line and its
+  shape-side ticks, the match marks naming their skin pieces and the feed holes at cut and
+  finished size; each row lists the gores it carries shapes on. Display only.
+- Added: build packs say where and how special shapes are sewn on. Marking sheets draw
+  each feed hole at its cut and finished size with the hem (double fold over the hole
+  tape by default), tick the side of the footprint line the shape covers, name the skin
+  piece beside every match number and say when a panel lies under a shape; skin pieces
+  say what each edge is sewn to (rim with its mark numbers, neighbouring pieces, tip disc
+  or apex); envelope row sheets list the gores that carry a marking sheet or feed hole.
+- Added: **Run Preview** and **Run CalculiX** also solve every placed special shape that
+  has a feed hole, after the envelope, with the same solver and load case (each shape's
+  own sub-model, element size footprint length / 100 between 60 and 300 mm, assumed;
+  CalculiX from a preview of the same sub-model). The 3D view shows them as sewn and
+  inflated (ADR-0031). *Simulate shape* still solves one shape with a chosen size.
+- Changed: project format version 3 keeps the latest simulation of every special shape
+  (summary, factor of safety, provenance, the envelope run it was solved with and the
+  solved skin) with the project, so it is shown again, current or STALE, after reopening
+  (ADR-0030). Version 1 and 2 files open unchanged; older releases cannot open version 3
+  files.
+- Changed: the 3D view draws special shapes as sewn instead of as a plain pink surface:
+  every gore or panel in the skin fabric's colour (every second one darker), with the
+  seams between the pieces and the rim drawn as lines. A shape simulation is drawn the
+  same way as *as sewn and inflated*, and the designed shape is hidden while that result
+  is current (tick it to compare). Display only; no pattern or result changes.
+- Fixed: special-shape simulations put rim nodes on the straight segment between two
+  footprint nodes where a load tape or row seam crossed the footprint, up to 10 mm inside
+  a curved footprint, and moved a skin seam's end along the rim by up to 0.3 mesh sizes
+  where a tape crossed next to it. The cut skin was strained there before any pressure
+  (up to 21 % on a 9 m teardrop pod) and the solver reported false stress peaks. Every
+  rim node now lies on the designed footprint and seam ends stay put (a tape crossing
+  next to one meets the rim there). That pod (20 panels, 0.25 m mesh, preview solver,
+  not verified): lowest skin FoS 2.6 → 67.6, converged in 147 000 iterations instead
+  of 404 000, height 1.298 → 1.305 m (designed 1.300 m). The validation study on
+  `special-shape-primitives` is unchanged within its tolerances (only one mesh lost 3
+  of 1435 nodes). Imported build-pack pods are unaffected.
 - Fixed: the parachute's red-line kinematic limit (*max travel*) was the last path sample before the travel stopped increasing, so the refined full-open pull could exceed it (by 1.9 µm in the case found). The limit is now the refined peak of the path (+3.2 µm in that case).
 - Changed: the 2D pattern view puts the pieces side by side on shelves that fill the view
   (*Layout: Side by side*, the new default), re-arranged when the view is resized,

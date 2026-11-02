@@ -7,26 +7,38 @@ specification and envelope (a key from both), recomputes only the shapes whose k
 changed, in a worker thread, and announces new results with ``updated``. A result
 computed for an older key is dropped when it arrives.
 
-Shape simulations (the shape's sub-model solved by the preview solver) run in their own
-worker; their results are kept in memory for this session and are marked stale when the
-shape or the envelope changes. Nothing here does engineering math: every number comes
-from :mod:`envelopelab`.
+Shape simulations (the shape's sub-model, its skin sewn from the cut pieces, solved by the
+preview solver) run in their own worker, one at a time. Each result is a run record and
+the skin as solved (:mod:`envelopelab.project.shape_runs`), kept with the project; it is
+marked stale when the shape or the envelope changes. Nothing here does engineering math:
+every number comes from :mod:`envelopelab`.
 """
 
 from __future__ import annotations
 
 import json
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import numpy as np
 from PySide6.QtCore import QCoreApplication, QObject, QThread, Signal
 
 from envelopelab.design.model import DesignDocument
 from envelopelab.features.primitives import PrimitiveDesign, PrimitiveError
-from envelopelab.project.model import PatternSet
-from envelopelab.project.shapes import ShapeSpec, envelope_surface, shape_design
+from envelopelab.features.scene import ShapeDisplay
+from envelopelab.project.model import PatternSet, ShapeRunRecord
+from envelopelab.project.shapes import (
+    ShapeSpec,
+    envelope_surface,
+    feed_hole_clearance,
+    shape_design,
+)
+
+if TYPE_CHECKING:
+    from envelopelab.project.session import ProjectSession
 
 
 def shape_key(spec: ShapeSpec, host_hash: str) -> str:
@@ -56,7 +68,7 @@ class ShapeResult:
 
 @dataclass
 class ShapeSimulation:
-    """A solved shape sub-model (kept in memory for this session).
+    """A shape simulation: its record and the skin as solved, as sewn.
 
     Attributes
     ----------
@@ -65,26 +77,29 @@ class ShapeSimulation:
     key : str
         Simulation key of the solve (stale when it differs from the current one, see
         :func:`simulation_key`).
-    appendage : AppendageModel
-        Sub-model.
-    result : SimulationResult
-        Preview-solver result.
-    metrics : AppendageMetrics
-        Heights (m), FoS (-), wrinkled fraction (-), chamber pressure (Pa).
-    design : PrimitiveDesign
-        The placed shape that was solved.
+    record : ShapeRunRecord
+        Summary, metrics and provenance.
+    display : ShapeDisplay
+        The solved skin split into its pieces, with its seams and rim (envelope frame, m).
+    arrays : dict of str to ndarray, optional
+        Display arrays of a new solve, to be kept with the project (None once kept or for
+        a simulation read from the project).
     """
 
     name: str
     key: str
-    appendage: Any
-    result: Any
-    metrics: Any
-    design: PrimitiveDesign
+    record: ShapeRunRecord
+    display: ShapeDisplay
+    arrays: dict[str, np.ndarray] | None = None
 
 
 class _DesignWorker(QThread):
-    """Places a batch of shapes on the envelope (pure functions of copies of the data)."""
+    """Places a batch of shapes on the envelope (pure functions of copies of the data).
+
+    Each shape's result is announced as soon as it is placed, so the first shapes show
+    while the others are still being placed. Setting ``stop`` (a newer request is waiting)
+    ends the batch after the shape being placed.
+    """
 
     done = Signal(object)  # list[tuple[str, ShapeResult]]
 
@@ -98,24 +113,29 @@ class _DesignWorker(QThread):
         self.design = design
         self.patterns = patterns
         self.jobs = jobs
+        #: Set from the GUI thread when the batch is out of date (a plain flag is enough:
+        #: it is only read between shapes).
+        self.stop = False
 
     def run(self) -> None:  # noqa: D102 (QThread entry point)
-        out: list[tuple[str, ShapeResult]] = []
         try:
             surface = envelope_surface(self.design, self.patterns)
         except Exception as exc:  # the envelope itself cannot be built
             message = f"the envelope cannot be built: {exc}"
             self.done.emit([(n, ShapeResult(k, None, message)) for n, k, _ in self.jobs])
             return
+        clearance = feed_hole_clearance(self.design, self.patterns)
         for name, key, spec in self.jobs:
+            if self.stop:
+                return
             try:
-                out.append((name, ShapeResult(key, shape_design(spec, surface))))
+                result = ShapeResult(key, shape_design(spec, surface, clearance))
             except (PrimitiveError, ValueError) as exc:
-                out.append((name, ShapeResult(key, None, str(exc))))
+                result = ShapeResult(key, None, str(exc))
             except Exception as exc:  # report everything to the GUI, never crash it
                 detail = traceback.format_exception_only(type(exc), exc)[-1].strip()
-                out.append((name, ShapeResult(key, None, f"internal error: {detail}")))
-        self.done.emit(out)
+                result = ShapeResult(key, None, f"internal error: {detail}")
+            self.done.emit([(name, result)])
 
 
 class ShapeService(QObject):
@@ -144,6 +164,19 @@ class ShapeService(QObject):
         """Forget every result and simulation (another project was opened)."""
         self.keys, self.results, self.simulations = {}, {}, {}
         self._queued = None
+
+    def restore(self, session: ProjectSession) -> None:
+        """Take the shape simulations kept with ``session``'s project (those whose result
+        file can be read); their status follows from their keys as usual."""
+        from envelopelab.project.shape_runs import display_from_arrays
+
+        for record in session.project.shape_runs:
+            arrays = session.run_arrays(record.run_id)
+            if arrays is None:
+                continue
+            self.simulations[record.shape] = ShapeSimulation(
+                record.shape, record.simulation_key, record, display_from_arrays(arrays)
+            )
 
     def sync(
         self,
@@ -194,8 +227,10 @@ class ShapeService(QObject):
         self, design: DesignDocument, patterns: PatternSet, jobs: list[tuple[str, str, ShapeSpec]]
     ) -> None:
         if self._worker is not None:
-            # One worker at a time: the newest request runs when the current one ends.
+            # One worker at a time: the newest request runs when the current one ends,
+            # which it does after its current shape (the rest of its batch is out of date).
             self._queued = (design, patterns, jobs)
+            self._worker.stop = True
             return
         self._worker = _DesignWorker(design, patterns, jobs)
         self._worker.done.connect(self._finished)
@@ -216,7 +251,13 @@ class ShapeService(QObject):
         if self._queued is not None:
             design, patterns, jobs = self._queued
             self._queued = None
-            jobs = [j for j in jobs if self.keys.get(j[0]) == j[1]]
+            # Still wanted, and not placed meanwhile by the batch that just ended.
+            jobs = [
+                (name, key, spec)
+                for name, key, spec in jobs
+                if self.keys.get(name) == key
+                and (name not in self.results or self.results[name].key != key)
+            ]
             if jobs:
                 self._start(design, patterns, jobs)
                 return
@@ -284,8 +325,127 @@ class ShapeSolveRequest:
     mesh_mm: float
 
 
+class ShapeSolveError(Exception):
+    """A shape simulation did not produce a result (the message says why)."""
+
+
+#: Solver identifiers (as in envelope run records).
+PREVIEW = "envelopelab-preview"
+CALCULIX = "calculix"
+
+
+def solve_shape(
+    req: ShapeSolveRequest,
+    solver: str = PREVIEW,
+    progress: Callable[[str, float], None] | None = None,
+    cancel: Any = None,
+    ccx_path: str | None = None,
+    workdir: str | None = None,
+    envelope_run_id: str | None = None,
+) -> ShapeSimulation:
+    """Build and solve one shape sub-model (worker thread; no Qt).
+
+    The skin is sewn from the shape's cut pieces
+    (:func:`envelopelab.features.primitives.primitive_appendage`) and loaded with the
+    envelope's load case. ``solver`` is the preview solver, or CalculiX started from a
+    converged preview of the same sub-model (when that preview does not converge, it is
+    returned as the result, with the reason in its findings).
+
+    Raises
+    ------
+    ShapeSolveError
+        When the sub-model cannot be built, or the solve is cancelled.
+    """
+    from envelopelab.features.builder import FeatureBuildError, build_appendage
+    from envelopelab.features.metrics import appendage_metrics
+    from envelopelab.features.primitives import primitive_appendage
+    from envelopelab.project.model import RunFinding
+    from envelopelab.project.shape_runs import display_from_arrays, shape_run_record
+    from envelopelab.project.simulation import (
+        membrane_for_fabric,
+        operating_conditions,
+        tape_material,
+    )
+    from envelopelab.solvers.dynamic_relaxation import SolverProgress, solve
+    from envelopelab.solvers.simulation import from_preview
+
+    label = f"Shape {req.name}"
+    say = progress or (lambda _m, _f: None)
+    try:
+        doc = req.document
+        tapes = doc.tapes
+        design = req.design
+        conditions = operating_conditions(doc, float(design.surface.profile.z[0]))
+        spec = primitive_appendage(
+            design,
+            mesh_size=req.mesh_mm / 1000.0,
+            load_tape=tape_material(tapes.vertical.tape_class, tapes.vertical.strength),
+            row_tape=tape_material(tapes.horizontal.tape_class, tapes.horizontal.strength),
+            rim_tape=tape_material(tapes.rim.tape_class, tapes.rim.strength),
+            hem_tape=tape_material(tapes.hole.tape_class, tapes.hole.strength),
+        )
+        materials = {
+            "host": membrane_for_fabric(req.host_fabric, req.fabrics),
+            "skin": membrane_for_fabric(req.skin_fabric, req.fabrics),
+        }
+        say(f"{label}: building the sub-model ({req.mesh_mm:g} mm)", 0.0)
+        appendage = build_appendage(spec, conditions, materials)
+    except (FeatureBuildError, PrimitiveError, ValueError) as exc:
+        raise ShapeSolveError(f"{label}: not simulated: {exc}") from exc
+
+    def report(p: SolverProgress) -> None:
+        say(
+            f"{label}: preview iteration {p.iteration}, residual {p.residual:.2e} "
+            f"(target {p.tolerance:.0e}), {p.elapsed:.0f} s",
+            p.fraction,
+        )
+
+    raw = solve(appendage.model, progress=report, cancel=cancel)
+    if raw.convergence.status == "cancelled":
+        raise ShapeSolveError(f"{label}: simulation cancelled")
+    result = from_preview(appendage.model, raw)
+    note: str | None = None
+    if solver == CALCULIX:
+        if not result.converged:
+            note = (
+                "CalculiX not started: the preview that finds its starting shape did not "
+                f"converge ({result.status})"
+            )
+        else:
+            from calculix_adapter import CalculixCancelledError, CalculixSettings, run_calculix
+
+            say(f"{label}: CalculiX from the preview equilibrium", 0.5)
+            try:
+                result = run_calculix(
+                    appendage.model,
+                    CalculixSettings(executable=ccx_path),
+                    workdir=workdir,
+                    start_positions=result.positions,
+                    cancel=cancel,
+                )
+            except CalculixCancelledError as exc:
+                raise ShapeSolveError(f"{label}: CalculiX cancelled (no result)") from exc
+    metrics = appendage_metrics(appendage, result)
+    record, arrays = shape_run_record(
+        req.name,
+        req.key,
+        design,
+        appendage,
+        result,
+        metrics,
+        req.mesh_mm / 1000.0,
+        doc.compute_content_hash(),
+        envelope_run_id,
+    )
+    if note is not None:
+        record.findings.append(
+            RunFinding(code="calculix_not_started", severity="error", message=note)
+        )
+    return ShapeSimulation(req.name, req.key, record, display_from_arrays(arrays), arrays)
+
+
 class _SolveWorker(QThread):
-    """Builds and solves one shape sub-model with the preview solver."""
+    """Solves one shape sub-model with the preview solver (Simulate shape)."""
 
     progress = Signal(str, float)
     solved = Signal(object)  # ShapeSimulation
@@ -299,58 +459,13 @@ class _SolveWorker(QThread):
         self.token = CancellationToken()
 
     def run(self) -> None:  # noqa: D102 (QThread entry point)
-        from envelopelab.features.builder import FeatureBuildError, build_appendage
-        from envelopelab.features.metrics import appendage_metrics
-        from envelopelab.features.primitives import primitive_appendage
-        from envelopelab.project.simulation import (
-            membrane_for_fabric,
-            operating_conditions,
-            tape_material,
-        )
-        from envelopelab.solvers.dynamic_relaxation import SolverProgress, solve
-        from envelopelab.solvers.simulation import from_preview
-
         req = self.request
-        label = f"Shape {req.name}"
         try:
-            doc = req.document
-            tapes = doc.tapes
-            design = req.design
-            z_mouth = float(design.surface.profile.z[0])
-            conditions = operating_conditions(doc, z_mouth)
-            spec = primitive_appendage(
-                design,
-                mesh_size=req.mesh_mm / 1000.0,
-                load_tape=tape_material(tapes.vertical.tape_class, tapes.vertical.strength),
-                row_tape=tape_material(tapes.horizontal.tape_class, tapes.horizontal.strength),
-                rim_tape=tape_material(tapes.rim.tape_class, tapes.rim.strength),
-                hem_tape=tape_material(tapes.hole.tape_class, tapes.hole.strength),
-            )
-            materials = {
-                "host": membrane_for_fabric(req.host_fabric, req.fabrics),
-                "skin": membrane_for_fabric(req.skin_fabric, req.fabrics),
-            }
-            self.progress.emit(f"{label}: building the sub-model ({req.mesh_mm:g} mm)", 0.0)
-            appendage = build_appendage(spec, conditions, materials)
-
-            def report(p: SolverProgress) -> None:
-                self.progress.emit(
-                    f"{label}: iteration {p.iteration}, residual {p.residual:.2e} "
-                    f"(target {p.tolerance:.0e}), {p.elapsed:.0f} s",
-                    p.fraction,
-                )
-
-            raw = solve(appendage.model, progress=report, cancel=self.token)
-            if raw.convergence.status == "cancelled":
-                self.failed.emit(f"{label}: simulation cancelled")
-                return
-            result = from_preview(appendage.model, raw)
-            metrics = appendage_metrics(appendage, result)
-            self.solved.emit(ShapeSimulation(req.name, req.key, appendage, result, metrics, design))
-        except (FeatureBuildError, PrimitiveError, ValueError) as exc:
-            self.failed.emit(f"{label}: not simulated: {exc}")
+            self.solved.emit(solve_shape(req, PREVIEW, self.progress.emit, self.token))
+        except ShapeSolveError as exc:
+            self.failed.emit(str(exc))
         except Exception as exc:  # the thread must report every failure to the GUI
-            self.failed.emit(f"{label}: simulation failed: {type(exc).__name__}: {exc}")
+            self.failed.emit(f"Shape {req.name}: simulation failed: {type(exc).__name__}: {exc}")
 
 
 class ShapeSimulator(QObject):
@@ -367,16 +482,29 @@ class ShapeSimulator(QObject):
         self.service = service
         self._worker: _SolveWorker | None = None
         self._solved_sim: ShapeSimulation | None = None
+        self._next: ShapeSolveRequest | None = None
+        #: The request being solved (None when idle).
+        self.request: ShapeSolveRequest | None = None
 
     @property
     def running(self) -> bool:
-        """A shape simulation is running."""
-        return self._worker is not None
+        """A shape simulation is running (or one waits for the running one to stop)."""
+        return self._worker is not None or self._next is not None
 
-    def start(self, request: ShapeSolveRequest) -> bool:
-        """Start a simulation; False when one is already running."""
+    def start(self, request: ShapeSolveRequest, replace: bool = False) -> bool:
+        """Start a simulation.
+
+        With ``replace`` a running simulation is cancelled and ``request`` starts as soon
+        as it has stopped; otherwise nothing starts while one runs (returns False).
+        """
         if self._worker is not None:
-            return False
+            if not replace:
+                return False
+            self._next = request
+            self.cancel()
+            return True
+        self._next = None
+        self.request = request
         worker = _SolveWorker(request)
         worker.progress.connect(self._progress)
         worker.failed.connect(self._failed)
@@ -394,7 +522,7 @@ class ShapeSimulator(QObject):
             self._worker.token.cancel()
 
     def wait(self, timeout_ms: int = 600_000) -> bool:
-        """Block until no simulation runs."""
+        """Block until no simulation runs (a queued one included)."""
         while self._worker is not None:
             if not self._worker.wait(timeout_ms):
                 return False
@@ -413,6 +541,7 @@ class ShapeSimulator(QObject):
 
     def _ended(self) -> None:
         worker, self._worker = self._worker, None
+        self.request = None
         if worker is not None:
             worker.deleteLater()
         sim, self._solved_sim = self._solved_sim, None
@@ -420,4 +549,7 @@ class ShapeSimulator(QObject):
             self.service.simulations[sim.name] = sim
             self.finished.emit(sim.name)
             self.service.updated.emit()
+        if self._next is not None:
+            self.start(self._next)
+            return
         self.idle.emit()

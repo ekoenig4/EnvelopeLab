@@ -25,11 +25,14 @@ towards the tip for skin pieces).
 | `CUT` | Cut outline, with the seam allowance |
 | `SEW` | Finished (sewn-line) outline |
 | `EDGE_<NAME>` | Each finished edge on its own: `RIM`, `LEFT`, `RIGHT`, `TOP` (skin), `LEFT`, `RIGHT`, `BOTTOM`, `TOP` (envelope and parachute radial panels), `RIM` (parachute centre panel) |
-| `MARKS` | Match marks (crosses) and their numbers |
+| `MARKS` | Match marks (crosses) and their numbers; on a marking sheet each number names the skin piece that carries it, e.g. `55 (P15)` |
 | `ATTACH` | Footprint line of a shape (marking sheets); in seam pairs the k-th line of a sheet is edge `attach<k>` |
-| `HOLE` | Feed hole (marking sheets) |
+| `ATTACH_SIDE` | Short ticks every 150 mm on the side of the footprint line the shape covers |
+| `HOLE` | Feed hole, finished size (marking sheets) |
+| `HOLE_CUT` | Feed hole as cut: the finished radius less the hem, by default a double fold over the design's hole tape (twice its width) |
+| `NOTES` | Sewing directions placed on the piece: the feed-hole sizes and hem; on a skin piece what each edge is sewn to (`RIM: sew to the envelope, marks a-b`, `sew to P4 (its left side)`, `TOP: sew to the tip disc`, `APEX of …`) |
 | `GRAIN` | Warp direction arrow |
-| `LABEL` | Header: `piece \| kind \| cut N \| fabric F \| finished W x H mm`, and a note |
+| `LABEL` | Header: `piece \| kind \| cut N \| fabric F \| finished W x H mm` (the first `LABEL` text, which the QA reads), then notes: on a marking sheet how to sew the shape there, or that the panel lies under it; on a skin piece where its rim marks lie on the envelope; on an envelope row which gores of that row carry a shape's marking sheet or feed hole |
 | `CAL` | Calibration line with ticks and its label `must measure L mm at 1:1, ticks every T mm` |
 
 The header and the calibration label are generated from the values that draw the

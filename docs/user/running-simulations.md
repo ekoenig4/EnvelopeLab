@@ -13,6 +13,17 @@ the rows are drawn to a DXF build pack, imported, sewn virtually and meshed
 by the parachute. The mesh edge length is set in **Preferences** (separately for each
 solver).
 
+**Special shapes are solved in the same run.** After the envelope, each placed special
+shape that has a feed hole is solved with the same solver and load case: the shape's own
+sub-model, its skin sewn from its cut pieces on a patch of the envelope round it
+([special shapes](special-shape-primitives.md)). Its element size is about 1/100 of its
+footprint length (60 to 300 mm, assumed), not the envelope's mesh size; a CalculiX run
+starts each shape from a preview of the same sub-model. The results appear in the
+**Special shapes** panel and in the 3D view as *as sewn and inflated*, are saved with the
+project with the run they belong to, and go STALE when the shape or the envelope changes.
+A shape without a feed hole, still being placed or that cannot be placed is left out, and
+the status bar says so. The envelope's own solve does not include the shapes.
+
 !!! warning "Material values"
     Fabric areal mass and service temperature come from the fabric library with its source
     tags. Membrane stiffness, strength and seam efficiency and tape stiffness and mass are

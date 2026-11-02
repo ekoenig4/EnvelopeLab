@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import subprocess
 import sys
 from pathlib import Path
@@ -10,7 +11,7 @@ import numpy as np
 import pytest
 
 from envelopelab.export.build_pack import primitive_sheets
-from envelopelab.features.primitives import PrimitiveDesign
+from envelopelab.features.primitives import Dome, PrimitiveDesign
 from envelopelab.io.shape_file import load_shape_file
 from envelopelab.project.gore_design import gore_outputs, panel_rows, panel_zone, seam_mismatches
 from envelopelab.project.model import PatternSet
@@ -126,7 +127,14 @@ def test_extends_adds_zones_and_shapes() -> None:
 
 
 def test_shapes_are_placed_with_their_feed_holes(placed: dict[str, PrimitiveDesign]) -> None:
-    assert placed["dome"].designed_height == pytest.approx(0.6, abs=1e-3)
+    # The 0.6 m dome is closed by its automatic cap, where the half-spheroid is that wide
+    # (height above the envelope, which curves away from the axis: within 3 mm).
+    dome = placed["dome"].primitive
+    assert isinstance(dome, Dome) and dome.cap_radius > 0.0
+    height = 0.6 * math.sqrt(1.0 - (dome.cap_radius / dome.base_radius) ** 2)
+    assert dome.tip_height == pytest.approx(height, rel=1e-12)
+    assert placed["dome"].designed_height == pytest.approx(height, abs=3e-3)
+    assert placed["dome"].pieces[-1].label == "dome-TIP"
     assert placed["blister"].designed_height == pytest.approx(0.5, abs=1e-3)
     assert [(h.gore, h.row) for h in placed["blister"].feed_holes] == [(13, "D"), (13, "D")]
     for design in placed.values():

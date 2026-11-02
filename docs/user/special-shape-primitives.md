@@ -9,7 +9,7 @@ EnvelopeLab works out:
 * numbered **match marks** on that line and on the shape's rim, so the skin goes on
   in the right place;
 * the **cutting pattern** of the shape: finished and cut outlines of every gore or panel,
-  and a tip disc for a tube;
+  and the tip disc or **cap** their tops are sewn round;
 * **checks** on that pattern;
 * a **simulation model** whose skin is sewn from exactly those cut pieces, so you can see
   how the shape holds under pressure before cutting cloth.
@@ -26,27 +26,47 @@ application ([below](#in-the-desktop-application)) or from Python (sections 1 to
 ## In the desktop application
 
 Open a standard-gore project and choose the **Special shapes** mode (**View ▸ Special
-shapes**, or its tab).
+shapes**, or its tab). This mode uses the whole window: the design tree and properties
+are folded away and the Validation / Warnings strip is made compact (it is never hidden);
+both come back when you change mode. The screen has three columns:
+
+* on the left, the list of special shapes with **Add shape**, **Duplicate**, **Remove**
+  and the exports;
+* in the middle, the selected shape's editor in tabs: **Placement & size**, **Profile**
+  (revolved shapes only), **Feed holes & cap** and **Simulation**;
+* on the right, what the shape gives, in tabs: **Cut pieces** (a drawing and a table),
+  **Checks** and **Attachment**.
 
 1. **Add shape** ▸ **Dome**, **Tube** or **Revolved profile** adds a shape sized from your
    envelope on gore 1, about halfway up the tape. **Import mesh (OBJ/STL/PLY)…** adds a
    free-form shape modelled in Blender (metres, Y up for OBJ as Blender exports it; Z up
    for STL and PLY). The mesh is stored in the project, so the file is no longer needed.
-2. Edit the shape in the **Parameters** form: placement (gore, tape position from the
+2. Edit the shape. **Placement & size**: placement (gore, tape position from the
    mouth in m, position across the gore, lean and lean direction in degrees), sizes in m,
-   number of skin gores or panels, match marks per piece, seam allowance, an optional
-   feed hole in the envelope, and the skin fabric (by default the fabric of the envelope
-   row the shape sits on). *More feed holes* lists extra holes inside the footprint (gore,
-   tape position from the mouth in m, position across the gore, radius in m). *Add feed
+   the number of skin gores or panels, match marks per piece, seam allowance and the
+   skin fabric (by default the fabric of the envelope row the shape sits on).
+   **Profile**: a revolved shape's profile points (radius and height in m, base first,
+   axis last). **Feed holes & cap**: an optional feed hole in the envelope under the base
+   point, the cap, and *More feed holes*, extra holes inside the footprint (gore, tape
+   position from the mouth in m, position across the gore, radius in m). *Add feed
    hole* puts one at the base point to edit; *Remove feed hole* deletes the selected
-   one. A revolved shape's profile is edited in its table (radius and
-   height in m, base first, axis last). Every change is one undo step.
+   one. **Cap diameter** closes the top of a shape whose
+   gores or panels would otherwise meet in a point: their tops are sewn round a cap of
+   that diameter instead, which is how points are made in practice. *Automatic* (the
+   default) makes every gore's or panel's top at least 100 mm wide (a 20-panel shape gets
+   a 637 mm cap, a 16-panel one 509 mm), but at most half the shape's base diameter;
+   untick it to type a diameter, or 0 to bring the pieces to a point. Every change is one
+   undo step.
 3. The shape is placed in the background while you keep editing; the list says
-   **being placed…** until it is done (usually under a second). The right-hand side then
-   shows the **pattern checks**, a drawing of the **cut pieces** (finished line solid, cut
-   line dashed, the rim sewn to the envelope in red) with their sizes and areas, and the
-   **attachment lines** on each envelope panel. The **3D View** shows the shape on the
-   envelope.
+   **being placed…** until it is done (usually under a second). The right-hand column then
+   shows the **Cut pieces**: a drawing of every piece, named under it (finished line
+   solid, cut line dashed, the rim sewn to the envelope in red; the mouse wheel zooms,
+   dragging pans, a double click fits them all again), and a table of their sizes and
+   areas; the **Checks** of the pattern; and the **Attachment** lines on each envelope
+   panel. The **3D View** shows the shape on the
+   envelope as it is sewn: each gore or panel in the colour of the skin fabric (every
+   second one darker, like the envelope's gores), the seams between them and the rim
+   sewn to the envelope drawn as dark lines.
 4. To move a shape by hand, press **Drag in 3D view…** (or tick **Drag special shapes**
    in the 3D View). Press the left mouse button on a shape and drag it over the
    envelope: a magenta ring shows where its base will sit, and the 3D View's info line
@@ -56,11 +76,21 @@ shapes**, or its tab).
    Pressing anywhere else still turns the view. The ring is an approximate preview (a
    circle of the base radius, without the lean); the real footprint, pattern and checks
    come when the shape is placed.
-5. **Simulate shape (preview solver)** solves the shape's sub-model (choose the mesh
-   size; finer is slower) in the background. **Cancel** stops it. The result lists the
+5. Every placed shape that has a feed hole is **simulated with the envelope**: **Run
+   Preview** and **Run CalculiX** solve the envelope and then each shape with the same
+   solver, its skin sewn from the cut pieces and inflated, at an element size of about
+   1/100 of the footprint length (60 to 300 mm; see
+   [Running simulations](running-simulations.md)). On the **Simulation** tab,
+   **Simulate shape (preview solver)**
+   solves the selected shape on its own, with the element size you choose (finer is
+   slower). **Cancel** stops it. The result lists the
    convergence status, iterations, final residual, mesh size, heights above the envelope
    as designed and inflated, chamber pressure, wrinkled fraction, rim tape tension and
-   the factor of safety of each region. It is drawn in the 3D View as a separate layer.
+   the factor of safety of each region. The 3D View then draws the shape **as sewn and
+   inflated**: the skin sewn from its cut pieces, as the solver left it, with the same
+   colours and seams. While that result is current the designed shape is hidden; tick
+   its layer in the layer list to compare the two (your choice is kept). A result that
+   did not converge says **NOT CONVERGED** in its label, and a **STALE** one is drawn grey.
 6. **Export build pack…** writes the envelope rows, the parachute (radial panel and
    centre panel) and every shape's pieces and marking sheets (DXF, PDF and `index.json`,
    section 4). **Export to Blender (OBJ)…** writes the
@@ -72,8 +102,8 @@ below 5, and a simulation that is **STALE** because the shape or the envelope ch
 after it ran are shown in red in the panel and listed in **Validation / Warnings**.
 Selecting such a warning opens the shape. The build pack is not written while a shape
 is being placed or cannot be placed, so a pack never leaves a shape out without saying
-so. Shape simulations are kept until the project is closed; they are not saved in the
-project file.
+so. Shape simulations are saved with the project (the latest one of every shape) and
+shown again when it is reopened, still marked STALE if the shape or the envelope changed.
 
 ## 1. Place a shape
 
@@ -213,6 +243,13 @@ partner on a skin piece's rim edge (`piece`, `piece_xy`).
   holes anywhere under it (`feed_holes`; in a shape file, placed by gore and row). The
   build pack draws each on the panel it is cut in, and adds a marking sheet for a panel
   that only has a hole.
+* *feed hole clear of seams*: a hole's finished edge must stay clear of every seam of the
+  panel it is cut in, by the width of the hole tape (the hem band) plus the seam
+  allowance (the fell): 76 mm for a 25 mm tape and 2 in seams. A hole too close is an
+  error. **Move feed holes clear of seams** (under *More feed holes*) moves every extra
+  hole that is too close the least distance, inside its panel and the footprint, in one
+  undo step, and says what it moved. The hole under the base point moves with the shape,
+  so it is only reported: move the shape or make the hole smaller.
 
 A shape is rejected if it does not fit: a base too large for the local envelope
 curvature, a lean that brings the skin back onto the envelope, or a footprint that would
@@ -273,9 +310,17 @@ The pack contains:
 
 * one DXF per piece, in millimetres: the envelope's row panels (cut once per gore) and
   every gore, panel and tip disc of each shape;
-* a **marking sheet** for each envelope panel a shape crosses: the panel with the
-  footprint line, the numbered match marks and the feed hole drawn where they go. Mark
-  them on the cut panels before sewing the envelope;
+* a **marking sheet** for each envelope panel a shape crosses or lies over: the panel
+  with the footprint line the shape's rim is sewn on (short ticks point into the shape),
+  the numbered match marks, each naming the skin piece with the same number (`55 (P15)`),
+  and every feed hole drawn twice, as cut and as finished, with its sizes and the hem
+  (by default a double fold over the hole tape). Mark them on the cut panels before
+  sewing the envelope. Each envelope row sheet lists which of its gores have a marking
+  sheet or a feed hole, so none is missed when the copies of the row are cut;
+* on every skin piece, what each edge is sewn to: the rim to the envelope (with its mark
+  numbers and the panels they lie on), each seam to the neighbouring piece, the top to
+  the tip disc (cap) or the apex. The tip disc has a tick on its edge where every seam
+  meets it, and each piece's name between the two ticks its top is sewn between;
 * `pattern.pdf`: every sheet at 1:1 on pages as wide as your fabric roll. A sheet wider
   than the roll is split into numbered strips;
 * `index.json`: every file with its piece, cut count, fabric, finished size, and which
@@ -320,5 +365,12 @@ default.
   between tapes is not included when placing the footprint, and marks across a lofted
   gore are placed in proportion to its flat width.
 * Seam allowances, stitching and tape widths are not part of the simulation model.
+* A cap is cut flat, so it flattens the top of a curved shape: by up to the height the
+  cap takes off (a dome's apex) or the cap's rise on a mesh's top, less what the cloth
+  stretches. The cloth round its edge wrinkles, and the preview solver may need more
+  iterations there, or not converge for a large cap. A smaller cap, more pieces or a
+  different element size can help; an unconverged result is never a prediction.
 * In the desktop application, shape simulations use the preview solver with assumed
-  stiffness values and are not saved with the project; run them again after reopening.
+  stiffness values, and those solved with the envelope use an automatic element size
+  (footprint length / 100, between 60 and 300 mm, assumed). Solve with a chosen size to
+  check that a result does not depend on the mesh.

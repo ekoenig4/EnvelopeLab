@@ -11,7 +11,7 @@ import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 
@@ -70,6 +70,9 @@ from envelopelab.project.profile_match import (
 from envelopelab.project.session import ProjectSession
 from envelopelab.project.shapes import ShapeSpec
 from envelopelab.solvers.axisymmetric import hold_shape
+
+if TYPE_CHECKING:
+    from envelopelab.features.primitives import PrimitiveDesign
 
 LOCKABLE = (
     "height",
@@ -1754,3 +1757,49 @@ def duplicate_shape(session: ProjectSession, name: str) -> str:
 
     session.edit_shapes(f"Duplicate shape {name}", mutate)
     return new
+
+
+def move_feed_holes_clear(
+    session: ProjectSession, placed: dict[str, PrimitiveDesign] | None = None
+) -> list[str]:
+    """Move every special shape's extra feed holes clear of their panels' seams (one undo
+    step; :func:`envelopelab.project.shapes.clear_feed_holes`).
+
+    ``placed`` maps shape names to the shapes already placed from the current state (the
+    others are placed here).
+
+    Returns
+    -------
+    list of str
+        What was moved, and the holes that could not be (a hole under a shape's base point
+        moves with the shape).
+
+    Raises
+    ------
+    ValueError
+        For a design without gores, or a shape that cannot be placed.
+    """
+    from envelopelab.project.shapes import clear_feed_holes, envelope_surface, feed_hole_clearance
+
+    design = session.design
+    if design.gores is None:
+        raise ValueError("special shapes are placed on a standard-gore design")
+    surface = envelope_surface(design, session.patterns)
+    clearance = feed_hole_clearance(design, session.patterns)
+    moved: dict[str, list[dict[str, Any]]] = {}
+    notes: list[str] = []
+    for spec in session.state.shapes:
+        done = (placed or {}).get(spec.name)
+        new, said = clear_feed_holes(spec, surface, clearance, done)
+        notes += said
+        if new.feed_holes != spec.feed_holes:
+            moved[spec.name] = [h.model_dump(mode="json") for h in new.feed_holes]
+    if moved:
+
+        def mutate(shapes: list[dict[str, Any]]) -> None:
+            for shape in shapes:
+                if shape["name"] in moved:
+                    shape["feed_holes"] = moved[shape["name"]]
+
+        session.edit_shapes("Move feed holes clear of seams", mutate)
+    return notes
