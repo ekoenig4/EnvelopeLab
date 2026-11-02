@@ -129,7 +129,9 @@ def test_freezing_the_crest_bows_keeps_every_seam() -> None:
     expected = crest_bows(design_profile(s.design), boundaries, crest)
     assert edits.freeze_crest_bows(s)
     assert s.design.gores is not None and s.design.gores.crest_loft is None
-    assert bows(s) == pytest.approx([(r.bottom_bow, r.top_bow) for r in crest_rows], abs=1e-12)
+    assert [b for pair in bows(s) for b in pair] == pytest.approx(
+        [b for r in crest_rows for b in (r.bottom_bow, r.top_bow)], abs=1e-12
+    )
     assert [b for pair in bows(s) for b in pair] == pytest.approx(
         [b for pair in expected for b in pair], abs=1e-12
     )
@@ -150,7 +152,9 @@ def test_editing_one_bow_keeps_the_others() -> None:
     computed = design_seam_bows(s.design)
     assert edits.set_row_bows(s, 0, 0.0, computed[0][1])
     assert s.design.gores is not None and s.design.gores.crest_loft is None
-    assert bows(s)[1:] == pytest.approx(computed[1:], abs=1e-12)
+    assert [b for pair in bows(s)[1:] for b in pair] == pytest.approx(
+        [b for pair in computed[1:] for b in pair], abs=1e-12
+    )
 
 
 def test_splitting_a_bowed_row_puts_a_straight_seam_in_it() -> None:
