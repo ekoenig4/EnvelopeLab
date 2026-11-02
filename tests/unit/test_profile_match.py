@@ -212,7 +212,7 @@ def test_compensation_keeps_its_target_across_steps_and_restores_it() -> None:
     edits.compensate_profile(s, shape.solved)
     target = s.project.profile_target
     assert target is not None
-    assert target.control_points == pytest.approx(original)
+    assert np.asarray(target.control_points) == pytest.approx(np.asarray(original))
     # The run is stale now and may not drive another step.
     stale = latest_run_shape(s, "calculix")
     assert stale is not None and not stale.usable and "stale" in stale.refusal
@@ -223,7 +223,7 @@ def test_compensation_keeps_its_target_across_steps_and_restores_it() -> None:
     edits.compensate_profile(s, second.solved)
     target = s.project.profile_target
     assert target is not None
-    assert target.control_points == pytest.approx(original)
+    assert np.asarray(target.control_points) == pytest.approx(np.asarray(original))
     assert len(target.step_deviations) == 2
     # The second run stretches the compensated cut, which lands close to the target.
     assert target.step_deviations[1] < target.step_deviations[0]

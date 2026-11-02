@@ -192,9 +192,11 @@ def test_special_shapes_mode_takes_the_whole_window(gore_window: MainWindow) -> 
     w.set_mode("shapes")
     assert side.sizes()[0] == 0 and not w.sidebar_action.isChecked()
     strip = outer.sizes()[1]
-    # Compact, but never below what the strip needs to show its counts and a few lines.
+    # Compact, but never below what the strip needs to show its counts and a few lines
+    # (where the strip already sits at that minimum, as on macOS, it stays there).
     floor = w.panels["validation"].minimumSizeHint().height()
-    assert 0 < strip <= max(layout.COMPACT_WARNINGS_PX, floor) < before_outer[1]
+    assert 0 < strip <= max(layout.COMPACT_WARNINGS_PX, floor)
+    assert strip <= before_outer[1]
     assert w.panels["validation"].isVisible()
     stored = w.capture_layout()
     w.set_mode("history")

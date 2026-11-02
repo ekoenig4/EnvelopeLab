@@ -371,8 +371,8 @@ def test_shape_file_loft_by_station_name_reaches_the_design() -> None:
     design = shape_design(sf.name, sf.shape, solution, row_count=4)
     assert design.gores is not None and design.gores.loft is not None
     # Cut exactly at the loft stations: 0..1 of the design's tape.
-    assert [(p.station, p.ratio) for p in design.gores.loft] == pytest.approx(
-        [(0.0, 1.4), (1.0, 1.0)]
+    assert np.asarray([(p.station, p.ratio) for p in design.gores.loft]) == pytest.approx(
+        np.asarray([(0.0, 1.4), (1.0, 1.0)])
     )
     # The editor shows the volume the shape solve computed.
     assert design_volume(design) == pytest.approx(solution.values["envelope_volume"], rel=1e-6)
