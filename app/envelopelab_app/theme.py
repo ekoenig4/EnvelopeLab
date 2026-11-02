@@ -109,6 +109,12 @@ def stylesheet() -> str:
         " font-weight: 600; }",
         "QPushButton#primaryAction:disabled { background: #9db6d6; border-color: #9db6d6; }",
         f"QLabel#emptyState {{ color: {t['muted']}; padding: 24px; }}",
+        f"QWidget#sidePanel QGroupBox {{ background: {t['surface']};"
+        f" border: 1px solid {t['border']}; border-radius: 8px; margin-top: 14px;"
+        " padding: 8px 6px 6px 6px; }",
+        "QWidget#sidePanel QGroupBox::title { subcontrol-origin: margin; left: 10px;"
+        " padding: 0 4px; font-weight: 600; }",
+        f"QLabel[role='figure'] {{ color: {t['ink']}; padding: 0 6px; }}",
         f"QWidget#cameraBar {{ background: {t['panel']}; border-top: 1px solid {t['border']}; }}",
     ]
     for kind, s in STATUS_STYLES.items():
@@ -123,6 +129,14 @@ def stylesheet() -> str:
             " font-size: 11px; font-weight: 600; }"
         )
     return "\n".join(parts)
+
+
+def text_style(kind: str) -> str:
+    """Style sheet for a plain label stating ``kind`` (a key of :data:`STATUS_STYLES`):
+    the status's text colour, semibold. Empty for ``ok`` and ``info``."""
+    if kind in ("ok", "info"):
+        return ""
+    return f"color: {STATUS_STYLES[kind].chip_text}; font-weight: 600;"
 
 
 def apply_theme(app: QApplication) -> None:

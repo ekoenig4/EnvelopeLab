@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the standard-gore editor uses the shared design: the key figures (volume,
+  height, maximum diameter, gross lift) and a lift-margin chip in its title bar, a status
+  banner stating the worst design problem (errors, compression under load, negative lift
+  margin), the side column's boxes as cards, and the theme's status colours in place of
+  hard-coded reds. Display only.
 - Changed: the Simulation Runs panel uses the shared design: an action toolbar (*Run
   Preview* as the main action), the CalculiX version as a status chip or a banner saying
   why it is disabled, a status chip per run (current, stale, FoS fail, not converged), a

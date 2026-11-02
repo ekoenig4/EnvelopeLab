@@ -226,3 +226,56 @@ def lowest_fos(fields: Mapping[str, ResultField]) -> float | None:
         if finite.size:
             lows.append(float(finite.min()))
     return min(lows) if lows else None
+
+
+def design_banner(
+    outputs_error: str | None,
+    errors: list[str],
+    lift_margin: float | None,
+    compressed_fraction: float,
+    compression_text: str = "",
+) -> Banner | None:
+    """The banner over the gore editor's profile (None: nothing wrong to report).
+
+    Worst first: the outputs cannot be computed or the design has errors; then a negative
+    lift margin and a profile that needs compression under load (both design limits).
+
+    Parameters
+    ----------
+    outputs_error : str, optional
+        Why the live outputs could not be computed.
+    errors : list of str
+        Error-level design findings.
+    lift_margin : float, optional
+        Lift margin after rigging and payload, kg (None when unknown).
+    compressed_fraction : float
+        Fraction of the tape that needs compression under load (0 when it holds, or
+        when the shape check is off), dimensionless.
+    compression_text : str
+        The shape check's own description of the compressed part.
+    """
+    if outputs_error or errors:
+        messages = ([outputs_error] if outputs_error else []) + errors
+        return Banner(
+            "error",
+            "The design has errors — outputs are not final.",
+            " ".join(m.rstrip(".") + "." for m in messages[:3]),
+        )
+    parts: list[str] = []
+    if lift_margin is not None and lift_margin < 0.0:
+        parts.append(
+            f"Lift margin {lift_margin:.1f} kg: the envelope cannot lift its rigging and "
+            "payload at these conditions."
+        )
+    if compressed_fraction > 0.0:
+        fallback = f"{compressed_fraction:.0%} of the tape needs compression."
+        parts.append(compression_text or fallback)
+    if parts:
+        if len(parts) > 1:
+            title = "A design limit is exceeded."
+        elif compressed_fraction > 0.0:
+            title = "The shape will not hold under load."
+        else:
+            title = "Negative lift margin."
+        return Banner("fail", title, " ".join(parts))
+    return None

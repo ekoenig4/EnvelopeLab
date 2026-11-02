@@ -17,6 +17,22 @@ in the undo history. Nothing is edited by hand in JSON.
 
 ## The standard-gore editor
 
+The editor's title bar always shows the key figures of the design (volume, height,
+maximum diameter and gross lift) and a chip with the **lift margin** after rigging and
+payload: ✓ when it is positive, ▲ when it is negative. Below it, a **status banner**
+states the worst problem of the design, with the same symbols as the 3D view:
+
+| Banner | When |
+|---|---|
+| ✕ **The design has errors — outputs are not final.** | the live outputs cannot be computed, or a design check reports an error |
+| ▲ **The shape will not hold under load.** | *Shape under load* finds spans that need compression (drawn red on the canvas) |
+| ▲ **Negative lift margin.** | the envelope cannot lift its rigging and payload at the operating conditions |
+
+Both limits together read **A design limit is exceeded.** The banner cannot be closed;
+it goes when the design is fixed. With *Check the shape under load* off, compression is
+not checked and not reported. The boxes of the side column (*Shape under load*, *Solved
+shape*, *Constraint locks*, *Live outputs*, ...) are drawn as cards.
+
 * **Profile canvas**: drag a control point; the curve follows while you drag, and
   releasing the mouse makes one edit. Radii cannot become negative.
   The canvas also marks where the panels lie: a tick across the curve at every row seam,
