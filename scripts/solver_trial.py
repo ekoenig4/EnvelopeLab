@@ -528,17 +528,22 @@ def run_trial(meshes: list[float], solvers: list[str], limit: float) -> dict[str
 # Report
 
 
-def richardson(h: list[float], q: list[float]) -> tuple[float, float] | None:
-    """Extrapolated value and observed order from the three finest meshes (ratio 2)."""
-    if len(q) < 3:
-        return None
-    q1, q2, q3 = q[-3], q[-2], q[-1]  # coarse -> fine
-    d1, d2 = q2 - q1, q3 - q2
-    if d1 == 0.0 or d2 == 0.0 or d1 / d2 <= 0.0:
-        return None
-    ratio = h[-2] / h[-1]
-    p = math.log(d1 / d2) / math.log(ratio)
-    return q3 + d2 / (ratio**p - 1.0), p
+def richardson(h: list[float], q: list[float]) -> tuple[float, float, list[float]] | None:
+    """Richardson extrapolation from the finest three meshes with a constant refinement
+    ratio (within 2 %) whose results converge monotonically (same-sign, shrinking
+    changes). Returns the extrapolated value, the observed order and the three mesh
+    sizes used, or None when no such triple exists (the quantity is not converging)."""
+    for k in range(len(q) - 1, 1, -1):
+        h1, h2, h3 = h[k - 2], h[k - 1], h[k]
+        r1, r2 = h1 / h2, h2 / h3
+        if abs(r1 / r2 - 1.0) > 0.02:
+            continue
+        d1, d2 = q[k - 1] - q[k - 2], q[k] - q[k - 1]
+        if d1 == 0.0 or d2 == 0.0 or d1 / d2 <= 0.0 or abs(d2) >= abs(d1):
+            return None
+        p = math.log(d1 / d2) / math.log(r2)
+        return q[k] + d2 / (r2**p - 1.0), p, [h1, h2, h3]
+    return None
 
 
 def report(data: dict[str, Any]) -> str:
@@ -611,8 +616,10 @@ def report(data: dict[str, Any]) -> str:
         )
     lines += ["", "## Mesh convergence", ""]
     lines.append(
-        "Richardson extrapolation from the three finest meshes of each solver's converged "
-        "results (ratio 2); error of each mesh against the extrapolated value."
+        "Converged results only. Where the finest three meshes with a constant refinement "
+        "ratio converge monotonically, Richardson extrapolation gives the mesh-independent "
+        "value, and each cell shows its error against it. Otherwise (*not converging*) "
+        "each cell shows the change from the previous mesh."
     )
     lines.append("")
     for key, label in (
@@ -636,16 +643,24 @@ def report(data: dict[str, Any]) -> str:
                 continue
             ext = richardson([h for h, _ in series], [q for _, q in series])
             cells = []
+            previous = None
             for m in meshes:
                 q = next((v for h, v in series if h == m), None)
                 if q is None:
                     cells.append("-")
                 elif ext is None:
-                    cells.append(f"{q:.4g}")
+                    change = "" if previous is None else f" ({100.0 * (q / previous - 1):+.2f} %)"
+                    cells.append(f"{q:.5g}{change}")
                 else:
                     err = 100.0 * (q - ext[0]) / ext[0]
-                    cells.append(f"{q:.4g} ({err:+.2f} %)")
-            tail = f"{ext[0]:.4g} | {ext[1]:.2f}" if ext else "- | -"
+                    cells.append(f"{q:.5g} ({err:+.2f} %)")
+                if q is not None:
+                    previous = q
+            if ext:
+                used = "/".join(f"{h:g}" for h in ext[2])
+                tail = f"{ext[0]:.5g} (from {used} mm) | {ext[1]:.2f}"
+            else:
+                tail = "not converging | -"
             lines.append(f"| {s} | " + " | ".join(cells) + f" | {tail} |")
         lines.append("")
     return "\n".join(lines) + "\n"

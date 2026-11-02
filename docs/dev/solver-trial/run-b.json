@@ -1,0 +1,145 @@
+{
+ "benchmark": "Smalley 90K (tests/fixtures/smalley_90k/shape.yaml), 12 rows",
+ "tolerance": 1e-06,
+ "time_limit_s": 1200.0,
+ "git_commit": "bb4843807444d2b046c31dcd5aae099834e7e05b",
+ "versions": {
+  "python": "3.13.18",
+  "numpy": "2.5.4",
+  "scipy": "1.18.1",
+  "numba": "0.68.1"
+ },
+ "machine": "x86_64, Linux",
+ "levels": [
+  {
+   "mesh_mm": 3200.0,
+   "nodes": 680,
+   "triangles": 1320,
+   "build_time_s": 3.9142790449986933
+  },
+  {
+   "mesh_mm": 1600.0,
+   "nodes": 1920,
+   "triangles": 3800,
+   "build_time_s": 3.7485348480004177
+  },
+  {
+   "mesh_mm": 800.0,
+   "nodes": 4300,
+   "triangles": 8520,
+   "build_time_s": 3.8495658969986835
+  },
+  {
+   "mesh_mm": 400.0,
+   "nodes": 10700,
+   "triangles": 21260,
+   "build_time_s": 4.549649456999759
+  }
+ ],
+ "runs": [
+  {
+   "solver": "energy-lbfgs-ml",
+   "mesh_mm": 3200.0,
+   "nodes": 680,
+   "status": "max_iterations",
+   "converged": false,
+   "wall_time": 14.143230245001178,
+   "residual": 4.709067873569201e-06,
+   "app_residual": 0.14358037462058645,
+   "counts": {
+    "iterations": 1584,
+    "gradient_evaluations": 1619,
+    "level_time_s": 14.143230245001178
+   },
+   "metrics": {
+    "volume_m3": 2531.5685874905657,
+    "crown_height_m": 15.632520016322093,
+    "max_diameter_m": 17.778723415020163,
+    "max_tape_tension_n": 409.4713332119082,
+    "max_fabric_n1_n_m": 907.551875658675,
+    "wrinkled_fraction": 0.8333333333333334
+   },
+   "notes": [
+    "scipy: CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH"
+   ]
+  },
+  {
+   "solver": "energy-lbfgs-ml",
+   "mesh_mm": 1600.0,
+   "nodes": 1920,
+   "status": "max_iterations",
+   "converged": false,
+   "wall_time": 71.8631617400024,
+   "residual": 3.036976284187014e-06,
+   "app_residual": 0.17814702169085964,
+   "counts": {
+    "iterations": 2150,
+    "gradient_evaluations": 2200,
+    "level_time_s": 57.71993149500122
+   },
+   "metrics": {
+    "volume_m3": 2536.153785842469,
+    "crown_height_m": 15.60917534218642,
+    "max_diameter_m": 17.819245639289836,
+    "max_tape_tension_n": 447.723051967841,
+    "max_fabric_n1_n_m": 989.1686829484188,
+    "wrinkled_fraction": 0.8315789473684211
+   },
+   "notes": [
+    "scipy: CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH"
+   ]
+  },
+  {
+   "solver": "energy-lbfgs-ml",
+   "mesh_mm": 800.0,
+   "nodes": 4300,
+   "status": "max_iterations",
+   "converged": false,
+   "wall_time": 432.32769601100154,
+   "residual": 1.6587795361881346e-05,
+   "app_residual": 0.5619916945949442,
+   "counts": {
+    "iterations": 3250,
+    "gradient_evaluations": 3333,
+    "level_time_s": 360.46453427099914
+   },
+   "metrics": {
+    "volume_m3": 2538.627413194365,
+    "crown_height_m": 15.615870913190136,
+    "max_diameter_m": 17.83494888086819,
+    "max_tape_tension_n": 466.2828484172543,
+    "max_fabric_n1_n_m": 990.2977729522602,
+    "wrinkled_fraction": 0.8192488262910798
+   },
+   "notes": [
+    "scipy: CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH"
+   ]
+  },
+  {
+   "solver": "energy-lbfgs-ml",
+   "mesh_mm": 400.0,
+   "nodes": 10700,
+   "status": "max_iterations",
+   "converged": false,
+   "wall_time": 1396.7668714270003,
+   "residual": 5.3103538339682446e-05,
+   "app_residual": 0.8256540396754047,
+   "counts": {
+    "iterations": 5133,
+    "gradient_evaluations": 5268,
+    "level_time_s": 964.4391754159988
+   },
+   "metrics": {
+    "volume_m3": 2539.7442974420223,
+    "crown_height_m": 15.618893289215968,
+    "max_diameter_m": 17.828873696591117,
+    "max_tape_tension_n": 485.7542332017628,
+    "max_fabric_n1_n_m": 1042.8874283052808,
+    "wrinkled_fraction": 0.8024929444967074
+   },
+   "notes": [
+    "scipy: CONVERGENCE: RELATIVE REDUCTION OF F <= FACTR*EPSMCH"
+   ]
+  }
+ ]
+}
