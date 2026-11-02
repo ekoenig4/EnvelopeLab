@@ -77,7 +77,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.optimize import brentq
+from scipy.optimize import brentq, minimize_scalar
 
 from envelopelab.geometry.gore import (
     GoreWidthModel,
@@ -525,6 +525,9 @@ def opening(
     delta = travel(psi)
     ok = (r >= 0.0) & (r <= lc) & np.concatenate(([True], np.diff(delta) > 0.0))
     stop = len(psi) if bool(np.all(ok)) else max(int(np.argmin(ok)), 1)
+    # Stopped because travel stopped increasing (not at the axis or with straight lines).
+    at_peak = stop < len(psi) and stop >= 2 and 0.0 <= r[stop] <= lc
+    psi_after = float(psi[stop]) if stop < len(psi) else float(psi[-1])
     psi, r, z, delta = psi[:stop], r[:stop], z[:stop], delta[:stop]
     margin = seal_margin(psi)
     area = np.zeros_like(margin)
@@ -548,10 +551,22 @@ def opening(
         psi_full = crossing(area - g.hole_area, lambda p: float(gap(p)) - g.hole_area, psi_seal)
     seal = None if psi_seal is None else float(travel(psi_seal))
     full = None if psi_full is None else float(travel(psi_full))
+    limit = float(delta[-1])
+    if at_peak:
+        # The path ended where travel stopped increasing: its true peak lies between the
+        # samples on either side of the last kept one, not at that sample, and a refined
+        # crossing in that interval can exceed the sampled value.
+        peak = minimize_scalar(
+            lambda p: -float(travel(p)),
+            bounds=(float(psi[stop - 2]), psi_after),
+            method="bounded",
+            options={"xatol": 1e-12},
+        )
+        limit = max(limit, -float(peak.fun))
     return OpeningResult(
         seal_open_travel=seal,
         full_open_travel=full,
-        max_travel=float(delta[-1]),
+        max_travel=limit,
         confluence_height_full=None if full is None else g.confluence_height - full,
         path_travel=delta,
         path_edge_radius=r,

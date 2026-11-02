@@ -17,6 +17,7 @@ nav:
   - Developer:
       - Setup: dev/setup.md
       - CalculiX installation: dev/calculix-installation.md
+      - Solver trial (Smalley 90K): dev/solver-trial.md
   - Theory:
       - Atmosphere: theory/atmosphere.md
       - Gore geometry: theory/gore-geometry.md
