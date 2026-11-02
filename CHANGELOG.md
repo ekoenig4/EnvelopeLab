@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: special shapes solved with the envelope use an element size of footprint
+  length / 40 (100 to 300 mm) instead of / 100 (60 to 300 mm), set from a mesh study on the
+  Smalley 90K alien design (ADR-0034): its four shapes solve in 105 s instead of 374 s
+  (four threads), with shape heights within 0.15 % of the 60/229 mm results (antenna
+  3.258 against 3.254 m, eye pod 1.178 against 1.176 m). Peak values still change with the
+  mesh, so every shape result now carries a `peak_values_mesh_dependent` warning.
 - Changed (physics): wrinkled fabric now carries its tension along the direction that
   maximises the uniaxial energy (Pipkin–Steigmann relaxed energy), instead of the major
   direction of the trial stress, and is slack only when no direction is stretched. For

@@ -79,7 +79,7 @@ both come back when you change mode. The screen has three columns:
 5. Every placed shape that has a feed hole is **simulated with the envelope**: **Run
    Preview** and **Run CalculiX** solve the envelope and then each shape with the same
    solver, its skin sewn from the cut pieces and inflated, at an element size of about
-   1/100 of the footprint length (60 to 300 mm; see
+   1/40 of the footprint length (100 to 300 mm; see
    [Running simulations](running-simulations.md)). On the **Simulation** tab,
    **Simulate shape (preview solver)**
    solves the selected shape on its own, with the element size you choose (finer is
@@ -372,5 +372,8 @@ default.
   different element size can help; an unconverged result is never a prediction.
 * In the desktop application, shape simulations use the preview solver with assumed
   stiffness values, and those solved with the envelope use an automatic element size
-  (footprint length / 100, between 60 and 300 mm, assumed). Solve with a chosen size to
-  check that a result does not depend on the mesh.
+  (footprint length / 40, between 100 and 300 mm, assumed; ADR-0034). At that size the
+  shape and its volume are settled to a fraction of a per cent, but peak values (the
+  largest tape tension or fabric resultant, and the factors of safety from them) still
+  change with the mesh; every result says so. Solve with a chosen, finer size, or compare
+  two sizes, before relying on a peak value.
