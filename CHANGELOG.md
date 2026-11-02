@@ -3,6 +3,7 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: the parachute's red-line kinematic limit (*max travel*) was the last path sample before the travel stopped increasing, so the refined full-open pull could exceed it (by 1.9 µm in the case found). The limit is now the refined peak of the path (+3.2 µm in that case).
 - Changed: the 2D pattern view puts the pieces side by side on shelves that fill the view
   (*Layout: Side by side*, the new default), re-arranged when the view is resized,
   instead of one tall column with empty space on both sides. In a wide window the pieces
