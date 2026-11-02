@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -203,6 +204,11 @@ def test_compensation_inverts_a_uniform_stretch_to_first_order() -> None:
         compensated_control_points(s.design, solved, relaxation=0.0)
 
 
+def flat(points: Sequence[Sequence[float]]) -> list[float]:
+    """Coordinates of (r, z) points in one list (pytest.approx takes no nested lists)."""
+    return [float(v) for point in points for v in point]
+
+
 def test_compensation_keeps_its_target_across_steps_and_restores_it() -> None:
     s = ProjectSession.open(FIXTURE)
     original = [tuple(p) for p in np.column_stack(control_arrays(s.design)).tolist()]
@@ -212,7 +218,8 @@ def test_compensation_keeps_its_target_across_steps_and_restores_it() -> None:
     edits.compensate_profile(s, shape.solved)
     target = s.project.profile_target
     assert target is not None
-    assert target.control_points == pytest.approx(original)
+    assert len(target.control_points) == len(original)
+    assert flat(target.control_points) == pytest.approx(flat(original))
     # The run is stale now and may not drive another step.
     stale = latest_run_shape(s, "calculix")
     assert stale is not None and not stale.usable and "stale" in stale.refusal
@@ -223,7 +230,8 @@ def test_compensation_keeps_its_target_across_steps_and_restores_it() -> None:
     edits.compensate_profile(s, second.solved)
     target = s.project.profile_target
     assert target is not None
-    assert target.control_points == pytest.approx(original)
+    assert len(target.control_points) == len(original)
+    assert flat(target.control_points) == pytest.approx(flat(original))
     assert len(target.step_deviations) == 2
     # The second run stretches the compensated cut, which lands close to the target.
     assert target.step_deviations[1] < target.step_deviations[0]
