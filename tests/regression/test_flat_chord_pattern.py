@@ -146,7 +146,11 @@ def test_shapes_are_placed_with_their_feed_holes(placed: dict[str, PrimitiveDesi
 
 
 def test_known_findings_are_reported(placed: dict[str, PrimitiveDesign]) -> None:
-    # The flat-panel attachment ease of these shapes is above the 3 mm default (README.md).
-    for design in placed.values():
+    # The flat-panel attachment ease is spread evenly between the match marks, which keeps
+    # every interval below the 3 mm default (README.md: 1.35, 0.39 and 1.05 mm; with the
+    # envelope marks at the rim marks' angles it was 3-6 mm, an error).
+    expected = {"dome": 1.35e-3, "horn": 0.39e-3, "blister": 1.05e-3}
+    for name, design in placed.items():
         ease = [c for c in design.checks if c.name == "attachment ease"]
-        assert ease and ease[0].severity == "error"
+        assert ease and ease[0].severity == "info"
+        assert ease[0].value == pytest.approx(expected[name], abs=0.02e-3)

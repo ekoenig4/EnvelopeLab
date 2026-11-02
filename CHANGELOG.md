@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: the *attachment ease* check failed on most special shapes (on the Smalley 90K
+  alien design 6.5 mm per match-mark interval on the antennae and 20.5 mm on the eye pods,
+  against a 3 mm limit) although the rim and the marked line differed by only 0.5 % and
+  0.12 % in total: the envelope marks sat at the same angles as the rim marks, so the
+  difference bunched into a few intervals. The envelope marks now divide the marked line
+  in the rim marks' proportions and the ease is spread evenly (1.2 mm and 2.5 mm at most
+  there; the marks move round the shape by at most 1.5°). Marking sheets change
+  accordingly; match marks carry `host_phi_deg`.
 - Changed: special shapes solved with the envelope use an element size of footprint
   length / 40 (100 to 300 mm) instead of / 100 (60 to 300 mm), set from a mesh study on the
   Smalley 90K alien design (ADR-0034): its four shapes solve in 105 s instead of 374 s
