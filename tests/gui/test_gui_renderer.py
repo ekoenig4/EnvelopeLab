@@ -333,3 +333,35 @@ def test_face_seams_zoom_to_a_layer_and_keep_saved_views_per_project(
     assert [v["name"] for v in w2.view3d.saved()] == ["crown"]
     assert w2.view3d.delete_view("crown") and w2.view3d.saved() == []
     w2.close()
+
+
+@pytest.mark.slow
+def test_solved_preview_is_drawn_with_its_factor_of_safety_scale(
+    qtbot: QtBot, settings: QSettings, tmp_path: Path
+) -> None:
+    from envelopelab_app.simulation import PREVIEW
+
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    session = w.open_project(GORE_PROJECT)
+    assert session is not None and w.view3d.plotter is not None
+    assert w.simulation.start(PREVIEW)
+    assert w.simulation.wait(600_000)
+    qtbot.waitUntil(lambda: len(session.project.runs) == 1, timeout=10_000)
+    view = w.view3d
+    qtbot.waitUntil(lambda: view.shown_field() is not None, timeout=10_000)
+    field = view.shown_field()
+    assert field is not None and field.name == "fos_warp"
+    view.redraw()
+    titles = list(view.plotter.scalar_bars.keys())
+    assert any("FoS warp" in t and "limit 5" in t for t in titles), titles
+    for mode in range(view.display_mode.count()):
+        view.display_mode.setCurrentIndex(mode)
+        view.redraw()
+    view.field_choice.setCurrentIndex(view.field_choice.findData("displacement"))
+    view.redraw()
+    assert any("[mm]" in t for t in view.plotter.scalar_bars.keys())
+    image = tmp_path / "fos.png"
+    assert view.save_screenshot(str(image)) and image.stat().st_size > 1000
+    w.close()

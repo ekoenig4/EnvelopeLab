@@ -28,8 +28,14 @@ title is drawn in red.
 ## Moving around the 3D view
 
 Drag with the left mouse button to orbit, the right button or the wheel to zoom, and the
-middle button (or Shift and the left button) to pan. The row of buttons under the 3D
-options places the camera exactly:
+middle button (or Shift and the left button) to pan. Click a face or an axis of the
+**orientation cube** in the top right corner to look along it. The tools on the left of
+the view are **Probe** (click an element for its zone and values), **Drag** (move special
+shapes), **Profile** (edit the profile with the spline widget), **Section** (clip the
+results with a plane) and **Reset** (reset the camera); what the toolbar, the status banner
+and the run details show is described in
+[Running simulations](running-simulations.md#results-in-the-3d-view). The row of buttons
+under the view places the camera exactly:
 
 | Button | Key | View |
 |---|---|---|

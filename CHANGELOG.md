@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the 3D view is reorganised (approved mockup): a toolbar chooses the run, the
+  field to colour by and the display mode (shaded, with mesh edges, wireframe), with a
+  screenshot button; a status banner across the view states the run's state worst first
+  (not converged, stale, factor of safety or temperature limit exceeded, current but not
+  verified with CalculiX, verified) and cannot be dismissed; tools sit on a rail left of
+  the view, an orientation cube in its corner, the camera buttons below it; the side
+  panel shows the layers with colour swatches, a *Run details* card (solver, status,
+  iterations, residual, mesh, load case, run time, volume, material sources) and the
+  *Probe* read-out. A shared theme (`envelopelab_app.theme`: colours, status banner and
+  chip) is applied to the whole application, for the other windows to follow.
 - Added: colour a run by fabric factor of safety (warp or weft), principal, warp and weft
   resultants, wrinkle state or displacement. Factors below the required factor (5,
   assumed) are always orange and labelled FAIL. Fields a run cannot give are listed but

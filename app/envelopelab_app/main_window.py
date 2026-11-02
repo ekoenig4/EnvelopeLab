@@ -177,6 +177,7 @@ class MainWindow(QMainWindow):
         self.simulation.failed.connect(self._run_failed)
         self.simulation.calculixChanged.connect(self._update_ccx_label)
         self.simulation.idle.connect(self._update_actions)
+        self.view3d.rerunRequested.connect(self._run_requested)
 
         self.autosave_timer = QTimer(self)
         self.autosave_timer.timeout.connect(self.autosave)
@@ -606,6 +607,12 @@ class MainWindow(QMainWindow):
         )
         self.cancel_action.setEnabled(running)
         self.runs.update_actions()
+
+    def _run_requested(self, solver: str) -> None:
+        """The 3D view's banner asks for a solve (only when that action is enabled)."""
+        action = self.calculix_action if solver == "calculix" else self.preview_action
+        if action.isEnabled():
+            action.trigger()
 
     def _update_ccx_label(self) -> None:
         if self.simulation.calculix_available:
