@@ -106,6 +106,7 @@ class SceneMesh:
     face_rgb: np.ndarray | None = None
     colorings: dict[str, Coloring] = field(default_factory=dict)
     role: str = "other"
+    smooth: bool = True
 
 
 @dataclass
@@ -200,6 +201,7 @@ def scene_data(scene: Scene) -> dict[str, Any]:
             "group": m.group,
             "note": m.note,
             "role": m.role,
+            "smooth": m.smooth,
             "visible": m.visible,
             "color": _rgb(m.color),
             "triangles": len(tris),
@@ -323,7 +325,28 @@ def design_scene(
         flat = [p for kind in lines.values() for p in kind]
         if flat:
             scene.lines.append(SceneLines("rigging", "Rigging", "Rigging", flat, RIGGING_COLOR))
+        wires = lines.get("flying_wires", [])
+        if wires:
+            scene.meshes.append(basket(min(float(np.min(w[:, 2])) for w in wires)))
     return scene
+
+
+#: Basket drawn under the burner frame (display only, m; source: assumed).
+BASKET_SIZE = (1.3, 1.3, 1.1)
+BASKET_COLOR = "#a8743a"
+
+
+def basket(frame_height: float) -> SceneMesh:
+    """A basket box (display only) hanging under the burner frame at ``frame_height`` m."""
+    w, d, h = BASKET_SIZE
+    top = frame_height - 0.25
+    x, y = w / 2, d / 2
+    pts = np.array(
+        [[sx * x, sy * y, top - h * sz] for sz in (0, 1) for sy in (-1, 1) for sx in (-1, 1)]
+    )
+    quads = [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]
+    tris = np.array([t for a, b, c, e in quads for t in ((a, b, c), (a, c, e))])
+    return SceneMesh("basket", "Basket", "Rigging", pts, tris, BASKET_COLOR, smooth=False)
 
 
 def _escape_json(data: Mapping[str, Any]) -> str:

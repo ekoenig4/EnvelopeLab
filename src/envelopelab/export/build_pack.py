@@ -1094,6 +1094,11 @@ def write_documents(
             app.write_parachute(ctx, out / ctx.file("parachute.pdf")),
             app.write_scoop(ctx, out / ctx.file("scoop.pdf")),
         )
+    if "cad" in extras.include:
+        from envelopelab.export.cad import write_cad
+
+        for path, what in write_cad(ctx, out):
+            written.append((path, "cad", "TOP & BOTTOM / CAD", "CAD", what))
     entries = [
         {"file": path.name, "kind": kind, "description": what}
         for path, kind, _group, _tag, what in written

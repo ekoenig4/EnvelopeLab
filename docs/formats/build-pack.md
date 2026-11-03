@@ -65,6 +65,9 @@ A pack can also hold **documents** (since format 2), chosen when it is exported
 | `<slug>-turning-vents.pdf`, `<slug>-vent-panels.pdf` | When the design has turning vents: each vent's seam, gores, rows, direction, opening, slot, open area, thrust and torque, air and heat loss, control line, the net torque and side force; and every panel that carries a vent |
 | `<slug>-parachute.pdf` | Parachute hole, seal overlap, diameter, panels, fabric, crown pressure, line lengths (metric and English), red-line pull, red line, and the lines-and-rings table with factors of safety |
 | `<slug>-scoop.pdf` | The scoop, the flying wires (each wire's length and limit tension), the wires and crow's-foot legs with factors of safety |
+| `<slug>-panels.dxf` (+ `<slug>-panels-dxf-preview.png`) | The full 2D development in mm (`envelopelab.export.cad`): every gore with its rows stacked as sewn (`CUT`, `SEW`), the special shapes' footprint lines and feed holes on the gores that carry them (`FEATURE`), gore numbers and row letters (`LABEL`) |
+| `<slug>-panel-templates.dxf` (+ `-preview.png`) | One of each envelope panel on a grid, `CUT` and `SEW`, labelled with its letter and cut count |
+| `<slug>-appendage-patterns.dxf` (+ `-preview.png`) | Every special-shape skin piece and the parachute panels on a grid, with their match marks (`MARKS`) |
 
 CSV files with more than one table separate them by a blank line and a `# title` row.
 PDF documents are A4 portrait, Helvetica (Latin-1 text: `>=` for ≥, `!` for ▲).
@@ -77,7 +80,7 @@ One HTML page with its own small WebGL renderer: no library, no network, nothing
 
 | Key | Content |
 |---|---|
-| `meshes[]` | `key`, `name`, `group` (Design, Result, Rigging), `role` (`design`, `result`, `other`), `note` (e.g. `preview`, `stale: …`, `NOT CONVERGED: …`), `visible`, `color` (RGB), `triangles` (count), `positions` (base64 little-endian float32, m, 3 vertices per triangle), optional `base` (uint8 RGB per vertex), `colorings` |
+| `meshes[]` | `key`, `name`, `group` (Design, Result, Rigging), `role` (`design`, `result`, `other`), `smooth` (smooth shading; false for the basket), `note` (e.g. `preview`, `stale: …`, `NOT CONVERGED: …`), `visible`, `color` (RGB), `triangles` (count), `positions` (base64 little-endian float32, m, 3 vertices per triangle), optional `base` (uint8 RGB per vertex: the fabric colours), `colorings` |
 | `meshes[].colorings` | Per field key (`fos_warp`, `deviation`, …): `rgb` (uint8 RGB per vertex) and `legend` (`title`, `entries`: colour and label, lowest first) |
 | `lines[]` | `key`, `name`, `group`, `role`, `visible`, `color`, `vertices`, `positions` (segment end points, float32, m) |
 | `labels[]` | `text` (gore numbers `G1`…) and `at` (m) |
@@ -85,7 +88,12 @@ One HTML page with its own small WebGL renderer: no library, no network, nothing
 | `initial` | Colouring shown first ("" for layer colours) |
 | `status` | `kind` (`ok`, `info`, `stale`, `fail`, `error`), `symbol`, `title`, `message`: the banner |
 
-Every colour is computed by EnvelopeLab and stored; the page only draws. A stale or
+The page opens in the **realistic look**: every part in its fabric colours (the
+inflated envelope coloured by its zones' fabrics), smooth shading under a sun, sky and
+ground light with a soft highlight, a sky-and-ground background, and a basket box under
+the burner frame when the design has flying wires (display only, 1.3 x 1.3 x 1.1 m,
+assumed). The analysis colourings (factor of safety, deviation, resultants, …) are in the
+*Colour by* list. Every colour is computed by EnvelopeLab and stored; the page only draws. A stale or
 unconverged result has no colourings and its `note` says why.
 
 ## DXF sheets
@@ -163,7 +171,8 @@ line, in every DXF and on every template page (across and along), measures what 
 label says; every template page is listed with its sheet and has one side no longer than
 the roll (formats 1 and 2: every `pattern.pdf` page is as wide as the roll); every sheet
 is drawn on a template page (a marking sheet over its row's panel); every header matches the index and the drawn `SEW` outline; every
-document opens (PDFs have pages, HTML pages load nothing from outside themselves), the
+document opens (PDFs have pages, HTML pages load nothing from outside themselves, combined
+DXFs are in mm, previews are PNG images), the
 panel dimensions list every envelope panel with the index's cut count and fabric, and the
 3D view loads nothing from outside the page and holds a scene
 with a surface and a status banner; and

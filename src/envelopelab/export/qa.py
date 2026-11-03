@@ -368,6 +368,15 @@ def _check_documents(root: Path, index: dict[str, Any], present: set[str]) -> li
                 continue
             if not pages:
                 findings.append(QAFinding(name, "document", "PDF has no pages"))
+        elif name.endswith(".dxf"):
+            from ezdxf.filemanagement import readfile
+
+            units = readfile(path).header.get("$INSUNITS", 0)
+            if units != 4:
+                findings.append(QAFinding(name, "units", f"$INSUNITS is {units}, not 4 (mm)"))
+        elif name.endswith(".png"):
+            if not path.read_bytes().startswith(b"\x89PNG\r\n\x1a\n"):
+                findings.append(QAFinding(name, "document", "not a PNG image"))
         elif name.endswith(".html"):
             from envelopelab.export.viewer import read_scene
 

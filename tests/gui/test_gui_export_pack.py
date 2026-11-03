@@ -82,7 +82,8 @@ def test_export_after_a_run_colours_the_result_and_keeps_its_status(
     assert "preview" in run["note"]
     design = next(m for m in scene["meshes"] if m["key"] == "design")
     assert not design["visible"] and "deviation" in design["colorings"]
-    assert scene["initial"] == "fos_warp"
+    assert scene["initial"] == ""  # opens in fabric colours; FoS is a Colour-by mode
+    assert run["base"]  # the inflated envelope in its zones' fabric colours
     assert scene["status"]["kind"] == view.banner.kind
     assert scene["status"]["title"] == view.banner.title.text()
     # A stale run is never coloured as a result, and says so.

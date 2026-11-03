@@ -126,6 +126,29 @@ def deviation_rgb(mm: np.ndarray, limit: float) -> np.ndarray:
     return out
 
 
+def _zone_colours(view: View3DPanel, layer: object) -> np.ndarray | None:
+    """Fabric colour per triangle of the envelope result, from the rest mesh's zones (the
+    result keeps its mesh) and the zones' fabrics in the library (display only)."""
+    from PySide6.QtGui import QColor
+
+    rest = view.layers.get("rest")
+    design = view.controller.design
+    faces = getattr(layer, "faces", None)
+    if rest is None or design is None or faces is None or len(rest.zones) != len(faces):
+        return None
+    colours: dict[str, np.ndarray] = {}
+    out = np.empty((len(faces), 3), dtype=np.uint8)
+    for k, zone in enumerate(rest.zones):
+        if zone not in colours:
+            fabric = view.controller.fabrics.fabric(design.zones.get(zone, ""))
+            colour = QColor(fabric.color) if fabric is not None else QColor()
+            if not colour.isValid():
+                colour = QColor(LAYER_COLORS["design"])
+            colours[zone] = np.array([colour.red(), colour.green(), colour.blue()])
+        out[k] = colours[zone]
+    return out
+
+
 def scene_from_view(view: View3DPanel) -> Scene:
     """The build pack's 3D scene from the view (see the module docstring)."""
     controller = view.controller
@@ -172,6 +195,9 @@ def scene_from_view(view: View3DPanel) -> Scene:
             part.startswith("shape-sim:") and "preview" in layer.label.lower()
         ):
             notes.append("preview")
+        face_rgb = layer.face_colors
+        if face_rgb is None and not layer.stale:
+            face_rgb = _zone_colours(view, layer)
         mesh = SceneMesh(
             part,
             layer.short,
@@ -180,7 +206,7 @@ def scene_from_view(view: View3DPanel) -> Scene:
             layer.faces,
             "#c7c7c7" if layer.stale else LAYER_COLORS[layer.kind],
             note=", ".join(notes),
-            face_rgb=None if layer.stale else layer.face_colors,
+            face_rgb=None if layer.stale else face_rgb,
             role="result",
         )
         fields = view.part_fields.get(part, {})
@@ -227,8 +253,9 @@ def scene_from_view(view: View3DPanel) -> Scene:
         "EnvelopeLab is a design aid, not certified engineering software. The builder is "
         "responsible for airworthiness."
     )
-    titles = scene.coloring_titles()
-    scene.initial = next((k for k in ("fos_warp", "n1") if k in titles), "")
+    # Opens in fabric colours (the realistic look); the analysis colourings are in the
+    # Colour-by list.
+    scene.initial = ""
     return scene
 
 

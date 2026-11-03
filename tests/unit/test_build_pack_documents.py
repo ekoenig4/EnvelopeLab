@@ -80,6 +80,17 @@ def test_every_document_is_written_listed_and_passes_the_qa(pack: Path) -> None:
     files = {d["file"] for d in index["documents"]}
     expected = {f"documents-sample-{f}" for spec in DOCUMENTS.values() for f, _what in spec.files}
     expected |= {"documents-sample-ear.pdf", "documents-sample-ear-build.pdf"}  # appendages
+    expected |= {
+        f"documents-sample-{name}"
+        for name in (
+            "panels.dxf",
+            "panels-dxf-preview.png",
+            "panel-templates.dxf",
+            "panel-templates-preview.png",
+            "appendage-patterns.dxf",
+            "appendage-patterns-preview.png",
+        )
+    }
     assert files == expected
     assert index["documents"][0]["file"] == "documents-sample-00-BUILD-PACK-INDEX.pdf"
     prov = index["provenance"]
@@ -198,7 +209,9 @@ def test_pdf_text_is_latin1() -> None:
 def test_design_scene_has_the_surface_seams_gore_numbers_and_rigging(pack: Path) -> None:
     scene = read_scene(pack / "documents-sample-3d.html")
     keys = [m["key"] for m in scene["meshes"]]
-    assert keys == ["design"]
+    assert keys == ["design", "basket"]  # a basket under the flying wires (display only)
+    basket = next(m for m in scene["meshes"] if m["key"] == "basket")
+    assert basket["smooth"] is False and basket["group"] == "Rigging"
     assert {ln["key"] for ln in scene["lines"]} == {"seams", "rigging"}
     assert [lb["text"] for lb in scene["labels"]] == [f"G{k}" for k in range(1, 13)]
     assert scene["status"]["kind"] == "info" and "Design only" in scene["status"]["title"]

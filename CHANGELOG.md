@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the build pack's 3D page opens in a realistic look, like the builder's pack:
+  fabric colours (the inflated envelope in its zones' fabrics), smooth shading with sun,
+  sky and ground light, a sky-and-ground background, and a basket under the flying
+  wires; the factor-of-safety, deviation and other colourings stay in *Colour by*.
+- Added: the build pack's combined CAD files, as in the builder's pack:
+  `<name>-panels.dxf` (full envelope development with the features),
+  `-panel-templates.dxf` (panels on a grid) and `-appendage-patterns.dxf` (skin and
+  parachute pieces), in mm, each with a PNG preview drawn without an imaging library.
 - Changed: the build pack's appendage and top-and-bottom documents follow the builder's
   pack: per special shape `<name>-<shape>.pdf` (spec, skin cut list, match marks, feed
   holes, checks) and `<name>-<shape>-build.pdf` (generated build procedure with notes

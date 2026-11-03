@@ -124,3 +124,30 @@ def test_appendage_and_top_bottom_documents(pack: Path) -> None:
     assert "FLYING WIRES" in scoop
     # No vents in this design: no vent sheets.
     assert not (pack / "shop-sample-turning-vents.pdf").exists()
+
+
+def test_combined_cad_files_are_in_mm_with_previews(pack: Path) -> None:
+    from ezdxf.filemanagement import readfile
+
+    dev = readfile(pack / "shop-sample-panels.dxf")
+    assert dev.header["$INSUNITS"] == 4
+    cuts = [e for e in dev.modelspace() if e.dxf.layer == "CUT"]
+    assert len(cuts) == 20 * 17  # every panel of every gore
+    assert any(e.dxf.layer == "FEATURE" for e in dev.modelspace())  # the eye's footprint
+    grid = readfile(pack / "shop-sample-panel-templates.dxf")
+    assert len([e for e in grid.modelspace() if e.dxf.layer == "CUT"]) == 17
+    for name in ("panels-dxf-preview", "panel-templates-preview", "appendage-patterns-preview"):
+        data = (pack / f"shop-sample-{name}.png").read_bytes()
+        assert data.startswith(b"\x89PNG\r\n\x1a\n") and b"IEND" in data[-12:]
+
+
+def test_png_writer_round_trips_its_size(tmp_path: Path) -> None:
+    import struct
+
+    import numpy as np
+
+    from envelopelab.export.cad import write_png
+
+    img = np.zeros((7, 11, 3), dtype=np.uint8)
+    data = write_png(tmp_path / "x.png", img).read_bytes()
+    assert struct.unpack(">II", data[16:24]) == (11, 7)

@@ -104,6 +104,12 @@ DOCUMENTS: dict[str, DocumentSpec] = {
         "REF",
         "Appendages: per special shape spec and build procedure; turning vents (PDF)",
     ),
+    "cad": DocumentSpec(
+        (),
+        "TOP & BOTTOM / CAD",
+        "CAD",
+        "Combined DXFs: envelope development, panel grid, appendage pieces (+ PNG previews)",
+    ),
     "top_bottom": DocumentSpec(
         (
             ("parachute.pdf", "parachute data and full rigging lengths"),

@@ -29,6 +29,7 @@ it never leaves a shape out without saying so.
 | `<name>-panels-A-B.pdf`, `<name>-panel-D.pdf`, … | Cutting the envelope: one panel per page at 1:1, two rows to a file; a row that carries a special shape on its own sheet with every gore's marks (labelled by gore) |
 | `<name>-panels-grouped.pdf` | The paired panel files in one, for printing in one go |
 | `<name>-parachute-patterns.pdf`, `<name>-<shape>-patterns.pdf` | Cutting the parachute and each special shape's skin pieces (one per page) |
+| `<name>-panels.dxf`, `<name>-panel-templates.dxf`, `<name>-appendage-patterns.dxf` (+ PNG previews) | CAD: the whole envelope developed with its features, the panels on a grid, and the appendage and parachute pieces, in mm |
 | `cad/` | One DXF per piece (mm) and `index.json`, for CAD programs and the automatic checks |
 | `<name>-layout-diagram.html` | The whole envelope as a gore x row grid in its fabric colours, with every feature located |
 | `<name>-panel-map.html` / `.csv` | Which panel of which gore carries which feature |
@@ -48,7 +49,9 @@ says. Solid = cut, dotted = sew (finished), red = feature marks, blue = finished
 
 ## The 3D view page
 
-`<name>-3d.html` shows what the application's 3D view shows for the run chosen there:
+`<name>-3d.html` opens in a **realistic look**: the balloon in its fabric colours with
+smooth shading, sky and ground, and a basket under the flying wires. It shows what the
+application's 3D view shows for the run chosen there:
 
 * the **design surface** (the shape as cut and sewn, in the row fabrics, with its seams
   and gore numbers G1…), the **rigging**, and the special shapes as designed;
