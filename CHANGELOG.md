@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: patterns are regenerated automatically after every edit and when a project
+  opens (Preferences, *Regenerate patterns after every edit*, now on by default; it costs
+  under 1 ms per edit on the fixtures). Settings saved by an earlier version take the new
+  default once (preferences version 2); turning it off is kept. When regeneration fails,
+  the Patterns banner says why instead of only "stale". Patterns and cut files are
+  unchanged.
 - Changed: the 3D view's layer list, legend and *Run* list use short layer names
   (*Design surface*, *Preview result*, *Dome (inflated)*, ...), with the full description
   as the tooltip. A stale or unconverged layer still says so on its row (*◷ stale*,

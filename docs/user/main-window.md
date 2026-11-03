@@ -26,8 +26,9 @@ Two areas stay visible in every mode:
   finding to select the element it is about.
 
 Mode tabs repeat the indicators of the panels they hold: **●** for unsaved changes and
-**[STALE]** when a result they show is out of date (for example *Patterns [STALE]* after
-changing the seam allowance, until you press **Regenerate patterns**). A stale panel's
+**[STALE]** when a result they show is out of date (for example *Simulation Runs
+[STALE]* after an edit, or *Patterns [STALE]* when automatic pattern regeneration is
+turned off in Preferences, until you press **Regenerate patterns**). A stale panel's
 title is drawn in red.
 
 ## Moving around the 3D view

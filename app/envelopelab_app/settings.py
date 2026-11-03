@@ -26,8 +26,8 @@ class Preferences:
     ccx_path : str
         CalculiX executable; empty: ``$ENVELOPELAB_CCX`` or ``PATH``.
     auto_regenerate_patterns : bool
-        Regenerate the flat patterns after every edit (otherwise they are marked stale
-        until *Regenerate* is pressed).
+        Regenerate the flat patterns after every edit (default; otherwise they are marked
+        stale until *Regenerate* is pressed).
     keep_rows_fitted : bool
         Rescale the panel rows to the meridian after profile edits.
     enable_3d : bool
@@ -44,7 +44,7 @@ class Preferences:
     preview_mesh_mm: float = 800.0
     calculix_mesh_mm: float = 800.0
     ccx_path: str = ""
-    auto_regenerate_patterns: bool = False
+    auto_regenerate_patterns: bool = True
     keep_rows_fitted: bool = True
     enable_3d: bool = True
     recovery_dir: str = ""
@@ -81,12 +81,27 @@ def _to_bool(value: object) -> bool:
     return bool(value)
 
 
+#: Version of the stored preferences. Saving writes every field, so a value stored by an
+#: older version is not necessarily a choice: a field whose default changed since is
+#: read as its new default once (until the preferences are saved again).
+PREFERENCES_VERSION = 2
+#: Fields whose stored value is ignored when the stored version is older than the key.
+RESET_IN_VERSION = {"auto_regenerate_patterns": 2}
+
+
 def load_preferences(settings: QSettings) -> Preferences:
-    """Preferences stored in ``settings`` (defaults for missing keys)."""
+    """Preferences stored in ``settings`` (defaults for missing keys, and for the fields
+    of :data:`RESET_IN_VERSION` stored by an older version)."""
     prefs = Preferences()
+    try:
+        stored_version = int(str(settings.value("preferences/version", 1)))
+    except ValueError:
+        stored_version = 1
     for f in fields(Preferences):
         key = f"preferences/{f.name}"
         if not settings.contains(key):
+            continue
+        if stored_version < RESET_IN_VERSION.get(f.name, 0):
             continue
         raw = settings.value(key)
         default = getattr(prefs, f.name)
@@ -103,6 +118,7 @@ def save_preferences(settings: QSettings, prefs: Preferences) -> None:
     """Store ``prefs``."""
     for f in fields(Preferences):
         settings.setValue(f"preferences/{f.name}", getattr(prefs, f.name))
+    settings.setValue("preferences/version", PREFERENCES_VERSION)
     settings.sync()
 
 

@@ -421,7 +421,18 @@ class PatternPanel(QWidget):
         if session is None or not self.controller.is_gore:
             self.banner.set_status("info", "No standard-gore design: nothing to draw.")
             return
-        if status == "not built":
+        if status != "current" and self.controller.patterns_error:
+            # Automatic (or pressed) regeneration failed: say why, never only "stale".
+            self.banner.set_status(
+                "error",
+                "Patterns could not be regenerated.",
+                f"{self.controller.patterns_error}. Fix the design, then regenerate "
+                "(the pieces shown, if any, are from before the edit).",
+                REGENERATE,
+            )
+            if status == "not built":
+                return
+        elif status == "not built":
             self.banner.set_status(
                 "info",
                 "Patterns have not been generated yet.",
@@ -429,7 +440,7 @@ class PatternPanel(QWidget):
                 REGENERATE,
             )
             return
-        if status == "stale":
+        elif status == "stale":
             self.banner.set_status(
                 "stale",
                 "Patterns are STALE.",

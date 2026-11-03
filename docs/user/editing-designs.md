@@ -402,11 +402,16 @@ For the selected row you can set the label, grain direction, zone, seam allowanc
 rows or this row), add notches, tape paths across the panel and feature locations (drag a
 feature to move it). *Marks on this row* lists them; *Remove selected mark* deletes one.
 
-Patterns are drawn **as last generated**. A status banner over the view, with the same
-symbols as the other windows, always says which: ✓ **Patterns are current**, i **not
-generated yet**, or ◷ **Patterns are STALE** when the design has changed since. Stale
-panels are greyed until you press **Regenerate patterns** (on the banner, in the toolbar
-or F5), or enable automatic regeneration in the preferences.
+Patterns are **regenerated automatically** after every edit (and when a project is
+opened), so the view always shows the current design. A status banner over the view, with
+the same symbols as the other windows, always says what it shows: ✓ **Patterns are
+current**, or ✕ **Patterns could not be regenerated** with the reason (for example rows
+that no longer fit the tape), in which case the pieces shown are from before the edit.
+To regenerate only on request, untick *Regenerate patterns after every edit* in
+**Preferences**: edits then leave the patterns ◷ **STALE** (greyed) until you press
+**Regenerate patterns** (on the banner, in the toolbar or F5). Automatic regeneration
+became the default in this version; it applies once to settings saved before, and a
+choice saved after that is kept.
 
 ### Manual outline overrides
 

@@ -30,13 +30,18 @@ from .gui_support import GORE_PROJECT, make_window  # noqa: E402
 
 @pytest.fixture
 def settings(tmp_path: Path) -> QSettings:
-    """Isolated settings: autosave off, recovery folder and fabric library in ``tmp_path``."""
+    """Isolated settings: autosave off, manual pattern regeneration, recovery folder and
+    fabric library in ``tmp_path``."""
     s = QSettings(str(tmp_path / "settings.ini"), QSettings.Format.IniFormat)
     s.setValue("preferences/autosave_minutes", 0.0)
     s.setValue("preferences/recovery_dir", str(tmp_path / "recovery"))
     s.setValue("preferences/material_library", str(tmp_path / "materials.sqlite"))
     s.setValue("preferences/preview_mesh_mm", 1600.0)
     s.setValue("preferences/calculix_mesh_mm", 1600.0)
+    # Most tests check the stale state an edit leaves, so they pin manual regeneration
+    # (the default is automatic; test_gui_auto_patterns.py covers it).
+    s.setValue("preferences/auto_regenerate_patterns", False)
+    s.setValue("preferences/version", 2)
     s.sync()
     return s
 
