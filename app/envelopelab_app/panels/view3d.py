@@ -57,6 +57,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from envelopelab.project.deviation import interpolate_on_mesh
 from envelopelab.project.gore_design import (
     DisplaySurface,
     control_arrays,
@@ -95,6 +96,7 @@ from envelopelab_app.result_view import (
     Bands,
     RunState,
     banner_for,
+    diverging_colors,
     failing_zone_names,
     fos_bands,
     wrinkle_bands,
@@ -323,7 +325,10 @@ LAYER_COLOUR = "Layer colour"
 FOS_LIMIT = DEFAULT_REQUIRED_FOS
 FOS_LIMIT_SOURCE = "assumed"
 #: Fields shown in another unit than SI: key to (scale factor, unit).
-DISPLAY_UNITS = {"displacement": (1000.0, "mm")}
+DISPLAY_UNITS = {"displacement": (1000.0, "mm"), "deviation": (1000.0, "mm")}
+#: Fields on a diverging colour map, symmetric about zero (blue inside, red outside).
+DIVERGING_FIELDS = ("deviation",)
+DIVERGING_CMAP = diverging_colors()
 #: Scalar bar titles (short: the bar is narrow).
 SHORT_TITLES = {
     "fos_warp": "FoS warp",
@@ -334,6 +339,7 @@ SHORT_TITLES = {
     "n_weft": "N weft",
     "wrinkle_state": "Wrinkling",
     "displacement": "Displacement",
+    "deviation": "Deviation, + outside",
 }
 #: Kinds of layers that are solver results (the toolbar's Run list).
 RESULT_KINDS = ("envelopelab-preview", "calculix")
@@ -680,6 +686,8 @@ class View3DPanel(QWidget):
             defer_hidden=lambda: controller.defer_hidden,
         )
         self._reference_path: str | None = None
+        #: Deviation interpolated onto the design surface, and what it was made for.
+        self._deviation_cache: tuple[tuple[Any, ...], np.ndarray] | None = None
         #: Fields of the chosen result run (key to field), and why others are missing.
         self.fields: dict[str, ResultField] = {}
         self.missing: dict[str, str] = {}
@@ -1053,8 +1061,9 @@ class View3DPanel(QWidget):
                     self.missing = dict.fromkeys(FIELD_LABELS, reason)
                 else:
                     model = self._current_model()
-                    self.fields = run_fields(arrays, model)
-                    self.missing = missing_fields(arrays, model, record.solver)
+                    design = session.design if session.design.gores is not None else None
+                    self.fields = run_fields(arrays, model, design)
+                    self.missing = missing_fields(arrays, model, record.solver, design)
         self.field_choice.blockSignals(True)
         self.field_choice.clear()
         self.field_choice.addItem(LAYER_COLOUR, None)
@@ -1240,6 +1249,18 @@ class View3DPanel(QWidget):
             style = "wireframe" if wire else "surface"
             with_edges = mode == "Shaded + mesh edges"
             opacity = 0.35 if layer.kind == "reference" else 1.0
+            deviation = self._design_deviation(layer)
+            if deviation is not None:
+                # The deviation from the design is drawn on the design surface itself.
+                plotter.add_mesh(
+                    mesh,
+                    name=layer.key,
+                    show_edges=with_edges,
+                    style=style,
+                    **self._deviation_kwargs(mesh, deviation),
+                )
+                legend.append([layer.legend_name, layer.color])
+                continue
             if layer.face_colors is not None and not layer.stale:
                 mesh.cell_data["rgb"] = layer.face_colors
                 plotter.add_mesh(
@@ -1253,6 +1274,10 @@ class View3DPanel(QWidget):
                 legend.append([layer.legend_name, layer.color])
                 continue
             colour_by = self.shown_field() if layer.key == self._result_key() else None
+            if colour_by is not None and colour_by.name in DIVERGING_FIELDS and self._on_design():
+                # The design surface carries the colours: the result is a faint outline.
+                colour_by = None
+                style, opacity = "wireframe", 0.25
             kwargs: dict[str, Any]
             if colour_by is not None and not layer.stale and layer.converged:
                 kwargs = self._field_kwargs(mesh, colour_by)
@@ -1338,10 +1363,68 @@ class View3DPanel(QWidget):
                 "scalar_bar_args": {**bar, "n_labels": 0},
             }
         data["field"] = np.asarray(field.values, dtype=np.float64) * scale
+        if field.name in DIVERGING_FIELDS:
+            return self._deviation_kwargs(mesh, np.asarray(field.values), data=data)
         return {
             "scalars": "field",
             "cmap": CONTINUOUS_CMAP,
             "scalar_bar_args": {**bar, "fmt": "%.3g"},
+        }
+
+    def _on_design(self) -> bool:
+        """The deviation is drawn on the design surface (shown and current)."""
+        design = self.layers.get("design")
+        return design is not None and design.visible and not design.stale
+
+    def _design_deviation(self, layer: Layer) -> np.ndarray | None:
+        """Deviation (m) at the design surface's points when ``layer`` is the design
+        surface and it is coloured by the deviation, else None. Interpolated linearly from
+        the result's nodes (where the deviation is exact) for display."""
+        field = self.shown_field()
+        key = self._result_key()
+        if (
+            layer.kind != "design"
+            or field is None
+            or field.name not in DIVERGING_FIELDS
+            or key is None
+            or not self._on_design()
+        ):
+            return None
+        result = self.layers[key]
+        cache_key = (key, self.controller.revision, len(layer.points))
+        if self._deviation_cache is None or self._deviation_cache[0] != cache_key:
+            values = interpolate_on_mesh(layer.points, result.points, result.faces, field.values)
+            self._deviation_cache = (cache_key, values)
+        return self._deviation_cache[1]
+
+    def _deviation_kwargs(self, mesh: Any, values: np.ndarray, data: Any = None) -> dict[str, Any]:
+        """``add_mesh`` arguments for a deviation (m, per point): diverging colours
+        symmetric about zero, in mm, red outside the design and blue inside."""
+        mm = np.asarray(values, dtype=np.float64) * 1000.0
+        (mesh.point_data if data is None else data)["field"] = mm
+        # The scale comes from the exact values at the result's nodes, so interpolating
+        # onto the design surface never hides the largest deviation.
+        field = self.shown_field()
+        exact = field.values * 1000.0 if field is not None and field.name == "deviation" else mm
+        finite = exact[np.isfinite(exact)]
+        limit = max(float(np.abs(finite).max()), 1.0) if finite.size else 1.0
+        title = "Deviation [mm]\n+ outside, - inside"
+        return {
+            "scalars": "field",
+            "cmap": DIVERGING_CMAP,
+            "clim": (-limit, limit),
+            "nan_color": "#c7c7c7",
+            "scalar_bar_args": {
+                "title": title,
+                "vertical": True,
+                "position_x": 0.84,
+                "position_y": 0.08,
+                "height": 0.5,
+                "width": 0.06,
+                "title_font_size": 14,
+                "label_font_size": 12,
+                "fmt": "%.0f",
+            },
         }
 
     def _spline_changed(self, polyline: object) -> None:

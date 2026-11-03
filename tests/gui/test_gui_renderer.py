@@ -362,6 +362,12 @@ def test_solved_preview_is_drawn_with_its_factor_of_safety_scale(
     view.field_choice.setCurrentIndex(view.field_choice.findData("displacement"))
     view.redraw()
     assert any("[mm]" in t for t in view.plotter.scalar_bars.keys())
+    # Deviation from the design: drawn on the design surface, symmetric scale in mm.
+    view.field_choice.setCurrentIndex(view.field_choice.findData("deviation"))
+    view.redraw()
+    assert any("Deviation" in t for t in view.plotter.scalar_bars.keys())
+    values = view._design_deviation(view.layers["design"])
+    assert values is not None and len(values) == len(view.layers["design"].points)
     image = tmp_path / "fos.png"
     assert view.save_screenshot(str(image)) and image.stat().st_size > 1000
     w.close()

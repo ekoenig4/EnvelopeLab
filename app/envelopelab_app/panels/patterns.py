@@ -64,6 +64,7 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab.geometry.gore import PanelRow
+from envelopelab.project.deviation import PanelDeviation
 from envelopelab.project.gore_design import (
     default_allowance,
     editable_outline,
@@ -75,6 +76,7 @@ from envelopelab.rigging.parachute import CentrePanel
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.pattern_layout import shelf_layout
 from envelopelab_app.refresh import Refresher
+from envelopelab_app.result_view import diverging_rgb
 from envelopelab_app.theme import StatusBanner
 
 GAP = 0.4  # m between rows in the layout
@@ -198,6 +200,9 @@ class PatternView(QGraphicsView):
         )
 
 
+#: Tessellation of the deviation overlay (its colours: result_view.diverging_rgb).
+HEAT_PER_GORE = 6
+HEAT_PER_ROW = 8
 #: Text of the banner's action.
 REGENERATE = "Regenerate patterns"
 
@@ -235,6 +240,21 @@ class PatternPanel(QWidget):
         self.edit_outline = QCheckBox("Edit outline (manual override)")
         self.edit_outline.toggled.connect(self._toggle_edit)
         toolbar.addWidget(self.edit_outline)
+        toolbar.addWidget(QLabel(" Overlay: "))
+        self.overlay = QComboBox()
+        self.overlay.setObjectName("patternOverlay")
+        self.overlay.addItem("None", None)
+        self.overlay.addItem("Deviation from design", "deviation")
+        self.overlay.setToolTip(
+            "Colour the panels by how far the solved envelope lies outside (red) or inside "
+            "(blue) the design there: of the gores cut from a row, the one that deviates "
+            "most at each point. Needs a current, converged run."
+        )
+        self.overlay.activated.connect(lambda _i: self._draw())
+        toolbar.addWidget(self.overlay)
+        #: Deviation per row (and what it was made for), for the overlay.
+        self._heat: tuple[tuple[object, ...], dict[str, PanelDeviation], str] | None = None
+        self._heat_limit = 1e-3  # m
 
         form_box = QGroupBox("Selected row")
         form = QFormLayout(form_box)
@@ -340,6 +360,12 @@ class PatternPanel(QWidget):
         layout.setSpacing(0)
         layout.addWidget(toolbar)
         layout.addWidget(self.banner)
+        self.overlay_note = QLabel()
+        self.overlay_note.setObjectName("overlayNote")
+        self.overlay_note.setWordWrap(True)
+        self.overlay_note.setContentsMargins(8, 2, 8, 2)
+        self.overlay_note.hide()
+        layout.addWidget(self.overlay_note)
         layout.addWidget(splitter)
 
         self.refresher = Refresher(
@@ -473,6 +499,7 @@ class PatternPanel(QWidget):
             pieces.append(
                 _Piece(scoop.panel.cut_outline, -(scoop.panel.finished_height + GAP), draw_scoop)
             )
+        heat = self._overlay(stale)
         for row in self.rows_by_letter().values():
             ann = session.patterns.row(row.label)
 
@@ -482,7 +509,7 @@ class PatternPanel(QWidget):
                 ann: RowPattern = ann,
             ) -> None:
                 self.view.offsets[row.label] = origin
-                self._in_container(
+                container = self._in_container(
                     origin,
                     partial(
                         self._draw_row,
@@ -494,6 +521,8 @@ class PatternPanel(QWidget):
                         design.gores.count if design.gores is not None else 0,
                     ),
                 )
+                if heat is not None and row.label in heat[0]:
+                    self._draw_heat(container, heat[0][row.label], heat[1])
 
             pieces.append(_Piece(row.cut_outline, y, draw_row))
             y += row.finished_height + GAP
@@ -505,6 +534,91 @@ class PatternPanel(QWidget):
             self._grow(piece.outline, origin)
         if first:
             QTimer.singleShot(0, self.fit)
+
+    def _overlay(self, stale: bool) -> tuple[dict[str, PanelDeviation], float] | None:
+        """The deviation overlay's values per row and its colour limit (m), or None (with
+        the reason in the note) when it is off or cannot be shown."""
+        if self.overlay.currentData() != "deviation":
+            self.overlay_note.hide()
+            return None
+        self.overlay_note.show()
+        session = self.controller.session
+        record = None
+        if session is not None:
+            current = [
+                r
+                for r in session.project.runs
+                if r.converged and session.run_status(r) == "current"
+            ]
+            # A current CalculiX run (the verification) first, else the latest preview.
+            current.sort(key=lambda r: (r.solver == "calculix", r.created))
+            record = current[-1] if current else None
+        if stale or session is None or record is None:
+            why = "the patterns are stale" if stale else "no current, converged run"
+            self.overlay_note.setText(f"Deviation overlay not shown: {why}.")
+            return None
+        key = (record.run_id, self.controller.revision)
+        if self._heat is None or self._heat[0] != key:
+            arrays = session.run_arrays(record.run_id)
+            if arrays is None:
+                self.overlay_note.setText(
+                    "Deviation overlay not shown: the run's results are missing."
+                )
+                return None
+            from envelopelab.project.deviation import (
+                envelope_deviation,
+                interpolate_on_mesh,
+                panel_deviation,
+            )
+            from envelopelab.project.gore_design import display_surface
+
+            design = session.design
+            positions, triangles = arrays["positions"], arrays["triangles"]
+            nodes = envelope_deviation(design, positions)
+            surface = display_surface(design, HEAT_PER_GORE, HEAT_PER_ROW)
+            values = interpolate_on_mesh(surface.points, positions, triangles, nodes)
+            rows = list(self.rows_by_letter().values())
+            grids = panel_deviation(design, rows, values, HEAT_PER_GORE, HEAT_PER_ROW)
+            finite = nodes[np.isfinite(nodes)]
+            limit = max(float(np.abs(finite).max()), 1e-3) if finite.size else 1e-3
+            note = (
+                f"Deviation from design, {record.solver_label} run of "
+                f"{record.created:%Y-%m-%d %H:%M}: red outside, blue inside, "
+                f"\u00b1{1000 * limit:.0f} mm full scale (from {1000 * finite.min():.0f} to "
+                f"{1000 * finite.max():.0f} mm at the run's nodes). Each row shows, at each "
+                "point, the gore that deviates most; hover a panel for which."
+            )
+            self._heat = (key, {g.row: g for g in grids}, note)
+            self._heat_limit = limit
+        self.overlay_note.setText(self._heat[2])
+        return self._heat[1], self._heat_limit
+
+    def _draw_heat(self, container: QGraphicsItem, grid: PanelDeviation, limit: float) -> None:
+        """Colour one panel row by its deviation grid (under its outline and markings)."""
+        # The fabric fill would cover the colours: the overlay replaces it.
+        for child in container.childItems():
+            if not isinstance(child, QGraphicsPolygonItem):
+                continue
+            if child.brush().style() != Qt.BrushStyle.NoBrush:
+                child.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+        for tri in grid.triangles:
+            corner = grid.values[tri]
+            value = float(np.nanmean(corner)) if np.isfinite(corner).any() else math.nan
+            if math.isnan(value):
+                color = QColor("#c7c7c7")
+            else:
+                r, g, b = diverging_rgb(value / limit)
+                color = QColor.fromRgbF(r, g, b, 0.85)
+            poly = QGraphicsPolygonItem(_polygon(grid.points[tri], 0.0), container)
+            poly.setBrush(QBrush(color))
+            poly.setPen(QPen(Qt.PenStyle.NoPen))
+            poly.setZValue(-0.5)
+            gores = sorted({int(g) for g in grid.gore[tri]})
+            poly.setToolTip(
+                f"Row {grid.row}: {1000 * value:+.0f} mm "
+                f"({'outside' if value > 0 else 'inside'} the design), worst of the gores "
+                f"here: gore {', '.join(map(str, gores))}"
+            )
 
     def _origins(self, pieces: list[_Piece]) -> list[QPointF]:
         """Scene origin of every piece: stacked as the assembled gore, or side by side on

@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: *Deviation from design* heat map: where the solved envelope lies outside (red) or
+  inside (blue) the designed shape, in mm, measured along the design's outward normal at
+  the run's nodes (`envelopelab.project.deviation`). In the 3D view it colours the design
+  surface (a new *Colour by* field); in the Patterns view *Overlay: Deviation from design*
+  maps it onto the flat panels (each point shows the gore that deviates most). Current,
+  converged runs only. On the standard-gore fixture's preview: -239 mm (inside, near the
+  mouth, where the shape check reports compression) to +121 mm. No existing result
+  changes. Diverging colours are the project's own ramp (no new dependency).
 - Changed: patterns are regenerated automatically after every edit and when a project
   opens (Preferences, *Regenerate patterns after every edit*, now on by default; it costs
   under 1 ms per edit on the fixtures). Settings saved by an earlier version take the new

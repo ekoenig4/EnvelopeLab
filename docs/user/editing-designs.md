@@ -413,6 +413,14 @@ To regenerate only on request, untick *Regenerate patterns after every edit* in
 became the default in this version; it applies once to settings saved before, and a
 choice saved after that is kept.
 
+**Overlay: Deviation from design** (toolbar) colours the flat panels by where the solved
+envelope of the latest current, converged run (CalculiX if there is one, else the preview)
+lies outside (red) or inside (blue) the design, as in the 3D view. Every gore of a row is
+cut from the same panel, so each point of a panel shows the gore that deviates most there;
+hover the panel for the value and the gore. A note under the toolbar names the run and the
+full scale. Without a current, converged run, or while the patterns are stale, the note
+says so and nothing is drawn. Display only: the cut files are not affected.
+
 ### Manual outline overrides
 
 *Edit outline (manual override)* shows handles on the selected row's finished outline.

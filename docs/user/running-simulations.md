@@ -64,7 +64,8 @@ The 3D view's toolbar chooses what it shows:
   preview or CalculiX run).
 * **Colour by**: *Factor of safety, warp* or *weft* (the default for a current, converged
   preview run), the principal, warp and weft resultants (N/m), *Wrinkling* (taut,
-  wrinkled, slack) and *Displacement from the as-sewn shape* (mm), or *Layer colour*.
+  wrinkled, slack), *Displacement from the as-sewn shape* (mm), *Deviation from
+  design* (mm, see below), or *Layer colour*.
   A field the run cannot give is listed but greyed out; hover for why (for example
   "CalculiX does not report warp/weft resultants", or a run from an older version that
   has to be run again).
@@ -76,6 +77,15 @@ scale, whatever else is shown; above it, blues get lighter with more margin. It 
 fabric strength of the triangle's zone over its warp or weft resultant, so the lowest
 value in a zone is the factor in the run's factor-of-safety table. Seams and tapes are not
 coloured; read them in the table.
+
+**Deviation from design** shows where the inflated envelope lies **outside** (red) or
+**inside** (blue) the designed shape, and by how many mm, on the **design surface** itself
+(white where they match; the solved mesh is drawn as a faint wireframe over it). The scale
+is symmetric and set by the largest deviation at the run's nodes. It is measured along the
+design's outward normal, so fabric that only slid along the surface reads as zero (see
+[the theory](../theory/shape-deviation.md)). Hide the design surface to colour the solved
+mesh instead. The same values can be shown on the flat panels in the Patterns view
+(*Overlay: Deviation from design*, see [editing designs](editing-designs.md)).
 
 A **status banner** across the top of the view always states the chosen run's state, worst
 first. It cannot be closed; it goes when the state does:

@@ -279,3 +279,32 @@ def design_banner(
             title = "Negative lift margin."
         return Banner("fail", title, " ".join(parts))
     return None
+
+
+#: Diverging ramp for deviations, from -1 (inside: blue) through 0 (white) to +1 (outside:
+#: red). The ends differ in lightness as well as hue, so they also read in grey.
+DIVERGING_STOPS = ("#1f4e9c", "#7fa7d9", "#f4f4f4", "#e5947a", "#a5262b")
+
+
+def diverging_rgb(t: float) -> tuple[float, float, float]:
+    """Colour of ``t`` in [-1, 1] on :data:`DIVERGING_STOPS` (RGB in 0..1; clipped)."""
+    t = max(-1.0, min(1.0, float(t)))
+    stops = [tuple(int(c[i : i + 2], 16) / 255.0 for i in (1, 3, 5)) for c in DIVERGING_STOPS]
+    x = (t + 1.0) / 2.0 * (len(stops) - 1)
+    i = min(int(x), len(stops) - 2)
+    f = x - i
+    a, b = stops[i], stops[i + 1]
+    return (
+        a[0] + f * (b[0] - a[0]),
+        a[1] + f * (b[1] - a[1]),
+        a[2] + f * (b[2] - a[2]),
+    )
+
+
+def diverging_colors(n: int = 21) -> list[str]:
+    """``n`` hex colours along :data:`DIVERGING_STOPS`, for a colour map."""
+    out = []
+    for k in range(n):
+        r, g, b = diverging_rgb(-1.0 + 2.0 * k / (n - 1))
+        out.append(f"#{round(255 * r):02x}{round(255 * g):02x}{round(255 * b):02x}")
+    return out

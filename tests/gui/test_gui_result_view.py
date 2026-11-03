@@ -148,3 +148,51 @@ def test_layer_list_shows_short_names_with_the_full_label_as_tooltip(
     assert Layer("shape:Ear", "shape", "x", empty, empty).short == "Ear (designed)"
     ref = Layer("reference", "reference", "Reference mesh (scan.obj)", empty, empty)
     assert ref.short == "Reference: scan.obj"
+
+
+def test_pattern_overlay_says_why_without_a_current_run(gore_window: MainWindow) -> None:
+    panel = gore_window.patterns
+    panel.regenerate()
+    panel.overlay.setCurrentIndex(panel.overlay.findData("deviation"))
+    panel.refresh()
+    assert not panel.overlay_note.isHidden()
+    assert "no current, converged run" in panel.overlay_note.text()
+    panel.overlay.setCurrentIndex(0)
+    panel.refresh()
+    assert panel.overlay_note.isHidden()
+
+
+@pytest.mark.slow
+def test_deviation_from_design_in_3d_and_on_the_patterns(
+    gore_window: MainWindow, qtbot: QtBot
+) -> None:
+    from PySide6.QtWidgets import QGraphicsPolygonItem
+
+    w = gore_window
+    session = w.controller.session
+    assert session is not None
+    w.patterns.regenerate()
+    assert w.simulation.start(PREVIEW)
+    assert w.simulation.wait(600_000)
+    qtbot.waitUntil(lambda: len(session.project.runs) == 1, timeout=10_000)
+    view = w.view3d
+    qtbot.waitUntil(lambda: "deviation" in view.fields, timeout=10_000)
+    field = view.fields["deviation"]
+    assert field.location == "node" and len(field.values) == session.project.runs[0].n_nodes
+    assert np.isfinite(field.values).all()
+    assert field.values.min() < 0.0 < field.values.max()  # inside somewhere, outside elsewhere
+    # The flat panels: one heat grid per row, with the same full scale as the nodes.
+    panel = w.patterns
+    w.show_panel("patterns")
+    panel.overlay.setCurrentIndex(panel.overlay.findData("deviation"))
+    panel.refresh()
+    heat = panel._heat
+    assert heat is not None and set(heat[1]) == set(panel.rows_by_letter())
+    assert panel._heat_limit == pytest.approx(float(np.abs(field.values).max()))
+    assert "red outside, blue inside" in panel.overlay_note.text()
+    tips = [
+        i.toolTip()
+        for i in panel.view.scene().items()
+        if isinstance(i, QGraphicsPolygonItem) and "worst of the gores" in i.toolTip()
+    ]
+    assert tips and all(t.startswith("Row ") for t in tips)
