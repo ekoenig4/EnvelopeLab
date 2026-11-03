@@ -480,6 +480,8 @@ class View3DPanel(QWidget):
         self.field_choice.setToolTip("Colour the chosen result by a field")
         self.field_choice.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
         self.field_choice.activated.connect(lambda _i: self._result_changed())
+        # Any change of field (chosen or set in code) shows or hides the design for it.
+        self.field_choice.currentIndexChanged.connect(lambda _i: self._design_for_field())
         self.display_mode = QComboBox()
         self.display_mode.setObjectName("displayMode")
         self.display_mode.addItems(DISPLAY_MODES)
