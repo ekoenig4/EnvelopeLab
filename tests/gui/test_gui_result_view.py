@@ -122,3 +122,29 @@ def test_preview_run_colours_by_fos_and_goes_grey_when_stale(
     view.rerunRequested.connect(requested.append)
     view.banner.action.click()
     assert requested == [PREVIEW]
+
+
+def test_layer_list_shows_short_names_with_the_full_label_as_tooltip(
+    gore_window: MainWindow,
+) -> None:
+    from envelopelab_app.panels.view3d import Layer
+    from envelopelab_app.theme import STATUS_STYLES
+
+    view = gore_window.view3d
+    item = view.layer_list.item(0)
+    assert item is not None and item.text() == "Design surface"
+    assert item.toolTip() == view.labels()["design"]  # the full description
+    assert len(item.text()) < len(item.toolTip())
+    empty = np.zeros((0, 3))
+    stale = Layer("envelopelab-preview", "envelopelab-preview", "long [STALE]", empty, empty)
+    stale.stale = True
+    stale.converged = False
+    # The status stays on the row, never only in the tooltip.
+    assert stale.display_name == (
+        f"Preview result  {STATUS_STYLES['error'].symbol} not converged"
+        f"  {STATUS_STYLES['stale'].symbol} stale"
+    )
+    assert Layer("shape-sim:Ear", "shape-simulated", "x", empty, empty).short == "Ear (inflated)"
+    assert Layer("shape:Ear", "shape", "x", empty, empty).short == "Ear (designed)"
+    ref = Layer("reference", "reference", "Reference mesh (scan.obj)", empty, empty)
+    assert ref.short == "Reference: scan.obj"

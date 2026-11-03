@@ -99,7 +99,7 @@ from envelopelab_app.result_view import (
     fos_bands,
     wrinkle_bands,
 )
-from envelopelab_app.theme import StatusBanner
+from envelopelab_app.theme import STATUS_STYLES, StatusBanner
 
 #: Layer colours (one per source, never shared).
 LAYER_COLORS = {
@@ -130,6 +130,15 @@ RIGGING_COLORS = {
     "feed_holes": "#ff00ff",
     "skin_seams": "#1a1a1a",
     "skin_rim": "#1a1a1a",
+}
+#: Short layer names by layer key (others: see :attr:`Layer.short`).
+SHORT_NAMES = {
+    "design": "Design surface",
+    "marks": "Panel details",
+    "rigging": "Rigging",
+    "rest": "Rest mesh",
+    "envelopelab-preview": "Preview result",
+    "calculix": "CalculiX result",
 }
 #: Layers drawn without mesh edges: display meshes (the design surface and the designed
 #: shapes, whose dense grids would render as solid black with edges), not solver meshes.
@@ -223,6 +232,40 @@ class Layer:
     def color(self) -> str:
         """Display colour (grey when stale)."""
         return "#c7c7c7" if self.stale else LAYER_COLORS[self.kind]
+
+    @property
+    def short(self) -> str:
+        """Short name for the layer list, the legend and the Run list (the full
+        description, :attr:`label`, is the tooltip)."""
+        name = SHORT_NAMES.get(self.key)
+        if name is not None:
+            return name
+        if self.key.startswith("shape-sim:"):
+            return f"{self.key.removeprefix('shape-sim:')} (inflated)"
+        if self.key.startswith("shape:"):
+            return f"{self.key.removeprefix('shape:')} (designed)"
+        if self.kind == "reference" and "(" in self.label:
+            return "Reference: " + self.label.split("(", 1)[1].rstrip(")")
+        return self.label
+
+    @property
+    def display_name(self) -> str:
+        """:attr:`short` with the layer's status when it is not a current result: never
+        hidden in a tooltip (stale and unconverged layers say so on their row)."""
+        parts = [self.short]
+        if not self.converged:
+            parts.append(f"{STATUS_STYLES['error'].symbol} not converged")
+        if self.stale:
+            parts.append(f"{STATUS_STYLES['stale'].symbol} stale")
+        return "  ".join(parts)
+
+    @property
+    def legend_name(self) -> str:
+        """:attr:`display_name` in plain text for the scene legend (VTK's font has no
+        status symbols)."""
+        flags = (("NOT CONVERGED", not self.converged), ("stale", self.stale))
+        status = [word for word, on in flags if on]
+        return f"{self.short} ({', '.join(status)})" if status else self.short
 
 
 def _merged_lines(polylines: list[Any]) -> Any:
@@ -898,7 +941,8 @@ class View3DPanel(QWidget):
         self.layer_list.blockSignals(True)
         self.layer_list.clear()
         for key, layer in self.layers.items():
-            item = QListWidgetItem(layer.label)
+            item = QListWidgetItem(layer.display_name)
+            item.setToolTip(layer.label)
             item.setData(Qt.ItemDataRole.UserRole, key)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked)
@@ -962,7 +1006,11 @@ class View3DPanel(QWidget):
         self.run_choice.clear()
         for key in RESULT_KINDS:
             if key in self.layers:
-                self.run_choice.addItem(self.layers[key].label, key)
+                result = self.layers[key]
+                self.run_choice.addItem(result.display_name, key)
+                self.run_choice.setItemData(
+                    self.run_choice.count() - 1, result.label, Qt.ItemDataRole.ToolTipRole
+                )
         if self.run_choice.count() == 0:
             self.run_choice.addItem("No result yet: run the preview", None)
         index = self.run_choice.findData(chosen_run) if chosen_run else -1
@@ -1182,7 +1230,7 @@ class View3DPanel(QWidget):
                         line_width=LINE_WIDTHS.get(kind, 2),
                     )
                 if len(layer.faces) == 0:
-                    legend.append([layer.label, layer.color])
+                    legend.append([layer.legend_name, layer.color])
             if not layer.visible or len(layer.faces) == 0:
                 continue
             faces = np.hstack([np.full((len(layer.faces), 1), 3), layer.faces]).ravel()
@@ -1202,7 +1250,7 @@ class View3DPanel(QWidget):
                     show_edges=with_edges,
                     style=style,
                 )
-                legend.append([layer.label, layer.color])
+                legend.append([layer.legend_name, layer.color])
                 continue
             colour_by = self.shown_field() if layer.key == self._result_key() else None
             kwargs: dict[str, Any]
@@ -1231,10 +1279,12 @@ class View3DPanel(QWidget):
                     color="#d62728",
                     line_width=3,
                 )
-            legend.append([layer.label, layer.color])
+            legend.append([layer.legend_name, layer.color])
         if legend:
             # Lower left: the view cube is top right and the colour scale on the right.
-            plotter.add_legend(legend, bcolor="white", size=(0.4, 0.16), loc="lower left")
+            # VTK scales the text to fill the box: keep it small for the short names.
+            height = min(0.04 * len(legend), 0.2)
+            plotter.add_legend(legend, bcolor="white", size=(0.22, height), loc="lower left")
         if (
             self.spline.isChecked()
             and self.controller.design is not None

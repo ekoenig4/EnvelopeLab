@@ -35,8 +35,10 @@ the status bar says so. The envelope's own solve does not include the shapes.
 * Every run row names its solver — **Preview (dynamic relaxation)** or **CalculiX
   verification** — with a solver-coloured swatch; the 3D view uses the same colours
   (preview blue, CalculiX orange, rest mesh olive, reference mesh green; the design
-  surface in its fabric colours with dark seams) and the same names in its layer list and
-  legend.
+  surface in its fabric colours with dark seams). Its layer list, legend and *Run* list
+  use short names (*Design surface*, *Rest mesh*, *Preview result*, *CalculiX result*,
+  *Dome (designed)*, *Dome (inflated)*, *Reference: scan.obj*); hover a layer for its full
+  description (solver, run id, construction, …).
 * Each run shows its **state** as a chip with the same symbols and colours as the 3D
   view's banner (i *Current*, ✓ *Current* for CalculiX, ◷ *Stale*, ▲ *FoS fail*, ✕ *Not
   converged*), whether it **converged**, the **Min FoS** (the lowest fabric factor of
@@ -48,10 +50,11 @@ the status bar says so. The envelope's own solve does not include the shapes.
   CalculiX version found; without CalculiX a banner says where it looked and why
   *Run CalculiX* is disabled.
 * A run whose inputs differ from the current design is **STALE**: greyed and italic in
-  the table, `[STALE]` in the 3D layer name and in the panel titles, and listed in
+  the table, *◷ stale* after its 3D layer name ("(stale)" in the scene legend) and
+  `[STALE]` in the panel titles, and listed in
   Validation. It is never shown as current. Undoing the edit makes it current again.
-* A run that did not converge is shown **NOT CONVERGED** in red and listed as an error in
-  Validation; its numbers are not final.
+* A run that did not converge is shown **NOT CONVERGED** in red (*✕ not converged* after
+  its 3D layer name) and listed as an error in Validation; its numbers are not final.
 
 ## Results in the 3D view
 

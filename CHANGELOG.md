@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the 3D view's layer list, legend and *Run* list use short layer names
+  (*Design surface*, *Preview result*, *Dome (inflated)*, ...), with the full description
+  as the tooltip. A stale or unconverged layer still says so on its row (*◷ stale*,
+  *✕ not converged*; plain words in the scene legend), and the stale banner no longer
+  repeats the run id (it is in the run details). Display only.
 - Changed: the envelope panels a special shape is sewn on (its footprint sew line, match
   marks and feed holes) moved from the Patterns view to the Special shapes window, in a
   new *Envelope panels* tab shown with the selected shape (opens zoomed on the marked

@@ -166,7 +166,7 @@ def banner_for(run: RunState | None) -> Banner | None:
         return Banner(
             "stale",
             "Stale result.",
-            f"The design has changed since {run.solver_label} run {run.run_id}. "
+            f"The design has changed since this {run.solver_label} run. "
             "The surface is drawn grey; its values are not current.",
             f"Re-run {run.solver_label}",
             run.solver,
