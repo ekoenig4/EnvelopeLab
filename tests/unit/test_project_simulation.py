@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 import yaml
 
 from envelopelab.materials import FabricLibraryRepository
 from envelopelab.project import edits
-from envelopelab.project.gore_design import editable_outline, panel_rows
+from envelopelab.project.gore_design import design_profile, editable_outline, panel_rows
 from envelopelab.project.session import ProjectSession
 from envelopelab.project.simulation import (
     BuildError,
@@ -95,6 +96,19 @@ def test_preview_run_record(tmp_path: Path) -> None:
     assert s.run_status(record) == "current"
     # Warp/weft resultants are kept, so the 3D view can colour by factor of safety.
     assert arrays["fabric_resultants"].shape == (record.n_elements, 3)
+    # Deviation from the design: at the widest solved node the envelope lies outside the
+    # designed equator by half the width difference (hand calculation from the record).
+    from envelopelab.project.run_fields import run_fields
+
+    dev = run_fields(arrays, built.model, s.design)["deviation"].values
+    assert dev.shape == (record.n_nodes,) and np.isfinite(dev).all()
+    p = arrays["positions"]
+    widest = int(np.argmax(np.hypot(p[:, 0], p[:, 1])))
+    profile = design_profile(s.design)
+    design_radius = float(profile.radius_at(np.linspace(0.0, profile.meridian_length, 2000)).max())
+    expected = float(np.hypot(p[widest, 0], p[widest, 1])) - design_radius
+    assert dev[widest] == pytest.approx(expected, abs=0.005)
+    assert dev[widest] > 0.0  # bulges outside
 
 
 def test_calculix_final_residual_is_the_last_out_of_balance() -> None:

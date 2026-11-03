@@ -20,6 +20,7 @@ from collections.abc import Mapping
 
 import numpy as np
 
+from envelopelab.design.model import DesignDocument
 from envelopelab.solvers.model import SolverModel
 from envelopelab.solvers.results import ResultField, triangle_factors_of_safety
 
@@ -33,6 +34,7 @@ FIELD_LABELS = {
     "n_weft": "Weft resultant [N/m]",
     "wrinkle_state": "Wrinkling (0 taut, 1 wrinkled, 2 slack) [-]",
     "displacement": "Displacement from the as-sewn shape [m]",
+    "deviation": "Deviation from design, + outside [m]",
 }
 #: Fields that are factors of safety (a lower value is worse; a limit applies).
 SAFETY_FIELDS = ("fos_warp", "fos_weft")
@@ -43,7 +45,9 @@ def _model_matches(arrays: Mapping[str, np.ndarray], model: SolverModel | None) 
 
 
 def run_fields(
-    arrays: Mapping[str, np.ndarray], model: SolverModel | None = None
+    arrays: Mapping[str, np.ndarray],
+    model: SolverModel | None = None,
+    design: DesignDocument | None = None,
 ) -> dict[str, ResultField]:
     """The scalar fields that can be shown for a run.
 
@@ -57,13 +61,17 @@ def run_fields(
         The solved model of the run, for the zone strengths of the factor of safety. Pass
         it only when the run is current (solved from the same design state); a model with
         another number of triangles is ignored.
+    design : DesignDocument, optional
+        The design the run was solved from, for the deviation from it
+        (:func:`envelopelab.project.deviation.envelope_deviation`). Pass it only when the
+        run is current.
 
     Returns
     -------
     dict of str to ResultField
         Keys of :data:`FIELD_LABELS` that the arrays allow, in that order. Units:
-        ``displacement`` m (per node), resultants N/m, factors of safety and wrinkle state
-        dimensionless (per triangle).
+        ``displacement`` and ``deviation`` m (per node), resultants N/m, factors of safety
+        and wrinkle state dimensionless (per triangle).
     """
     out: dict[str, ResultField] = {}
     fabric = arrays.get("fabric_resultants")
@@ -108,17 +116,30 @@ def run_fields(
             "m",
             "displacement from the initial (as-sewn) positions",
         )
+    if design is not None and design.gores is not None and "positions" in arrays:
+        from envelopelab.project.deviation import envelope_deviation
+
+        out["deviation"] = ResultField(
+            "deviation",
+            "node",
+            envelope_deviation(design, np.asarray(arrays["positions"])),
+            "m",
+            "normal distance from the designed surface: + outside, - inside",
+        )
     return out
 
 
 def missing_fields(
-    arrays: Mapping[str, np.ndarray], model: SolverModel | None = None, solver: str = ""
+    arrays: Mapping[str, np.ndarray],
+    model: SolverModel | None = None,
+    solver: str = "",
+    design: DesignDocument | None = None,
 ) -> dict[str, str]:
     """Fields of :data:`FIELD_LABELS` that :func:`run_fields` leaves out, and why.
 
     Parameters
     ----------
-    arrays, model
+    arrays, model, design
         As for :func:`run_fields`.
     solver : str
         The run's solver id (``envelopelab-preview`` or ``calculix``), for the reason.
@@ -128,7 +149,9 @@ def missing_fields(
     dict of str to str
         Field key to a one-line reason.
     """
-    shown = run_fields(arrays, model)
+    shown = set(run_fields(arrays, model))  # without the deviation: it is not cheap
+    if design is not None and design.gores is not None and "positions" in arrays:
+        shown.add("deviation")
     if "fabric_resultants" not in arrays:
         why_fabric = (
             "CalculiX does not report warp/weft resultants"
@@ -145,6 +168,8 @@ def missing_fields(
             reasons[key] = why_fabric or "only for a current run (zone strengths of its model)"
         elif key in ("n_warp", "n_weft"):
             reasons[key] = why_fabric
+        elif key == "deviation":
+            reasons[key] = "only for a current run (the design it was solved from)"
         elif key == "wrinkle_state":
             reasons[key] = "the solver did not report a wrinkle state"
         else:

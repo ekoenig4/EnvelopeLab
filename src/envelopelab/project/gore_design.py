@@ -1795,6 +1795,39 @@ def envelope_marks(
     return out
 
 
+def display_stations(
+    design: DesignDocument, per_row: int = 8
+) -> tuple[FloatArray, list[int], list[float]]:
+    """Tape stations of :func:`display_surface`: its point ``i * m + j`` (``m`` = gores x
+    ``per_gore``) lies at station ``i``.
+
+    Parameters
+    ----------
+    design : DesignDocument
+        Gore design.
+    per_row : int
+        Segments along the tape in each row.
+
+    Returns
+    -------
+    (ndarray, list of int, list of float)
+        Tape arc length of every station, m (mouth first); the row index of every segment
+        between station ``i`` and ``i + 1``; and the row boundaries along the tape, m.
+    """
+    assert design.gores is not None
+    length = design_profile(design).meridian_length
+    bounds = [0.0]
+    for row in design.gores.panel_rows:
+        bounds.append(min(bounds[-1] + row.finished_height, length))
+    stations = [0.0]
+    s_row: list[int] = []
+    for i, (s0, s1) in enumerate(zip(bounds[:-1], bounds[1:], strict=True)):
+        if s1 > s0:
+            stations += list(np.linspace(s0, s1, per_row + 1)[1:])
+            s_row += [i] * per_row
+    return np.array(stations), s_row, bounds
+
+
 def display_surface(design: DesignDocument, per_gore: int = 6, per_row: int = 8) -> DisplaySurface:
     """Display tessellation of a gore design (see :class:`DisplaySurface`).
 
@@ -1816,16 +1849,7 @@ def display_surface(design: DesignDocument, per_gore: int = 6, per_row: int = 8)
     profile = design_profile(design)
     n = design.gores.count
     length = profile.meridian_length
-    bounds = [0.0]
-    for row in design.gores.panel_rows:
-        bounds.append(min(bounds[-1] + row.finished_height, length))
-    stations = [0.0]
-    s_row: list[int] = []
-    for i, (s0, s1) in enumerate(zip(bounds[:-1], bounds[1:], strict=True)):
-        if s1 > s0:
-            stations += list(np.linspace(s0, s1, per_row + 1)[1:])
-            s_row += [i] * per_row
-    s = np.array(stations)
+    s, s_row, bounds = display_stations(design, per_row)
     r, z = profile.radius_at(s), profile.height_at(s)
     width_model = design_width_model(design)
     m = n * per_gore

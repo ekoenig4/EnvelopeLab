@@ -96,13 +96,14 @@ def test_run_fields_of_a_current_preview_run(solved: tuple[SolverModel, SolveRes
     model, result = solved
     arrays = _arrays(result, model)
     fields = run_fields(arrays, model)
-    assert list(fields) == list(FIELD_LABELS)  # every field, in display order
+    # Every field but the deviation (it needs the design), in display order.
+    assert list(fields) == [k for k in FIELD_LABELS if k != "deviation"]
     assert fields["displacement"].location == "node"
     assert len(fields["displacement"].values) == len(model.positions)
     for key in ("fos_warp", "n1", "n_weft", "wrinkle_state"):
         assert len(fields[key].values) == len(model.triangles)
     assert fields["n1"].unit == "N/m" and fields["fos_warp"].unit == "-"
-    assert missing_fields(arrays, model) == {}
+    assert set(missing_fields(arrays, model)) == {"deviation"}
 
 
 def test_fos_is_left_out_without_a_matching_model_or_resultants(
