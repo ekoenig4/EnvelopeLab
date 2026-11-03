@@ -16,13 +16,17 @@ every edge is sewn to (the rim to the envelope line with its mark numbers, each 
 the neighbouring piece, the top to the tip disc or the apex), and each envelope row says
 which of its gores carry a marking sheet or a feed hole.
 
-Each sheet is written as a DXF file in millimetres (``$INSUNITS`` = 4) and as one or more
-pages of ``pattern.pdf``, whose pages are as wide as the fabric roll; a sheet wider than
-the roll is split into strips of the roll width. ``index.json`` lists every file with
-its piece, cut count, fabric and finished size, and the pairs of edges that are sewn
-together. :func:`envelopelab.export.qa.check_pack` checks a pack against AGENTS.md §6.6.
+Each sheet is written as a DXF file in millimetres (``$INSUNITS`` = 4) in the pack's
+``cad/`` folder, and at 1:1 on the template PDFs at the top of the pack
+(:mod:`envelopelab.export.templates`: grouped as a shop cuts them, each page as large
+as its piece with one side no longer than the fabric roll). ``cad/index.json`` lists
+every file with its piece, cut count, fabric and finished size, the template pages, and
+the pairs of edges that are sewn together. :func:`envelopelab.export.qa.check_pack` checks
+a pack against AGENTS.md §6.6.
 
-From format 2 a pack can also hold *documents* (:mod:`envelopelab.export.documents`):
+Format 3 moved the DXFs and the index into ``cad/`` and replaced ``pattern.pdf`` (roll-wide
+pages) by the template files (ADR-0037). A pack can also hold *documents*
+(:mod:`envelopelab.export.documents`):
 a cover and index, a spec summary, a cut list, a rigging sheet, a sewing schedule and a
 self-contained 3D view (:mod:`envelopelab.export.viewer`), chosen with
 :class:`PackExtras`. ``index.json`` lists them under ``documents`` with the export's
@@ -43,7 +47,6 @@ generated from the same values that draw the geometry, never typed.
 from __future__ import annotations
 
 import json
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -53,7 +56,6 @@ import numpy as np
 from ezdxf.enums import TextEntityAlignment
 
 from envelopelab.geometry.polygon import offset_polygon
-from envelopelab.report.pdf import PdfCanvas
 from envelopelab.solvers.membrane import FloatArray
 
 if TYPE_CHECKING:
@@ -63,9 +65,9 @@ if TYPE_CHECKING:
 
 MM = 1000.0  # mm per m
 PT_PER_M = 72.0 / 0.0254  # PDF points per m
-PACK_FORMAT = "envelopelab-build-pack/2"
+PACK_FORMAT = "envelopelab-build-pack/3"
+CAD_DIR = "cad"
 INDEX = "index.json"
-PDF_NAME = "pattern.pdf"
 DEFAULT_ROLL_WIDTH = 60 * 0.0254  # m (60 in roll, AGENTS.md example)
 SEWN_EDGE_TOLERANCE = 0.003  # m (AGENTS.md §6.6 default; source: assumed)
 PDF_MARGIN = 0.02  # m round each page's content
@@ -750,109 +752,6 @@ def write_dxf(sheet: Sheet, path: str | Path) -> Path:
     return target
 
 
-def _strips(sheet: Sheet, roll_width: float) -> list[tuple[float, float]]:
-    """x ranges (m) of the roll-width strips covering a sheet, with the page margins."""
-    lo = float(sheet.cut[:, 0].min()) - PDF_MARGIN
-    hi = float(sheet.cut[:, 0].max()) + PDF_MARGIN
-    usable = roll_width
-    count = max(1, math.ceil((hi - lo) / usable - 1e-9))
-    return [(lo + k * usable, lo + (k + 1) * usable) for k in range(count)]
-
-
-def write_pdf(sheets: Sequence[Sheet], path: str | Path, roll_width: float) -> list[int]:
-    """Write all sheets at 1:1 on pages as wide as the roll.
-
-    Parameters
-    ----------
-    sheets : sequence of Sheet
-        Sheets in m.
-    path : str or Path
-        Output PDF.
-    roll_width : float
-        Fabric roll width, m.
-
-    Returns
-    -------
-    list of int
-        Number of pages (strips) of each sheet.
-    """
-    page_w = roll_width * PT_PER_M
-    canvas: PdfCanvas | None = None
-    counts = []
-    for sheet in sheets:
-        strips = _strips(sheet, roll_width)
-        counts.append(len(strips))
-        y_lo = float(sheet.cut[:, 1].min()) - 0.12
-        y_hi = float(sheet.cut[:, 1].max()) + 0.18
-        size = (page_w, (y_hi - y_lo) * PT_PER_M)
-        for k, (x_lo, _) in enumerate(strips):
-            if canvas is None:
-                canvas = PdfCanvas(size)
-            else:
-                canvas.new_page(size)
-
-            def p(
-                x: float, y: float, x_lo: float = x_lo, y_lo: float = y_lo
-            ) -> tuple[float, float]:
-                return ((x - x_lo) * PT_PER_M, (y - y_lo) * PT_PER_M)
-
-            canvas.polygon([p(x, y) for x, y in sheet.cut], stroke=(0, 0, 0), width=0.8)
-            canvas.polygon([p(x, y) for x, y in sheet.finished], stroke=(0.1, 0.3, 0.8), width=0.5)
-            for line in sheet.lines:
-                q = [p(x, y) for x, y in line]
-                for a, b in zip(q[:-1], q[1:], strict=True):
-                    canvas.line(*a, *b, color=(0.8, 0.1, 0.1), width=0.8)
-            ang = np.linspace(0.0, 2 * math.pi, 73)
-            for x, y, r in sheet.holes:
-                canvas.polygon(
-                    [p(x + r * math.cos(t), y + r * math.sin(t)) for t in ang],
-                    stroke=(0.8, 0.1, 0.1),
-                )
-            for x, y, r in sheet.hole_cuts:
-                if r > 0.0:
-                    canvas.polygon(
-                        [p(x + r * math.cos(t), y + r * math.sin(t)) for t in ang],
-                        stroke=(0.0, 0.0, 0.0),
-                    )
-            for seg in sheet.ticks:
-                (ax, ay), (bx, by) = (p(float(u), float(v)) for u, v in seg)
-                canvas.line(ax, ay, bx, by, color=(0.8, 0.1, 0.1), width=0.8)
-            for x, y, text in sheet.texts:  # centred on their point (Helvetica ~0.52 em)
-                tx, ty = p(x, y)
-                canvas.text(tx - 0.26 * 10 * len(text), ty - 3.5, text, size=10)
-            for x, y, text in sheet.marks:
-                cx, cy = p(x, y)
-                canvas.line(cx - 8, cy, cx + 8, cy, width=0.8)
-                canvas.line(cx, cy - 8, cx, cy + 8, width=0.8)
-                canvas.text(cx + 6, cy + 6, text, size=10)
-            hx, hy = p(float(sheet.cut[:, 0].min()), float(sheet.cut[:, 1].max()) + 0.06)
-            strip = f"  [strip {k + 1} of {len(strips)}]" if len(strips) > 1 else ""
-            canvas.text(max(hx, 10.0), hy, sheet.header() + strip, size=12, bold=True)
-            extra = ([sheet.note] if sheet.note else []) + sheet.notes
-            for j, extra_line in enumerate(extra):
-                canvas.text(max(hx, 10.0), hy + 16 * (j + 1), extra_line, size=10)
-            # Calibration line at the left of every page: its label comes from the same
-            # length and tick that draw it; the comment lets the QA find and measure it.
-            length, tick = calibration(min(roll_width - 2 * PDF_MARGIN, 0.5))
-            x0 = PDF_MARGIN * PT_PER_M
-            y0 = 0.05 * PT_PER_M
-            canvas.comment(f"CAL {length * MM:.0f} {tick * MM:.0f}")
-            canvas.line(x0, y0, x0 + length * PT_PER_M, y0, width=1.0)
-            for j in range(int(round(length / tick)) + 1):
-                xt = x0 + j * tick * PT_PER_M
-                canvas.line(xt, y0, xt, y0 + 10, width=0.6)
-            canvas.text(x0, y0 - 14, calibration_label(length, tick), size=10)
-    if canvas is None:
-        raise BuildPackError("no sheets to write")
-    canvas.save(path)
-    return counts
-
-
-# --------------------------------------------------------------------------------------
-# Pack
-# --------------------------------------------------------------------------------------
-
-
 def write_pack(
     sheets: Sequence[Sheet],
     out_dir: str | Path,
@@ -862,7 +761,9 @@ def write_pack(
     documents: Sequence[dict[str, str]] = (),
     provenance: dict[str, str] | None = None,
 ) -> Path:
-    """Write a build pack: one DXF per sheet, ``pattern.pdf`` and ``index.json``.
+    """Write a build pack: the 1:1 template PDFs at the top of ``out_dir``
+    (:mod:`envelopelab.export.templates`) and, in ``cad/``, one DXF per sheet and
+    ``index.json``.
 
     Parameters
     ----------
@@ -873,43 +774,74 @@ def write_pack(
     seam_pairs : sequence of SeamPair
         Edges sewn together (checked by the QA).
     roll_width : float
-        Fabric roll width, m (PDF page width).
+        Fabric roll width, m: one side of every template page is no longer.
     title : str
-        Pack title for the index.
+        Pack title (the design name; also the file-name prefix of the templates).
     documents : sequence of dict
-        Documents already written to ``out_dir`` (``file``, ``kind``, ``description``),
-        listed in the index.
+        Documents already written to ``out_dir`` (``file``, ``kind``, ``description``;
+        paths relative to ``out_dir``), listed in the index.
     provenance : dict, optional
         Where the pack comes from (:class:`envelopelab.export.documents.Provenance`).
 
     Returns
     -------
     Path
-        The index file.
+        The index file (``cad/index.json``).
     """
+    from envelopelab.export.templates import TemplateFile, template_files, write_template_pdf
+
     names = [s.name for s in sheets]
     if len(set(names)) != len(names):
         raise BuildPackError("sheet names must be unique")
     if roll_width <= 2 * PDF_MARGIN:
         raise BuildPackError("roll width must exceed the page margins")
+    if not sheets:
+        raise BuildPackError("no sheets to write")
     out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
+    cad = out / CAD_DIR
+    cad.mkdir(parents=True, exist_ok=True)
     entries: list[dict[str, Any]] = []
     for sheet in sheets:
-        write_dxf(sheet, out / f"{sheet.name}.dxf")
-    pages = write_pdf(sheets, out / PDF_NAME, roll_width)
-    for sheet, n_pages in zip(sheets, pages, strict=True):
+        write_dxf(sheet, cad / f"{sheet.name}.dxf")
         w, h = sheet.finished_size
         entries.append(
             {
-                "file": f"{sheet.name}.dxf",
+                "file": f"{CAD_DIR}/{sheet.name}.dxf",
                 "piece": sheet.piece,
                 "kind": sheet.kind,
                 "cut_count": sheet.cut_count,
                 "fabric": sheet.fabric,
                 "finished_width_mm": round(w * MM, 3),
                 "finished_height_mm": round(h * MM, 3),
-                "pdf_pages": n_pages,
+            }
+        )
+    files = template_files(title, sheets)
+    grouped = [page for f in files if f.grouped for page in f.pages]
+    if len(grouped) > 1 and sum(f.grouped for f in files) > 1:
+        from envelopelab.export.templates import slug
+
+        files.append(
+            TemplateFile(
+                f"{slug(title)}-panels-grouped.pdf", "every paired panel sheet in one file", grouped
+            )
+        )
+    templates = []
+    for tfile in files:
+        pages = write_template_pdf(tfile, out / tfile.name, roll_width)
+        templates.append(
+            {
+                "file": tfile.name,
+                "description": tfile.description,
+                "pages": [
+                    {
+                        "sheet": sh,
+                        "band": int(b),
+                        "bands": int(n),
+                        "turned": t == "90",
+                        "markings": [] if over == "-" else over.split(","),
+                    }
+                    for _page, sh, b, n, t, over in (line.split(" ") for line in pages)
+                ],
             }
         )
     index = {
@@ -917,21 +849,21 @@ def write_pack(
         "title": title,
         "units": "mm",
         "roll_width_mm": round(roll_width * MM, 3),
-        "pdf": PDF_NAME,
         "provenance": provenance or {},
+        "templates": templates,
         "documents": list(documents),
         "sheets": entries,
         "seam_pairs": [
             {
-                "a": [{"file": f"{n}.dxf", "edge": e} for n, e in pair.a],
-                "b": [{"file": f"{n}.dxf", "edge": e} for n, e in pair.b],
+                "a": [{"file": f"{CAD_DIR}/{n}.dxf", "edge": e} for n, e in pair.a],
+                "b": [{"file": f"{CAD_DIR}/{n}.dxf", "edge": e} for n, e in pair.b],
                 "tolerance_mm": SEWN_EDGE_TOLERANCE * MM,
                 "ease_mm": round(pair.ease * MM, 3),
             }
             for pair in seam_pairs
         ],
     }
-    path = out / INDEX
+    path = cad / INDEX
     path.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
     return path
 
@@ -1084,9 +1016,12 @@ def write_documents(
     if "cover" in extras.include:
         files = [(docs.COVER, docs.DOCUMENTS["cover"][1])]
         files += [(e["file"], e["description"]) for e in entries]
-        files += [(PDF_NAME, "every sheet at 1:1 on roll-wide pages")]
-        files += [(f"{s.name}.dxf", s.header()) for s in sheets]
-        files += [(INDEX, "machine-readable index of every file")]
+        from envelopelab.export.templates import template_files
+
+        files += [
+            (t.name, f"1:1 - {t.description}") for t in template_files(design.meta.name, sheets)
+        ]
+        files += [(f"{CAD_DIR}/", "one DXF per piece (mm) and index.json, for CAD and the QA")]
         cover = docs.write_cover(design, outputs, files, out, prov, extras.status)
         entries.insert(
             0, {"file": cover.name, "kind": "cover", "description": docs.DOCUMENTS["cover"][1]}

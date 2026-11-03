@@ -1,23 +1,52 @@
 # Build pack
 
 A build pack is a directory written by `envelopelab.export.build_pack.export_build_pack`
-(or `write_pack`). It holds everything needed to cut and mark the cloth at 1:1.
+(or `write_pack`). It holds everything needed to cut and mark the cloth at 1:1. From
+format 3 (`envelopelab-build-pack/3`, ADR-0037) its top level is laid out as a shop
+works, with every file named after the design (`<slug>` = the design name in lower
+case, words joined by hyphens), and the machine-readable files are in `cad/`.
+
+**1:1 templates** (`envelopelab.export.templates`), at the top level:
 
 | File | Content |
 |---|---|
-| `envelope-row-<R>.dxf` | Envelope row panel `R`, cut once per gore |
-| `parachute-panel.dxf` | Parachute radial panel, cut once per radial panel; bottom = the parachute edge |
-| `parachute-centre.dxf` | Parachute centre panel (a circle), cut once; only when the parachute has one |
-| `<shape>-G<k>.dxf`, `<shape>-P<k>.dxf` | Skin gore or panel `k` of a special shape |
-| `<shape>-TIP.dxf` | Flat tip disc of a tube or revolved shape |
-| `<shape>-mark-G<g>-<R>.dxf` | Marking sheet: envelope panel (gore `g`, row `R`) with the shape's footprint line, match marks and feed hole |
-| `pattern.pdf` | Every sheet at 1:1 on pages as wide as the fabric roll; a sheet wider than the roll is split into numbered strips |
-| `index.json` | The index (below); it lists every other file |
+| `<slug>-panels-<R1>-<R2>.pdf` | Envelope rows without shape markings, two to a file (an odd one out joins the file before it: `-panels-O-P-Q.pdf`), one panel per page |
+| `<slug>-panel-<R>.pdf` | A row that carries a shape's markings, on its own sheet: the panel with every gore's footprint lines, match marks, side ticks and feed holes drawn over it, each labelled `<shape> - GORE <g>` |
+| `<slug>-panels-grouped.pdf` | Every paired file in one |
+| `<slug>-parachute-patterns.pdf` | Parachute radial panel and centre panel |
+| `<slug>-<shape>-patterns.pdf` | A special shape's skin pieces, one per page |
 
-From format 2 (`envelopelab-build-pack/2`) a pack can also hold **documents**, chosen when
-it is exported (**File ▸ Export build pack…**, or `PackExtras` in
-`envelopelab.export.build_pack.export_build_pack`). A pack with none is a format-1 pack
-with the two new index keys (empty).
+Every page is one piece at 1:1, as large as the piece plus 20 mm, with **one side no
+longer than the roll**: upright when its height fits the roll (the row height across the
+bolt, the gore width along the roll), turned a quarter when only its width fits, and
+split into numbered bands across the roll when neither does. A page shows the cut line
+(solid black), the sewn line (dotted grey), feature marks (red), the finished widths and
+height (blue), the panel letter, cut count, fabric and finished size, the warp (UP)
+arrow, a legend, the sheet header (as in the DXF) and two calibration lines, across and
+along the page, all inside the piece. Each page's stream starts with
+`%PAGE <sheet> <band> <bands> <turn> <marking sheets>`; each calibration line is preceded
+by `%CAL L T` (across) or `%CALV L T` (along), and its label (`must measure L mm at 1:1,
+ticks every T mm`, `along: …`) is generated from the same values.
+
+**`cad/`**:
+
+| File | Content |
+|---|---|
+| `cad/envelope-row-<R>.dxf` | Envelope row panel `R`, cut once per gore |
+| `cad/parachute-panel.dxf` | Parachute radial panel, cut once per radial panel; bottom = the parachute edge |
+| `cad/parachute-centre.dxf` | Parachute centre panel (a circle), cut once; only when the parachute has one |
+| `cad/<shape>-G<k>.dxf`, `cad/<shape>-P<k>.dxf` | Skin gore or panel `k` of a special shape |
+| `cad/<shape>-TIP.dxf` | Flat tip disc of a tube or revolved shape |
+| `cad/<shape>-mark-G<g>-<R>.dxf` | Marking sheet: envelope panel (gore `g`, row `R`) with the shape's footprint line, match marks and feed hole |
+| `cad/index.json` | The index (below); it lists every other file of the pack |
+
+Formats 1 and 2 had the DXFs and `index.json` at the top and `pattern.pdf` (every sheet
+on pages exactly as wide as the roll) instead of the templates; the QA still reads them.
+
+A pack can also hold **documents** (since format 2), chosen when it is exported
+(**File ▸ Export build pack…**, or `PackExtras` in
+`envelopelab.export.build_pack.export_build_pack`); a pack with none has empty
+`documents` and `provenance` keys.
 
 | File | Content |
 |---|---|
@@ -79,28 +108,31 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
 
 ```json
 {
-  "format": "envelopelab-build-pack/2",
+  "format": "envelopelab-build-pack/3",
   "title": "design name",
   "units": "mm",
   "roll_width_mm": 1524.0,
-  "pdf": "pattern.pdf",
   "provenance": {"app_version": "0.1.0", "git_commit": "2753321…", "design_hash": "…",
                  "created": "2026-11-03T20:56:43+00:00", "project": "balloon.elproj"},
+  "templates": [
+    {"file": "sample-panels-A-B.pdf", "description": "panels A, B",
+     "pages": [{"sheet": "envelope-row-A", "band": 1, "bands": 1, "turned": false,
+                "markings": []}, "…"]}
+  ],
   "documents": [
     {"file": "00-cover.pdf", "kind": "cover", "description": "Cover and index: …"},
     {"file": "3d-view.html", "kind": "viewer", "description": "3D view of …"}
   ],
   "sheets": [
-    {"file": "ear-G1.dxf", "piece": "ear-G1", "kind": "skin piece", "cut_count": 1,
-     "fabric": "ripstop red", "finished_width_mm": 392.1, "finished_height_mm": 1855.0,
-     "pdf_pages": 1}
+    {"file": "cad/ear-G1.dxf", "piece": "ear-G1", "kind": "skin piece", "cut_count": 1,
+     "fabric": "ripstop red", "finished_width_mm": 392.1, "finished_height_mm": 1855.0}
   ],
   "seam_pairs": [
-    {"a": [{"file": "ear-G1.dxf", "edge": "right"}],
-     "b": [{"file": "ear-G2.dxf", "edge": "left"}],
+    {"a": [{"file": "cad/ear-G1.dxf", "edge": "right"}],
+     "b": [{"file": "cad/ear-G2.dxf", "edge": "left"}],
      "tolerance_mm": 3.0, "ease_mm": 0.0},
-    {"a": [{"file": "ear-G1.dxf", "edge": "rim"}, "…"],
-     "b": [{"file": "ear-mark-G3-D.dxf", "edge": "attach1"}],
+    {"a": [{"file": "cad/ear-G1.dxf", "edge": "rim"}, "…"],
+     "b": [{"file": "cad/ear-mark-G3-D.dxf", "edge": "attach1"}],
      "tolerance_mm": 3.0, "ease_mm": -5.677}
   ]
 }
@@ -118,8 +150,10 @@ marks (checked per mark interval when the shape is designed).
 
 `envelopelab.export.qa.check_pack` checks a pack from its files alone (AGENTS.md §6.6):
 the index and the directory list the same files; every DXF is in mm; every calibration
-line, in every DXF and on every PDF page, measures what its label says; every PDF page is
-as wide as the roll; every header matches the index and the drawn `SEW` outline; every
+line, in every DXF and on every template page (across and along), measures what its
+label says; every template page is listed with its sheet and has one side no longer than
+the roll (formats 1 and 2: every `pattern.pdf` page is as wide as the roll); every sheet
+is drawn on a template page (a marking sheet over its row's panel); every header matches the index and the drawn `SEW` outline; every
 document opens (PDFs have pages), the cut list lists every sheet with the index's cut
 count and fabric, and the 3D view loads nothing from outside the page and holds a scene
 with a surface and a status banner; and

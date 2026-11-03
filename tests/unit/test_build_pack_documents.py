@@ -71,13 +71,13 @@ def _copy(pack: Path, tmp_path: Path) -> Path:
 
 
 def _index(pack: Path) -> dict:  # type: ignore[type-arg]
-    return dict(json.loads((pack / "index.json").read_text(encoding="utf-8")))
+    return dict(json.loads((pack / "cad" / "index.json").read_text(encoding="utf-8")))
 
 
 def test_every_document_is_written_listed_and_passes_the_qa(pack: Path) -> None:
     assert check_pack(pack) == []
     index = _index(pack)
-    assert index["format"] == PACK_FORMAT == "envelopelab-build-pack/2"
+    assert index["format"] == PACK_FORMAT == "envelopelab-build-pack/3"
     files = {d["file"] for d in index["documents"]}
     expected = {f for names, _what in DOCUMENTS.values() for f in names}
     assert files == expected

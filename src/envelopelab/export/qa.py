@@ -3,6 +3,9 @@
 :func:`check_pack` reads a pack written by :mod:`envelopelab.export.build_pack` and checks:
 
 * every file in ``index.json`` exists and every file in the directory is listed;
+* format 3: every template page is listed with its sheet, has one side no longer than the
+  roll, and carries both calibration lines (across and along), each measuring what its
+  label says; every sheet is drawn on a template page;
 * every DXF declares millimetres (``$INSUNITS`` = 4);
 * every calibration line (DXF layer ``CAL`` and every PDF page) measures what its label
   says, measured from the drawn geometry, and the label was generated from the same
@@ -32,7 +35,7 @@ from typing import Any
 
 import numpy as np
 
-from envelopelab.export.build_pack import INDEX, PT_PER_M
+from envelopelab.export.build_pack import CAD_DIR, INDEX, PT_PER_M
 
 HEADER = re.compile(
     r"^(?P<piece>.+?) \| (?P<kind>.+?) \| cut (?P<cut>\d+) \| fabric (?P<fabric>.+?) \| "
@@ -166,14 +169,18 @@ def check_pack(out_dir: str | Path) -> list[QAFinding]:
     """
     root = Path(out_dir)
     findings: list[QAFinding] = []
-    index_path = root / INDEX
+    index_path = root / CAD_DIR / INDEX
+    if not index_path.is_file():
+        index_path = root / INDEX  # formats 1 and 2
     if not index_path.is_file():
         return [QAFinding(INDEX, "index", "index.json is missing")]
     index = json.loads(index_path.read_text(encoding="utf-8"))
     documents = index.get("documents", [])
-    listed = {s["file"] for s in index["sheets"]} | {index["pdf"]}
-    listed |= {d["file"] for d in documents}
-    present = {p.name for p in root.iterdir() if p.is_file() and p.name != INDEX}
+    templates = index.get("templates", [])
+    listed = {s["file"] for s in index["sheets"]} | ({index["pdf"]} if "pdf" in index else set())
+    listed |= {d["file"] for d in documents} | {t["file"] for t in templates}
+    own = index_path.relative_to(root).as_posix()
+    present = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()} - {own}
     findings += [QAFinding(f, "index", "listed but missing") for f in sorted(listed - present)]
     findings += [QAFinding(f, "index", "present but not listed") for f in sorted(present - listed)]
 
@@ -235,8 +242,9 @@ def check_pack(out_dir: str | Path) -> list[QAFinding]:
                 QAFinding(names, "seam", f"{a:.1f} mm against {other} {b:.1f} mm{planned}")
             )
 
-    pdf = root / index["pdf"]
-    if pdf.is_file():
+    findings += _check_templates(root, index, present)
+    pdf = root / index.get("pdf", "")
+    if "pdf" in index and pdf.is_file():
         roll_pt = index["roll_width_mm"] / 1000.0 * PT_PER_M
         pages = _pdf_pages(pdf)
         expected_pages = sum(int(s["pdf_pages"]) for s in index["sheets"])
@@ -258,6 +266,85 @@ def check_pack(out_dir: str | Path) -> list[QAFinding]:
     return findings
 
 
+def _page_boxes(path: Path) -> list[tuple[float, float, str]]:
+    """(width, height in pt, content stream) of every page of a PDF, in order."""
+    data = path.read_bytes()
+    objects = {
+        int(m.group(1)): m.group(2)
+        for m in re.finditer(rb"(\d+) 0 obj\n(.*?)\nendobj\n", data, re.S)
+    }
+    pages = []
+    for body in objects.values():
+        if b"/Type /Page " not in body:
+            continue
+        box = re.search(rb"/MediaBox \[0 0 ([\d.]+) ([\d.]+)\]", body)
+        content = re.search(rb"/Contents (\d+) 0 R", body)
+        if box is None or content is None:
+            continue
+        raw = re.search(rb"stream\n(.*)\nendstream", objects[int(content.group(1))], re.S)
+        text = zlib.decompress(raw.group(1)).decode("latin-1") if raw else ""
+        pages.append((float(box.group(1)), float(box.group(2)), text))
+    return pages
+
+
+CALV = re.compile(r"%CALV (\d+) (\d+)\n[^\n]*?([\d.]+) ([\d.]+) m ([\d.]+) ([\d.]+) l S")
+CALV_LABEL = re.compile(r"along: must measure (\d+) mm at 1:1, ticks every (\d+) mm")
+
+
+def _check_cal_vertical(name: str, page: int, content: str) -> list[QAFinding]:
+    m = CALV.search(content)
+    if m is None:
+        return [QAFinding(name, "calibration", f"page {page}: no calibration line along")]
+    drawn = (float(m.group(6)) - float(m.group(4))) / PT_PER_M * 1000.0
+    if abs(drawn - float(m.group(1))) > 0.05 * 1000.0 / PT_PER_M * 2 + CAL_TOLERANCE_MM:
+        return [
+            QAFinding(name, "calibration", f"page {page}: along {drawn:.2f} mm, label {m.group(1)}")
+        ]
+    label = CALV_LABEL.search(content)
+    if label is None or label.group(1) != m.group(1) or label.group(2) != m.group(2):
+        return [QAFinding(name, "calibration", f"page {page}: along label differs from the line")]
+    return []
+
+
+def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> list[QAFinding]:
+    """Template files (format 3): pages as listed, one side within the roll, both
+    calibration lines measured, every sheet drawn."""
+    findings: list[QAFinding] = []
+    templates = index.get("templates", [])
+    if not templates:
+        return findings
+    roll_pt = index["roll_width_mm"] / 1000.0 * PT_PER_M
+    drawn: set[str] = set()
+    for t in templates:
+        name = t["file"]
+        if name not in present:
+            continue
+        pages = _page_boxes(root / name)
+        if len(pages) != len(t["pages"]):
+            findings.append(
+                QAFinding(name, "template", f"{len(pages)} pages, index lists {len(t['pages'])}")
+            )
+        for k, ((w, h, content), entry) in enumerate(zip(pages, t["pages"], strict=False), 1):
+            want = f"%PAGE {entry['sheet']} {entry['band']} {entry['bands']} "
+            if want not in content:
+                findings.append(QAFinding(name, "template", f"page {k}: not {entry['sheet']}"))
+            drawn.add(entry["sheet"])
+            drawn.update(entry.get("markings", []))
+            if min(w, h) > roll_pt + 1.0:
+                findings.append(
+                    QAFinding(
+                        name, "page size", f"page {k}: {w:.0f} x {h:.0f} pt, roll {roll_pt:.0f} pt"
+                    )
+                )
+            findings += _check_cal_pdf(name, k, content)
+            findings += _check_cal_vertical(name, k, content)
+    for entry in index["sheets"]:
+        if Path(entry["file"]).stem not in drawn:
+            findings.append(QAFinding(entry["file"], "template", "on no template page"))
+    return findings
+
+
+#: A reference to a file or address outside the page (the 3D view must be self-contained).
 EXTERNAL = re.compile(
     r"""(?:src|href)\s*=\s*["']?(?:https?:|//|file:)|@import|url\(\s*["']?https?:""", re.I
 )

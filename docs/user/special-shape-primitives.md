@@ -334,12 +334,14 @@ The pack contains:
   numbers and the panels they lie on), each seam to the neighbouring piece, the top to
   the tip disc (cap) or the apex. The tip disc has a tick on its edge where every seam
   meets it, and each piece's name between the two ticks its top is sewn between;
-* `pattern.pdf`: every sheet at 1:1 on pages as wide as your fabric roll. A sheet wider
-  than the roll is split into numbered strips;
-* `index.json`: every file with its piece, cut count, fabric, finished size, and which
-  edges are sewn together.
+* the 1:1 templates: the envelope rows (a row that carries a shape on its own sheet, with
+  every gore's marks over the one panel, labelled by gore) and each shape's skin pieces
+  (`<name>-<shape>-patterns.pdf`, one piece per page), each page as large as its piece
+  with one side within your fabric roll;
+* `cad/`: one DXF per sheet and `index.json`, with every file, piece, cut count, fabric,
+  finished size, and which edges are sewn together.
 
-Before cutting, **measure the calibration line** on every printed or plotted sheet. It
+Before cutting, **measure both calibration lines** on every printed or plotted sheet. Each
 must measure what its label says (for example 500 mm with ticks every 100 mm). If it
 doesn't, the sheet was scaled when it was printed. The layers and the index are described in
 [Build pack](../formats/build-pack.md).

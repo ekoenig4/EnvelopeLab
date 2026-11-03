@@ -172,7 +172,7 @@ def cut_list(sheets: Sequence[Sheet]) -> Table:
         cut = _area(s.cut)
         table.rows.append(
             [
-                f"{s.name}.dxf",
+                f"cad/{s.name}.dxf",
                 s.piece,
                 s.kind,
                 str(s.cut_count),
@@ -714,8 +714,8 @@ def write_cover(
         doc.paragraph(f"- {line}")
     doc.heading("Before cutting")
     doc.paragraph(
-        "Print pattern.pdf at 100 % (no fit-to-page) and measure the calibration line on "
-        "every page: it must measure what its label says."
+        "Print every 1:1 template at 100 % (no fit-to-page) and measure both calibration "
+        "lines on every page: each must measure what its label says."
     )
     table = Table("Files", ["File", "What it is"])
     table.rows = [[name, what] for name, what in files]

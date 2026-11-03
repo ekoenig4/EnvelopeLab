@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: build pack format 3 (ADR-0037), laid out like a shop pack: the 1:1 templates
+  are named after the design and grouped (`<slug>-panels-A-B.pdf`, a row carrying a
+  shape's markings on its own `<slug>-panel-D.pdf` with every gore's marks over the one
+  panel, `-panels-grouped.pdf`, `-parachute-patterns.pdf`, `-<shape>-patterns.pdf`);
+  every page is as large as its piece with one side within the roll (no more taped
+  strips), with the panel letter, cut count, fabric, finished dimensions, warp arrow,
+  legend and calibration lines across and along. The per-piece DXFs and `index.json`
+  moved to `cad/`; `pattern.pdf` is gone. AGENTS.md §6.6 page-size rule changed to match.
 - Added: **File ▸ Export build pack…** with a dialog (folder, roll width, documents). The
   pack (format `envelopelab-build-pack/2`, ADR-0036) can now hold a cover and index
   (provenance, safety notice, every value tagged assumed, file list), a spec summary, a

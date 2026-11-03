@@ -37,7 +37,7 @@ INCH = 0.0254  # m
 class ExportPackDialog(QDialog):
     """Choose the folder, the fabric roll width and the documents of a build pack.
 
-    The cutting sheets (one DXF per piece, ``pattern.pdf`` and ``index.json``) are always
+    The 1:1 templates and ``cad/`` (one DXF per piece and ``index.json``) are always
     written; the documents are optional.
     """
 
@@ -58,13 +58,15 @@ class ExportPackDialog(QDialog):
         self.roll.setDecimals(1)
         self.roll.setSuffix(" in")
         self.roll.setValue(DEFAULT_ROLL_WIDTH / INCH)
-        self.roll.setToolTip("Fabric roll width: the width of every page of pattern.pdf")
+        self.roll.setToolTip("Fabric roll width: one side of every 1:1 page is no longer")
         form = QFormLayout()
         form.addRow("Folder", row)
         form.addRow("Roll width", self.roll)
         self.checks: dict[str, QCheckBox] = {}
         docs = QVBoxLayout()
-        always = QLabel("Always: one DXF per piece at 1:1 (mm), pattern.pdf, index.json")
+        always = QLabel(
+            "Always: the 1:1 panel and piece templates (PDF), cad/ (one DXF per piece, index.json)"
+        )
         always.setProperty("role", "muted")
         docs.addWidget(always)
         for key in DOCUMENTS:

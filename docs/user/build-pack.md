@@ -9,8 +9,10 @@ panel); the pack format is described in [Build pack](../formats/build-pack.md).
 
 * **Folder**: where the pack is written (created if needed; files of the same names are
   replaced). The last folder is remembered.
-* **Roll width**: the width of your fabric roll (default 60 in). Every page of
-  `pattern.pdf` is that wide; a piece wider than the roll is split into numbered strips.
+* **Roll width**: the width of your fabric roll (default 60 in). Every 1:1 page is as
+  large as its piece with one side no longer than the roll: the row height runs across
+  the bolt and the gore width along the roll. A piece larger than the roll both ways is
+  split into numbered bands across the roll.
 * **Include**: the documents (all ticked by default). The cutting sheets are always
   written.
 
@@ -22,7 +24,10 @@ it never leaves a shape out without saying so.
 | File | Use it for |
 |---|---|
 | `00-cover.pdf` | Start here: what the pack is, where it comes from (version, git commit, design hash, time), the safety notice, **every value tagged *assumed*** (check these against datasheets before building), the structural result, and the list of files |
-| `pattern.pdf`, `*.dxf` | Cutting: every piece at 1:1, with its calibration line, header (piece, cut count, fabric, finished size), grain, match marks and sewing directions |
+| `<name>-panels-A-B.pdf`, `<name>-panel-D.pdf`, … | Cutting the envelope: one panel per page at 1:1, two rows to a file; a row that carries a special shape on its own sheet with every gore's marks (labelled by gore) |
+| `<name>-panels-grouped.pdf` | The paired panel files in one, for printing in one go |
+| `<name>-parachute-patterns.pdf`, `<name>-<shape>-patterns.pdf` | Cutting the parachute and each special shape's skin pieces (one per page) |
+| `cad/` | One DXF per piece (mm) and `index.json`, for CAD programs and the automatic checks |
 | `cut-list.pdf` / `.csv` | Planning the fabric: pieces, cut counts, areas, fabric totals, tape lengths and thread |
 | `sewing-schedule.pdf` / `.csv` | Sewing: every seam in order with both edge lengths, how often it is sewn and a box to tick |
 | `rigging.pdf` / `.csv` | Making the lines: lengths, limit loads, strengths with their source, factors of safety (**FAILS** when below the requirement) |
@@ -30,8 +35,9 @@ it never leaves a shape out without saying so.
 | `3d-view.html` | Looking at it: open it in any browser, offline |
 | `index.json` | Programs: the machine-readable list of every file and seam |
 
-**Before cutting**, print `pattern.pdf` at 100 % (no *fit to page*) and measure the
-calibration line on every page: it must measure what its label says.
+**Before cutting**, print every 1:1 file at 100 % (never *fit to page*) and measure both
+calibration lines on every page (across and along): each must measure what its label
+says. Solid = cut, dotted = sew (finished), red = feature marks, blue = finished sizes.
 
 ## The 3D view page
 

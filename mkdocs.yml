@@ -87,6 +87,7 @@ nav:
       - ADR-0034: adr/ADR-0034-shape-mesh-size-from-a-study.md
       - ADR-0035: adr/ADR-0035-run-fabric-resultants.md
       - ADR-0036: adr/ADR-0036-build-pack-documents-and-3d-view.md
+      - ADR-0037: adr/ADR-0037-build-pack-shop-layout.md
 theme:
   name: material
 markdown_extensions:
