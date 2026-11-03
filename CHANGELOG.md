@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the envelope panels a special shape is sewn on (its footprint sew line, match
+  marks and feed holes) moved from the Patterns view to the Special shapes window, in a
+  new *Envelope panels* tab shown with the selected shape (opens zoomed on the marked
+  area; double click for the whole panels). The Patterns view now shows only the base
+  envelope, and its *Show special shapes* option is gone. Display only: the build pack's
+  marking sheets are unchanged.
 - Changed: the Validation / Warnings strip uses the shared design: count chips per
   severity (✕ errors, ▲ warnings, i notes, or ✓ no problems), the severity's symbol and
   colour on every finding, and *Show* filters for errors, warnings and notes (the counts

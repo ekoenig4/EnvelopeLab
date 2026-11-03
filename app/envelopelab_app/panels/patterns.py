@@ -5,12 +5,9 @@ any) at the bottom, the panel rows from the mouth up, and the parachute on top. 
 is drawn in its own panel coordinates (x across, y up from its finished bottom seam, m)
 inside a container item placed at its slot of the stack.
 
-With *Show special shapes* on, every envelope panel a special shape crosses or lies over
-follows as its own piece, gore by gore, as on the build pack's marking sheets
-(:func:`envelopelab.export.build_pack.primitive_sheets`): the footprint line the shape's
-rim is sewn on with ticks on the shape's side, the numbered match marks naming their skin
-pieces, and the feed holes at their cut and finished sizes; each row says which of its
-gores are marked.
+Only the base envelope is drawn here. The envelope panels a special shape is sewn on (its
+footprint line, match marks and feed holes) are shown with that shape, in the Special
+shapes window (*Envelope panels*, :mod:`envelopelab_app.marking_view`).
 
 Rows are drawn from the *last generated* patterns. When the design changed since then the
 view says so (a STALE banner, greyed rows) until the patterns are regenerated: it never
@@ -238,15 +235,6 @@ class PatternPanel(QWidget):
         self.edit_outline = QCheckBox("Edit outline (manual override)")
         self.edit_outline.toggled.connect(self._toggle_edit)
         toolbar.addWidget(self.edit_outline)
-        self.show_shapes = QCheckBox("Show special shapes")
-        self.show_shapes.setChecked(True)
-        self.show_shapes.setToolTip(
-            "Add the envelope panels each special shape is sewn on, gore by gore: the "
-            "footprint line, the match marks and the feed holes, as on the build pack's "
-            "marking sheets"
-        )
-        self.show_shapes.toggled.connect(lambda _on: self._draw())
-        toolbar.addWidget(self.show_shapes)
 
         form_box = QGroupBox("Selected row")
         form = QFormLayout(form_box)
@@ -474,20 +462,16 @@ class PatternPanel(QWidget):
             pieces.append(
                 _Piece(scoop.panel.cut_outline, -(scoop.panel.finished_height + GAP), draw_scoop)
             )
-        markings = self._shape_markings() if self.show_shapes.isChecked() else ([], {})
-        sheets, row_notes = markings
         for row in self.rows_by_letter().values():
             ann = session.patterns.row(row.label)
-            these = tuple(row_notes.get(row.label, []))
 
             def draw_row(
                 origin: QPointF,
                 row: PanelRow = row,
                 ann: RowPattern = ann,
-                notes: tuple[str, ...] = these,
             ) -> None:
                 self.view.offsets[row.label] = origin
-                container = self._in_container(
+                self._in_container(
                     origin,
                     partial(
                         self._draw_row,
@@ -499,130 +483,17 @@ class PatternPanel(QWidget):
                         design.gores.count if design.gores is not None else 0,
                     ),
                 )
-                if notes:
-                    short = [n.split(" (sheets ")[0].replace(" of this row", "") for n in notes]
-                    text = QGraphicsSimpleTextItem("\n".join(short), container)
-                    text.setToolTip("\n".join(notes))
-                    font = text.font()
-                    font.setPointSizeF(7.0)
-                    text.setFont(font)
-                    text.setBrush(QBrush(QColor("#c0392b")))
-                    text.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-                    text.setPos(-0.45 * row.bottom_width, -0.15 * row.finished_height)
 
             pieces.append(_Piece(row.cut_outline, y, draw_row))
             y += row.finished_height + GAP
         pieces += self._parachute_pieces(y, stale)
         if pieces:
             y = max(y, max(float(p.stacked_y + p.outline[:, 1].max()) for p in pieces) + GAP)
-        for sheet in sheets:
-            pieces.append(_Piece(sheet.cut, y, partial(self._draw_marking, sheet, stale)))
-            y += float(sheet.cut[:, 1].max() - sheet.cut[:, 1].min()) + GAP
         for piece, origin in zip(pieces, self._origins(pieces), strict=True):
             piece.draw(origin)
             self._grow(piece.outline, origin)
         if first:
             QTimer.singleShot(0, self.fit)
-
-    def _shape_markings(self) -> tuple[list[Any], dict[str, list[str]]]:
-        """Marking sheets of the placed special shapes, and per row which gores they mark
-        (:mod:`envelopelab.export.build_pack`; shapes still being placed are left out)."""
-        from envelopelab.export.build_pack import (
-            default_hole_hem,
-            primitive_sheets,
-            shape_row_notes,
-        )
-
-        session = self.controller.session
-        if session is None:
-            return [], {}
-        placed = []
-        for spec in session.state.shapes:
-            result = self.controller.shapes.result(spec.name)
-            if result is not None and result.design is not None:
-                placed.append(result.design)
-        hem, tape = default_hole_hem(session.design)
-        sheets = [
-            s
-            for d in placed
-            for s in primitive_sheets(d, "skin", None, hem, tape)
-            if s.kind == "marking"
-        ]
-        return sheets, shape_row_notes(placed)
-
-    def _draw_marking(self, sheet: Any, stale: bool, origin: QPointF) -> None:
-        """One envelope panel with a shape's markings (panel coordinates, m)."""
-        self._in_container(origin, partial(self._draw_marking_items, sheet, stale))
-
-    def _draw_marking_items(self, sheet: Any, stale: bool) -> None:
-        scene = self.view.scene()
-        grey = QColor("#9e9e9e")
-        red = grey if stale else QColor("#c0392b")
-        outline = QGraphicsPolygonItem(_polygon(sheet.finished, 0.0))
-        outline.setBrush(QBrush(QColor(200, 200, 200, 60) if stale else QColor("#fdf6e3")))
-        pen = QPen(grey if stale else QColor("#9467bd"), 1.5)
-        pen.setCosmetic(True)
-        outline.setPen(pen)
-        tip = "\n".join([sheet.piece, sheet.note, *sheet.notes, *(w for _, _, w in sheet.texts)])
-        outline.setToolTip(tip)
-        outline.setZValue(-1.0)  # under the markings (the container reorders its children)
-        scene.addItem(outline)
-
-        def path(points: np.ndarray, width: float, style: Qt.PenStyle) -> None:
-            item = QGraphicsPathItem()
-            p = QPainterPath(QPointF(float(points[0][0]), -float(points[0][1])))
-            for x, y in points[1:]:
-                p.lineTo(float(x), -float(y))
-            item.setPath(p)
-            line_pen = QPen(red, width, style)
-            line_pen.setCosmetic(True)
-            item.setPen(line_pen)
-            scene.addItem(item)
-
-        for line in sheet.lines:
-            path(line, 2.0, Qt.PenStyle.SolidLine)
-        for tick in sheet.ticks:
-            path(tick, 1.0, Qt.PenStyle.SolidLine)
-        for circles, style in (
-            (sheet.holes, Qt.PenStyle.SolidLine),
-            (sheet.hole_cuts, Qt.PenStyle.DashLine),
-        ):
-            for x, y, r in circles:
-                if r <= 0.0:
-                    continue
-                ring = QGraphicsEllipseItem(x - r, -y - r, 2 * r, 2 * r)
-                ring_pen = QPen(red, 1.0, style)
-                ring_pen.setCosmetic(True)
-                ring.setPen(ring_pen)
-                scene.addItem(ring)
-
-        def text(x: float, y: float, words: str, size: float = 6.5) -> None:
-            item = QGraphicsSimpleTextItem(words)
-            font = item.font()
-            font.setPointSizeF(size)
-            item.setFont(font)
-            item.setBrush(QBrush(red))
-            item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-            item.setPos(x, -y)
-            scene.addItem(item)
-
-        for x, y, words in sheet.marks:
-            path(np.array([[x - 0.02, y], [x + 0.02, y]]), 1.0, Qt.PenStyle.SolidLine)
-            path(np.array([[x, y - 0.02], [x, y + 0.02]]), 1.0, Qt.PenStyle.SolidLine)
-            text(x + 0.02, y + 0.02, words)
-        for (x, y, r), (_, _, rc) in zip(sheet.holes, sheet.hole_cuts, strict=True):
-            text(x - r, y + r + 0.03, f"hole: cut {2000 * rc:.0f} / finished {2000 * r:.0f} mm")
-        lo, hi = sheet.finished.min(axis=0), sheet.finished.max(axis=0)
-        # Short on the piece; the full directions are in the tooltip and on the sheets.
-        shape = sheet.note.removeprefix("mark ").removesuffix(" on this panel before assembly")
-        label = QGraphicsSimpleTextItem(f"{sheet.piece.upper()}: {shape}")
-        label.setToolTip(tip)
-        font = label.font()
-        font.setPointSizeF(7.5)
-        label.setFont(font)
-        label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-        label.setPos(float(lo[0]), -float(hi[1]) - 0.05)
-        scene.addItem(label)
 
     def _origins(self, pieces: list[_Piece]) -> list[QPointF]:
         """Scene origin of every piece: stacked as the assembled gore, or side by side on

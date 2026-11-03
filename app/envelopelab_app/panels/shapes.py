@@ -81,6 +81,7 @@ from envelopelab.project.shapes import (
     shape_fabrics,
 )
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.marking_view import MarkingView
 from envelopelab_app.refresh import Refresher
 
 FAIL_COLOR = "#b00020"
@@ -512,6 +513,28 @@ class ShapesPanel(QWidget):
         pieces_split.setStretchFactor(0, 3)
         pieces_split.setStretchFactor(1, 1)
         self.result_tabs.addTab(pieces_split, "Cut pieces")
+        # The envelope panels the shape is sewn on (its marking sheets); the Patterns
+        # view shows only the base envelope.
+        self.markings = MarkingView()
+        self.markings.setObjectName("shapeMarkings")
+        self.marking_notes = QLabel()
+        self.marking_notes.setObjectName("shapeMarkingNotes")
+        self.marking_notes.setWordWrap(True)
+        self.marking_notes.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        envelope_panels = QWidget()
+        envelope_layout = QVBoxLayout(envelope_panels)
+        envelope_layout.setContentsMargins(0, 0, 0, 0)
+        caption = QLabel(
+            "Envelope panels this shape is sewn on, as on the build pack's marking "
+            "sheets: footprint line (ticks on the shape's side), numbered match marks, "
+            "feed holes cut (dashed) and finished (solid). Wheel: zoom; double click: marked "
+            "area / whole panel."
+        )
+        caption.setWordWrap(True)
+        envelope_layout.addWidget(caption)
+        envelope_layout.addWidget(self.markings, 1)
+        envelope_layout.addWidget(self.marking_notes)
+        self.result_tabs.addTab(envelope_panels, "Envelope panels")
         self.result_tabs.addTab(self.checks, "Checks")
         self.result_tabs.addTab(self.attachment, "Attachment")
 
@@ -1135,6 +1158,8 @@ class ShapesPanel(QWidget):
         self.pieces.clear()
         self.attachment.clear()
         self.preview.set_pieces([])
+        self.markings.set_sheets([])
+        self.marking_notes.clear()
         if spec is None:
             text = "No special shapes. Add a dome, a tube, a revolved profile or a mesh."
             self.status.setText(text if self.controller.is_gore else "")
@@ -1202,6 +1227,35 @@ class ShapesPanel(QWidget):
             for column in range(tree.columnCount()):
                 tree.resizeColumnToContents(column)
         self.preview.set_pieces(design.pieces)
+        self._show_markings(design)
+
+    def _show_markings(self, design: Any) -> None:
+        """The envelope panels ``design`` (a placed shape) is sewn on, and per row which
+        gores they are (:mod:`envelopelab.export.build_pack`)."""
+        from envelopelab.export.build_pack import (
+            default_hole_hem,
+            primitive_sheets,
+            shape_row_notes,
+        )
+
+        session = self.controller.session
+        if session is None:
+            return
+        hem, tape = default_hole_hem(session.design)
+        sheets = [
+            s for s in primitive_sheets(design, "skin", None, hem, tape) if s.kind == "marking"
+        ]
+        stale = self.controller.artifact_status("patterns") == "stale"
+        self.markings.set_sheets(sheets, stale)
+        notes = [
+            f"Row {row}: {note}"
+            for row, row_notes in shape_row_notes([design]).items()
+            for note in row_notes
+        ]
+        lines = [f"{len(sheets)} envelope panel(s) to mark."] if sheets else []
+        if stale:
+            lines.append("Patterns are STALE: regenerate them before marking (shown greyed).")
+        self.marking_notes.setText("\n".join(lines + notes))
 
     def _show_simulation(self, spec: ShapeSpec | None) -> None:
         self.sim_tree.clear()

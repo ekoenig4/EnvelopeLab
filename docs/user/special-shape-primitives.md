@@ -35,7 +35,7 @@ both come back when you change mode. The screen has three columns:
 * in the middle, the selected shape's editor in tabs: **Placement & size**, **Profile**
   (revolved shapes only), **Feed holes & cap** and **Simulation**;
 * on the right, what the shape gives, in tabs: **Cut pieces** (a drawing and a table),
-  **Checks** and **Attachment**.
+  **Envelope panels** (where it is sewn on the envelope), **Checks** and **Attachment**.
 
 1. **Add shape** ▸ **Dome**, **Tube** or **Revolved profile** adds a shape sized from your
    envelope on gore 1, about halfway up the tape. **Import mesh (OBJ/STL/PLY)…** adds a
@@ -62,8 +62,18 @@ both come back when you change mode. The screen has three columns:
    shows the **Cut pieces**: a drawing of every piece, named under it (finished line
    solid, cut line dashed, the rim sewn to the envelope in red; the mouse wheel zooms,
    dragging pans, a double click fits them all again), and a table of their sizes and
-   areas; the **Checks** of the pattern; and the **Attachment** lines on each envelope
-   panel. The **3D View** shows the shape on the
+   areas; the **Envelope panels** the shape is sewn on; the **Checks** of the pattern;
+   and the **Attachment** lines on each envelope panel.
+
+   **Envelope panels** shows, for the selected shape only, every envelope panel it crosses
+   or lies over, gore by gore (for example *GORE 3 ROW D: ear*), as on the build pack's
+   marking sheets: the footprint line the shape's rim is sewn on, with short ticks on the
+   shape's side; the numbered match marks, each naming the skin piece with the same
+   number; and every feed hole, cut (dashed) and finished (solid), with its sizes. It opens
+   zoomed on the marked area; a double click switches to the whole panels and back, and
+   the mouse wheel zooms. Below it, each row says which of its gores are marked. Hover a
+   panel for the full sewing directions. While the patterns are STALE the panels are
+   greyed and the tab says so. The **Patterns** view shows only the base envelope. The **3D View** shows the shape on the
    envelope as it is sewn: each gore or panel in the colour of the skin fabric (every
    second one darker, like the envelope's gores), the seams between them and the rim
    sewn to the envelope drawn as dark lines.

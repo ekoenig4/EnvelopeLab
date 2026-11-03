@@ -371,9 +371,10 @@ def test_a_calculix_run_verifies_the_special_shapes(gore_window: MainWindow, qtb
         assert any(f.severity == "error" for f in record.findings)
 
 
-def test_pattern_view_shows_where_each_shape_is_sewn(gore_window: MainWindow) -> None:
-    """Every panel a shape is sewn on follows the rows as its own piece, with the footprint
-    line, the match marks and the feed hole; the rows say which gores are marked."""
+def test_shape_window_shows_where_each_shape_is_sewn(gore_window: MainWindow) -> None:
+    """The Special shapes window shows, with the selected shape, every envelope panel it is
+    sewn on (footprint line, match marks, feed hole) and which gores of each row those are;
+    the Patterns view shows only the base envelope."""
     from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsSimpleTextItem
 
     from envelopelab.export.build_pack import primitive_sheets
@@ -383,27 +384,33 @@ def test_pattern_view_shows_where_each_shape_is_sewn(gore_window: MainWindow) ->
     placed = panel.placed("Dome")
     assert placed is not None
     w.controller.regenerate_patterns()
-    w.show_panel("patterns")
-    view = w.patterns
-    view.refresh()
-
-    def texts() -> list[str]:
-        return [
-            i.text() for i in view.view.scene().items() if isinstance(i, QGraphicsSimpleTextItem)
-        ]
-
+    panel.refresh()
+    view = panel.markings
     markings = [s for s in primitive_sheets(placed) if s.kind == "marking"]
-    shown = texts()
+    assert markings and len(view.sheets) == len(markings)
+    shown = view.labels()
     for sheet in markings:
         assert f"{sheet.piece.upper()}: Dome" in shown
     numbers = {t.split()[0] for t in shown if "(G" in t}
     assert {str(m.number) for m in placed.marks} <= numbers
     assert any(t.startswith("hole: cut ") for t in shown)
-    assert any(t.startswith("Dome: mark gores") for t in shown)
-    rings = [i for i in view.view.scene().items() if isinstance(i, QGraphicsEllipseItem)]
+    rings = [i for i in view.scene().items() if isinstance(i, QGraphicsEllipseItem)]
     assert len(rings) >= 2  # the feed hole, cut and finished
-    view.show_shapes.setChecked(False)
-    assert not any(t.startswith("Dome: mark gores") for t in texts())
+    assert "Row B: Dome: mark gores" in panel.marking_notes.text()
+    assert not view.stale
+    # It opens on the marked area; a double click (fit whole) shows the whole panels.
+    view.fit()
+    assert not view.showing_all
+    view.fit(whole=True)
+    assert view.showing_all
+    # The Patterns view no longer draws any shape's panels or row notes.
+    w.show_panel("patterns")
+    w.patterns.refresh()
+    texts = [
+        i.text() for i in w.patterns.view.scene().items() if isinstance(i, QGraphicsSimpleTextItem)
+    ]
+    assert not any(": Dome" in t or t.startswith("Dome: mark gores") for t in texts)
+    assert not hasattr(w.patterns, "show_shapes")
 
 
 def test_move_feed_holes_clear_of_the_seams(gore_window: MainWindow) -> None:
@@ -450,6 +457,7 @@ def test_editor_and_results_are_in_tabs(gore_window: MainWindow) -> None:
     ]
     assert [results.tabText(i) for i in range(results.count())] == [
         "Cut pieces",
+        "Envelope panels",
         "Checks",
         "Attachment",
     ]
