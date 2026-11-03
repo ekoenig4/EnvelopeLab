@@ -115,6 +115,12 @@ def stylesheet() -> str:
         "QWidget#sidePanel QGroupBox::title { subcontrol-origin: margin; left: 10px;"
         " padding: 0 4px; font-weight: 600; }",
         f"QLabel[role='figure'] {{ color: {t['ink']}; padding: 0 6px; }}",
+        f"QWidget#panelToolbar QToolButton:unchecked {{ background: {t['surface']};"
+        f" border: 1px solid {t['control_border']}; border-radius: 4px; padding: 2px 8px;"
+        f" color: {t['muted']}; }}",
+        f"QWidget#panelToolbar QToolButton:checked {{ background: {t['selected']};"
+        f" border: 1px solid {t['accent']}; border-radius: 4px; padding: 2px 8px;"
+        f" color: {t['ink']}; font-weight: 600; }}",
         f"QWidget#cameraBar {{ background: {t['panel']}; border-top: 1px solid {t['border']}; }}",
     ]
     for kind, s in STATUS_STYLES.items():

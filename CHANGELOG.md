@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the Validation / Warnings strip uses the shared design: count chips per
+  severity (✕ errors, ▲ warnings, i notes, or ✓ no problems), the severity's symbol and
+  colour on every finding, and *Show* filters for errors, warnings and notes (the counts
+  always include every finding). Display only.
 - Changed: the 2D pattern view uses the shared design: its state (current, not
   generated, STALE) is the shared status banner with a *Regenerate patterns* button on it
   when needed, and the *Selected row* form is drawn as a card. Display only.

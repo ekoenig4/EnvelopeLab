@@ -5,7 +5,7 @@ live outputs and saves it as a project.
 
 !!! danger "A design aid, not a certification"
     EnvelopeLab is not certified engineering software. The builder is responsible for
-    airworthiness. Red items in the **Validation / Warnings** panel, results marked
+    airworthiness. Errors (✕, red) in the **Validation / Warnings** panel, results marked
     **NOT CONVERGED** or **STALE**, and factor-of-safety failures must be resolved before
     you rely on a design.
 

@@ -18,7 +18,11 @@ Two areas stay visible in every mode:
   element in the tree shows its values in Properties, whatever the mode.
 * the **Validation / Warnings** strip at the bottom. The layout cannot hide it, so errors,
   factor-of-safety failures and stale or unconverged results stay on screen while you
-  work in any mode.
+  work in any mode. Its header counts the findings with the same chips as the rest of the
+  application (✕ errors, ▲ warnings, i notes, or ✓ *No problems found*), and each finding
+  starts with its symbol, errors first. **Show:** *Errors*, *Warnings* and *Notes* hide
+  or show those rows in the list; the counts always include every finding. Click a
+  finding to select the element it is about.
 
 Mode tabs repeat the indicators of the panels they hold: **●** for unsaved changes and
 **[STALE]** when a result they show is out of date (for example *Patterns [STALE]* after
