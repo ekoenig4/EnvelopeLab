@@ -22,16 +22,6 @@ from PySide6.QtWidgets import (
 from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH
 from envelopelab.export.documents import DOCUMENTS
 
-#: Check-box text per document, in the order shown.
-DOCUMENT_TEXT = {
-    "index": "Build-pack index: specs, features, shop limits, files, build order (PDF)",
-    "spec": "Spec summary, metric + English (PDF)",
-    "viewer": "3D model (HTML, opens offline in a browser)",
-    "cut_list": "Cut list (PDF + CSV)",
-    "sewing": "Sewing schedule (PDF + CSV)",
-    "build_log": "Build log: sign-off sheets (PDF)",
-    "rigging": "Rigging sheet (PDF + CSV)",
-}
 INCH = 0.0254  # m
 
 
@@ -71,10 +61,10 @@ class ExportPackDialog(QDialog):
         always.setProperty("role", "muted")
         docs.addWidget(always)
         for key in DOCUMENTS:
-            box = QCheckBox(DOCUMENT_TEXT.get(key, key))
+            box = QCheckBox(DOCUMENTS[key].title)
             box.setObjectName(f"pack_{key}")
             box.setChecked(True)
-            box.setToolTip(DOCUMENTS[key][3])
+            box.setToolTip(", ".join(suffix for suffix, _what in DOCUMENTS[key].files))
             self.checks[key] = box
             docs.addWidget(box)
         form.addRow("Include", docs)

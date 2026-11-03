@@ -20,7 +20,6 @@ from envelopelab.export.build_pack import (
 )
 from envelopelab.export.documents import (
     DOCUMENTS,
-    cut_list,
     pdf_text,
     rigging_table,
     sewing_schedule,
@@ -79,7 +78,7 @@ def test_every_document_is_written_listed_and_passes_the_qa(pack: Path) -> None:
     index = _index(pack)
     assert index["format"] == PACK_FORMAT == "envelopelab-build-pack/3"
     files = {d["file"] for d in index["documents"]}
-    expected = {f"documents-sample-{f}" for names, *_rest in DOCUMENTS.values() for f in names}
+    expected = {f"documents-sample-{f}" for spec in DOCUMENTS.values() for f, _what in spec.files}
     assert files == expected
     assert index["documents"][0]["file"] == "documents-sample-00-BUILD-PACK-INDEX.pdf"
     prov = index["provenance"]
@@ -95,46 +94,45 @@ def test_sheets_only_by_default_and_unknown_documents_are_refused(tmp_path: Path
         export_build_pack(DESIGN, [], tmp_path / "bad", extras=PackExtras(frozenset({"x"})))
 
 
-def test_cut_list_matches_every_sheet_header(pack: Path) -> None:
+def test_panel_dimensions_match_every_row_header(pack: Path) -> None:
     index = _index(pack)
-    rows = list(
-        csv.reader(
-            (pack / "documents-sample-cut-list.csv").read_text(encoding="utf-8").splitlines()
-        )
-    )
-    header = rows[1]
-    pieces = {r[0]: r for r in rows[2 : 2 + len(index["sheets"])]}
+    text = (pack / "documents-sample-panel-dimensions.csv").read_text(encoding="utf-8")
+    rows = list(csv.reader(text.splitlines()))
+    header, body = rows[0], {r[0]: r for r in rows[1:]}
     for entry in index["sheets"]:
-        row = pieces[entry["file"]]
-        assert row[header.index("Cut")] == str(entry["cut_count"])
-        assert row[header.index("Fabric")] == entry["fabric"]
-    # The totals add up the cut pieces.
-    sheets = envelope_sheets(DESIGN)
-    table = cut_list(sheets)
-    total = sum(float(r[-1]) for r in table.rows)
-    assert total == pytest.approx(sum(float(r[-2]) * int(r[3]) for r in table.rows), rel=1e-3)
+        if entry["kind"] != "envelope panel":
+            continue
+        row = body[entry["piece"].removeprefix("row ")]
+        assert row[header.index("cut")] == str(entry["cut_count"])
+        assert row[header.index("fabric")] == entry["fabric"]
+        assert int(row[header.index("height_mm")]) == round(entry["finished_height_mm"])
+    # Top row first, as on the builder's sheets; the across-bolt side is the shorter one.
+    assert [r[0] for r in rows[1:]] == ["F", "E", "D", "C", "B", "A"]
+    for r in rows[1:]:
+        assert int(r[header.index("across_bolt_mm")]) <= int(r[header.index("along_table_mm")])
+    loft = list(csv.reader((pack / "documents-sample-panel-loft.csv").read_text().splitlines()))
+    assert loft[0][1:] == [f"width@{p}%_mm" for p in (0, 25, 50, 75, 100)]
+    # The loft's end widths are the dimension sheet's bottom and top widths.
+    first = loft[1]
+    assert int(first[1]) == int(body[first[0]][1]) and int(first[5]) == int(body[first[0]][2])
 
 
-def test_qa_catches_a_cut_list_that_disagrees_and_a_page_that_loads_a_file(
+def test_qa_catches_dimensions_that_disagree_and_a_page_that_loads_a_file(
     pack: Path, tmp_path: Path
 ) -> None:
     bad = _copy(pack, tmp_path)
-    text = (bad / "documents-sample-cut-list.csv").read_text(encoding="utf-8")
-    (bad / "documents-sample-cut-list.csv").write_text(
-        text.replace(
-            "envelope-row-A.dxf,row A,envelope panel,12,",
-            "envelope-row-A.dxf,row A,envelope panel,11,",
-        ),
-        encoding="utf-8",
-    )
+    name = "documents-sample-panel-dimensions.csv"
+    lines = (bad / name).read_text(encoding="utf-8").splitlines()
+    lines[1] = lines[1].replace(",12,", ",11,")
+    (bad / name).write_text("\n".join(lines) + "\n", encoding="utf-8")
     page = (bad / "documents-sample-3d.html").read_text(encoding="utf-8")
     (bad / "documents-sample-3d.html").write_text(
         page.replace("<head>", '<head><script src="https://example.com/x.js"></script>'),
         encoding="utf-8",
     )
     checks = {(f.file, f.check) for f in check_pack(bad)}
-    assert ("documents-sample-cut-list.csv", "cut list") in checks
-    assert ("documents-sample-3d.html", "viewer") in checks
+    assert (name, "dimensions") in checks
+    assert ("documents-sample-3d.html", "html") in checks
     (bad / "documents-sample-spec-summary.pdf").unlink()
     assert ("documents-sample-spec-summary.pdf", "index") in {
         (f.file, f.check) for f in check_pack(bad)
@@ -143,14 +141,12 @@ def test_qa_catches_a_cut_list_that_disagrees_and_a_page_that_loads_a_file(
 
 def test_sewing_schedule_lists_every_seam_in_assembly_order(pack: Path) -> None:
     index = _index(pack)
-    rows = list(
-        csv.reader(
-            (pack / "documents-sample-sewing-schedule.csv").read_text(encoding="utf-8").splitlines()
-        )
-    )
-    steps = rows[1:]
-    assert len(steps) == len(index["seam_pairs"])
-    stages = [r[1] for r in steps]
+    page = (pack / "documents-sample-sewing-schedule.html").read_text(encoding="utf-8")
+    for heading in ("Seam specifications", "Webbing / tape schedule", "Assembly sequence"):
+        assert heading in page
+    sheets = envelope_sheets(DESIGN)
+    table = sewing_schedule(sheets, envelope_seam_pairs(sheets), 12)
+    assert len(table.rows) == 6 + 5
     order = [
         "Gore seams (load tapes)",
         "Row seams (horizontal tapes)",
@@ -158,14 +154,26 @@ def test_sewing_schedule_lists_every_seam_in_assembly_order(pack: Path) -> None:
         "Shape skin seams",
         "Shape rim to the envelope",
     ]
-    ranks = [order.index(s) for s in stages]
+    ranks = [order.index(r[1]) for r in table.rows]
     assert ranks == sorted(ranks)
-    gore = next(r for r in steps if r[1] == order[0])
+    gore = table.rows[0]
     assert gore[4] == "12" and gore[5] == gore[6]  # sewn once per gore, equal lengths
-    assert all(r[-1] == "[  ]" for r in steps)
-    sheets = envelope_sheets(DESIGN)
-    table = sewing_schedule(sheets, envelope_seam_pairs(sheets), 12)
-    assert len(table.rows) == 6 + 5
+    assert all(r[-1] == "[  ]" for r in table.rows)
+    # Every seam pair of the pack is on the schedule page.
+    assert page.count("[  ]") == len(index["seam_pairs"])
+
+
+def test_panel_map_and_layout_locate_every_feature(pack: Path) -> None:
+    text = (pack / "documents-sample-panel-map.csv").read_text(encoding="utf-8")
+    grid = {r[0]: r[1:] for r in csv.reader(text.splitlines()[1:])}
+    for a in SHAPES[0].attachment:
+        assert grid[a.row][a.gore - 1].startswith("EAR")
+    diagram = (pack / "documents-sample-layout-diagram.html").read_text(encoding="utf-8")
+    assert "<svg" in diagram and "EAR" in diagram
+    from envelopelab.export.qa import _page_boxes
+
+    gores = _page_boxes(pack / "documents-sample-gore-layout.pdf")
+    assert len(gores) == 1 + 12  # all gores, then one page per gore
 
 
 def test_rigging_sheet_marks_a_failing_factor_of_safety() -> None:

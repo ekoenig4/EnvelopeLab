@@ -54,9 +54,13 @@ A pack can also hold **documents** (since format 2), chosen when it is exported
 | `<slug>-3d.html` | The 3D view (below), one self-contained page |
 | `<slug>-spec-summary.pdf` | A4 landscape: key measurements in metric and English (volume, height, width, gore length, mouth, parachute hole and overlap, parachute, lines, red line, gross lift, lift margin), the configuration, the rigging factors of safety, the safety notice and every value tagged `assumed` |
 | `<slug>-build-log.pdf` | A3 landscape sign-off sheets (item, spec, done by, date, checked): panel cutting, one per special shape, the turning vents, parachute / rigging / final |
-| `<slug>-cut-list.pdf`, `.csv` | Every sheet (file, piece, kind, cut count, fabric, finished size, finished and cut areas of one piece and of all), fabric totals, tape lengths per class and thread |
+| `<slug>-layout-diagram.html` | The gore x row grid (face = gore 1), every cell in its fabric zone's colour, every feature located (special shapes, feed holes, turning vents, scoop), with a key (`envelopelab.export.planning`) |
+| `<slug>-panel-map.html`, `.csv` | The same grid as a table: what each panel of each gore carries (`EYE`, `EYE HOLE`, `VENT`, `SCOOP`, …), else its zone in capitals; CSV header `row\gore,1,2,…`, top row first |
+| `<slug>-gore-layout.pdf` | A3: every gore developed (rows stacked, finished outlines) side by side with the footprint lines and feed holes in red and the vents in orange, then one page per gore with each row's bottom width; scale drawings only |
+| `<slug>-panel-dimensions.html`, `.csv` | Every panel, top row first: `panel, width_bottom_mm, width_top_mm, height_mm, cut_width_bottom_mm, cut_width_top_mm, cut_height_mm, across_bolt_mm, along_table_mm, bolt_spare_mm, table_spare_mm, cut, fabric` (the shorter cut side lies across the bolt; a negative spare means the piece does not fit); the HTML adds the fabric totals |
+| `<slug>-panel-loft.html`, `.csv` | `panel, width@0%_mm … width@100%_mm`: finished width at 0, 25, 50, 75 and 100 % of the height |
+| `<slug>-sewing-schedule.html` | Seam specifications (seam, type, allowance, stitch), the webbing / tape schedule (length with 10 % waste, per gore, shape rims and feed holes), the assembly sequence (the build order) and every sewn seam pair in order with both edge lengths, ease and a check box |
 | `<slug>-rigging.pdf`, `.csv` | Every line and ring: element, count, length each (rings: diameter), total, limit load, strength and its source, factor of safety, required, check (`ok`, `FAILS`, `not assessed`), mass; the red-line pull |
-| `<slug>-sewing-schedule.pdf`, `.csv` | Every seam pair in assembly order (gore seams, row seams, parachute, shape skin seams, shape rims to the envelope), how often it is sewn, both edge lengths, the planned ease, a *Done* box |
 
 CSV files with more than one table separate them by a blank line and a `# title` row.
 PDF documents are A4 portrait, Helvetica (Latin-1 text: `>=` for ≥, `!` for ▲).
@@ -155,8 +159,9 @@ line, in every DXF and on every template page (across and along), measures what 
 label says; every template page is listed with its sheet and has one side no longer than
 the roll (formats 1 and 2: every `pattern.pdf` page is as wide as the roll); every sheet
 is drawn on a template page (a marking sheet over its row's panel); every header matches the index and the drawn `SEW` outline; every
-document opens (PDFs have pages), the cut list lists every sheet with the index's cut
-count and fabric, and the 3D view loads nothing from outside the page and holds a scene
+document opens (PDFs have pages, HTML pages load nothing from outside themselves), the
+panel dimensions list every envelope panel with the index's cut count and fabric, and the
+3D view loads nothing from outside the page and holds a scene
 with a surface and a status banner; and
 every sewn edge pair differs by its planned ease within its tolerance.
 `scripts/check_build_pack.py` exports a generic sample pack and checks it;

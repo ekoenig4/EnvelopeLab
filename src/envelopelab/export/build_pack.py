@@ -1032,24 +1032,40 @@ def write_documents(
         written["viewer"] = [write_viewer(scene, out / docs.document_files(stem, "viewer")[0])]
     if "spec" in extras.include:
         written["spec"] = [write_spec_summary(ctx, out / docs.document_files(stem, "spec")[0])]
-    if "cut_list" in extras.include:
-        written["cut_list"] = docs.write_cut_list(design, sheets, outputs, out, prov, stem)
+    if "planning" in extras.include:
+        from envelopelab.export import planning
+
+        written["planning"] = [
+            planning.write_layout_diagram(ctx, out),
+            *planning.write_panel_map(ctx, out),
+            planning.write_gore_layout(ctx, out / ctx.file("gore-layout.pdf")),
+            *planning.write_dimensions(ctx, out),
+        ]
     if "sewing" in extras.include:
-        written["sewing"] = docs.write_sewing(design, sheets, pairs, out, prov, stem)
+        from envelopelab.export.planning import write_sewing_schedule
+
+        sew = out / docs.document_files(stem, "sewing")[0]
+        written["sewing"] = [write_sewing_schedule(ctx, sew)]
     if "build_log" in extras.include:
         log = out / docs.document_files(stem, "build_log")[0]
         written["build_log"] = [write_build_log(ctx, log)]
     if "rigging" in extras.include:
         written["rigging"] = docs.write_rigging(design, outputs, out, prov, stem)
     entries = [
-        {"file": path.name, "kind": kind, "description": docs.DOCUMENTS[kind][3]}
+        {
+            "file": path.name,
+            "kind": kind,
+            "description": docs.document_description(path.name, stem)[3],
+        }
         for kind, paths in written.items()
         for path in paths
     ]
     if "index" in extras.include:
         index_name = docs.document_files(stem, "index")[0]
-        files = [FileEntry(index_name, *docs.DOCUMENTS["index"][1:])]
-        files += [FileEntry(e["file"], *docs.DOCUMENTS[e["kind"]][1:]) for e in entries]
+        files = [FileEntry(index_name, *docs.document_description(index_name, stem)[1:])]
+        files += [
+            FileEntry(e["file"], *docs.document_description(e["file"], stem)[1:]) for e in entries
+        ]
         grouped = [t for t in templates if t.grouped]
         for t in templates:
             if t in grouped or (t.pages and t.pages[0].sheet.kind == "envelope panel"):
@@ -1076,6 +1092,11 @@ def write_documents(
         ctx.files = files
         write_index(ctx, out / index_name)
         entries.insert(
-            0, {"file": index_name, "kind": "index", "description": docs.DOCUMENTS["index"][3]}
+            0,
+            {
+                "file": index_name,
+                "kind": "index",
+                "description": docs.document_description(index_name, stem)[3],
+            },
         )
     return entries, prov

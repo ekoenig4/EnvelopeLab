@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the build pack's layout and planning documents follow the builder's pack:
+  `<name>-layout-diagram.html` (gore x row grid in the zone colours, features located),
+  `-panel-map.html/.csv`, `-gore-layout.pdf` (all gores developed with features, then one
+  page per gore), `-panel-dimensions.html/.csv` (finished and cut sizes, across the bolt,
+  along the table, spares, fabric totals), `-panel-loft.html/.csv` (widths at 0-100 %)
+  and `-sewing-schedule.html` (seam specs, tape schedule with waste, assembly sequence,
+  every seam). They replace the earlier cut list and PDF/CSV sewing schedule; the pack QA
+  checks the panel dimensions against every row header.
 - Changed: the build pack's documents follow the builder's pack: a three-sheet A3
   `<name>-00-BUILD-PACK-INDEX.pdf` (key dimensions metric + English, features, shop
   limits with the largest cut piece, printing rules, grouped file index tagged REF / 1:1

@@ -16,8 +16,8 @@
 * every sewn edge pair differs by its planned ease (``ease_mm``, 0 for edges cut to the
   same length) within its tolerance (default 3 mm), measured from the ``EDGE_*``
   polylines and, for a shape's footprint lines, the ``ATTACH`` polylines;
-* the documents (format 2): every PDF opens and has pages, the cut list lists every
-  sheet with the index's cut count and fabric, and the 3D view is self-contained (no
+* the documents: every PDF opens and has pages, the panel dimensions list every envelope
+  panel with the index's cut count and fabric, and the 3D view is self-contained (no
   file or address outside the page) with a readable scene.
 
 The index entries are the design data of the export; a pack is consistent when the
@@ -373,7 +373,9 @@ def _check_documents(root: Path, index: dict[str, Any], present: set[str]) -> li
 
             text = path.read_text(encoding="utf-8")
             if EXTERNAL.search(text):
-                findings.append(QAFinding(name, "viewer", "page loads an external file"))
+                findings.append(QAFinding(name, "html", "page loads an external file"))
+            if doc.get("kind") != "viewer":
+                continue
             try:
                 scene = read_scene(path)
             except (ValueError, KeyError) as exc:
@@ -383,24 +385,23 @@ def _check_documents(root: Path, index: dict[str, Any], present: set[str]) -> li
                 findings.append(QAFinding(name, "viewer", "scene has no surface"))
             if scene.get("status", {}).get("kind") not in ("ok", "info", "stale", "fail", "error"):
                 findings.append(QAFinding(name, "viewer", "scene has no status banner"))
-        elif name.endswith("cut-list.csv"):
+        elif name.endswith("panel-dimensions.csv"):
             rows = list(csv.reader(path.read_text(encoding="utf-8").splitlines()))
-            header = next((r for r in rows if r and r[0] == "File"), None)
-            if header is None:
-                findings.append(QAFinding(name, "cut list", "no pieces table"))
+            if not rows or rows[0][:1] != ["panel"]:
+                findings.append(QAFinding(name, "dimensions", "no panel table"))
                 continue
-            listed: dict[str, tuple[str, str]] = {}
-            for r in rows[rows.index(header) + 1 :]:
-                if not r or r[0].startswith("#"):
-                    break
-                listed[r[0]] = (r[header.index("Cut")], r[header.index("Fabric")])
+            header = rows[0]
+            listed = {r[0]: (r[header.index("cut")], r[header.index("fabric")]) for r in rows[1:]}
             for entry in index["sheets"]:
-                got = listed.get(entry["file"])
+                if entry["kind"] != "envelope panel":
+                    continue
+                letter = entry["piece"].removeprefix("row ")
+                got = listed.get(letter)
                 want = (str(entry["cut_count"]), entry["fabric"])
                 if got is None:
-                    findings.append(QAFinding(name, "cut list", f"{entry['file']} not listed"))
+                    findings.append(QAFinding(name, "dimensions", f"panel {letter} not listed"))
                 elif got != want:
                     findings.append(
-                        QAFinding(name, "cut list", f"{entry['file']}: {got} != index {want}")
+                        QAFinding(name, "dimensions", f"panel {letter}: {got} != index {want}")
                     )
     return findings

@@ -54,9 +54,9 @@ def test_export_without_a_run_writes_the_design_only_page(
     assert scene["status"]["title"] == "Design only."
     assert (tmp_path / "pack" / f"{stem}-00-BUILD-PACK-INDEX.pdf").is_file()
     # Only the chosen documents.
-    gore_window.export_build_pack(tmp_path / "few", frozenset({"cut_list"}))
+    gore_window.export_build_pack(tmp_path / "few", frozenset({"planning"}))
     assert not (tmp_path / "few" / f"{stem}-3d.html").exists()
-    assert (tmp_path / "few" / f"{stem}-cut-list.csv").is_file()
+    assert (tmp_path / "few" / f"{stem}-panel-dimensions.csv").is_file()
 
 
 @pytest.mark.slow

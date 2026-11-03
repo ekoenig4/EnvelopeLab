@@ -42,47 +42,89 @@ ROW = 12.0  # points per table row
 FONT = 8.0  # points
 CHAR = 0.5  # average Helvetica glyph width, as a fraction of the font size
 
-#: Document parts a pack can include: key to (file suffixes after ``<slug>-``, index group,
-#: tag, description). Tags: ``REF`` reading, any printer; ``1:1`` print actual size.
-DOCUMENTS: dict[str, tuple[tuple[str, ...], str, str, str]] = {
-    "index": (
-        ("00-BUILD-PACK-INDEX.pdf",),
+
+@dataclass(frozen=True)
+class DocumentSpec:
+    """One part of a pack a user can include: its files (suffix after ``<slug>-`` and a
+    one-line description each), its group in the index, its tag (``REF``: reading, any
+    printer; ``1:1``: print at actual size) and its name in the export dialog."""
+
+    files: tuple[tuple[str, str], ...]
+    group: str
+    tag: str
+    title: str
+
+
+DOCUMENTS: dict[str, DocumentSpec] = {
+    "index": DocumentSpec(
+        (("00-BUILD-PACK-INDEX.pdf", "this document - specs, index, build order"),),
         "START HERE",
         "REF",
-        "this document - specs, features, shop limits, file index, build order",
+        "Build-pack index: specs, features, shop limits, files, build order (PDF)",
     ),
-    "spec": (("spec-summary.pdf",), "START HERE", "REF", "all key dimensions, metric + English"),
-    "viewer": (("3d.html",), "START HERE", "REF", "interactive 3D model (open in a browser)"),
-    "cut_list": (
-        ("cut-list.pdf", "cut-list.csv"),
+    "spec": DocumentSpec(
+        (("spec-summary.pdf", "all key dimensions, metric + English"),),
+        "START HERE",
+        "REF",
+        "Spec summary, metric + English (PDF)",
+    ),
+    "viewer": DocumentSpec(
+        (("3d.html", "interactive 3D model (open in a browser)"),),
+        "START HERE",
+        "REF",
+        "3D model (HTML, opens offline in a browser)",
+    ),
+    "planning": DocumentSpec(
+        (
+            ("layout-diagram.html", "gore x row grid with every feature located"),
+            ("panel-map.html", "which panel carries which feature"),
+            ("panel-map.csv", "which panel carries which feature"),
+            ("gore-layout.pdf", "all gores + one page per gore"),
+            ("panel-dimensions.html", "finished and cut sizes, every panel"),
+            ("panel-dimensions.csv", "finished and cut sizes, every panel"),
+            ("panel-loft.html", "panel width at 0/25/50/75/100 % height"),
+            ("panel-loft.csv", "panel width at 0/25/50/75/100 % height"),
+        ),
         "LAYOUT & PLANNING",
         "REF",
-        "pieces, cut counts, fabric areas, tapes",
+        "Layout and planning: layout diagram, panel map, gore layout, dimensions, loft",
     ),
-    "sewing": (
-        ("sewing-schedule.pdf", "sewing-schedule.csv"),
+    "sewing": DocumentSpec(
+        (("sewing-schedule.html", "seam specs, tape schedule, assembly sequence"),),
         "LAYOUT & PLANNING",
         "REF",
-        "every seam in assembly order, with a check box",
+        "Sewing schedule: seam specs, tapes, assembly sequence (HTML)",
     ),
-    "build_log": (
-        ("build-log.pdf",),
+    "build_log": DocumentSpec(
+        (("build-log.pdf", "sign-off sheets - print and use on the floor"),),
         "LAYOUT & PLANNING",
         "REF",
-        "sign-off sheets - print and use on the floor",
+        "Build log: sign-off sheets (PDF)",
     ),
-    "rigging": (
-        ("rigging.pdf", "rigging.csv"),
+    "rigging": DocumentSpec(
+        (
+            ("rigging.pdf", "lines and rings: lengths, loads, strengths, FoS"),
+            ("rigging.csv", "lines and rings: lengths, loads, strengths, FoS"),
+        ),
         "TOP & BOTTOM / CAD",
         "REF",
-        "lines and rings: lengths, loads, strengths, FoS",
+        "Rigging sheet (PDF + CSV)",
     ),
 }
 
 
 def document_files(slug: str, key: str) -> list[str]:
     """The file names of document ``key`` in a pack whose prefix is ``slug``."""
-    return [f"{slug}-{suffix}" for suffix in DOCUMENTS[key][0]]
+    return [f"{slug}-{suffix}" for suffix, _what in DOCUMENTS[key].files]
+
+
+def document_description(name: str, slug: str) -> tuple[str, str, str, str]:
+    """(key, group, tag, description) of a document file of a pack."""
+    for key, spec in DOCUMENTS.items():
+        for suffix, what in spec.files:
+            if name == f"{slug}-{suffix}":
+                return key, spec.group, spec.tag, what
+    raise KeyError(name)
 
 
 SAFETY_NOTICE = (
@@ -173,45 +215,6 @@ def _area(points: Any) -> float:
     return abs(signed_area(points))
 
 
-def cut_list(sheets: Sequence[Sheet]) -> Table:
-    """Every sheet: piece, file, kind, cut count, fabric, finished size, areas.
-
-    Areas are those of the finished and cut outlines of one piece and of all pieces cut
-    (m²); marking sheets are cut 0 times (they are drawn on panels cut elsewhere).
-    """
-    table = Table(
-        "Pieces",
-        [
-            "File",
-            "Piece",
-            "Kind",
-            "Cut",
-            "Fabric",
-            "Finished W x H (mm)",
-            "Finished area (m2)",
-            "Cut area (m2)",
-            "Cut area, all (m2)",
-        ],
-    )
-    for s in sheets:
-        w, h = s.finished_size
-        cut = _area(s.cut)
-        table.rows.append(
-            [
-                f"cad/{s.name}.dxf",
-                s.piece,
-                s.kind,
-                str(s.cut_count),
-                s.fabric,
-                f"{w * 1000:.0f} x {h * 1000:.0f}",
-                f"{_area(s.finished):.3f}",
-                f"{cut:.3f}",
-                f"{cut * s.cut_count:.3f}",
-            ]
-        )
-    return table
-
-
 def fabric_totals(sheets: Sequence[Sheet]) -> Table:
     """Cut fabric area per fabric over every piece cut (m²)."""
     totals: dict[str, tuple[int, float, float]] = {}
@@ -227,29 +230,6 @@ def fabric_totals(sheets: Sequence[Sheet]) -> Table:
     table = Table("Fabric totals", ["Fabric", "Pieces", "Finished area (m2)", "Cut area (m2)"])
     for fabric, (n, fin, cut) in sorted(totals.items()):
         table.rows.append([fabric, str(n), f"{fin:.2f}", f"{cut:.2f}"])
-    return table
-
-
-TAPE_NAMES = {
-    "vertical": "load tapes (vertical seams)",
-    "horizontal": "horizontal tapes (row seams)",
-    "rim": "mouth rim tape",
-    "hole": "crown hole tape",
-}
-
-
-def tape_list(outputs: GoreOutputs | None) -> Table:
-    """Tape lengths per class (m) and thread, from the envelope mass estimate."""
-    table = Table("Tapes and thread", ["Item", "Length (m)", "Mass (kg)"])
-    mass = None if outputs is None else outputs.mass
-    if mass is None:
-        table.rows.append(["not estimated (the panel rows are invalid)", "-", "-"])
-        return table
-    for key, length in mass.tape_lengths.items():
-        table.rows.append(
-            [TAPE_NAMES.get(key, key), f"{length:.2f}", f"{mass.tape_masses.get(key, 0.0):.3f}"]
-        )
-    table.rows.append(["thread", f"{mass.thread_length:.0f}", f"{mass.thread_mass:.3f}"])
     return table
 
 
@@ -543,28 +523,6 @@ def _subtitle(design: DesignDocument, prov: Provenance | None) -> str:
     return " | ".join(parts)
 
 
-def write_cut_list(
-    design: DesignDocument,
-    sheets: Sequence[Sheet],
-    outputs: GoreOutputs | None,
-    out_dir: Path,
-    prov: Provenance | None = None,
-    stem: str = "design",
-) -> list[Path]:
-    """``<stem>-cut-list.pdf`` and ``.csv`` (the pieces table first)."""
-    tables = [cut_list(sheets), fabric_totals(sheets), tape_list(outputs)]
-    doc = _Document("Cut list", _subtitle(design, prov))
-    doc.paragraph(
-        "Cut counts and fabrics are those printed on each sheet's header. Areas include the "
-        "seam allowance ('cut') or not ('finished'); marking sheets are drawn on panels cut "
-        "from their row sheet and are not cut themselves."
-    )
-    for t in tables:
-        doc.table(t)
-    pdf, csv_name = document_files(stem, "cut_list")
-    return [doc.save(out_dir / pdf), write_csv(tables, out_dir / csv_name)]
-
-
 def write_rigging(
     design: DesignDocument,
     outputs: GoreOutputs | None,
@@ -600,26 +558,4 @@ def write_rigging(
         doc.paragraph(f"Red-line pull: seal open {seal}, fully open {full}.")
     doc.paragraph("Not assessed: red-line pull force, scoop wind load.")
     pdf, csv_name = document_files(stem, "rigging")
-    return [doc.save(out_dir / pdf), write_csv([table], out_dir / csv_name)]
-
-
-def write_sewing(
-    design: DesignDocument,
-    sheets: Sequence[Sheet],
-    pairs: Sequence[SeamPair],
-    out_dir: Path,
-    prov: Provenance | None = None,
-    stem: str = "design",
-) -> list[Path]:
-    """``<stem>-sewing-schedule.pdf`` and ``.csv``."""
-    gores = design.gores.count if design.gores is not None else 1
-    table = sewing_schedule(sheets, pairs, gores)
-    doc = _Document("Sewing schedule", _subtitle(design, prov))
-    doc.paragraph(
-        "Sew in this order. 'Times' is how often the seam is sewn (gore seams once per "
-        "gore). Match the marks on both edges; where an ease is given, work it in evenly "
-        "between the marks. Tick 'Done' as you go."
-    )
-    doc.table(table)
-    pdf, csv_name = document_files(stem, "sewing")
     return [doc.save(out_dir / pdf), write_csv([table], out_dir / csv_name)]

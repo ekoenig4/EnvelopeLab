@@ -30,8 +30,12 @@ it never leaves a shape out without saying so.
 | `<name>-panels-grouped.pdf` | The paired panel files in one, for printing in one go |
 | `<name>-parachute-patterns.pdf`, `<name>-<shape>-patterns.pdf` | Cutting the parachute and each special shape's skin pieces (one per page) |
 | `cad/` | One DXF per piece (mm) and `index.json`, for CAD programs and the automatic checks |
-| `<name>-cut-list.pdf` / `.csv` | Planning the fabric: pieces, cut counts, areas, fabric totals, tape lengths and thread |
-| `<name>-sewing-schedule.pdf` / `.csv` | Sewing: every seam in order with both edge lengths, how often it is sewn and a box to tick |
+| `<name>-layout-diagram.html` | The whole envelope as a gore x row grid in its fabric colours, with every feature located |
+| `<name>-panel-map.html` / `.csv` | Which panel of which gore carries which feature |
+| `<name>-gore-layout.pdf` | Every gore drawn to scale with its features, then one page per gore |
+| `<name>-panel-dimensions.html` / `.csv` | Finished and cut size of every panel, how it lies on the bolt and the table, the spare, and the fabric totals |
+| `<name>-panel-loft.html` / `.csv` | Every panel's width at 0, 25, 50, 75 and 100 % of its height, for checking cut panels |
+| `<name>-sewing-schedule.html` | Sewing: seam specifications, the tape schedule (with 10 % waste), the assembly sequence and every seam in order with both edge lengths and a box to tick |
 | `<name>-rigging.pdf` / `.csv` | Making the lines: lengths, limit loads, strengths with their source, factors of safety (**FAILS** when below the requirement) |
 | `<name>-3d.html` | Looking at it: open it in any browser, offline |
 
