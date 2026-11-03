@@ -2,7 +2,7 @@
 artifacts, unconverged and failing runs. Nothing is hidden; errors are listed first.
 
 Laid out in the shared design: a header with one status chip per severity (✕ errors,
-▲ warnings, i notes, or ✓ when there is nothing to report) and filter buttons, then the
+▲ warnings, i notes, or ✓ when there is nothing to report) and a *Show* menu, then the
 findings, each with its severity's symbol and colour. The filters only hide rows from the
 list while they are off; the counts always include every finding, so a problem is never
 hidden from the summary. Clicking a finding selects the element it is about.
@@ -11,12 +11,13 @@ hidden from the summary. Clicking a finding selects the element it is about.
 from __future__ import annotations
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtGui import QAction, QBrush, QColor
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -63,7 +64,7 @@ class ValidationPanel(QWidget):
         self.summary.setAccessibleName("Findings summary")
         self.chips = {severity: StatusChip() for severity in SEVERITY_STATUS}
         self.clear_chip = StatusChip()
-        self.filters: dict[str, QToolButton] = {}
+        self.filters: dict[str, QAction] = {}
         header = QWidget()
         header.setObjectName("panelToolbar")
         bar = QHBoxLayout(header)
@@ -73,20 +74,25 @@ class ValidationPanel(QWidget):
             bar.addWidget(chip)
         bar.addWidget(self.summary)
         bar.addStretch(1)
-        bar.addWidget(QLabel("Show:"))
+        # One menu button, not a button per severity: the strip spans the whole window,
+        # so its header must stay narrow (the window has to fit a 1280 px screen).
+        self.show_button = QToolButton()
+        self.show_button.setObjectName("showFindings")
+        self.show_button.setText("Show")
+        self.show_button.setToolTip(
+            "Which findings the list shows (the counts always include every finding)"
+        )
+        self.show_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        menu = QMenu(self.show_button)
         for severity in SEVERITY_STATUS:
-            button = QToolButton()
-            button.setText(SEVERITY_WORDS[severity][1].capitalize())
-            button.setObjectName(f"show_{severity}")
-            button.setCheckable(True)
-            button.setChecked(True)
-            button.setToolTip(
-                f"Show {SEVERITY_WORDS[severity][1]} in the list (the counts always "
-                "include every finding)"
-            )
-            button.toggled.connect(lambda _on: self._apply_filters())
-            self.filters[severity] = button
-            bar.addWidget(button)
+            action = menu.addAction(SEVERITY_WORDS[severity][1].capitalize())
+            action.setObjectName(f"show_{severity}")
+            action.setCheckable(True)
+            action.setChecked(True)
+            action.toggled.connect(lambda _on: self._apply_filters())
+            self.filters[severity] = action
+        self.show_button.setMenu(menu)
+        bar.addWidget(self.show_button)
         self.list = QListWidget()
         self.list.setObjectName("findingsList")
         self.list.setAlternatingRowColors(True)
@@ -135,6 +141,8 @@ class ValidationPanel(QWidget):
         self._apply_filters()
 
     def _apply_filters(self) -> None:
+        hidden = [SEVERITY_WORDS[s][1] for s, a in self.filters.items() if not a.isChecked()]
+        self.show_button.setText(f"Show (hiding {', '.join(hidden)})" if hidden else "Show")
         for i in range(self.list.count()):
             item = self.list.item(i)
             severity = str(item.data(Qt.ItemDataRole.UserRole + 1))
