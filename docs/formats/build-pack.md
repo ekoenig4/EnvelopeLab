@@ -60,7 +60,11 @@ A pack can also hold **documents** (since format 2), chosen when it is exported
 | `<slug>-panel-dimensions.html`, `.csv` | Every panel, top row first: `panel, width_bottom_mm, width_top_mm, height_mm, cut_width_bottom_mm, cut_width_top_mm, cut_height_mm, across_bolt_mm, along_table_mm, bolt_spare_mm, table_spare_mm, cut, fabric` (the shorter cut side lies across the bolt; a negative spare means the piece does not fit); the HTML adds the fabric totals |
 | `<slug>-panel-loft.html`, `.csv` | `panel, width@0%_mm … width@100%_mm`: finished width at 0, 25, 50, 75 and 100 % of the height |
 | `<slug>-sewing-schedule.html` | Seam specifications (seam, type, allowance, stitch), the webbing / tape schedule (length with 10 % waste, per gore, shape rims and feed holes), the assembly sequence (the build order) and every sewn seam pair in order with both edge lengths, ease and a check box |
-| `<slug>-rigging.pdf`, `.csv` | Every line and ring: element, count, length each (rings: diameter), total, limit load, strength and its source, factor of safety, required, check (`ok`, `FAILS`, `not assessed`), mass; the red-line pull |
+| `<slug>-<shape>.pdf` | Per special shape (`envelopelab.export.appendages`): kind, placement, envelope panels, rim length, the skin cut list (piece, cut, finished size, surface area, sheet), every match mark (number, skin piece, envelope gore and row, position on the panel), the feed holes and the shape's design checks (`FAILS` / `WARNING`) |
+| `<slug>-<shape>-build.pdf` | Per special shape: the build procedure generated from its data (print and check, cut the skin, mark the envelope, feed holes, sew the skin, tape the footprint, sew the rim with its ease, inspect), each step naming its sheet, with blank notes lines |
+| `<slug>-turning-vents.pdf`, `<slug>-vent-panels.pdf` | When the design has turning vents: each vent's seam, gores, rows, direction, opening, slot, open area, thrust and torque, air and heat loss, control line, the net torque and side force; and every panel that carries a vent |
+| `<slug>-parachute.pdf` | Parachute hole, seal overlap, diameter, panels, fabric, crown pressure, line lengths (metric and English), red-line pull, red line, and the lines-and-rings table with factors of safety |
+| `<slug>-scoop.pdf` | The scoop, the flying wires (each wire's length and limit tension), the wires and crow's-foot legs with factors of safety |
 
 CSV files with more than one table separate them by a blank line and a `# title` row.
 PDF documents are A4 portrait, Helvetica (Latin-1 text: `>=` for ≥, `!` for ▲).

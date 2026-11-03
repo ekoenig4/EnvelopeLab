@@ -1024,48 +1024,84 @@ def write_documents(
         extras.status,
         stem,
     )
-    written: dict[str, list[Path]] = {}
+    written: list[tuple[Path, str, str, str, str]] = []  # path, kind, group, tag, what
+
+    def add(kind: str, *paths: Path) -> None:
+        for path in paths:
+            _key, group, tag, what = docs.document_description(path.name, stem)
+            written.append((path, kind, group, tag, what))
+
     if "viewer" in extras.include:
         scene = extras.scene
         if scene is None:
             scene = design_scene(design, None if outputs is None else outputs.rigging)
-        written["viewer"] = [write_viewer(scene, out / docs.document_files(stem, "viewer")[0])]
+        add("viewer", write_viewer(scene, out / docs.document_files(stem, "viewer")[0]))
     if "spec" in extras.include:
-        written["spec"] = [write_spec_summary(ctx, out / docs.document_files(stem, "spec")[0])]
+        add("spec", write_spec_summary(ctx, out / docs.document_files(stem, "spec")[0]))
     if "planning" in extras.include:
         from envelopelab.export import planning
 
-        written["planning"] = [
+        add(
+            "planning",
             planning.write_layout_diagram(ctx, out),
             *planning.write_panel_map(ctx, out),
             planning.write_gore_layout(ctx, out / ctx.file("gore-layout.pdf")),
             *planning.write_dimensions(ctx, out),
-        ]
+        )
     if "sewing" in extras.include:
         from envelopelab.export.planning import write_sewing_schedule
 
-        sew = out / docs.document_files(stem, "sewing")[0]
-        written["sewing"] = [write_sewing_schedule(ctx, sew)]
+        add("sewing", write_sewing_schedule(ctx, out / docs.document_files(stem, "sewing")[0]))
     if "build_log" in extras.include:
-        log = out / docs.document_files(stem, "build_log")[0]
-        written["build_log"] = [write_build_log(ctx, log)]
-    if "rigging" in extras.include:
-        written["rigging"] = docs.write_rigging(design, outputs, out, prov, stem)
+        add("build_log", write_build_log(ctx, out / docs.document_files(stem, "build_log")[0]))
+    if "appendages" in extras.include:
+        from envelopelab.export import appendages as app
+
+        for prim in primitives:
+            spec_name, build_name, _patterns = app.shape_files(ctx, prim)
+            name = prim.primitive.name
+            written.append(
+                (
+                    app.write_shape_spec(ctx, prim, out / spec_name),
+                    "appendages",
+                    "APPENDAGES",
+                    "REF",
+                    f"{name}: spec, marking, skin cut list, match marks, feed holes",
+                )
+            )
+            written.append(
+                (
+                    app.write_shape_build(ctx, prim, out / build_name),
+                    "appendages",
+                    "APPENDAGES",
+                    "REF",
+                    f"{name}: build procedure, step by step",
+                )
+            )
+        if design.turning_vents:
+            vents, vent_panels = app.write_turning_vents(ctx, out)
+            written.append(
+                (vents, "appendages", "APPENDAGES", "REF", "vent placement and assembly")
+            )
+            written.append(
+                (vent_panels, "appendages", "APPENDAGES", "REF", "which panels carry the vents")
+            )
+    if "top_bottom" in extras.include:
+        from envelopelab.export import appendages as app
+
+        add(
+            "top_bottom",
+            app.write_parachute(ctx, out / ctx.file("parachute.pdf")),
+            app.write_scoop(ctx, out / ctx.file("scoop.pdf")),
+        )
     entries = [
-        {
-            "file": path.name,
-            "kind": kind,
-            "description": docs.document_description(path.name, stem)[3],
-        }
-        for kind, paths in written.items()
-        for path in paths
+        {"file": path.name, "kind": kind, "description": what}
+        for path, kind, _group, _tag, what in written
     ]
     if "index" in extras.include:
         index_name = docs.document_files(stem, "index")[0]
         files = [FileEntry(index_name, *docs.document_description(index_name, stem)[1:])]
-        files += [
-            FileEntry(e["file"], *docs.document_description(e["file"], stem)[1:]) for e in entries
-        ]
+        files += [FileEntry(path.name, group, tag, what) for path, _k, group, tag, what in written]
         grouped = [t for t in templates if t.grouped]
         for t in templates:
             if t in grouped or (t.pages and t.pages[0].sheet.kind == "envelope panel"):

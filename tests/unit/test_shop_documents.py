@@ -106,3 +106,21 @@ def test_largest_piece_is_measured_from_the_cut_outlines() -> None:
     short, long, name = largest_piece(envelope_sheets(DESIGN))
     assert name.startswith("envelope-row-") and short < long
     assert short < 1.6  # the rows of this design are about 1.4 m tall
+
+
+def test_appendage_and_top_bottom_documents(pack: Path) -> None:
+    from envelopelab.export.appendages import build_steps
+
+    spec = _page_boxes(pack / "shop-sample-eye.pdf")
+    text = "".join(c for _w, _h, c in spec)
+    assert "SKIN CUT LIST" in text and "MATCH MARKS" in text
+    build = "".join(c for _w, _h, c in _page_boxes(pack / "shop-sample-eye-build.pdf"))
+    assert "BUILD PROCEDURE" in build and "notes:" in build
+    steps = [s for s, _t in build_steps(_ctx(), SHAPES[0])]
+    assert steps[0] == "PRINT & CHECK" and "SEW THE RIM" in steps and steps[-1] == "INSPECT"
+    chute = "".join(c for _w, _h, c in _page_boxes(pack / "shop-sample-parachute.pdf"))
+    assert "PARACHUTE - PATTERN DATA" in chute and "shroud line" in chute
+    scoop = "".join(c for _w, _h, c in _page_boxes(pack / "shop-sample-scoop.pdf"))
+    assert "FLYING WIRES" in scoop
+    # No vents in this design: no vent sheets.
+    assert not (pack / "shop-sample-turning-vents.pdf").exists()

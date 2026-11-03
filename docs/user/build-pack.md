@@ -36,7 +36,9 @@ it never leaves a shape out without saying so.
 | `<name>-panel-dimensions.html` / `.csv` | Finished and cut size of every panel, how it lies on the bolt and the table, the spare, and the fabric totals |
 | `<name>-panel-loft.html` / `.csv` | Every panel's width at 0, 25, 50, 75 and 100 % of its height, for checking cut panels |
 | `<name>-sewing-schedule.html` | Sewing: seam specifications, the tape schedule (with 10 % waste), the assembly sequence and every seam in order with both edge lengths and a box to tick |
-| `<name>-rigging.pdf` / `.csv` | Making the lines: lengths, limit loads, strengths with their source, factors of safety (**FAILS** when below the requirement) |
+| `<name>-<shape>.pdf`, `<name>-<shape>-build.pdf` | Each special shape: its specification, skin cut list, match marks and feed holes; and its build procedure, step by step, with lines for your own notes |
+| `<name>-turning-vents.pdf`, `<name>-vent-panels.pdf` | The turning vents (when there are any): placement, opening, thrust and torque, control lines; and the panels that carry them |
+| `<name>-parachute.pdf`, `<name>-scoop.pdf` | Making the lines: parachute data and every rigging length; the scoop and the flying wires, each wire's length; factors of safety (**FAILS** when below the requirement) |
 | `<name>-3d.html` | Looking at it: open it in any browser, offline |
 
 

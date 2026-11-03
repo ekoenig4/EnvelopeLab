@@ -278,7 +278,7 @@ def features(ctx: PackContext) -> list[tuple[str, str]]:
     if d.rigging.red_line is not None:
         out.append(("Red line", f"led down seam {d.rigging.red_line.guide_seam}"))
     if d.rigging.flying_wires is not None:
-        out.append(("Flying wires", "to the burner frame (see the rigging sheet)"))
+        out.append(("Flying wires", "to the burner frame (see the scoop sheet)"))
     return out or [("Features", "none: a plain envelope")]
 
 
@@ -404,11 +404,11 @@ def build_order(ctx: PackContext) -> list[tuple[str, str]]:
             (
                 "PARACHUTE",
                 f"Set the parachute with {mm(g.seal_overlap)} seal overlap; rig the lines to "
-                f"the lengths on {ctx.file('rigging.pdf')}.",
+                f"the lengths on {ctx.file('parachute.pdf')}.",
             )
         )
     if d.rigging.red_line is not None or d.rigging.flying_wires is not None:
-        steps.append(("LINES & WIRES", f"Red line and flying wires per {ctx.file('rigging.pdf')}."))
+        steps.append(("LINES & WIRES", f"Red line and flying wires per {ctx.file('scoop.pdf')}."))
     steps.append(
         (
             "INSPECT & SIGN OFF",

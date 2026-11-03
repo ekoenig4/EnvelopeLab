@@ -19,13 +19,10 @@ text is kept to Latin-1 (:func:`pdf_text`).
 
 from __future__ import annotations
 
-import csv
-import io
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from envelopelab.geometry.polygon import signed_area
@@ -101,14 +98,20 @@ DOCUMENTS: dict[str, DocumentSpec] = {
         "REF",
         "Build log: sign-off sheets (PDF)",
     ),
-    "rigging": DocumentSpec(
+    "appendages": DocumentSpec(
+        (),
+        "APPENDAGES",
+        "REF",
+        "Appendages: per special shape spec and build procedure; turning vents (PDF)",
+    ),
+    "top_bottom": DocumentSpec(
         (
-            ("rigging.pdf", "lines and rings: lengths, loads, strengths, FoS"),
-            ("rigging.csv", "lines and rings: lengths, loads, strengths, FoS"),
+            ("parachute.pdf", "parachute data and full rigging lengths"),
+            ("scoop.pdf", "scoop, mouth rigging, flying-wire tables"),
         ),
         "TOP & BOTTOM / CAD",
         "REF",
-        "Rigging sheet (PDF + CSV)",
+        "Parachute and scoop / flying-wire sheets (PDF)",
     ),
 }
 
@@ -406,156 +409,3 @@ def assumed_values(design: DesignDocument, outputs: GoreOutputs | None) -> list[
 # --------------------------------------------------------------------------------------
 # Writers
 # --------------------------------------------------------------------------------------
-
-
-def write_csv(tables: Sequence[Table], path: str | Path) -> Path:
-    """Write ``tables`` to one CSV file (a title row and a header row per table)."""
-    buf = io.StringIO()
-    writer = csv.writer(buf, lineterminator="\n")
-    for k, table in enumerate(tables):
-        if k:
-            writer.writerow([])
-        if len(tables) > 1:
-            writer.writerow([f"# {table.title}"])
-        writer.writerow(table.columns)
-        writer.writerows(table.rows)
-    out = Path(path)
-    out.write_text(buf.getvalue(), encoding="utf-8")
-    return out
-
-
-class _Document:
-    """A4 portrait pages of text and tables, paginated."""
-
-    FAIL = (0.49, 0.18, 0.07)
-    MUTED = (0.29, 0.33, 0.39)
-
-    def __init__(self, title: str, subtitle: str) -> None:
-        from envelopelab.report.pdf import PdfCanvas
-
-        self.canvas = PdfCanvas(A4_PORTRAIT)
-        self.title, self.subtitle = pdf_text(title), pdf_text(subtitle)
-        self.page = 1
-        self._header()
-
-    def _header(self) -> None:
-        w, h = A4_PORTRAIT
-        self.canvas.text(MARGIN, h - MARGIN, self.title, 14, bold=True)
-        self.canvas.text(MARGIN, h - MARGIN - 14, self.subtitle, 8, color=self.MUTED)
-        self.canvas.text(w - MARGIN - 40, MARGIN / 2, f"page {self.page}", 7, color=self.MUTED)
-        self.y = h - MARGIN - 36
-
-    def _need(self, height: float) -> None:
-        if self.y - height < MARGIN:
-            self.canvas.new_page()
-            self.page += 1
-            self._header()
-
-    def heading(self, text: str) -> None:
-        self._need(3 * ROW)
-        self.y -= 6
-        self.canvas.text(MARGIN, self.y, pdf_text(text), 11, bold=True)
-        self.y -= ROW + 2
-
-    def paragraph(self, text: str, bold: bool = False, fail: bool = False) -> None:
-        width = A4_PORTRAIT[0] - 2 * MARGIN
-        per_line = max(int(width / (9 * CHAR)), 20)
-        words, line = pdf_text(text).split(), ""
-        lines = []
-        for word in words:
-            if len(line) + len(word) + 1 > per_line:
-                lines.append(line)
-                line = word
-            else:
-                line = f"{line} {word}".strip()
-        lines.append(line)
-        for ln in lines:
-            self._need(ROW)
-            colour = self.FAIL if fail else (0.0, 0.0, 0.0)
-            self.canvas.text(MARGIN, self.y, ln, 9, bold=bold, color=colour)
-            self.y -= ROW
-        self.y -= 4
-
-    def table(self, table: Table) -> None:
-        self.heading(table.title)
-        width = A4_PORTRAIT[0] - 2 * MARGIN
-        cells = [table.columns, *table.rows]
-        n = len(table.columns)
-        need = [max(len(pdf_text(str(r[c]))) for r in cells if c < len(r)) for c in range(n)]
-        need = [min(max(k, 3), 40) for k in need]
-        scale = min(1.0, width / (sum(need) * FONT * CHAR + 6 * n))
-        size = max(FONT * scale, 5.5)
-        cols = [k * size * CHAR + 6 for k in need]
-        stretch = width / sum(cols)
-        cols = [c * stretch for c in cols]
-        limit = [max(int((c - 4) / (size * CHAR)), 3) for c in cols]
-
-        def row(values: Sequence[str], bold: bool, fail: bool) -> None:
-            self._need(ROW)
-            x = MARGIN
-            colour = self.FAIL if fail else (0.0, 0.0, 0.0)
-            for c, value in enumerate(values):
-                text = pdf_text(str(value))
-                if len(text) > limit[c]:
-                    text = text[: limit[c] - 1] + "~"
-                self.canvas.text(x + 2, self.y, text, size, bold=bold or fail, color=colour)
-                x += cols[c]
-            self.canvas.line(MARGIN, self.y - 3, MARGIN + width, self.y - 3, (0.8, 0.83, 0.86))
-            self.y -= ROW
-
-        row(table.columns, True, False)
-        for k, values in enumerate(table.rows):
-            if self.y - ROW < MARGIN:
-                row(table.columns, True, False)  # header again on the new page
-            row(values, False, k in table.fails)
-        if not table.rows:
-            self.paragraph("(none)")
-        self.y -= 6
-
-    def save(self, path: str | Path) -> Path:
-        return self.canvas.save(path)
-
-
-def _subtitle(design: DesignDocument, prov: Provenance | None) -> str:
-    parts = [design.meta.name or "design"]
-    if prov is not None:
-        parts += [f"exported {prov.created}", f"design {prov.design_hash[:12]}"]
-    return " | ".join(parts)
-
-
-def write_rigging(
-    design: DesignDocument,
-    outputs: GoreOutputs | None,
-    out_dir: Path,
-    prov: Provenance | None = None,
-    stem: str = "design",
-) -> list[Path]:
-    """``<stem>-rigging.pdf`` and ``.csv``."""
-    rig = None if outputs is None else outputs.rigging
-    table = rigging_table(rig)
-    doc = _Document("Rigging sheet", _subtitle(design, prov))
-    r = design.rigging
-    doc.paragraph(
-        f"Load case: limit load factor {r.load_factor.value:g} ({r.load_factor.source}), "
-        f"required factor of safety {r.required_safety_factor.value:g} "
-        f"({r.required_safety_factor.source}). Lengths are finished lengths between "
-        "attachment points; add the splices and loops of your hardware."
-    )
-    failing = [table.rows[i] for i in sorted(table.fails)]
-    if failing:
-        doc.paragraph(
-            "FAILS: " + "; ".join(f"{row[1]} FoS {row[8]} < {row[9]}" for row in failing),
-            bold=True,
-            fail=True,
-        )
-    if rig is None:
-        doc.paragraph("Rigging not evaluated (no valid rigging outputs).", bold=True)
-    doc.table(table)
-    if rig is not None and rig.parachute is not None:
-        op = rig.parachute.opening
-        seal = "NOT REACHABLE" if op.seal_open_travel is None else f"{op.seal_open_travel:.3f} m"
-        full = "NOT REACHABLE" if op.full_open_travel is None else f"{op.full_open_travel:.3f} m"
-        doc.paragraph(f"Red-line pull: seal open {seal}, fully open {full}.")
-    doc.paragraph("Not assessed: red-line pull force, scoop wind load.")
-    pdf, csv_name = document_files(stem, "rigging")
-    return [doc.save(out_dir / pdf), write_csv([table], out_dir / csv_name)]

@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the build pack's appendage and top-and-bottom documents follow the builder's
+  pack: per special shape `<name>-<shape>.pdf` (spec, skin cut list, match marks, feed
+  holes, checks) and `<name>-<shape>-build.pdf` (generated build procedure with notes
+  lines); `-turning-vents.pdf` and `-vent-panels.pdf` when there are vents;
+  `-parachute.pdf` (pattern data and every rigging length) and `-scoop.pdf` (scoop,
+  each flying wire, legs). They replace the earlier rigging sheet (PDF/CSV).
 - Changed: the build pack's layout and planning documents follow the builder's pack:
   `<name>-layout-diagram.html` (gore x row grid in the zone colours, features located),
   `-panel-map.html/.csv`, `-gore-layout.pdf` (all gores developed with features, then one
