@@ -50,17 +50,18 @@ A pack can also hold **documents** (since format 2), chosen when it is exported
 
 | File | Content |
 |---|---|
-| `00-cover.pdf` | Cover and index: provenance (app version, git commit, design hash, time), the safety notice, every value tagged `assumed`, the structural result in one line, and every file of the pack with what it is |
-| `3d-view.html` | The 3D view (below), one self-contained page |
-| `spec-summary.pdf`, `spec-summary.json` | Size and lift (height, diameter, tape length, volume, area, operating conditions, gross lift, payload, lift margin), mass budget, materials per zone with source tags, rigging factors of safety |
-| `cut-list.pdf`, `cut-list.csv` | Every sheet (file, piece, kind, cut count, fabric, finished size, finished and cut areas of one piece and of all), fabric totals, tape lengths per class and thread |
-| `rigging.pdf`, `rigging.csv` | Every line and ring: element, count, length each (rings: diameter), total, limit load, strength and its source, factor of safety, required, check (`ok`, `FAILS`, `not assessed`), mass; the red-line pull |
-| `sewing-schedule.pdf`, `sewing-schedule.csv` | Every seam pair in assembly order (gore seams, row seams, parachute, shape skin seams, shape rims to the envelope), how often it is sewn, both edge lengths, the planned ease, a *Done* box |
+| `<slug>-00-BUILD-PACK-INDEX.pdf` | A3 landscape, three sheets (`envelopelab.export.shop`): the key dimensions in metric and English, the features (special shapes with their gores, rows, pieces and feed holes; turning vents; scoop; parachute; red line; flying wires), the shop limits (bolt width, cutting table, largest cut piece, with a warning when a piece exceeds them), the printing rules; the index of every file, grouped (START HERE, LAYOUT & PLANNING, PANEL TEMPLATES, APPENDAGES, TOP & BOTTOM / CAD) and tagged `REF`, `1:1` or `CAD`; the build order, each step naming its sheet; the airworthiness note and the provenance |
+| `<slug>-3d.html` | The 3D view (below), one self-contained page |
+| `<slug>-spec-summary.pdf` | A4 landscape: key measurements in metric and English (volume, height, width, gore length, mouth, parachute hole and overlap, parachute, lines, red line, gross lift, lift margin), the configuration, the rigging factors of safety, the safety notice and every value tagged `assumed` |
+| `<slug>-build-log.pdf` | A3 landscape sign-off sheets (item, spec, done by, date, checked): panel cutting, one per special shape, the turning vents, parachute / rigging / final |
+| `<slug>-cut-list.pdf`, `.csv` | Every sheet (file, piece, kind, cut count, fabric, finished size, finished and cut areas of one piece and of all), fabric totals, tape lengths per class and thread |
+| `<slug>-rigging.pdf`, `.csv` | Every line and ring: element, count, length each (rings: diameter), total, limit load, strength and its source, factor of safety, required, check (`ok`, `FAILS`, `not assessed`), mass; the red-line pull |
+| `<slug>-sewing-schedule.pdf`, `.csv` | Every seam pair in assembly order (gore seams, row seams, parachute, shape skin seams, shape rims to the envelope), how often it is sewn, both edge lengths, the planned ease, a *Done* box |
 
 CSV files with more than one table separate them by a blank line and a `# title` row.
 PDF documents are A4 portrait, Helvetica (Latin-1 text: `>=` for ≥, `!` for ▲).
 
-### 3d-view.html
+### <slug>-3d.html
 
 One HTML page with its own small WebGL renderer: no library, no network, nothing fetched
 (the QA checks it). The scene is embedded as JSON in
@@ -120,8 +121,8 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
                 "markings": []}, "…"]}
   ],
   "documents": [
-    {"file": "00-cover.pdf", "kind": "cover", "description": "Cover and index: …"},
-    {"file": "3d-view.html", "kind": "viewer", "description": "3D view of …"}
+    {"file": "sample-00-BUILD-PACK-INDEX.pdf", "kind": "index", "description": "…"},
+    {"file": "sample-3d.html", "kind": "viewer", "description": "interactive 3D model …"}
   ],
   "sheets": [
     {"file": "cad/ear-G1.dxf", "piece": "ear-G1", "kind": "skin piece", "cut_count": 1,

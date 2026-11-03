@@ -24,12 +24,13 @@ from envelopelab.export.documents import DOCUMENTS
 
 #: Check-box text per document, in the order shown.
 DOCUMENT_TEXT = {
-    "viewer": "3D view (HTML, opens offline in a browser)",
-    "cover": "Cover and index (PDF)",
-    "spec": "Spec summary (PDF + JSON)",
+    "index": "Build-pack index: specs, features, shop limits, files, build order (PDF)",
+    "spec": "Spec summary, metric + English (PDF)",
+    "viewer": "3D model (HTML, opens offline in a browser)",
     "cut_list": "Cut list (PDF + CSV)",
-    "rigging": "Rigging sheet (PDF + CSV)",
     "sewing": "Sewing schedule (PDF + CSV)",
+    "build_log": "Build log: sign-off sheets (PDF)",
+    "rigging": "Rigging sheet (PDF + CSV)",
 }
 INCH = 0.0254  # m
 
@@ -73,7 +74,7 @@ class ExportPackDialog(QDialog):
             box = QCheckBox(DOCUMENT_TEXT.get(key, key))
             box.setObjectName(f"pack_{key}")
             box.setChecked(True)
-            box.setToolTip(DOCUMENTS[key][1])
+            box.setToolTip(DOCUMENTS[key][3])
             self.checks[key] = box
             docs.addWidget(box)
         form.addRow("Include", docs)

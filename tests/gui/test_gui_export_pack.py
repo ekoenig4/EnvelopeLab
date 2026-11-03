@@ -41,17 +41,22 @@ def test_export_dialog_defaults_and_file_menu(gore_window: MainWindow, qtbot: Qt
 def test_export_without_a_run_writes_the_design_only_page(
     gore_window: MainWindow, tmp_path: Path
 ) -> None:
+    from envelopelab.export.templates import slug
+
+    design = gore_window.controller.design
+    assert design is not None
+    stem = slug(design.meta.name)
     index = gore_window.export_build_pack(tmp_path / "pack", roll_width=1.0)
     assert index is not None and check_pack(tmp_path / "pack") == []
-    scene = read_scene(tmp_path / "pack" / "3d-view.html")
+    scene = read_scene(tmp_path / "pack" / f"{stem}-3d.html")
     assert [m["key"] for m in scene["meshes"]] == ["design"]
     assert scene["meshes"][0]["visible"]
     assert scene["status"]["title"] == "Design only."
-    assert (tmp_path / "pack" / "00-cover.pdf").is_file()
+    assert (tmp_path / "pack" / f"{stem}-00-BUILD-PACK-INDEX.pdf").is_file()
     # Only the chosen documents.
     gore_window.export_build_pack(tmp_path / "few", frozenset({"cut_list"}))
-    assert not (tmp_path / "few" / "3d-view.html").exists()
-    assert (tmp_path / "few" / "cut-list.csv").is_file()
+    assert not (tmp_path / "few" / f"{stem}-3d.html").exists()
+    assert (tmp_path / "few" / f"{stem}-cut-list.csv").is_file()
 
 
 @pytest.mark.slow
@@ -66,9 +71,12 @@ def test_export_after_a_run_colours_the_result_and_keeps_its_status(
     qtbot.waitUntil(lambda: len(session.project.runs) == 1, timeout=10_000)
     view = w.view3d
     qtbot.waitUntil(lambda: "fos_warp" in view.fields, timeout=10_000)
+    from envelopelab.export.templates import slug
+
+    stem = slug(session.design.meta.name)
     assert w.export_build_pack(tmp_path / "pack") is not None
     assert check_pack(tmp_path / "pack") == []
-    scene = read_scene(tmp_path / "pack" / "3d-view.html")
+    scene = read_scene(tmp_path / "pack" / f"{stem}-3d.html")
     run = next(m for m in scene["meshes"] if m["role"] == "result")
     assert {"fos_warp", "deviation"} <= set(run["colorings"])
     assert "preview" in run["note"]
@@ -84,7 +92,7 @@ def test_export_after_a_run_colours_the_result_and_keeps_its_status(
     )
     qtbot.waitUntil(lambda: view.banner.kind == "stale", timeout=10_000)
     assert w.export_build_pack(tmp_path / "stale") is not None
-    scene = read_scene(tmp_path / "stale" / "3d-view.html")
+    scene = read_scene(tmp_path / "stale" / f"{stem}-3d.html")
     run = next(m for m in scene["meshes"] if m["role"] == "result")
     assert run["colorings"] == {} and "stale" in run["note"]
     assert scene["status"]["kind"] == "stale"

@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the build pack's documents follow the builder's pack: a three-sheet A3
+  `<name>-00-BUILD-PACK-INDEX.pdf` (key dimensions metric + English, features, shop
+  limits with the largest cut piece, printing rules, grouped file index tagged REF / 1:1
+  / CAD, build order naming each step's sheet, airworthiness note), an A4 metric +
+  English `<name>-spec-summary.pdf`, and `<name>-build-log.pdf` sign-off sheets; every
+  document is named after the design. The earlier cover and spec summary are replaced.
 - Changed: build pack format 3 (ADR-0037), laid out like a shop pack: the 1:1 templates
   are named after the design and grouped (`<slug>-panels-A-B.pdf`, a row carrying a
   shape's markings on its own `<slug>-panel-D.pdf` with every gore's marks over the one

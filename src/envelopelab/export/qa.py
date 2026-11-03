@@ -383,7 +383,7 @@ def _check_documents(root: Path, index: dict[str, Any], present: set[str]) -> li
                 findings.append(QAFinding(name, "viewer", "scene has no surface"))
             if scene.get("status", {}).get("kind") not in ("ok", "info", "stale", "fail", "error"):
                 findings.append(QAFinding(name, "viewer", "scene has no status banner"))
-        elif name == "cut-list.csv":
+        elif name.endswith("cut-list.csv"):
             rows = list(csv.reader(path.read_text(encoding="utf-8").splitlines()))
             header = next((r for r in rows if r and r[0] == "File"), None)
             if header is None:

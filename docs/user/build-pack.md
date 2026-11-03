@@ -23,17 +23,18 @@ it never leaves a shape out without saying so.
 
 | File | Use it for |
 |---|---|
-| `00-cover.pdf` | Start here: what the pack is, where it comes from (version, git commit, design hash, time), the safety notice, **every value tagged *assumed*** (check these against datasheets before building), the structural result, and the list of files |
+| `<name>-00-BUILD-PACK-INDEX.pdf` | Start here (three A3 sheets): the key dimensions in metric and English, the features, the shop limits the pack is built to (bolt width, cutting table, largest piece), how to print; the index of every file (`REF` to read, `1:1` to print at actual size, `CAD`); and the build order, each step naming the sheet to work from |
+| `<name>-spec-summary.pdf` | The design at a glance, metric and English: size, volume, mouth, parachute hole and overlap, line lengths, lift and lift margin, configuration, rigging factors of safety, and **every value tagged *assumed*** (check these against datasheets before building) |
+| `<name>-build-log.pdf` | Sign-off sheets for the floor: panel cutting, each special shape, the turning vents, and the parachute, rigging and final inspection |
 | `<name>-panels-A-B.pdf`, `<name>-panel-D.pdf`, … | Cutting the envelope: one panel per page at 1:1, two rows to a file; a row that carries a special shape on its own sheet with every gore's marks (labelled by gore) |
 | `<name>-panels-grouped.pdf` | The paired panel files in one, for printing in one go |
 | `<name>-parachute-patterns.pdf`, `<name>-<shape>-patterns.pdf` | Cutting the parachute and each special shape's skin pieces (one per page) |
 | `cad/` | One DXF per piece (mm) and `index.json`, for CAD programs and the automatic checks |
-| `cut-list.pdf` / `.csv` | Planning the fabric: pieces, cut counts, areas, fabric totals, tape lengths and thread |
-| `sewing-schedule.pdf` / `.csv` | Sewing: every seam in order with both edge lengths, how often it is sewn and a box to tick |
-| `rigging.pdf` / `.csv` | Making the lines: lengths, limit loads, strengths with their source, factors of safety (**FAILS** when below the requirement) |
-| `spec-summary.pdf` / `.json` | The design at a glance: size, volume, lift, lift margin, mass budget, materials |
-| `3d-view.html` | Looking at it: open it in any browser, offline |
-| `index.json` | Programs: the machine-readable list of every file and seam |
+| `<name>-cut-list.pdf` / `.csv` | Planning the fabric: pieces, cut counts, areas, fabric totals, tape lengths and thread |
+| `<name>-sewing-schedule.pdf` / `.csv` | Sewing: every seam in order with both edge lengths, how often it is sewn and a box to tick |
+| `<name>-rigging.pdf` / `.csv` | Making the lines: lengths, limit loads, strengths with their source, factors of safety (**FAILS** when below the requirement) |
+| `<name>-3d.html` | Looking at it: open it in any browser, offline |
+
 
 **Before cutting**, print every 1:1 file at 100 % (never *fit to page*) and measure both
 calibration lines on every page (across and along): each must measure what its label
@@ -41,7 +42,7 @@ says. Solid = cut, dotted = sew (finished), red = feature marks, blue = finished
 
 ## The 3D view page
 
-`3d-view.html` shows what the application's 3D view shows for the run chosen there:
+`<name>-3d.html` shows what the application's 3D view shows for the run chosen there:
 
 * the **design surface** (the shape as cut and sewn, in the row fabrics, with its seams
   and gore numbers G1…), the **rigging**, and the special shapes as designed;

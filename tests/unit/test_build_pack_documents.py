@@ -79,9 +79,9 @@ def test_every_document_is_written_listed_and_passes_the_qa(pack: Path) -> None:
     index = _index(pack)
     assert index["format"] == PACK_FORMAT == "envelopelab-build-pack/3"
     files = {d["file"] for d in index["documents"]}
-    expected = {f for names, _what in DOCUMENTS.values() for f in names}
+    expected = {f"documents-sample-{f}" for names, *_rest in DOCUMENTS.values() for f in names}
     assert files == expected
-    assert index["documents"][0]["file"] == "00-cover.pdf"
+    assert index["documents"][0]["file"] == "documents-sample-00-BUILD-PACK-INDEX.pdf"
     prov = index["provenance"]
     assert prov["design_hash"] == DESIGN.compute_content_hash()
     assert prov["app_version"] and prov["created"]
@@ -97,7 +97,11 @@ def test_sheets_only_by_default_and_unknown_documents_are_refused(tmp_path: Path
 
 def test_cut_list_matches_every_sheet_header(pack: Path) -> None:
     index = _index(pack)
-    rows = list(csv.reader((pack / "cut-list.csv").read_text(encoding="utf-8").splitlines()))
+    rows = list(
+        csv.reader(
+            (pack / "documents-sample-cut-list.csv").read_text(encoding="utf-8").splitlines()
+        )
+    )
     header = rows[1]
     pieces = {r[0]: r for r in rows[2 : 2 + len(index["sheets"])]}
     for entry in index["sheets"]:
@@ -115,29 +119,35 @@ def test_qa_catches_a_cut_list_that_disagrees_and_a_page_that_loads_a_file(
     pack: Path, tmp_path: Path
 ) -> None:
     bad = _copy(pack, tmp_path)
-    text = (bad / "cut-list.csv").read_text(encoding="utf-8")
-    (bad / "cut-list.csv").write_text(
+    text = (bad / "documents-sample-cut-list.csv").read_text(encoding="utf-8")
+    (bad / "documents-sample-cut-list.csv").write_text(
         text.replace(
             "envelope-row-A.dxf,row A,envelope panel,12,",
             "envelope-row-A.dxf,row A,envelope panel,11,",
         ),
         encoding="utf-8",
     )
-    page = (bad / "3d-view.html").read_text(encoding="utf-8")
-    (bad / "3d-view.html").write_text(
+    page = (bad / "documents-sample-3d.html").read_text(encoding="utf-8")
+    (bad / "documents-sample-3d.html").write_text(
         page.replace("<head>", '<head><script src="https://example.com/x.js"></script>'),
         encoding="utf-8",
     )
     checks = {(f.file, f.check) for f in check_pack(bad)}
-    assert ("cut-list.csv", "cut list") in checks
-    assert ("3d-view.html", "viewer") in checks
-    (bad / "spec-summary.pdf").unlink()
-    assert ("spec-summary.pdf", "index") in {(f.file, f.check) for f in check_pack(bad)}
+    assert ("documents-sample-cut-list.csv", "cut list") in checks
+    assert ("documents-sample-3d.html", "viewer") in checks
+    (bad / "documents-sample-spec-summary.pdf").unlink()
+    assert ("documents-sample-spec-summary.pdf", "index") in {
+        (f.file, f.check) for f in check_pack(bad)
+    }
 
 
 def test_sewing_schedule_lists_every_seam_in_assembly_order(pack: Path) -> None:
     index = _index(pack)
-    rows = list(csv.reader((pack / "sewing-schedule.csv").read_text(encoding="utf-8").splitlines()))
+    rows = list(
+        csv.reader(
+            (pack / "documents-sample-sewing-schedule.csv").read_text(encoding="utf-8").splitlines()
+        )
+    )
     steps = rows[1:]
     assert len(steps) == len(index["seam_pairs"])
     stages = [r[1] for r in steps]
@@ -177,7 +187,7 @@ def test_pdf_text_is_latin1() -> None:
 
 
 def test_design_scene_has_the_surface_seams_gore_numbers_and_rigging(pack: Path) -> None:
-    scene = read_scene(pack / "3d-view.html")
+    scene = read_scene(pack / "documents-sample-3d.html")
     keys = [m["key"] for m in scene["meshes"]]
     assert keys == ["design"]
     assert {ln["key"] for ln in scene["lines"]} == {"seams", "rigging"}

@@ -1,5 +1,6 @@
-"""Build-pack documents: cover and index, spec summary, cut list, rigging sheet and sewing
-schedule (PDF for printing, CSV or JSON for reading back).
+"""Build-pack documents: cut list, rigging sheet and sewing schedule (PDF for printing,
+CSV for reading back), the document list (:data:`DOCUMENTS`) and the shared helpers of
+the shop documents (:mod:`envelopelab.export.shop`: index, spec summary, build log).
 
 Every document is generated from the same data as the cutting sheets
 (:class:`~envelopelab.export.build_pack.Sheet`, :class:`SeamPair`), the design's live
@@ -9,7 +10,7 @@ internally and printed in the units the builder measures with (m, mm, m², kg, N
 
 Safety: a factor of safety below the requirement is printed as ``FAILS`` with its value
 and the requirement; a value that is not assessed says so; every material value carries
-its source tag, and the cover lists the safety notice and every value tagged
+its source tag, and the spec summary lists the safety notice and every value tagged
 ``assumed``.
 
 The PDFs use :class:`envelopelab.report.pdf.PdfCanvas` (Helvetica, Latin-1), so the
@@ -20,7 +21,6 @@ from __future__ import annotations
 
 import csv
 import io
-import json
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
@@ -42,22 +42,48 @@ ROW = 12.0  # points per table row
 FONT = 8.0  # points
 CHAR = 0.5  # average Helvetica glyph width, as a fraction of the font size
 
-COVER = "00-cover.pdf"
-VIEWER = "3d-view.html"
-SPEC_PDF, SPEC_JSON = "spec-summary.pdf", "spec-summary.json"
-CUT_PDF, CUT_CSV = "cut-list.pdf", "cut-list.csv"
-RIG_PDF, RIG_CSV = "rigging.pdf", "rigging.csv"
-SEW_PDF, SEW_CSV = "sewing-schedule.pdf", "sewing-schedule.csv"
-
-#: Document parts a pack can include, with their files and a one-line description.
-DOCUMENTS = {
-    "viewer": ((VIEWER,), "3D view of the design, its rigging and the shown run (offline)"),
-    "cover": ((COVER,), "Cover and index: provenance, safety notice, assumed values, files"),
-    "spec": ((SPEC_PDF, SPEC_JSON), "Spec summary: size, volume, lift, masses, materials, FoS"),
-    "cut_list": ((CUT_PDF, CUT_CSV), "Cut list: pieces, cut counts, fabric areas, tapes"),
-    "rigging": ((RIG_PDF, RIG_CSV), "Rigging sheet: lines and rings, lengths, loads, FoS"),
-    "sewing": ((SEW_PDF, SEW_CSV), "Sewing schedule: every seam in order, with a check box"),
+#: Document parts a pack can include: key to (file suffixes after ``<slug>-``, index group,
+#: tag, description). Tags: ``REF`` reading, any printer; ``1:1`` print actual size.
+DOCUMENTS: dict[str, tuple[tuple[str, ...], str, str, str]] = {
+    "index": (
+        ("00-BUILD-PACK-INDEX.pdf",),
+        "START HERE",
+        "REF",
+        "this document - specs, features, shop limits, file index, build order",
+    ),
+    "spec": (("spec-summary.pdf",), "START HERE", "REF", "all key dimensions, metric + English"),
+    "viewer": (("3d.html",), "START HERE", "REF", "interactive 3D model (open in a browser)"),
+    "cut_list": (
+        ("cut-list.pdf", "cut-list.csv"),
+        "LAYOUT & PLANNING",
+        "REF",
+        "pieces, cut counts, fabric areas, tapes",
+    ),
+    "sewing": (
+        ("sewing-schedule.pdf", "sewing-schedule.csv"),
+        "LAYOUT & PLANNING",
+        "REF",
+        "every seam in assembly order, with a check box",
+    ),
+    "build_log": (
+        ("build-log.pdf",),
+        "LAYOUT & PLANNING",
+        "REF",
+        "sign-off sheets - print and use on the floor",
+    ),
+    "rigging": (
+        ("rigging.pdf", "rigging.csv"),
+        "TOP & BOTTOM / CAD",
+        "REF",
+        "lines and rings: lengths, loads, strengths, FoS",
+    ),
 }
+
+
+def document_files(slug: str, key: str) -> list[str]:
+    """The file names of document ``key`` in a pack whose prefix is ``slug``."""
+    return [f"{slug}-{suffix}" for suffix in DOCUMENTS[key][0]]
+
 
 SAFETY_NOTICE = (
     "EnvelopeLab is a design aid, not certified engineering software. The builder is "
@@ -374,68 +400,6 @@ def sewing_schedule(sheets: Sequence[Sheet], pairs: Sequence[SeamPair], gores: i
     return table
 
 
-def spec_tables(design: DesignDocument, outputs: GoreOutputs | None) -> list[Table]:
-    """The spec summary: size and lift, mass budget, materials, factors of safety."""
-    op = design.operating
-    size = Table("Size and lift", ["Quantity", "Value", "Note"])
-    if outputs is None:
-        size.rows.append(["outputs", "not available", "the design outputs could not be computed"])
-        return [size]
-    g = design.gores
-    size.rows += [
-        ["gores", str(g.count if g is not None else "-"), ""],
-        ["panel rows", str(len(g.panel_rows) if g is not None else "-"), ""],
-        ["height", f"{outputs.height:.3f} m", "design shape (as cut), not inflated"],
-        ["maximum diameter", f"{outputs.max_diameter:.3f} m", ""],
-        ["load-tape length", f"{outputs.meridian_length:.3f} m", "mouth to crown"],
-        ["volume", f"{outputs.volume:.2f} m3", "lofted design surface"],
-        ["fabric area", f"{outputs.area:.2f} m2", "finished"],
-        ["ambient", f"{op.ambient_temperature:.2f} K, {op.ambient_pressure:.0f} Pa", ""],
-        ["internal temperature", f"{op.internal_temperature:.2f} K", ""],
-        ["gross lift", f"{outputs.gross_lift:.0f} N", "V (rho_amb - rho_int) g"],
-        ["payload", f"{op.payload_mass:.1f} kg", ""],
-    ]
-    margin = outputs.lift_margin
-    size.rows.append(
-        [
-            "lift margin",
-            "not estimated" if margin is None else f"{margin:.1f} kg",
-            "NEGATIVE: cannot lift its mass" if margin is not None and margin < 0 else "",
-        ]
-    )
-    if margin is not None and margin < 0:
-        size.fails.add(len(size.rows) - 1)
-    masses = Table("Mass budget", ["Item", "Mass (kg)"])
-    if outputs.mass is not None:
-        m = outputs.mass
-        masses.rows += [
-            ["envelope fabric", f"{m.fabric_mass:.2f}"],
-            ["envelope tapes", f"{sum(m.tape_masses.values()):.2f}"],
-            ["thread", f"{m.thread_mass:.3f}"],
-        ]
-    for item, kg in (outputs.rigging.masses if outputs.rigging is not None else {}).items():
-        masses.rows.append([item, f"{kg:.3f}"])
-    total = (outputs.envelope_mass or 0.0) + (outputs.rigging_mass or 0.0)
-    masses.rows.append(["total (without payload)", f"{total:.2f}"])
-    materials = Table("Materials", ["Zone", "Fabric", "Finished area (m2)", "Areal mass", "Source"])
-    if outputs.mass is not None:
-        for zone, z in outputs.mass.zones.items():
-            materials.rows.append(
-                [
-                    zone,
-                    design.zones.get(zone, "-"),
-                    f"{z.finished_area:.2f}",
-                    f"{z.areal_mass.value * 1000:.0f} g/m2",
-                    z.areal_mass.source,
-                ]
-            )
-    tables = [size, masses, materials]
-    rig = rigging_table(outputs.rigging)
-    rig.title = "Factors of safety (rigging)"
-    tables.append(rig)
-    return tables
-
-
 def assumed_values(design: DesignDocument, outputs: GoreOutputs | None) -> list[str]:
     """Every value of the design and its outputs tagged ``assumed``, one line each."""
     out: list[str] = []
@@ -579,48 +543,15 @@ def _subtitle(design: DesignDocument, prov: Provenance | None) -> str:
     return " | ".join(parts)
 
 
-def write_spec(
-    design: DesignDocument,
-    outputs: GoreOutputs | None,
-    out_dir: Path,
-    prov: Provenance | None = None,
-) -> list[Path]:
-    """``spec-summary.pdf`` and ``spec-summary.json``."""
-    tables = spec_tables(design, outputs)
-    doc = _Document("Spec summary", _subtitle(design, prov))
-    fails = [t for t in tables if t.fails]
-    if fails:
-        doc.paragraph(
-            "FAILS: "
-            + "; ".join(t.rows[i][0] + " " + t.rows[i][1] for t in fails for i in t.fails),
-            bold=True,
-            fail=True,
-        )
-    for t in tables:
-        doc.table(t)
-    doc.paragraph(SAFETY_NOTICE)
-    pdf = doc.save(out_dir / SPEC_PDF)
-    data = {
-        "design": design.meta.name,
-        "provenance": None if prov is None else prov.as_dict(),
-        "tables": [
-            {"title": t.title, "columns": t.columns, "rows": t.rows, "fails": sorted(t.fails)}
-            for t in tables
-        ],
-    }
-    js = out_dir / SPEC_JSON
-    js.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-    return [pdf, js]
-
-
 def write_cut_list(
     design: DesignDocument,
     sheets: Sequence[Sheet],
     outputs: GoreOutputs | None,
     out_dir: Path,
     prov: Provenance | None = None,
+    stem: str = "design",
 ) -> list[Path]:
-    """``cut-list.pdf`` and ``cut-list.csv`` (the pieces table first)."""
+    """``<stem>-cut-list.pdf`` and ``.csv`` (the pieces table first)."""
     tables = [cut_list(sheets), fabric_totals(sheets), tape_list(outputs)]
     doc = _Document("Cut list", _subtitle(design, prov))
     doc.paragraph(
@@ -630,7 +561,8 @@ def write_cut_list(
     )
     for t in tables:
         doc.table(t)
-    return [doc.save(out_dir / CUT_PDF), write_csv(tables, out_dir / CUT_CSV)]
+    pdf, csv_name = document_files(stem, "cut_list")
+    return [doc.save(out_dir / pdf), write_csv(tables, out_dir / csv_name)]
 
 
 def write_rigging(
@@ -638,8 +570,9 @@ def write_rigging(
     outputs: GoreOutputs | None,
     out_dir: Path,
     prov: Provenance | None = None,
+    stem: str = "design",
 ) -> list[Path]:
-    """``rigging.pdf`` and ``rigging.csv``."""
+    """``<stem>-rigging.pdf`` and ``.csv``."""
     rig = None if outputs is None else outputs.rigging
     table = rigging_table(rig)
     doc = _Document("Rigging sheet", _subtitle(design, prov))
@@ -666,7 +599,8 @@ def write_rigging(
         full = "NOT REACHABLE" if op.full_open_travel is None else f"{op.full_open_travel:.3f} m"
         doc.paragraph(f"Red-line pull: seal open {seal}, fully open {full}.")
     doc.paragraph("Not assessed: red-line pull force, scoop wind load.")
-    return [doc.save(out_dir / RIG_PDF), write_csv([table], out_dir / RIG_CSV)]
+    pdf, csv_name = document_files(stem, "rigging")
+    return [doc.save(out_dir / pdf), write_csv([table], out_dir / csv_name)]
 
 
 def write_sewing(
@@ -675,8 +609,9 @@ def write_sewing(
     pairs: Sequence[SeamPair],
     out_dir: Path,
     prov: Provenance | None = None,
+    stem: str = "design",
 ) -> list[Path]:
-    """``sewing-schedule.pdf`` and ``sewing-schedule.csv``."""
+    """``<stem>-sewing-schedule.pdf`` and ``.csv``."""
     gores = design.gores.count if design.gores is not None else 1
     table = sewing_schedule(sheets, pairs, gores)
     doc = _Document("Sewing schedule", _subtitle(design, prov))
@@ -686,38 +621,5 @@ def write_sewing(
         "between the marks. Tick 'Done' as you go."
     )
     doc.table(table)
-    return [doc.save(out_dir / SEW_PDF), write_csv([table], out_dir / SEW_CSV)]
-
-
-def write_cover(
-    design: DesignDocument,
-    outputs: GoreOutputs | None,
-    files: Sequence[tuple[str, str]],
-    out_dir: Path,
-    prov: Provenance | None = None,
-    status: str = "",
-) -> Path:
-    """``00-cover.pdf``: provenance, safety notice, assumed values, the result status and
-    every file of the pack with what it is."""
-    doc = _Document(f"Build pack: {design.meta.name or 'design'}", _subtitle(design, prov))
-    doc.paragraph(SAFETY_NOTICE, bold=True)
-    if prov is not None:
-        doc.heading("Provenance")
-        for key, value in prov.as_dict().items():
-            doc.paragraph(f"{key.replace('_', ' ')}: {value or '-'}")
-    if status:
-        doc.heading("Structural result")
-        doc.paragraph(status)
-    doc.heading("Values tagged 'assumed'")
-    assumed = assumed_values(design, outputs)
-    for line in assumed or ["none"]:
-        doc.paragraph(f"- {line}")
-    doc.heading("Before cutting")
-    doc.paragraph(
-        "Print every 1:1 template at 100 % (no fit-to-page) and measure both calibration "
-        "lines on every page: each must measure what its label says."
-    )
-    table = Table("Files", ["File", "What it is"])
-    table.rows = [[name, what] for name, what in files]
-    doc.table(table)
-    return doc.save(out_dir / COVER)
+    pdf, csv_name = document_files(stem, "sewing")
+    return [doc.save(out_dir / pdf), write_csv([table], out_dir / csv_name)]

@@ -927,7 +927,9 @@ def export_build_pack(
     documents: list[dict[str, str]] = []
     prov = None
     if extras is not None and extras.include:
-        documents, prov = write_documents(design, sheets, pairs, Path(out_dir), extras, patterns)
+        documents, prov = write_documents(
+            design, sheets, pairs, Path(out_dir), extras, patterns, primitives, roll_width
+        )
     return write_pack(
         sheets,
         out_dir,
@@ -956,8 +958,10 @@ class PackExtras:
     provenance : Provenance, optional
         Where the pack comes from (default: this installation, now, an empty hash).
     status : str
-        The structural result in one line for the cover (e.g. "Preview run ...,
+        The structural result in one line for the index (e.g. "Preview run ...,
         converged, not verified with CalculiX"), "" for none.
+    table_length : float
+        Cutting-table length, m (a shop limit printed in the index).
     """
 
     include: frozenset[str] = frozenset()
@@ -965,6 +969,7 @@ class PackExtras:
     scene: Any = None
     provenance: Any = None
     status: str = ""
+    table_length: float = 12 * 0.3048  # m (12 ft, a common cutting table; source: assumed)
 
 
 def write_documents(
@@ -974,10 +979,20 @@ def write_documents(
     out: Path,
     extras: PackExtras,
     patterns: PatternSet | None = None,
+    primitives: Sequence[PrimitiveDesign] = (),
+    roll_width: float = DEFAULT_ROLL_WIDTH,
 ) -> tuple[list[dict[str, str]], Any]:
     """Write the documents of ``extras`` into ``out``; returns their index entries and the
-    provenance used."""
+    provenance used. The build-pack index is written last: it lists every file."""
     from envelopelab.export import documents as docs
+    from envelopelab.export.shop import (
+        FileEntry,
+        PackContext,
+        write_build_log,
+        write_index,
+        write_spec_summary,
+    )
+    from envelopelab.export.templates import slug, template_files
     from envelopelab.export.viewer import design_scene, write_viewer
 
     unknown = set(extras.include) - set(docs.DOCUMENTS)
@@ -994,36 +1009,73 @@ def write_documents(
         except ValueError:
             outputs = None
     prov = extras.provenance or docs.provenance(design.compute_content_hash())
+    stem = slug(design.meta.name)
+    templates = template_files(design.meta.name, sheets)
+    ctx = PackContext(
+        design,
+        outputs,
+        sheets,
+        pairs,
+        primitives,
+        templates,
+        roll_width,
+        extras.table_length,
+        prov,
+        extras.status,
+        stem,
+    )
     written: dict[str, list[Path]] = {}
     if "viewer" in extras.include:
         scene = extras.scene
         if scene is None:
             scene = design_scene(design, None if outputs is None else outputs.rigging)
-        written["viewer"] = [write_viewer(scene, out / docs.VIEWER)]
+        written["viewer"] = [write_viewer(scene, out / docs.document_files(stem, "viewer")[0])]
     if "spec" in extras.include:
-        written["spec"] = docs.write_spec(design, outputs, out, prov)
+        written["spec"] = [write_spec_summary(ctx, out / docs.document_files(stem, "spec")[0])]
     if "cut_list" in extras.include:
-        written["cut_list"] = docs.write_cut_list(design, sheets, outputs, out, prov)
-    if "rigging" in extras.include:
-        written["rigging"] = docs.write_rigging(design, outputs, out, prov)
+        written["cut_list"] = docs.write_cut_list(design, sheets, outputs, out, prov, stem)
     if "sewing" in extras.include:
-        written["sewing"] = docs.write_sewing(design, sheets, pairs, out, prov)
+        written["sewing"] = docs.write_sewing(design, sheets, pairs, out, prov, stem)
+    if "build_log" in extras.include:
+        log = out / docs.document_files(stem, "build_log")[0]
+        written["build_log"] = [write_build_log(ctx, log)]
+    if "rigging" in extras.include:
+        written["rigging"] = docs.write_rigging(design, outputs, out, prov, stem)
     entries = [
-        {"file": path.name, "kind": kind, "description": docs.DOCUMENTS[kind][1]}
+        {"file": path.name, "kind": kind, "description": docs.DOCUMENTS[kind][3]}
         for kind, paths in written.items()
         for path in paths
     ]
-    if "cover" in extras.include:
-        files = [(docs.COVER, docs.DOCUMENTS["cover"][1])]
-        files += [(e["file"], e["description"]) for e in entries]
-        from envelopelab.export.templates import template_files
-
-        files += [
-            (t.name, f"1:1 - {t.description}") for t in template_files(design.meta.name, sheets)
-        ]
-        files += [(f"{CAD_DIR}/", "one DXF per piece (mm) and index.json, for CAD and the QA")]
-        cover = docs.write_cover(design, outputs, files, out, prov, extras.status)
+    if "index" in extras.include:
+        index_name = docs.document_files(stem, "index")[0]
+        files = [FileEntry(index_name, *docs.DOCUMENTS["index"][1:])]
+        files += [FileEntry(e["file"], *docs.DOCUMENTS[e["kind"]][1:]) for e in entries]
+        grouped = [t for t in templates if t.grouped]
+        for t in templates:
+            if t in grouped or (t.pages and t.pages[0].sheet.kind == "envelope panel"):
+                group = "PANEL TEMPLATES"
+            elif t.name.endswith("-parachute-patterns.pdf"):
+                group = "TOP & BOTTOM / CAD"
+            else:
+                group = "APPENDAGES"
+            files.append(FileEntry(t.name, group, "1:1", t.description))
+        if len(grouped) > 1:
+            files.append(
+                FileEntry(
+                    f"{stem}-panels-grouped.pdf",
+                    "PANEL TEMPLATES",
+                    "1:1",
+                    "all paired panel sheets in one file",
+                )
+            )
+        files.append(
+            FileEntry(
+                f"{CAD_DIR}/", "TOP & BOTTOM / CAD", "CAD", "one DXF per piece (mm), index.json"
+            )
+        )
+        ctx.files = files
+        write_index(ctx, out / index_name)
         entries.insert(
-            0, {"file": cover.name, "kind": "cover", "description": docs.DOCUMENTS["cover"][1]}
+            0, {"file": index_name, "kind": "index", "description": docs.DOCUMENTS["index"][3]}
         )
     return entries, prov
