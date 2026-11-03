@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the 3D view treats a run as the whole balloon (approved mockup, board 4). The
+  *Run* list has one entry per solve, the envelope and the shapes solved with it
+  ("Preview run · envelope + 2 shapes"; CalculiX a second entry); shapes are no longer
+  separate runs. *Colour by* colours every part together on one shared scale; a result
+  field hides the design surfaces and *Deviation from design* shows them. One banner, worst
+  part first, naming the part. Grouped layer tree (Design, Result, Rigging, Reference) with
+  a box per group; run details per part; *Go to part* in the camera bar; the Probe names the
+  part. Display only.
 - Added: special-shape simulations have the envelope's colour maps in the 3D view. Each
   solved shape is in the *Run* list (*Dome (inflated)*) with factor of safety warp/weft,
   principal and warp/weft resultants, wrinkling, displacement and the deviation from its

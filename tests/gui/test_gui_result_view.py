@@ -131,10 +131,12 @@ def test_layer_list_shows_short_names_with_the_full_label_as_tooltip(
     from envelopelab_app.theme import STATUS_STYLES
 
     view = gore_window.view3d
-    item = view.layer_list.item(0)
-    assert item is not None and item.text() == "Design surface"
-    assert item.toolTip() == view.labels()["design"]  # the full description
-    assert len(item.text()) < len(item.toolTip())
+    item = view.layer_item("design")
+    assert item is not None and item.text(0) == "Design surface"
+    assert item.toolTip(0) == view.labels()["design"]  # the full description
+    assert len(item.text(0)) < len(item.toolTip(0))
+    group = item.parent()
+    assert group is not None and group.text(0) == "Design"
     empty = np.zeros((0, 3))
     stale = Layer("envelopelab-preview", "envelopelab-preview", "long [STALE]", empty, empty)
     stale.stale = True

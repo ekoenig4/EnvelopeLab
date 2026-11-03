@@ -60,8 +60,9 @@ the status bar says so. The envelope's own solve does not include the shapes.
 
 The 3D view's toolbar chooses what it shows:
 
-* **Run**: the result the colours, the banner and the run details describe (the latest
-  preview or CalculiX run).
+* **Run**: the solve the colours, the banner and the run details describe: the latest
+  preview or CalculiX run, each **the whole balloon**, the envelope and every special shape
+  solved with it ("Preview run · envelope + 2 shapes").
 * **Colour by**: *Factor of safety, warp* or *weft* (the default for a current, converged
   preview run), the principal, warp and weft resultants (N/m), *Wrinkling* (taut,
   wrinkled, slack), *Displacement from the as-sewn shape* (mm), *Deviation from
@@ -87,18 +88,25 @@ design's outward normal, so fabric that only slid along the surface reads as zer
 mesh instead. The same values can be shown on the flat panels in the Patterns view
 (*Overlay: Deviation from design*, see [editing designs](editing-designs.md)).
 
-**Special shapes** solved with the envelope are in the *Run* list too (for example
-*Dome (inflated)*), with the same *Colour by* fields on their skin: factor of safety warp
-and weft, resultants, wrinkling, displacement, and the deviation from the shape's designed
-skin (drawn on *Dome (designed)* when that layer is shown, else on the inflated skin). The
-banner and run details then describe the shape's simulation. The shape's skin factor in the
-Special shapes panel is the conservative bound min(N_ult,warp, N_ult,weft) / N1 (major
-principal resultant), so it is never above the lowest warp or weft value shown here.
-Simulations from earlier versions have no stored skin results: run them again for the
-colours.
+**Special shapes** are parts of the run, not runs of their own. *Colour by* colours the
+envelope and every shape of the run together on **one scale**, so the weakest spot of the
+whole balloon stands out (the factor-of-safety limit, 5, applies to every part). Choosing a
+result field hides the design surfaces (they lie where the result does and would cover
+it); choosing *Deviation from design* shows them again, each part's deviation drawn on its
+own design (the envelope surface, *Dome (designed)*, ...). Tick them back in the layer tree
+whenever you like. The shape's skin factor in the Special shapes panel is the conservative
+bound min(N_ult,warp, N_ult,weft) / N1 (major principal resultant), so it is never above
+the lowest warp or weft value shown here. Simulations from earlier versions have no stored
+skin results: run them again for the colours.
+
+The **layer tree** groups the layers: *Design* (design surface, panel details, designed
+shapes), *Result* (the inflated envelope and shapes, the rest mesh), *Rigging* and
+*Reference*. A group's box shows or hides all its layers. **Go to part** (camera bar) fits
+the view to the envelope or a shape.
 
 A **status banner** across the top of the view always states the chosen run's state, worst
-first. It cannot be closed; it goes when the state does:
+part first, and names the part when it is a shape ("Dome: Factor of safety below the
+limit"; other parts in the same state are listed after "Also:"). It cannot be closed; it goes when the state does:
 
 | Banner | When | The view |
 |---|---|---|
@@ -109,11 +117,13 @@ first. It cannot be closed; it goes when the state does:
 | ✓ **Current and converged** | a current, converged CalculiX run exists too | — |
 
 "Verified" only means a current, converged CalculiX run exists for the same design; compare
-the two runs in the Simulation Runs table. The **Run details** card beside the layer list
-gives the solver and version, status, iterations, final residual (hover for what it
-measures), mesh size, load case, run time, volume and the material source tags
-(**assumed** in bold). The **Probe** tool (on the left of the view) shows the zone and
-every field's value of the element you click, and flags a factor below the limit.
+the two runs in the Simulation Runs table. The **Run details** card beside the layer tree
+gives the solver and version, the envelope's mesh size, load case, run time and volume and
+the material source tags (**assumed** in bold), then one row per part (status, iterations,
+final residual, lowest factor of safety) and each shape's mesh and run time (hover for what
+the residual measures). The **Probe** tool (on the left of the view) shows the zone and
+every field's value of the element you click, names the part (*Envelope* or *Dome skin*),
+and flags a factor below the limit.
 
 !!! warning "Strength values"
     In this version the fabric strengths are generic `assumed` values (see *Material

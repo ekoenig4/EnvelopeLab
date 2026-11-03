@@ -312,7 +312,7 @@ def test_face_seams_zoom_to_a_layer_and_keep_saved_views_per_project(
     assert azimuth() == pytest.approx(22.5)
     view.view_buttons["iso"].click()
     far = np.linalg.norm(np.array(plotter.camera.position) - plotter.camera.focal_point)
-    view.layer_list.setCurrentRow(0)  # the design surface
+    view.select_layer("design")
     view.view_buttons["zoom_layer"].click()
     near = np.linalg.norm(np.array(plotter.camera.position) - plotter.camera.focal_point)
     assert near <= far

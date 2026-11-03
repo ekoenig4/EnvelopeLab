@@ -262,9 +262,9 @@ def test_3d_view_draws_shapes_as_sewn_pieces(gore_window: MainWindow) -> None:
     assert sewn.face_colors is not None and len(np.unique(sewn.face_colors, axis=0)) == 2
     assert len(sewn.polylines["skin_seams"]) == 16 + 1
     # The user's choice is kept when the layers are rebuilt.
-    items = [view.layer_list.item(i) for i in range(view.layer_list.count())]
-    item = next(i for i in items if i.data(Qt.ItemDataRole.UserRole) == "shape:Dome")
-    item.setCheckState(Qt.CheckState.Checked)
+    item = view.layer_item("shape:Dome")
+    assert item is not None
+    item.setCheckState(0, Qt.CheckState.Checked)
     view.refresh()
     assert view.layers["shape:Dome"].visible
 
@@ -534,12 +534,12 @@ def test_shapes_are_reported_one_by_one_and_a_stale_batch_stops() -> None:
 
 
 @pytest.mark.slow
-def test_a_shape_simulation_has_colour_maps_and_its_deviation(
+def test_one_run_colours_the_envelope_and_its_shapes_together(
     gore_window: MainWindow, qtbot: QtBot
 ) -> None:
-    """A solved special shape is in the 3D view's Run list with the envelope's fields:
-    factor of safety, resultants, wrinkling, displacement and the deviation from its
-    designed skin; the banner and run details describe it."""
+    """The 3D view's run is the whole balloon: the envelope and the shapes solved with
+    it. Its parts share the fields and one colour scale; the run details list each part;
+    a shape is not a run of its own (it is reached through its layers and Go to part)."""
     from envelopelab_app.simulation import PREVIEW
 
     w = gore_window
@@ -551,22 +551,39 @@ def test_a_shape_simulation_has_colour_maps_and_its_deviation(
     qtbot.waitUntil(lambda: session.shape_run("Dome") is not None, timeout=10_000)
     view = w.view3d
     view.refresh()
-    index = view.run_choice.findData("shape-sim:Dome")
-    assert index >= 0 and view.run_choice.itemText(index).startswith("Dome (inflated)")
-    view.run_choice.setCurrentIndex(index)
-    view._result_changed()
+    assert view.run_choice.findData("shape-sim:Dome") < 0  # not a run of its own
+    assert view.run_choice.currentData() == PREVIEW
+    assert "envelope + 1 shape" in view.run_choice.currentText()
+    assert view.parts() == [PREVIEW, "shape-sim:Dome"]
+    assert view.part_choice.findData("shape:Dome") >= 0  # Go to part
     record = session.shape_run("Dome")
     assert record is not None
+    dome = view.part_fields["shape-sim:Dome"]
     for name in ("fos_warp", "fos_weft", "n1", "n_warp", "wrinkle_state", "displacement"):
-        assert name in view.fields, (name, view.missing.get(name))
-    deviation = view.fields["deviation"]
-    assert deviation.location == "node" and np.isfinite(deviation.values).all()
-    # One value per skin triangle (the sub-model's element count also has the envelope
-    # patch round the shape).
+        assert name in dome, (name, view.part_missing["shape-sim:Dome"].get(name))
+    assert np.isfinite(dome["deviation"].values).all()
     skin = len(view.layers["shape-sim:Dome"].faces)
-    assert len(view.fields["fos_warp"].values) == skin < record.n_elements
+    assert len(dome["fos_warp"].values) == skin < record.n_elements
     # The conservative shape summary never exceeds the lowest warp/weft factor shown.
-    low = min(float(view.fields[k].values.min()) for k in ("fos_warp", "fos_weft"))
+    low = min(float(dome[k].values.min()) for k in ("fos_warp", "fos_weft"))
     assert record.fos["skin"] <= low * (1.0 + 1e-12)
+    # One scale: the shared values hold both parts.
+    view.field_choice.setCurrentIndex(view.field_choice.findData("n1"))
+    shared = view._shared_values("n1")
+    assert len(shared) == len(view.fields["n1"].values) + len(dome["n1"].values)
+    assert view.part_field("shape-sim:Dome") is dome["n1"]
+    # The run details have a row per part.
+    details = view.run_details.text()
+    assert ">Envelope<" in details and ">Dome<" in details
     assert view.banner.kind in ("info", "fail", "error")
-    assert f"{record.iterations}" in view.run_details.text()
+    # The tree groups the layers; the Result group holds the envelope and the dome.
+    item = view.layer_item("shape-sim:Dome")
+    group = None if item is None else item.parent()
+    assert group is not None and group.text(0) == "Result"
+    # The Probe names the part it hit.
+    on_dome = view.layers["shape-sim:Dome"].points[0]
+    assert view.part_at(on_dome) == "shape-sim:Dome"
+    assert view.probe_text("shape-sim:Dome", 0).startswith("Dome skin · element 0")
+    on_envelope = view.layers[PREVIEW].points[0]
+    assert view.part_at(on_envelope) == PREVIEW
+    assert view.probe_text(PREVIEW, 0).startswith("Envelope · element 0")
