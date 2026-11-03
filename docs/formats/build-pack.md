@@ -14,6 +14,42 @@ A build pack is a directory written by `envelopelab.export.build_pack.export_bui
 | `pattern.pdf` | Every sheet at 1:1 on pages as wide as the fabric roll; a sheet wider than the roll is split into numbered strips |
 | `index.json` | The index (below); it lists every other file |
 
+From format 2 (`envelopelab-build-pack/2`) a pack can also hold **documents**, chosen when
+it is exported (**File ▸ Export build pack…**, or `PackExtras` in
+`envelopelab.export.build_pack.export_build_pack`). A pack with none is a format-1 pack
+with the two new index keys (empty).
+
+| File | Content |
+|---|---|
+| `00-cover.pdf` | Cover and index: provenance (app version, git commit, design hash, time), the safety notice, every value tagged `assumed`, the structural result in one line, and every file of the pack with what it is |
+| `3d-view.html` | The 3D view (below), one self-contained page |
+| `spec-summary.pdf`, `spec-summary.json` | Size and lift (height, diameter, tape length, volume, area, operating conditions, gross lift, payload, lift margin), mass budget, materials per zone with source tags, rigging factors of safety |
+| `cut-list.pdf`, `cut-list.csv` | Every sheet (file, piece, kind, cut count, fabric, finished size, finished and cut areas of one piece and of all), fabric totals, tape lengths per class and thread |
+| `rigging.pdf`, `rigging.csv` | Every line and ring: element, count, length each (rings: diameter), total, limit load, strength and its source, factor of safety, required, check (`ok`, `FAILS`, `not assessed`), mass; the red-line pull |
+| `sewing-schedule.pdf`, `sewing-schedule.csv` | Every seam pair in assembly order (gore seams, row seams, parachute, shape skin seams, shape rims to the envelope), how often it is sewn, both edge lengths, the planned ease, a *Done* box |
+
+CSV files with more than one table separate them by a blank line and a `# title` row.
+PDF documents are A4 portrait, Helvetica (Latin-1 text: `>=` for ≥, `!` for ▲).
+
+### 3d-view.html
+
+One HTML page with its own small WebGL renderer: no library, no network, nothing fetched
+(the QA checks it). The scene is embedded as JSON in
+`<script id="scene" type="application/json">` (format `envelopelab-viewer/1`):
+
+| Key | Content |
+|---|---|
+| `meshes[]` | `key`, `name`, `group` (Design, Result, Rigging), `role` (`design`, `result`, `other`), `note` (e.g. `preview`, `stale: …`, `NOT CONVERGED: …`), `visible`, `color` (RGB), `triangles` (count), `positions` (base64 little-endian float32, m, 3 vertices per triangle), optional `base` (uint8 RGB per vertex), `colorings` |
+| `meshes[].colorings` | Per field key (`fos_warp`, `deviation`, …): `rgb` (uint8 RGB per vertex) and `legend` (`title`, `entries`: colour and label, lowest first) |
+| `lines[]` | `key`, `name`, `group`, `role`, `visible`, `color`, `vertices`, `positions` (segment end points, float32, m) |
+| `labels[]` | `text` (gore numbers `G1`…) and `at` (m) |
+| `colorings` | Field key to its title (the *Colour by* list) |
+| `initial` | Colouring shown first ("" for layer colours) |
+| `status` | `kind` (`ok`, `info`, `stale`, `fail`, `error`), `symbol`, `title`, `message`: the banner |
+
+Every colour is computed by EnvelopeLab and stored; the page only draws. A stale or
+unconverged result has no colourings and its `note` says why.
+
 ## DXF sheets
 
 Units are millimetres (`$INSUNITS` = 4, `$MEASUREMENT` = 1). Pattern coordinates: `x`
@@ -43,11 +79,17 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
 
 ```json
 {
-  "format": "envelopelab-build-pack/1",
+  "format": "envelopelab-build-pack/2",
   "title": "design name",
   "units": "mm",
   "roll_width_mm": 1524.0,
   "pdf": "pattern.pdf",
+  "provenance": {"app_version": "0.1.0", "git_commit": "2753321…", "design_hash": "…",
+                 "created": "2026-11-03T20:56:43+00:00", "project": "balloon.elproj"},
+  "documents": [
+    {"file": "00-cover.pdf", "kind": "cover", "description": "Cover and index: …"},
+    {"file": "3d-view.html", "kind": "viewer", "description": "3D view of …"}
+  ],
   "sheets": [
     {"file": "ear-G1.dxf", "piece": "ear-G1", "kind": "skin piece", "cut_count": 1,
      "fabric": "ripstop red", "finished_width_mm": 392.1, "finished_height_mm": 1855.0,
@@ -77,7 +119,10 @@ marks (checked per mark interval when the shape is designed).
 `envelopelab.export.qa.check_pack` checks a pack from its files alone (AGENTS.md §6.6):
 the index and the directory list the same files; every DXF is in mm; every calibration
 line, in every DXF and on every PDF page, measures what its label says; every PDF page is
-as wide as the roll; every header matches the index and the drawn `SEW` outline; and
+as wide as the roll; every header matches the index and the drawn `SEW` outline; every
+document opens (PDFs have pages), the cut list lists every sheet with the index's cut
+count and fabric, and the 3D view loads nothing from outside the page and holds a scene
+with a surface and a status banner; and
 every sewn edge pair differs by its planned ease within its tolerance.
 `scripts/check_build_pack.py` exports a generic sample pack and checks it;
 `scripts/verify.py` runs it.

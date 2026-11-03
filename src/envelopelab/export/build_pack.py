@@ -22,6 +22,12 @@ the roll is split into strips of the roll width. ``index.json`` lists every file
 its piece, cut count, fabric and finished size, and the pairs of edges that are sewn
 together. :func:`envelopelab.export.qa.check_pack` checks a pack against AGENTS.md §6.6.
 
+From format 2 a pack can also hold *documents* (:mod:`envelopelab.export.documents`):
+a cover and index, a spec summary, a cut list, a rigging sheet, a sewing schedule and a
+self-contained 3D view (:mod:`envelopelab.export.viewer`), chosen with
+:class:`PackExtras`. ``index.json`` lists them under ``documents`` with the export's
+provenance.
+
 Sheet contents (DXF layers)
 ---------------------------
 ``CUT`` cut outline (with seam allowance); ``SEW`` finished outline; ``EDGE_<NAME>`` each
@@ -57,7 +63,7 @@ if TYPE_CHECKING:
 
 MM = 1000.0  # mm per m
 PT_PER_M = 72.0 / 0.0254  # PDF points per m
-PACK_FORMAT = "envelopelab-build-pack/1"
+PACK_FORMAT = "envelopelab-build-pack/2"
 INDEX = "index.json"
 PDF_NAME = "pattern.pdf"
 DEFAULT_ROLL_WIDTH = 60 * 0.0254  # m (60 in roll, AGENTS.md example)
@@ -853,6 +859,8 @@ def write_pack(
     seam_pairs: Sequence[SeamPair] = (),
     roll_width: float = DEFAULT_ROLL_WIDTH,
     title: str = "",
+    documents: Sequence[dict[str, str]] = (),
+    provenance: dict[str, str] | None = None,
 ) -> Path:
     """Write a build pack: one DXF per sheet, ``pattern.pdf`` and ``index.json``.
 
@@ -868,6 +876,11 @@ def write_pack(
         Fabric roll width, m (PDF page width).
     title : str
         Pack title for the index.
+    documents : sequence of dict
+        Documents already written to ``out_dir`` (``file``, ``kind``, ``description``),
+        listed in the index.
+    provenance : dict, optional
+        Where the pack comes from (:class:`envelopelab.export.documents.Provenance`).
 
     Returns
     -------
@@ -905,6 +918,8 @@ def write_pack(
         "units": "mm",
         "roll_width_mm": round(roll_width * MM, 3),
         "pdf": PDF_NAME,
+        "provenance": provenance or {},
+        "documents": list(documents),
         "sheets": entries,
         "seam_pairs": [
             {
@@ -930,9 +945,10 @@ def export_build_pack(
     roll_width: float = DEFAULT_ROLL_WIDTH,
     marking_allowance: float | None = None,
     hole_hem: float | None = None,
+    extras: PackExtras | None = None,
 ) -> Path:
     """Export the envelope rows, the parachute, and every primitive's pieces and marking
-    sheets.
+    sheets, and the documents chosen in ``extras``.
 
     Parameters
     ----------
@@ -953,6 +969,8 @@ def export_build_pack(
     hole_hem : float, optional
         Hem turned back round each feed hole, m (default: a double fold over the design's
         hole tape, twice its width).
+    extras : PackExtras, optional
+        Documents to write with the sheets (default: none, the sheets only).
 
     Returns
     -------
@@ -974,4 +992,103 @@ def export_build_pack(
         fabric = skin_fabric if isinstance(skin_fabric, str) else skin_fabric.get(name, "skin")
         sheets += primitive_sheets(p, fabric, marking_allowance, hem, hole_tape)
         pairs += primitive_seam_pairs(p)
-    return write_pack(sheets, out_dir, pairs, roll_width, title=design.meta.name)
+    documents: list[dict[str, str]] = []
+    prov = None
+    if extras is not None and extras.include:
+        documents, prov = write_documents(design, sheets, pairs, Path(out_dir), extras, patterns)
+    return write_pack(
+        sheets,
+        out_dir,
+        pairs,
+        roll_width,
+        title=design.meta.name,
+        documents=documents,
+        provenance=None if prov is None else prov.as_dict(),
+    )
+
+
+@dataclass
+class PackExtras:
+    """The documents of a build pack and what they are made from.
+
+    Attributes
+    ----------
+    include : frozenset of str
+        Keys of :data:`envelopelab.export.documents.DOCUMENTS` to write.
+    outputs : GoreOutputs, optional
+        The design's live outputs (:func:`envelopelab.project.gore_design.gore_outputs`)
+        for the spec summary, cut list (tapes) and rigging sheet; computed when missing.
+    scene : Scene, optional
+        The 3D view to write (default :func:`envelopelab.export.viewer.design_scene`:
+        the design and its rigging, no solver result).
+    provenance : Provenance, optional
+        Where the pack comes from (default: this installation, now, an empty hash).
+    status : str
+        The structural result in one line for the cover (e.g. "Preview run ...,
+        converged, not verified with CalculiX"), "" for none.
+    """
+
+    include: frozenset[str] = frozenset()
+    outputs: Any = None
+    scene: Any = None
+    provenance: Any = None
+    status: str = ""
+
+
+def write_documents(
+    design: DesignDocument,
+    sheets: Sequence[Sheet],
+    pairs: Sequence[SeamPair],
+    out: Path,
+    extras: PackExtras,
+    patterns: PatternSet | None = None,
+) -> tuple[list[dict[str, str]], Any]:
+    """Write the documents of ``extras`` into ``out``; returns their index entries and the
+    provenance used."""
+    from envelopelab.export import documents as docs
+    from envelopelab.export.viewer import design_scene, write_viewer
+
+    unknown = set(extras.include) - set(docs.DOCUMENTS)
+    if unknown:
+        raise BuildPackError(f"unknown build-pack documents: {sorted(unknown)}")
+    out.mkdir(parents=True, exist_ok=True)
+    outputs = extras.outputs
+    if outputs is None:
+        from envelopelab.project.gore_design import gore_outputs
+        from envelopelab.project.model import PatternSet as Patterns
+
+        try:
+            outputs = gore_outputs(design, patterns if patterns is not None else Patterns())
+        except ValueError:
+            outputs = None
+    prov = extras.provenance or docs.provenance(design.compute_content_hash())
+    written: dict[str, list[Path]] = {}
+    if "viewer" in extras.include:
+        scene = extras.scene
+        if scene is None:
+            scene = design_scene(design, None if outputs is None else outputs.rigging)
+        written["viewer"] = [write_viewer(scene, out / docs.VIEWER)]
+    if "spec" in extras.include:
+        written["spec"] = docs.write_spec(design, outputs, out, prov)
+    if "cut_list" in extras.include:
+        written["cut_list"] = docs.write_cut_list(design, sheets, outputs, out, prov)
+    if "rigging" in extras.include:
+        written["rigging"] = docs.write_rigging(design, outputs, out, prov)
+    if "sewing" in extras.include:
+        written["sewing"] = docs.write_sewing(design, sheets, pairs, out, prov)
+    entries = [
+        {"file": path.name, "kind": kind, "description": docs.DOCUMENTS[kind][1]}
+        for kind, paths in written.items()
+        for path in paths
+    ]
+    if "cover" in extras.include:
+        files = [(docs.COVER, docs.DOCUMENTS["cover"][1])]
+        files += [(e["file"], e["description"]) for e in entries]
+        files += [(PDF_NAME, "every sheet at 1:1 on roll-wide pages")]
+        files += [(f"{s.name}.dxf", s.header()) for s in sheets]
+        files += [(INDEX, "machine-readable index of every file")]
+        cover = docs.write_cover(design, outputs, files, out, prov, extras.status)
+        entries.insert(
+            0, {"file": cover.name, "kind": "cover", "description": docs.DOCUMENTS["cover"][1]}
+        )
+    return entries, prov

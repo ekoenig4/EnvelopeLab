@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__ · 3D view</title>
+<style>
+:root { --ink:#1f2933; --muted:#4b5563; --panel:#f7f8fa; --border:#cfd5dc; --accent:#1d5fb4; }
+* { box-sizing: border-box; }
+body { margin:0; font:14px/1.4 "Segoe UI","Noto Sans",Inter,system-ui,sans-serif;
+  color:var(--ink); background:var(--panel); }
+header { display:flex; align-items:center; gap:12px; padding:8px 16px;
+  border-bottom:1px solid var(--border); background:#fff; flex-wrap:wrap; }
+header h1 { font-size:16px; margin:0; font-weight:600; }
+header label { color:var(--muted); }
+select, button { font:inherit; padding:3px 8px; border:1px solid #c5ccd5;
+  border-radius:4px; background:#fff; color:var(--ink); }
+button:hover { background:#eef2f6; }
+.banner { padding:8px 16px; background:__BANNER_BG__; color:__BANNER_TEXT__;
+  border-bottom:2px solid __BANNER_BORDER__; }
+.banner b { margin-right:6px; }
+main { display:flex; min-height:0; height:calc(100vh - 160px); min-height:420px; }
+#view { position:relative; flex:1; min-width:0; background:#eef1f4; }
+canvas { width:100%; height:100%; display:block; touch-action:none; }
+#labels span { position:absolute; transform:translate(-50%,-50%); font-size:11px;
+  color:var(--muted); pointer-events:none; white-space:nowrap; }
+aside { width:280px; padding:12px; overflow:auto; border-left:1px solid var(--border);
+  background:#fff; }
+aside h2 { font-size:13px; margin:12px 0 6px; }
+aside h2:first-child { margin-top:0; }
+.group { font-weight:600; margin-top:6px; }
+.layer { display:flex; gap:6px; align-items:baseline; margin-left:4px; }
+.layer small { color:var(--muted); }
+.swatch { display:inline-block; width:14px; height:12px; border:1px solid #0003;
+  vertical-align:middle; margin-right:6px; }
+#legend div { margin:2px 0; }
+footer { padding:8px 16px; color:var(--muted); font-size:12px; }
+footer ul { margin:4px 0; padding-left:18px; }
+.views { display:flex; gap:4px; flex-wrap:wrap; }
+@media (max-width: 760px) { main { flex-direction:column; height:auto; }
+  #view { height:60vh; } aside { width:auto; border-left:0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>__TITLE__</h1>
+  <label for="colour">Colour by</label>
+  <select id="colour"><option value="">Layer colour</option></select>
+  <div class="views">
+    <button data-view="front">Front</button><button data-view="side">Side</button>
+    <button data-view="top">Top</button><button data-view="iso">Isometric</button>
+  </div>
+</header>
+<div class="banner" id="banner"></div>
+<main>
+  <div id="view"><canvas id="gl"></canvas><div id="labels"></div></div>
+  <aside>
+    <h2>Layers</h2><div id="layers"></div>
+    <h2>Legend</h2><div id="legend"><small>Layer colours.</small></div>
+    <h2>Mouse</h2>
+    <small>Drag: rotate. Shift-drag or right-drag: pan. Wheel: zoom.</small>
+  </aside>
+</main>
+<footer><ul>__NOTES__</ul></footer>
+<script id="scene" type="application/json">__DATA__</script>
+<script>
+"use strict";
+const S = JSON.parse(document.getElementById("scene").textContent);
+const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const b = document.getElementById("banner");
+b.innerHTML = "<b>" + esc(S.status.symbol + " " + S.status.title) + "</b>" + esc(S.status.message);
+function bytes(s) { const r = atob(s); const a = new Uint8Array(r.length);
+  for (let i = 0; i < r.length; i++) a[i] = r.charCodeAt(i); return a; }
+function floats(s) { const u = bytes(s); return new Float32Array(u.buffer, u.byteOffset, u.length / 4); }
+const canvas = document.getElementById("gl");
+const gl = canvas.getContext("webgl", {antialias: true});
+if (!gl) { document.getElementById("view").innerHTML =
+  "<p style='padding:16px'>This browser cannot draw WebGL; open the page in a current browser.</p>"; }
+const VS = "attribute vec3 p; attribute vec3 n; attribute vec3 c; uniform mat4 m; uniform float lit;" +
+  "uniform vec3 e; varying vec3 vc; void main(){ gl_Position = m*vec4(p,1.0);" +
+  " float d = abs(dot(n, e));" +
+  " vc = c/255.0*mix(1.0, 0.35+0.65*d, lit); }";
+const FS = "precision mediump float; varying vec3 vc; void main(){ gl_FragColor = vec4(vc,1.0); }";
+function shader(type, src) { const s = gl.createShader(type); gl.shaderSource(s, src);
+  gl.compileShader(s); return s; }
+let prog = null;
+if (gl) { prog = gl.createProgram(); gl.attachShader(prog, shader(gl.VERTEX_SHADER, VS));
+  gl.attachShader(prog, shader(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog); gl.useProgram(prog);
+  gl.enable(gl.DEPTH_TEST); gl.enable(gl.POLYGON_OFFSET_FILL); gl.polygonOffset(1, 1); }
+const loc = prog ? {p: gl.getAttribLocation(prog, "p"), n: gl.getAttribLocation(prog, "n"),
+  c: gl.getAttribLocation(prog, "c"), m: gl.getUniformLocation(prog, "m"),
+  lit: gl.getUniformLocation(prog, "lit"), e: gl.getUniformLocation(prog, "e")} : null;
+function buffer(data) { const x = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, x);
+  gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW); return x; }
+function uniformColour(count, rgb) { const a = new Uint8Array(count * 3);
+  for (let i = 0; i < count; i++) a.set(rgb, i * 3); return a; }
+const parts = [];
+for (const m of S.meshes) {
+  const pos = floats(m.positions); const nrm = new Float32Array(pos.length);
+  for (let i = 0; i < pos.length; i += 9) {
+    const ux = pos[i+3]-pos[i], uy = pos[i+4]-pos[i+1], uz = pos[i+5]-pos[i+2];
+    const vx = pos[i+6]-pos[i], vy = pos[i+7]-pos[i+1], vz = pos[i+8]-pos[i+2];
+    let nx = uy*vz-uz*vy, ny = uz*vx-ux*vz, nz = ux*vy-uy*vx;
+    const l = Math.hypot(nx, ny, nz) || 1; nx /= l; ny /= l; nz /= l;
+    for (let k = 0; k < 3; k++) { nrm[i+3*k] = nx; nrm[i+3*k+1] = ny; nrm[i+3*k+2] = nz; } }
+  const base = m.base ? bytes(m.base) : uniformColour(pos.length / 3, m.color);
+  const part = {meta: m, kind: "mesh", count: pos.length / 3, visible: m.visible, colours: {}};
+  if (gl) { part.p = buffer(pos); part.n = buffer(nrm); part.base = buffer(base);
+    for (const [k, c] of Object.entries(m.colorings)) part.colours[k] = buffer(bytes(c.rgb)); }
+  parts.push(part); }
+for (const l of S.lines) {
+  const pos = floats(l.positions);
+  const part = {meta: l, kind: "lines", count: pos.length / 3, visible: l.visible};
+  if (gl) { part.p = buffer(pos); part.n = buffer(new Float32Array(pos.length));
+    part.base = buffer(uniformColour(pos.length / 3, l.color)); }
+  parts.push(part); }
+const lo = S.bounds[0], hi = S.bounds[1];
+const centre = [0, 1, 2].map((i) => (lo[i] + hi[i]) / 2);
+const size = Math.max(hi[0]-lo[0], hi[1]-lo[1], hi[2]-lo[2], 1e-6);
+const cam = {az: -0.6, el: 0.35, dist: 2.2 * size, pan: [0, 0, 0]};
+const VIEWS = {front: [-Math.PI/2, 0], side: [0, 0], top: [-Math.PI/2, Math.PI/2 - 1e-3], iso: [-0.6, 0.35]};
+function matrix() {
+  const w = canvas.clientWidth, h = canvas.clientHeight, a = w / Math.max(h, 1);
+  const ce = Math.cos(cam.el), se = Math.sin(cam.el), ca = Math.cos(cam.az), sa = Math.sin(cam.az);
+  const eye = [ca*ce, sa*ce, se];
+  const t = [centre[0]+cam.pan[0], centre[1]+cam.pan[1], centre[2]+cam.pan[2]];
+  const f = [-eye[0], -eye[1], -eye[2]];
+  let r = [f[1], -f[0], 0];  // f x up (z)
+  if (Math.hypot(r[0], r[1]) < 1e-9) r = [1, 0, 0];
+  const rl = Math.hypot(r[0], r[1], r[2]) || 1; r = r.map((x) => x / rl);
+  const u = [r[1]*f[2]-r[2]*f[1], r[2]*f[0]-r[0]*f[2], r[0]*f[1]-r[1]*f[0]];
+  const e = [t[0]+eye[0]*cam.dist, t[1]+eye[1]*cam.dist, t[2]+eye[2]*cam.dist];
+  const dot = (x, y) => x[0]*y[0]+x[1]*y[1]+x[2]*y[2];
+  const view = [r[0],u[0],-f[0],0, r[1],u[1],-f[1],0, r[2],u[2],-f[2],0, -dot(r,e),-dot(u,e),dot(f,e),1];
+  const near = cam.dist / 100, far = cam.dist * 10, fy = 1 / Math.tan(0.4);
+  const proj = [fy/a,0,0,0, 0,fy,0,0, 0,0,(far+near)/(near-far),-1, 0,0,2*far*near/(near-far),0];
+  const out = new Float32Array(16);
+  for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { let s = 0;
+    for (let k = 0; k < 4; k++) s += proj[k*4+j] * view[i*4+k]; out[i*4+j] = s; }
+  return {m: out, r: r, u: u, eye: eye}; }
+const colourBy = document.getElementById("colour");
+for (const [k, t] of Object.entries(S.colorings)) { const o = document.createElement("option");
+  o.value = k; o.textContent = t; colourBy.appendChild(o); }
+function bind(part, attr, buf, size, type, norm) { gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.enableVertexAttribArray(attr); gl.vertexAttribPointer(attr, size, type, norm, 0, 0); }
+const labelBox = document.getElementById("labels");
+const labelEls = S.labels.map((l) => { const s = document.createElement("span");
+  s.textContent = l.text; labelBox.appendChild(s); return s; });
+function draw() {
+  if (!gl) return;
+  const w = canvas.clientWidth, h = canvas.clientHeight, dpr = window.devicePixelRatio || 1;
+  if (canvas.width !== Math.round(w*dpr) || canvas.height !== Math.round(h*dpr)) {
+    canvas.width = Math.round(w*dpr); canvas.height = Math.round(h*dpr); }
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clearColor(0.933, 0.945, 0.957, 1); gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  const M = matrix(); gl.uniformMatrix4fv(loc.m, false, M.m); gl.uniform3fv(loc.e, M.eye);
+  const key = colourBy.value;
+  for (const part of parts) { if (!part.visible) continue;
+    bind(part, loc.p, part.p, 3, gl.FLOAT, false); bind(part, loc.n, part.n, 3, gl.FLOAT, false);
+    const colours = (part.kind === "mesh" && key && part.colours[key]) || part.base;
+    bind(part, loc.c, colours, 3, gl.UNSIGNED_BYTE, false);
+    gl.uniform1f(loc.lit, part.kind === "mesh" ? 1 : 0);
+    gl.drawArrays(part.kind === "mesh" ? gl.TRIANGLES : gl.LINES, 0, part.count); }
+  S.labels.forEach((l, i) => { const p = l.at, m = M.m;
+    const x = m[0]*p[0]+m[4]*p[1]+m[8]*p[2]+m[12], y = m[1]*p[0]+m[5]*p[1]+m[9]*p[2]+m[13];
+    const z = m[3]*p[0]+m[7]*p[1]+m[11]*p[2]+m[15];
+    // A gore number on the far side of the envelope is hidden (it would show through).
+    const facing = (p[0]-centre[0])*M.eye[0] + (p[1]-centre[1])*M.eye[1] > 0 || Math.abs(M.eye[2]) > 0.9;
+    const el = labelEls[i]; if (z <= 0 || !facing) { el.style.display = "none"; return; }
+    el.style.display = ""; el.style.left = ((x/z+1)/2*w) + "px"; el.style.top = ((1-y/z)/2*h) + "px"; }); }
+function legend() {
+  const box = document.getElementById("legend"), key = colourBy.value;
+  const m = S.meshes.find((x) => x.colorings[key]);
+  if (!key || !m) { box.innerHTML = "<small>Layer colours.</small>"; return; }
+  const lg = m.colorings[key].legend;
+  const missing = S.meshes.filter((x) => x.visible !== undefined && !x.colorings[key] && x.group === "Result");
+  box.innerHTML = "<div><b>" + esc(lg.title) + "</b></div>" + lg.entries.slice().reverse().map(
+    (e) => "<div><span class='swatch' style='background:" + esc(e[0]) + "'></span>" + esc(e[1]) + "</div>").join("") +
+    (missing.length ? "<div><small>Not coloured: " + missing.map((x) => esc(x.name) +
+      (x.note ? " (" + esc(x.note) + ")" : "")).join(", ") + "</small></div>" : ""); }
+const layersBox = document.getElementById("layers"); const groups = {};
+const boxes = new Map();
+const ORDER = ["Design", "Result", "Rigging"];
+const rank = (g) => (ORDER.indexOf(g) < 0 ? ORDER.length : ORDER.indexOf(g));
+parts.slice().sort((a, b) => rank(a.meta.group) - rank(b.meta.group)).forEach((part) => {
+  const g = part.meta.group;
+  if (!groups[g]) { const d = document.createElement("div"); d.className = "group"; d.textContent = g;
+    layersBox.appendChild(d); groups[g] = true; }
+  const row = document.createElement("label"); row.className = "layer";
+  const box = document.createElement("input"); box.type = "checkbox"; box.checked = part.visible;
+  box.addEventListener("change", () => { part.visible = box.checked; draw(); });
+  boxes.set(part, box);
+  const c = part.meta.color; row.appendChild(box);
+  row.insertAdjacentHTML("beforeend", "<span class='swatch' style='background:rgb(" + c.join(",") +
+    ")'></span>" + esc(part.meta.name) + (part.meta.note ? " <small>" + esc(part.meta.note) + "</small>" : ""));
+  layersBox.appendChild(row); });
+// As in the application: a result field hides the design surfaces, the deviation from
+// design is drawn on them (and hides the results).
+function roles() { const key = colourBy.value; if (!key) return;
+  const onDesign = key === "deviation";
+  parts.forEach((part) => { const role = part.meta.role;
+    if (role !== "design" && role !== "result") return;
+    const show = (role === "design") === onDesign;
+    const colours = part.meta.colorings || {};
+    if (show && role === "design" && part.kind === "mesh" && !colours[key]) return;
+    part.visible = show; const box = boxes.get(part); if (box) box.checked = show; }); }
+colourBy.addEventListener("change", () => { roles(); legend(); draw(); });
+document.querySelectorAll("[data-view]").forEach((x) => x.addEventListener("click", () => {
+  const v = VIEWS[x.dataset.view]; cam.az = v[0]; cam.el = v[1]; cam.pan = [0, 0, 0]; draw(); }));
+let drag = null;
+canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+canvas.addEventListener("pointerdown", (e) => { drag = {x: e.clientX, y: e.clientY,
+  pan: e.shiftKey || e.button === 2}; canvas.setPointerCapture(e.pointerId); });
+canvas.addEventListener("pointermove", (e) => { if (!drag) return;
+  const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.x = e.clientX; drag.y = e.clientY;
+  if (drag.pan) { const M = matrix(), k = cam.dist / canvas.clientHeight;
+    for (let i = 0; i < 3; i++) cam.pan[i] += (-dx*M.r[i] + dy*M.u[i]) * k; }
+  else { cam.az -= dx * 0.01; cam.el = Math.max(-1.55, Math.min(1.55, cam.el + dy * 0.01)); }
+  draw(); });
+canvas.addEventListener("pointerup", () => { drag = null; });
+canvas.addEventListener("wheel", (e) => { e.preventDefault();
+  cam.dist *= Math.exp(e.deltaY * 0.001); draw(); }, {passive: false});
+window.addEventListener("resize", draw);
+if (S.initial) { colourBy.value = S.initial; roles(); }
+legend(); draw();
+</script>
+</body>
+</html>

@@ -63,6 +63,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH, PackExtras
 from envelopelab.features.metrics import REQUIRED_FOS
 from envelopelab.features.primitives import CutPiece, PrimitiveDesign
 from envelopelab.project.model import SOLVER_LABELS
@@ -347,6 +348,8 @@ class ShapesPanel(QWidget):
 
     #: The user wants to drag shape ``name`` in the 3D view (the main window shows it).
     dragRequested = Signal(str)  # noqa: N815 (Qt naming)
+    #: The Export build pack… button: the main window opens its export dialog.
+    exportRequested = Signal()  # noqa: N815 (Qt naming)
 
     def __init__(self, controller: WorkspaceController) -> None:
         super().__init__()
@@ -700,11 +703,18 @@ class ShapesPanel(QWidget):
         self._update_buttons()
         return started
 
-    def export_pack(self, out_dir: str | Path) -> Path | None:
+    def export_pack(
+        self,
+        out_dir: str | Path,
+        extras: PackExtras | None = None,
+        roll_width: float = DEFAULT_ROLL_WIDTH,
+    ) -> Path | None:
         """Write the build pack of the envelope and every placed shape; returns the index.
 
         Refused (None) while a shape is being placed or cannot be placed, so a pack never
-        silently leaves a shape out.
+        silently leaves a shape out. ``extras`` chooses the documents written with the
+        sheets (:class:`envelopelab.export.build_pack.PackExtras`; default none);
+        ``roll_width`` is the fabric roll width, m.
         """
         from envelopelab.export.build_pack import export_build_pack
 
@@ -722,7 +732,14 @@ class ShapesPanel(QWidget):
             placed.append(design)
             fabrics[spec.name] = shape_fabrics(spec, session.design, session.patterns, design)[1]
         index = self.controller.attempt(
-            export_build_pack, session.design, placed, out_dir, session.patterns, fabrics
+            export_build_pack,
+            session.design,
+            placed,
+            out_dir,
+            session.patterns,
+            fabrics,
+            roll_width=roll_width,
+            extras=extras,
         )
         if index is not None:
             self.controller.message.emit(f"Build pack written to {out_dir}")
@@ -759,9 +776,7 @@ class ShapesPanel(QWidget):
             self.import_mesh(path)
 
     def _export_pack_dialog(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Build pack folder")
-        if path:
-            self.export_pack(path)
+        self.exportRequested.emit()
 
     def _export_blender_dialog(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Export to Blender", "", "OBJ (*.obj)")

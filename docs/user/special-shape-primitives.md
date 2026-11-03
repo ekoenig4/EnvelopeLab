@@ -101,7 +101,7 @@ both come back when you change mode. The screen has three columns:
    colours and seams. While that result is current the designed shape is hidden; tick
    its layer in the layer list to compare the two (your choice is kept). A result that
    did not converge says **NOT CONVERGED** in its label, and a **STALE** one is drawn grey.
-6. **Export build pack…** writes the envelope rows, the parachute (radial panel and
+6. **Export build pack…** (also **File ▸ Export build pack…**, [guide](build-pack.md)) writes the envelope rows, the parachute (radial panel and
    centre panel) and every shape's pieces and marking sheets (DXF, PDF and `index.json`,
    section 4). **Export to Blender (OBJ)…** writes the
    envelope, every shape and every current shape simulation (section 5).

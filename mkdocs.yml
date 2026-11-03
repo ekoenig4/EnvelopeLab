@@ -14,6 +14,7 @@ nav:
       - Reality Check report: user/reality-check-report.md
       - Special shapes on a standard envelope: user/special-shape-primitives.md
       - Parachute and rigging: user/rigging.md
+      - Exporting a build pack: user/build-pack.md
   - Developer:
       - Setup: dev/setup.md
       - CalculiX installation: dev/calculix-installation.md
@@ -85,6 +86,7 @@ nav:
       - ADR-0033: adr/ADR-0033-energy-consistent-wrinkle-direction.md
       - ADR-0034: adr/ADR-0034-shape-mesh-size-from-a-study.md
       - ADR-0035: adr/ADR-0035-run-fabric-resultants.md
+      - ADR-0036: adr/ADR-0036-build-pack-documents-and-3d-view.md
 theme:
   name: material
 markdown_extensions:

@@ -12,7 +12,10 @@
   finished size matches the ``SEW`` outline drawn in the DXF;
 * every sewn edge pair differs by its planned ease (``ease_mm``, 0 for edges cut to the
   same length) within its tolerance (default 3 mm), measured from the ``EDGE_*``
-  polylines and, for a shape's footprint lines, the ``ATTACH`` polylines.
+  polylines and, for a shape's footprint lines, the ``ATTACH`` polylines;
+* the documents (format 2): every PDF opens and has pages, the cut list lists every
+  sheet with the index's cut count and fabric, and the 3D view is self-contained (no
+  file or address outside the page) with a readable scene.
 
 The index entries are the design data of the export; a pack is consistent when the
 drawn geometry agrees with them.
@@ -167,7 +170,9 @@ def check_pack(out_dir: str | Path) -> list[QAFinding]:
     if not index_path.is_file():
         return [QAFinding(INDEX, "index", "index.json is missing")]
     index = json.loads(index_path.read_text(encoding="utf-8"))
+    documents = index.get("documents", [])
     listed = {s["file"] for s in index["sheets"]} | {index["pdf"]}
+    listed |= {d["file"] for d in documents}
     present = {p.name for p in root.iterdir() if p.is_file() and p.name != INDEX}
     findings += [QAFinding(f, "index", "listed but missing") for f in sorted(listed - present)]
     findings += [QAFinding(f, "index", "present but not listed") for f in sorted(present - listed)]
@@ -249,4 +254,66 @@ def check_pack(out_dir: str | Path) -> list[QAFinding]:
                     )
                 )
             findings += _check_cal_pdf(index["pdf"], k, content)
+    findings += _check_documents(root, index, present)
+    return findings
+
+
+EXTERNAL = re.compile(
+    r"""(?:src|href)\s*=\s*["']?(?:https?:|//|file:)|@import|url\(\s*["']?https?:""", re.I
+)
+
+
+def _check_documents(root: Path, index: dict[str, Any], present: set[str]) -> list[QAFinding]:
+    """The document checks of the module docstring."""
+    import csv
+
+    findings: list[QAFinding] = []
+    for doc in index.get("documents", []):
+        name = doc["file"]
+        if name not in present:
+            continue
+        path = root / name
+        if name.endswith(".pdf"):
+            try:
+                pages = _pdf_pages(path)
+            except (ValueError, zlib.error, IndexError) as exc:
+                findings.append(QAFinding(name, "document", f"PDF does not open: {exc}"))
+                continue
+            if not pages:
+                findings.append(QAFinding(name, "document", "PDF has no pages"))
+        elif name.endswith(".html"):
+            from envelopelab.export.viewer import read_scene
+
+            text = path.read_text(encoding="utf-8")
+            if EXTERNAL.search(text):
+                findings.append(QAFinding(name, "viewer", "page loads an external file"))
+            try:
+                scene = read_scene(path)
+            except (ValueError, KeyError) as exc:
+                findings.append(QAFinding(name, "viewer", f"no readable scene: {exc}"))
+                continue
+            if not scene.get("meshes"):
+                findings.append(QAFinding(name, "viewer", "scene has no surface"))
+            if scene.get("status", {}).get("kind") not in ("ok", "info", "stale", "fail", "error"):
+                findings.append(QAFinding(name, "viewer", "scene has no status banner"))
+        elif name == "cut-list.csv":
+            rows = list(csv.reader(path.read_text(encoding="utf-8").splitlines()))
+            header = next((r for r in rows if r and r[0] == "File"), None)
+            if header is None:
+                findings.append(QAFinding(name, "cut list", "no pieces table"))
+                continue
+            listed: dict[str, tuple[str, str]] = {}
+            for r in rows[rows.index(header) + 1 :]:
+                if not r or r[0].startswith("#"):
+                    break
+                listed[r[0]] = (r[header.index("Cut")], r[header.index("Fabric")])
+            for entry in index["sheets"]:
+                got = listed.get(entry["file"])
+                want = (str(entry["cut_count"]), entry["fabric"])
+                if got is None:
+                    findings.append(QAFinding(name, "cut list", f"{entry['file']} not listed"))
+                elif got != want:
+                    findings.append(
+                        QAFinding(name, "cut list", f"{entry['file']}: {got} != index {want}")
+                    )
     return findings

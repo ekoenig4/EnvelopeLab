@@ -78,7 +78,7 @@ radial panels' top edges and the centre panel's edge are checked to be the same 
 Parachutes from designs saved before the centre panel existed have none; type a diameter
 to add one.
 
-**Export build pack…** (Shapes panel) writes the parachute with the envelope rows:
+**File ▸ Export build pack…** ([guide](build-pack.md)) writes the parachute with the envelope rows:
 `parachute-panel.dxf`, cut once per radial panel, and `parachute-centre.dxf`, cut once.
 The pack's output QA checks that the radial panels' tops match the centre panel's edge
 ([build pack format](../formats/build-pack.md)). A parachute whose pattern cannot be made

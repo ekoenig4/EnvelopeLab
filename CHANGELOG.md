@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: **File ▸ Export build pack…** with a dialog (folder, roll width, documents). The
+  pack (format `envelopelab-build-pack/2`, ADR-0036) can now hold a cover and index
+  (provenance, safety notice, every value tagged assumed, file list), a spec summary, a
+  cut list (pieces, areas, fabric totals, tapes), a rigging sheet (lengths, loads,
+  strengths with source, FoS, FAILS) and a sewing schedule (every seam in order with a
+  check box), as PDF and CSV/JSON, and `3d-view.html`: a self-contained offline 3D view
+  of the design, rigging, shapes and the chosen run, with the app's colourings (FoS
+  bands, deviation, ...) and status banner. The pack QA checks the documents. No
+  numerical result changes.
 - Changed: the Rigging window in the shared design: key figures in the toolbar (rigging
   mass, lowest factor of safety against the requirement, limit load factor), a status
   banner worst first (a failing factor of safety named with its value, rigging not

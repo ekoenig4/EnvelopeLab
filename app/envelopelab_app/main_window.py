@@ -167,6 +167,7 @@ class MainWindow(QMainWindow):
         self.controller.editRejected.connect(self._rejected)
         self.controller.selectionChanged.connect(self._selection_mode)
         self.shapes.dragRequested.connect(self.drag_shape_in_3d)
+        self.shapes.exportRequested.connect(self.export_pack_dialog)
         self.controller.message.connect(lambda text: self.statusBar().showMessage(text, 8000))
         self.controller.fileChanged.connect(self._update_title)
         self.controller.stateChanged.connect(self._update_actions)
@@ -337,6 +338,7 @@ class MainWindow(QMainWindow):
         )
         self.cancel_action = self._action("C&ancel run", self.simulation.cancel)
         self.reference_action = self._action("Load &reference mesh…", self.reference_dialog)
+        self.export_pack_action = self._action("&Export build pack…", self.export_pack_dialog)
         self.detect_action = self._action("Detect CalculiX again", self.simulation.detect_calculix)
 
         menu = self.menuBar()
@@ -348,6 +350,8 @@ class MainWindow(QMainWindow):
         self.recent_menu.aboutToShow.connect(self._fill_recent)
         file_menu.addAction(self.save_action)
         file_menu.addAction(self.save_as_action)
+        file_menu.addSeparator()
+        file_menu.addAction(self.export_pack_action)
         file_menu.addSeparator()
         file_menu.addAction(self.prefs_action)
         file_menu.addSeparator()
@@ -822,6 +826,67 @@ class MainWindow(QMainWindow):
             return False
         path, _ = QFileDialog.getSaveFileName(self, "Save project as", "", FILE_FILTER)
         return bool(path) and self.save_to(path)
+
+    def export_pack_dialog(self) -> None:
+        """File ▸ Export build pack…: choose the folder, roll width and documents."""
+        from envelopelab_app.export_dialog import ExportPackDialog
+
+        session = self.controller.session
+        if session is None or session.design.gores is None:
+            self.controller.editRejected.emit("a build pack needs a standard-gore design")
+            return
+        folder = str(self.settings.value("export/pack_folder", "") or "")
+        dialog = ExportPackDialog(self, folder)
+        if dialog.exec():
+            self.settings.setValue("export/pack_folder", str(dialog.path()))
+            self.export_build_pack(dialog.path(), dialog.include(), dialog.roll_width())
+
+    def export_build_pack(
+        self,
+        out_dir: str | Path,
+        include: frozenset[str] | None = None,
+        roll_width: float | None = None,
+    ) -> Path | None:
+        """Write the build pack: the cutting sheets and the documents of ``include``
+        (default all of :data:`envelopelab.export.documents.DOCUMENTS`), the 3D view
+        taken from the 3D view's chosen run; returns the index (None when refused).
+
+        Parameters
+        ----------
+        out_dir : str or Path
+            Pack folder.
+        include : frozenset of str, optional
+            Document keys.
+        roll_width : float, optional
+            Fabric roll width, m (default 60 in).
+        """
+        from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH, PackExtras
+        from envelopelab.export.documents import DOCUMENTS, provenance
+        from envelopelab_app.pack_scene import scene_from_view, status_line
+
+        session = self.controller.session
+        if session is None or session.design.gores is None:
+            return None
+        chosen = frozenset(DOCUMENTS) if include is None else include
+        scene = None
+        if "viewer" in chosen:
+            if self.view3d.refresher.dirty:  # hidden since the last change: bring it up to date
+                self.view3d.refresher.run()
+            scene = self.controller.attempt(scene_from_view, self.view3d)
+            if scene is None:
+                return None
+        extras = PackExtras(
+            include=chosen,
+            outputs=self.controller.outputs,
+            scene=scene,
+            provenance=provenance(
+                session.content_hash(), session.path.name if session.path else ""
+            ),
+            status=status_line(self.view3d),
+        )
+        return self.shapes.export_pack(
+            out_dir, extras, DEFAULT_ROLL_WIDTH if roll_width is None else roll_width
+        )
 
     def reference_dialog(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
