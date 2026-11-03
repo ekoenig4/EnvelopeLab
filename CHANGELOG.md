@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the Rigging window in the shared design: key figures in the toolbar (rigging
+  mass, lowest factor of safety against the requirement, limit load factor), a status
+  banner worst first (a failing factor of safety named with its value, rigging not
+  complete, or checked with what is not assessed), and one card per element with its own
+  status chip, Add / Remove button, values and a lines table (count, length, limit load,
+  strength with source, factor of safety, mass). No value changes.
 - Changed: the application looks the same on every system: Qt's Fusion style and a light
   palette from the theme's colours everywhere (a dark system theme or the native style no
   longer changes it). Where the system font is only DejaVu Sans (WSL), it uses Segoe UI
