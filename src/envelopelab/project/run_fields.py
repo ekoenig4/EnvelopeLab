@@ -22,7 +22,11 @@ import numpy as np
 
 from envelopelab.design.model import DesignDocument
 from envelopelab.solvers.model import SolverModel
-from envelopelab.solvers.results import ResultField, triangle_factors_of_safety
+from envelopelab.solvers.results import (
+    ResultField,
+    factors_from_strengths,
+    triangle_factors_of_safety,
+)
 
 #: Field keys in display order, with their labels (unit in brackets, SI).
 FIELD_LABELS = {
@@ -127,6 +131,118 @@ def run_fields(
             "normal distance from the designed surface: + outside, - inside",
         )
     return out
+
+
+def shape_run_fields(
+    arrays: Mapping[str, np.ndarray],
+    designed_points: np.ndarray | None = None,
+    designed_triangles: np.ndarray | None = None,
+) -> dict[str, ResultField]:
+    """The scalar fields of a special shape's stored simulation (its skin).
+
+    Parameters
+    ----------
+    arrays : mapping of str to ndarray
+        The shape run's arrays (:func:`envelopelab.project.shape_runs.shape_run_record`):
+        ``points`` (m) and ``triangles`` of the solved skin, and, from this version on,
+        ``skin_principal``, ``skin_strength``, ``skin_fabric_resultants`` (N/m),
+        ``skin_wrinkle_state`` and ``skin_initial_points`` (m).
+    designed_points, designed_triangles : ndarray, optional
+        The shape's designed skin in the same (envelope) frame, m, for the deviation from
+        it (:func:`envelopelab.project.deviation.deviation_at_nodes`). Pass it only when
+        the simulation is current.
+
+    Returns
+    -------
+    dict of str to ResultField
+        As :func:`run_fields`, for the fields the arrays allow.
+    """
+    out: dict[str, ResultField] = {}
+    fabric = arrays.get("skin_fabric_resultants")
+    strength = arrays.get("skin_strength")
+    if fabric is not None and strength is not None:
+        fos = factors_from_strengths(fabric, strength)
+        out["fos_warp"] = ResultField(
+            "fos_warp", "triangle", fos[:, 0], "-", "warp strength / warp resultant"
+        )
+        out["fos_weft"] = ResultField(
+            "fos_weft", "triangle", fos[:, 1], "-", "weft strength / weft resultant"
+        )
+    if "skin_principal" in arrays:
+        principal = np.asarray(arrays["skin_principal"], dtype=np.float64)
+        out["n1"] = ResultField(
+            "n1", "triangle", principal[:, 0], "N/m", "major principal Cauchy resultant"
+        )
+        out["n2"] = ResultField(
+            "n2", "triangle", principal[:, 1], "N/m", "minor principal Cauchy resultant"
+        )
+    if fabric is not None:
+        f = np.asarray(fabric, dtype=np.float64)
+        out["n_warp"] = ResultField(
+            "n_warp", "triangle", f[:, 0], "N/m", "resultant along the deformed warp"
+        )
+        out["n_weft"] = ResultField(
+            "n_weft", "triangle", f[:, 1], "N/m", "resultant along the deformed weft"
+        )
+    if "skin_wrinkle_state" in arrays:
+        out["wrinkle_state"] = ResultField(
+            "wrinkle_state",
+            "triangle",
+            np.asarray(arrays["skin_wrinkle_state"], dtype=np.float64),
+            "-",
+            "tension-field state: 0 taut, 1 wrinkled, 2 slack",
+        )
+    points = np.asarray(arrays["points"], dtype=np.float64)
+    if "skin_initial_points" in arrays:
+        moved = points - np.asarray(arrays["skin_initial_points"], dtype=np.float64)
+        out["displacement"] = ResultField(
+            "displacement",
+            "node",
+            np.linalg.norm(moved, axis=1),
+            "m",
+            "displacement from the initial (as-sewn) positions",
+        )
+    if designed_points is not None and designed_triangles is not None:
+        from envelopelab.project.deviation import deviation_at_nodes
+
+        out["deviation"] = ResultField(
+            "deviation",
+            "node",
+            deviation_at_nodes(points, designed_points, designed_triangles),
+            "m",
+            "normal distance from the designed skin: + outside, - inside",
+        )
+    return {k: out[k] for k in FIELD_LABELS if k in out}
+
+
+def shape_missing_fields(arrays: Mapping[str, np.ndarray], current: bool = True) -> dict[str, str]:
+    """Fields :func:`shape_run_fields` cannot give for a shape run, and why.
+
+    Parameters
+    ----------
+    arrays : mapping of str to ndarray
+        The shape run's arrays.
+    current : bool
+        Whether the simulation is current (the deviation needs the design it was solved
+        from).
+    """
+    shown = set(shape_run_fields(arrays))
+    if current:
+        shown.add("deviation")
+    old = "skin_principal" not in arrays
+    reasons: dict[str, str] = {}
+    for key in FIELD_LABELS:
+        if key in shown:
+            continue
+        if key == "deviation":
+            reasons[key] = "only for a current simulation (the design it was solved from)"
+        elif old:
+            reasons[key] = "this simulation has no stored skin results (run it again)"
+        elif key in SAFETY_FIELDS or key in ("n_warp", "n_weft"):
+            reasons[key] = "the solver did not report warp/weft resultants"
+        else:
+            reasons[key] = "not stored with this simulation"
+    return reasons
 
 
 def missing_fields(

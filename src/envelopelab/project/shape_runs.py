@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
-from envelopelab.features.scene import ShapeDisplay, simulated_display
+from envelopelab.features.scene import ShapeDisplay, simulated_display, to_envelope_frame
 from envelopelab.project.model import RunFinding, ShapeRunRecord, utc_now
 
 if TYPE_CHECKING:
@@ -173,7 +173,50 @@ def shape_run_record(
         manifest=result.manifest.to_dict(),
         envelope_run_id=envelope_run_id,
     )
-    return record, display_arrays(simulated_display(design, appendage, result))
+    arrays = display_arrays(simulated_display(design, appendage, result))
+    arrays.update(skin_result_arrays(design, appendage, result))
+    return record, arrays
+
+
+def skin_result_arrays(
+    design: PrimitiveDesign, appendage: AppendageModel, result: SimulationResult
+) -> dict[str, np.ndarray]:
+    """Per-triangle results of a shape's skin, in the order of its display triangles.
+
+    The display (:func:`envelopelab.features.scene.simulated_display`) keeps the
+    sub-model's skin triangles in order, so triangle ``k`` of the display is skin triangle
+    ``k``.
+
+    Returns
+    -------
+    dict of str to ndarray
+        ``skin_principal`` (N/m, (k, 2)); ``skin_strength`` (warp and weft strength of
+        each triangle's material zone, N/m, (k, 2)); ``skin_initial_points`` (the as-sewn
+        start of the display's points, envelope frame, m); and, when the solver reports
+        them, ``skin_fabric_resultants`` (N/m, (k, 3)) and ``skin_wrinkle_state`` (k,).
+    """
+    model = appendage.model
+    skin = np.asarray(appendage.skin_triangles, dtype=np.int64)
+    used = np.unique(model.triangles[skin])
+    strengths = np.array(
+        [
+            (model.materials[z].strength_warp.value, model.materials[z].strength_weft.value)
+            for z in model.zone_names
+        ],
+        dtype=np.float64,
+    ).reshape(-1, 2)
+    out: dict[str, np.ndarray] = {
+        "skin_principal": np.asarray(result.principal, dtype=np.float64)[skin],
+        "skin_strength": strengths[np.asarray(model.tri_zone, dtype=np.int64)[skin]],
+        "skin_initial_points": np.asarray(
+            to_envelope_frame(design, result.initial_positions), dtype=np.float64
+        )[used],
+    }
+    if result.fabric_resultants is not None:
+        out["skin_fabric_resultants"] = np.asarray(result.fabric_resultants, dtype=np.float64)[skin]
+    if result.wrinkle_state is not None:
+        out["skin_wrinkle_state"] = np.asarray(result.wrinkle_state, dtype=np.int8)[skin]
+    return out
 
 
 def display_arrays(display: ShapeDisplay) -> dict[str, np.ndarray]:

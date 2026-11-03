@@ -577,8 +577,29 @@ def triangle_factors_of_safety(model: SolverModel, fabric_resultants: FloatArray
         ],
         dtype=np.float64,
     ).reshape(-1, 2)
-    capacity = strengths[np.asarray(model.tri_zone, dtype=np.int64)]
-    demand = n[:, :2]
+    return factors_from_strengths(n, strengths[np.asarray(model.tri_zone, dtype=np.int64)])
+
+
+def factors_from_strengths(fabric_resultants: FloatArray, strengths: FloatArray) -> FloatArray:
+    r"""Warp and weft factor of safety per triangle from its resultants and strengths.
+
+    :math:`\mathrm{FoS} = N_{ult} / N` per yarn direction (see
+    :func:`triangle_factors_of_safety`); ``inf`` where a direction carries no tension.
+
+    Parameters
+    ----------
+    fabric_resultants : ndarray, shape (m, 2) or (m, 3)
+        Warp and weft resultants per triangle (a third column is ignored), N/m.
+    strengths : ndarray, shape (m, 2)
+        Warp and weft strength of each triangle's material, N/m.
+
+    Returns
+    -------
+    ndarray, shape (m, 2)
+        Dimensionless.
+    """
+    demand = np.asarray(fabric_resultants, dtype=np.float64)[:, :2]
+    capacity = np.asarray(strengths, dtype=np.float64)
     with np.errstate(divide="ignore", invalid="ignore"):
         fos = np.where(demand > 0.0, capacity / np.where(demand > 0.0, demand, 1.0), np.inf)
     return np.asarray(fos, dtype=np.float64)

@@ -93,8 +93,11 @@ none) are stored next to the project in
 `runs[].result_file` gives the relative path. A shape run's file holds the skin as solved
 in the envelope frame (m): `points`, `triangles`, the cut `piece` of every triangle and
 the number of `pieces`, the seams (`seam_points`, one seam after the other, and
-`seam_offsets` where each starts) and the `rim`; `shape_runs[].result_file` gives its
-path.
+`seam_offsets` where each starts) and the `rim`, and from this version on the skin's
+results per triangle in the same order (`skin_principal` and `skin_fabric_resultants` in
+N/m, `skin_strength` of each triangle's material in N/m, `skin_wrinkle_state`) and its
+as-sewn start (`skin_initial_points`, m), all optional; `shape_runs[].result_file` gives
+its path.
 
 Files are written atomically (a temporary file is renamed over the target). While a
 project has unsaved changes the application also writes autosave files
