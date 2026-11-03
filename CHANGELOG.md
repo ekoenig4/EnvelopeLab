@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: special-shape simulations have the envelope's colour maps in the 3D view. Each
+  solved shape is in the *Run* list (*Dome (inflated)*) with factor of safety warp/weft,
+  principal and warp/weft resultants, wrinkling, displacement and the deviation from its
+  designed skin; the banner and run details describe it. Shape runs now store their skin's
+  results (`skin_*` arrays, optional: earlier runs have none and must be run again). The
+  per-triangle factor uses warp and weft as for the envelope; the shape summary's skin
+  factor stays the conservative min(N_ult) / N1 bound (never higher, tested). No existing
+  result changes.
 - Added: *Deviation from design* heat map: where the solved envelope lies outside (red) or
   inside (blue) the designed shape, in mm, measured along the design's outward normal at
   the run's nodes (`envelopelab.project.deviation`). In the 3D view it colours the design

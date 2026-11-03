@@ -66,7 +66,14 @@ from envelopelab.project.gore_design import (
     panel_zone,
 )
 from envelopelab.project.model import SOLVER_LABELS, RunRecord
-from envelopelab.project.run_fields import FIELD_LABELS, SAFETY_FIELDS, missing_fields, run_fields
+from envelopelab.project.run_fields import (
+    FIELD_LABELS,
+    SAFETY_FIELDS,
+    missing_fields,
+    run_fields,
+    shape_missing_fields,
+    shape_run_fields,
+)
 from envelopelab.project.shapes import (
     ShapePlacement,
     base_radius,
@@ -724,8 +731,10 @@ class View3DPanel(QWidget):
         layers take their default)."""
         visible = dict(self._chosen_visibility)
         self.layers = {}
-        #: Run record of each result layer (key to record).
-        self._records: dict[str, RunRecord] = {}
+        #: Run record of each result layer (key to record; shape simulations too).
+        self._records: dict[str, Any] = {}
+        #: A shape simulation layer's simulation and designed skin (envelope frame, m).
+        self._shape_runs: dict[str, tuple[Any, Any]] = {}
         session = self.controller.session
         if session is not None and session.design.gores is not None:
             try:
@@ -848,11 +857,13 @@ class View3DPanel(QWidget):
         design = self.controller.design
         host = design if design is not None and design.gores is not None else None
         specs = {s.name: s for s in session.state.shapes} if session is not None else {}
+        designed: dict[str, Any] = {}
         for name in service.keys:
             result = service.result(name)
             if result is None or result.design is None:
                 continue
             shown = designed_display(result.design)
+            designed[name] = shown
             # Sit the shape and its feed holes on the drawn envelope (display only).
             shift = display_offset(host, result.design) if host else np.zeros(3)
             holes = feed_hole_rings(host, result.design) if host else []
@@ -886,8 +897,11 @@ class View3DPanel(QWidget):
                 label += " [NOT CONVERGED]"
             if stale:
                 label += " [STALE]"
-            self.layers[f"shape-sim:{name}"] = Layer(
-                f"shape-sim:{name}",
+            key = f"shape-sim:{name}"
+            self._records[key] = sim.record
+            self._shape_runs[key] = (sim, designed.get(name) or designed_display(placed))
+            self.layers[key] = Layer(
+                key,
                 "shape-simulated",
                 label,
                 shown.points + shift,
@@ -1012,7 +1026,9 @@ class View3DPanel(QWidget):
         chosen_run = self.run_choice.currentData()
         self.run_choice.blockSignals(True)
         self.run_choice.clear()
-        for key in RESULT_KINDS:
+        keys = [k for k in RESULT_KINDS if k in self.layers]
+        keys += sorted(k for k in self.layers if k.startswith("shape-sim:"))
+        for key in keys:
             if key in self.layers:
                 result = self.layers[key]
                 self.run_choice.addItem(result.display_name, key)
@@ -1051,7 +1067,12 @@ class View3DPanel(QWidget):
         self.fields, self.missing = {}, {}
         if record is not None and session is not None:
             layer = self.layers[key] if key is not None else None
-            arrays = session.run_arrays(record.run_id)
+            shape = self._shape_runs.get(key) if key is not None else None
+            arrays = (
+                (shape[0].arrays or session.run_arrays(record.run_id))
+                if shape is not None
+                else session.run_arrays(record.run_id)
+            )
             if arrays is not None and layer is not None:
                 if not layer.converged:
                     reason = "not converged: values are not final"
@@ -1059,6 +1080,10 @@ class View3DPanel(QWidget):
                 elif layer.stale:
                     reason = "stale: the design has changed since this run"
                     self.missing = dict.fromkeys(FIELD_LABELS, reason)
+                elif shape is not None:
+                    designed = shape[1]
+                    self.fields = shape_run_fields(arrays, designed.points, designed.triangles)
+                    self.missing = shape_missing_fields(arrays)
                 else:
                     model = self._current_model()
                     design = session.design if session.design.gores is not None else None
@@ -1104,23 +1129,32 @@ class View3DPanel(QWidget):
         layer = self.layers[key]
         failing: list[str] = []
         lows: list[float] = []
-        model = self._current_model()
+        shape = key.startswith("shape-sim:")
+        model = None if shape else self._current_model()
         for name, direction in zip(SAFETY_FIELDS, ("warp", "weft"), strict=True):
             field = self.fields.get(name)
-            if field is None or model is None:
+            if field is None or (model is None and not shape):
                 continue
-            zone_of = [model.zone_names[int(i)] for i in model.tri_zone]
+            zone_of = (
+                [f"{layer.short.removesuffix(' (inflated)')} skin"] * len(field.values)
+                if model is None
+                else [model.zone_names[int(i)] for i in model.tri_zone]
+            )
             failing += failing_zone_names(field.values, zone_of, direction, FOS_LIMIT)
             finite = field.values[np.isfinite(field.values)]
             if finite.size:
                 lows.append(float(finite.min()))
-        verified = any(
-            r.solver == "calculix" and r.converged and session.run_status(r) == "current"
-            for r in session.project.runs
+        verified = (
+            record.solver == "calculix"
+            if shape
+            else any(
+                r.solver == "calculix" and r.converged and session.run_status(r) == "current"
+                for r in session.project.runs
+            )
         )
         return RunState(
             solver=record.solver,
-            solver_label=SOLVER_LABELS[record.solver],
+            solver_label=SOLVER_LABELS.get(record.solver, record.solver),
             run_id=record.run_id,
             converged=layer.converged,
             stale=layer.stale,
@@ -1154,7 +1188,11 @@ class View3DPanel(QWidget):
             f"<b>{escape(s)}</b>" if s == "assumed" else escape(s) for s in record.material_sources
         )
         rows = (
-            ("Solver", f"{record.solver_label} {record.solver_version}".strip()),
+            (
+                "Solver",
+                f"{SOLVER_LABELS.get(record.solver, record.solver)} "
+                f"{record.solver_version}".strip(),
+            ),
             (
                 "Status",
                 record.status
@@ -1167,13 +1205,16 @@ class View3DPanel(QWidget):
             ("Residual", f"{record.residual:.2e}"),
             (
                 "Mesh",
-                f"{record.n_nodes} nodes, {record.n_elements} elements, "
-                f"{record.n_tape_elements} tape elements",
+                f"{record.n_nodes} nodes, {record.n_elements} elements"
+                + (
+                    f", {record.n_tape_elements} tape elements"
+                    if hasattr(record, "n_tape_elements")
+                    else ""
+                ),
             ),
             ("Load case", record.load_case),
             ("Run time", f"{record.run_time:.1f} s"),
-            ("Volume", f"{record.volume:.1f} m³"),
-        )
+        ) + ((("Volume", f"{record.volume:.1f} m³"),) if hasattr(record, "volume") else ())
         body = "".join(f"<tr><td>{escape(k)}&nbsp;</td><td>{escape(v)}</td></tr>" for k, v in rows)
         body += f"<tr><td>Materials&nbsp;</td><td>{sources or '—'}</td></tr>"
         self.run_details.setText(f"<table>{body}</table>")
@@ -1261,7 +1302,8 @@ class View3DPanel(QWidget):
                 )
                 legend.append([layer.legend_name, layer.color])
                 continue
-            if layer.face_colors is not None and not layer.stale:
+            coloured = layer.key == self._result_key() and self.shown_field() is not None
+            if layer.face_colors is not None and not layer.stale and not coloured:
                 mesh.cell_data["rgb"] = layer.face_colors
                 plotter.add_mesh(
                     mesh,
@@ -1371,9 +1413,17 @@ class View3DPanel(QWidget):
             "scalar_bar_args": {**bar, "fmt": "%.3g"},
         }
 
+    def _design_key(self) -> str:
+        """The layer of the chosen run's design: the envelope's design surface, or a
+        special shape's designed skin."""
+        key = self._result_key() or ""
+        if key.startswith("shape-sim:"):
+            return "shape:" + key.removeprefix("shape-sim:")
+        return "design"
+
     def _on_design(self) -> bool:
         """The deviation is drawn on the design surface (shown and current)."""
-        design = self.layers.get("design")
+        design = self.layers.get(self._design_key())
         return design is not None and design.visible and not design.stale
 
     def _design_deviation(self, layer: Layer) -> np.ndarray | None:
@@ -1383,7 +1433,7 @@ class View3DPanel(QWidget):
         field = self.shown_field()
         key = self._result_key()
         if (
-            layer.kind != "design"
+            layer.key != self._design_key()
             or field is None
             or field.name not in DIVERGING_FIELDS
             or key is None

@@ -87,6 +87,16 @@ design's outward normal, so fabric that only slid along the surface reads as zer
 mesh instead. The same values can be shown on the flat panels in the Patterns view
 (*Overlay: Deviation from design*, see [editing designs](editing-designs.md)).
 
+**Special shapes** solved with the envelope are in the *Run* list too (for example
+*Dome (inflated)*), with the same *Colour by* fields on their skin: factor of safety warp
+and weft, resultants, wrinkling, displacement, and the deviation from the shape's designed
+skin (drawn on *Dome (designed)* when that layer is shown, else on the inflated skin). The
+banner and run details then describe the shape's simulation. The shape's skin factor in the
+Special shapes panel is the conservative bound min(N_ult,warp, N_ult,weft) / N1 (major
+principal resultant), so it is never above the lowest warp or weft value shown here.
+Simulations from earlier versions have no stored skin results: run them again for the
+colours.
+
 A **status banner** across the top of the view always states the chosen run's state, worst
 first. It cannot be closed; it goes when the state does:
 

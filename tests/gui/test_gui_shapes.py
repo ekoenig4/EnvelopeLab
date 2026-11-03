@@ -531,3 +531,42 @@ def test_shapes_are_reported_one_by_one_and_a_stale_batch_stops() -> None:
     stopped.done.connect(stop_after_first)
     stopped.run()
     assert [[name for name, _ in b] for b in seen] == [["A"]]
+
+
+@pytest.mark.slow
+def test_a_shape_simulation_has_colour_maps_and_its_deviation(
+    gore_window: MainWindow, qtbot: QtBot
+) -> None:
+    """A solved special shape is in the 3D view's Run list with the envelope's fields:
+    factor of safety, resultants, wrinkling, displacement and the deviation from its
+    designed skin; the banner and run details describe it."""
+    from envelopelab_app.simulation import PREVIEW
+
+    w = gore_window
+    _fed_dome(w)
+    session = w.controller.session
+    assert session is not None
+    assert w.simulation.start(PREVIEW)
+    assert w.simulation.wait(900_000)
+    qtbot.waitUntil(lambda: session.shape_run("Dome") is not None, timeout=10_000)
+    view = w.view3d
+    view.refresh()
+    index = view.run_choice.findData("shape-sim:Dome")
+    assert index >= 0 and view.run_choice.itemText(index).startswith("Dome (inflated)")
+    view.run_choice.setCurrentIndex(index)
+    view._result_changed()
+    record = session.shape_run("Dome")
+    assert record is not None
+    for name in ("fos_warp", "fos_weft", "n1", "n_warp", "wrinkle_state", "displacement"):
+        assert name in view.fields, (name, view.missing.get(name))
+    deviation = view.fields["deviation"]
+    assert deviation.location == "node" and np.isfinite(deviation.values).all()
+    # One value per skin triangle (the sub-model's element count also has the envelope
+    # patch round the shape).
+    skin = len(view.layers["shape-sim:Dome"].faces)
+    assert len(view.fields["fos_warp"].values) == skin < record.n_elements
+    # The conservative shape summary never exceeds the lowest warp/weft factor shown.
+    low = min(float(view.fields[k].values.min()) for k in ("fos_warp", "fos_weft"))
+    assert record.fos["skin"] <= low * (1.0 + 1e-12)
+    assert view.banner.kind in ("info", "fail", "error")
+    assert f"{record.iterations}" in view.run_details.text()
