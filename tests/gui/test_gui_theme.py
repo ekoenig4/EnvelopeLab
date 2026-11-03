@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 from pytestqt.qtbot import QtBot
@@ -79,3 +81,67 @@ def test_stylesheet_covers_every_status() -> None:
     css = stylesheet()
     for kind in STATUS_STYLES:
         assert f"[status='{kind}']" in css
+
+
+def test_theme_selects_fusion_and_a_light_palette_from_the_tokens() -> None:
+    from PySide6.QtGui import QPalette
+
+    from envelopelab_app.theme import TOKENS, look_report, palette
+
+    app = QApplication.instance()
+    assert isinstance(app, QApplication)
+    apply_theme(app, environ={}, platform="test")
+    assert app.property("envelopelabStyle") == "fusion"
+    pal = app.palette()
+    assert pal.color(QPalette.ColorRole.Base).name() == TOKENS["surface"]
+    assert pal.color(QPalette.ColorRole.Text).name() == TOKENS["ink"]
+    assert pal.color(QPalette.ColorRole.Highlight).name() == TOKENS["accent"]
+    # Light whatever the system theme: dark text on a light window.
+    assert (
+        _contrast(
+            palette().color(QPalette.ColorRole.WindowText).name(),
+            palette().color(QPalette.ColorRole.Window).name(),
+        )
+        >= 4.5
+    )
+    assert "Qt style: fusion" in look_report(app)
+
+
+def test_a_generic_system_font_is_replaced_by_a_preferred_installed_one() -> None:
+    from PySide6.QtGui import QFont, QFontInfo
+
+    from envelopelab_app.theme import GENERIC_FONTS, choose_font
+
+    generic = QFont("Sans Serif", 9)
+    chosen = choose_font(generic, ["DejaVu Sans", "Noto Sans"], ("Segoe UI", "Noto Sans"))
+    assert chosen is not None and chosen.family() == "Noto Sans"
+    assert chosen.pointSizeF() == 9  # the size stays the platform's
+    assert choose_font(generic, ["DejaVu Sans"], ("Noto Sans",)) is None  # none installed
+    # A font the desktop chose (here: whatever this machine resolves) is kept.
+    real = QFontInfo(QFont("Noto Sans")).family()
+    if real not in GENERIC_FONTS:
+        assert choose_font(QFont(real, 11), [real, "Inter"], ("Inter",)) is None
+
+
+def test_a_symbol_no_font_can_draw_falls_back_to_ascii() -> None:
+    from dataclasses import replace
+
+    from envelopelab_app.theme import ASCII_SYMBOLS, fit_status_symbols
+
+    app = QApplication.instance()
+    assert isinstance(app, QApplication)
+    styles = {k: replace(v) for k, v in STATUS_STYLES.items()}
+    styles["stale"] = replace(styles["stale"], symbol="\U0010fffd")  # private use: no glyph
+    assert "stale" in fit_status_symbols(app.font(), [], styles)
+    assert styles["stale"].symbol == ASCII_SYMBOLS["stale"]
+    assert len(set(ASCII_SYMBOLS.values())) == len(ASCII_SYMBOLS)  # still one per status
+    assert all(s.isascii() for s in ASCII_SYMBOLS.values())
+    assert set(ASCII_SYMBOLS) == set(STATUS_STYLES)
+
+
+def test_windows_fonts_are_only_loaded_when_present(tmp_path: Path) -> None:
+    from envelopelab_app.theme import load_windows_fonts
+
+    assert load_windows_fonts(tmp_path) == []
+    (tmp_path / "segoeui.ttf").write_bytes(b"not a font")
+    assert load_windows_fonts(tmp_path) == []

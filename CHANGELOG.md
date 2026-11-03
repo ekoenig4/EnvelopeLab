@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the application looks the same on every system: Qt's Fusion style and a light
+  palette from the theme's colours everywhere (a dark system theme or the native style no
+  longer changes it). Where the system font is only DejaVu Sans (WSL), it uses Segoe UI
+  from the Windows installation under WSL, else Noto Sans, Inter, Cantarell or Ubuntu;
+  `scripts/install_env.sh` installs Noto Sans. Status symbols no font can draw fall back
+  to ASCII. The 3D view's tool rail buttons have a visible frame.
+- Added: `envelopelab --scale FACTOR` (the same as `QT_SCALE_FACTOR`) for WSL on a scaled
+  Windows display; `--diagnose` prints the Qt style, font, DPI and status symbols.
 - Changed: the 3D view treats a run as the whole balloon (approved mockup, board 4). The
   *Run* list has one entry per solve, the envelope and the shapes solved with it
   ("Preview run · envelope + 2 shapes"; CalculiX a second entry); shapes are no longer
