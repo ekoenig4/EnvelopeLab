@@ -14,6 +14,7 @@ nav:
       - Reality Check report: user/reality-check-report.md
       - Special shapes on a standard envelope: user/special-shape-primitives.md
       - Parachute and rigging: user/rigging.md
+      - Exporting a build pack: user/build-pack.md
   - Developer:
       - Setup: dev/setup.md
       - CalculiX installation: dev/calculix-installation.md
@@ -29,6 +30,7 @@ nav:
       - Design editing and staleness: theory/design-editing.md
       - Profile editing, segments and simplify: theory/profile-editing.md
       - Solved shape vs drawn profile: theory/profile-matching.md
+      - Deviation from the design: theory/shape-deviation.md
       - Profile under load: theory/profile-physics.md
       - Shape families: theory/shape-families.md
       - Parachute and rigging: theory/rigging.md
@@ -83,6 +85,11 @@ nav:
       - ADR-0032: adr/ADR-0032-special-shape-caps.md
       - ADR-0033: adr/ADR-0033-energy-consistent-wrinkle-direction.md
       - ADR-0034: adr/ADR-0034-shape-mesh-size-from-a-study.md
+      - ADR-0035: adr/ADR-0035-run-fabric-resultants.md
+      - ADR-0036: adr/ADR-0036-build-pack-documents-and-3d-view.md
+      - ADR-0037: adr/ADR-0037-build-pack-shop-layout.md
+      - ADR-0038: adr/ADR-0038-one-pdf-per-piece.md
+      - ADR-0039: adr/ADR-0039-marked-panels-assembly-and-shape-views.md
 theme:
   name: material
 markdown_extensions:

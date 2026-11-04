@@ -17,6 +17,22 @@ in the undo history. Nothing is edited by hand in JSON.
 
 ## The standard-gore editor
 
+The editor's title bar always shows the key figures of the design (volume, height,
+maximum diameter and gross lift) and a chip with the **lift margin** after rigging and
+payload: ✓ when it is positive, ▲ when it is negative. Below it, a **status banner**
+states the worst problem of the design, with the same symbols as the 3D view:
+
+| Banner | When |
+|---|---|
+| ✕ **The design has errors — outputs are not final.** | the live outputs cannot be computed, or a design check reports an error |
+| ▲ **The shape will not hold under load.** | *Shape under load* finds spans that need compression (drawn red on the canvas) |
+| ▲ **Negative lift margin.** | the envelope cannot lift its rigging and payload at the operating conditions |
+
+Both limits together read **A design limit is exceeded.** The banner cannot be closed;
+it goes when the design is fixed. With *Check the shape under load* off, compression is
+not checked and not reported. The boxes of the side column (*Shape under load*, *Solved
+shape*, *Constraint locks*, *Live outputs*, ...) are drawn as cards.
+
 * **Profile canvas**: drag a control point; the curve follows while you drag, and
   releasing the mouse makes one edit. Radii cannot become negative.
   The canvas also marks where the panels lie: a tick across the curve at every row seam,
@@ -373,13 +389,10 @@ and its circular centre panel. **Layout** in the toolbar chooses how they are ar
 * *Assembled gore*: stacked up one gore as they are sewn, the scoop at the bottom and the
   parachute's centre panel on top, so you can see how the rows meet.
 
-With **Show special shapes** on (the default), every envelope panel a special shape is
-sewn on, or lies under, follows the parachute as its own piece, gore by gore (for
-example *GORE 3 ROW D: ear*), as on the build pack's marking sheets: the footprint line
-the shape's rim is sewn on, with short ticks on the shape's side; the numbered match
-marks, each naming the skin piece with the same number; and every feed hole, cut
-(dashed) and finished (solid), with its sizes. Each row says which of its gores carry
-such a panel. Hover a panel or a row's list for the full sewing directions.
+The pattern view shows only the base envelope. The envelope panels a special shape is
+sewn on (its footprint line, match marks and feed holes) are shown with that shape, in the
+**Special shapes** mode under *Envelope panels* (see
+[special shapes](special-shape-primitives.md)).
 
 The layout is for display only: it does not change the cut files. Each panel row is drawn as cut (dashed) and finished (solid,
 filled with the zone's fabric colour) outlines with its label, grain arrow, notches, tapes
@@ -389,9 +402,24 @@ For the selected row you can set the label, grain direction, zone, seam allowanc
 rows or this row), add notches, tape paths across the panel and feature locations (drag a
 feature to move it). *Marks on this row* lists them; *Remove selected mark* deletes one.
 
-Patterns are drawn **as last generated**. When the design has changed since, a red
-**STALE** banner says so and the panels are greyed until you press **Regenerate patterns**
-(F5), or enable automatic regeneration in the preferences.
+Patterns are **regenerated automatically** after every edit (and when a project is
+opened), so the view always shows the current design. A status banner over the view, with
+the same symbols as the other windows, always says what it shows: ✓ **Patterns are
+current**, or ✕ **Patterns could not be regenerated** with the reason (for example rows
+that no longer fit the tape), in which case the pieces shown are from before the edit.
+To regenerate only on request, untick *Regenerate patterns after every edit* in
+**Preferences**: edits then leave the patterns ◷ **STALE** (greyed) until you press
+**Regenerate patterns** (on the banner, in the toolbar or F5). Automatic regeneration
+became the default in this version; it applies once to settings saved before, and a
+choice saved after that is kept.
+
+**Overlay: Deviation from design** (toolbar) colours the flat panels by where the solved
+envelope of the latest current, converged run (CalculiX if there is one, else the preview)
+lies outside (red) or inside (blue) the design, as in the 3D view. Every gore of a row is
+cut from the same panel, so each point of a panel shows the gore that deviates most there;
+hover the panel for the value and the gore. A note under the toolbar names the run and the
+full scale. Without a current, converged run, or while the patterns are stale, the note
+says so and nothing is drawn. Display only: the cut files are not affected.
 
 ### Manual outline overrides
 

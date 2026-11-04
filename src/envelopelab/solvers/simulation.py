@@ -121,6 +121,9 @@ class SimulationResult:
         Nodes used as the mouth datum for height and width.
     wrinkle_state : ndarray of int8, optional
         0 taut, 1 wrinkled, 2 slack per element, when the solver reports it.
+    fabric_resultants : ndarray, shape (m, 3), optional
+        Resultants along the deformed warp and weft directions and the in-plane shear on
+        the warp axis per element, N/m, when the solver reports them (the preview solver).
     findings : list of Finding
         Warnings and errors; errors mean the result is not final.
     chamber_volumes : dict of str to float
@@ -152,6 +155,7 @@ class SimulationResult:
     mouth_nodes: IntArray
     manifest: RunManifest
     wrinkle_state: np.ndarray | None = None
+    fabric_resultants: FloatArray | None = None
     findings: list[Finding] = field(default_factory=list)
     chamber_volumes: dict[str, float] = field(default_factory=dict)
 
@@ -317,6 +321,7 @@ def from_preview(
         mouth_nodes=mouth,
         manifest=manifest or manifest_for(model, "envelopelab-preview", result.metadata),
         wrinkle_state=result.state,
+        fabric_resultants=result.fabric_resultants,
         findings=[Finding(w.code, w.message, w.severity) for w in result.warnings],
         chamber_volumes=dict(result.chamber_volumes),
     )

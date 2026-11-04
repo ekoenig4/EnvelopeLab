@@ -10,8 +10,9 @@ from PySide6.QtCore import QSettings
 from PySide6.QtWidgets import QApplication
 
 from envelopelab_app.diagnostics import environment_report, install_crash_log, opengl_report
-from envelopelab_app.graphics import configure_graphics, select_qt_platform
+from envelopelab_app.graphics import configure_graphics, configure_scale, select_qt_platform
 from envelopelab_app.main_window import MainWindow
+from envelopelab_app.theme import apply_theme, look_report
 
 ORGANIZATION = "EnvelopeLab"
 APPLICATION = "EnvelopeLab"
@@ -25,6 +26,7 @@ def create_application(argv: list[str]) -> QApplication:
     app = QApplication(argv)
     app.setOrganizationName(ORGANIZATION)
     app.setApplicationName(APPLICATION)
+    apply_theme(app)
     return app
 
 
@@ -47,6 +49,13 @@ def main(argv: list[str] | None = None) -> int:
         "--hardware-gl", action="store_true", help="use the GPU OpenGL driver even under WSL"
     )
     parser.add_argument(
+        "--scale",
+        type=float,
+        metavar="FACTOR",
+        help="draw the interface this much larger, e.g. 1.5 for a Windows display at 150 %% "
+        "under WSL (the same as QT_SCALE_FACTOR)",
+    )
+    parser.add_argument(
         "--diagnose",
         action="store_true",
         help="print versions, display and OpenGL settings and the crash-log path, then exit",
@@ -54,9 +63,14 @@ def main(argv: list[str] | None = None) -> int:
     options, qt_args = parser.parse_known_args(args[1:])
     # Before any OpenGL context exists: Mesa reads the variable when the first one is made,
     # and Qt reads its platform when the QApplication is created.
+    try:
+        scaled = configure_scale(os.environ, options.scale)
+    except ValueError as exc:
+        parser.error(str(exc))
     for reason in (
         configure_graphics(os.environ, options.software_gl, options.hardware_gl),
         select_qt_platform(os.environ),
+        scaled,
     ):
         if reason:
             print(f"envelopelab: {reason}", file=sys.stderr)
@@ -85,7 +99,8 @@ def diagnose(qt_argv: list[str]) -> int:
     from envelopelab_app.diagnostics import crash_log_path
 
     print(environment_report())
-    create_application(qt_argv)
+    app = create_application(qt_argv)
+    print(look_report(app))
     print(opengl_report())
     print(f"crash log: {crash_log_path()}")
     return 0

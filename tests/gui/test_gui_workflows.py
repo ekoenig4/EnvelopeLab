@@ -479,8 +479,8 @@ def test_layer_list_without_renderer_names_every_source(gore_window: MainWindow)
     assert labels == {
         "design": "Design surface (profile, current): 8 gores x 4 panel rows, seams dark"
     }
-    item = gore_window.view3d.layer_list.item(0)
-    assert item is not None and item.checkState() == Qt.CheckState.Checked
+    item = gore_window.view3d.layer_item("design")
+    assert item is not None and item.checkState(0) == Qt.CheckState.Checked
 
 
 def test_flat_chord_construction_crest_loft_and_bows(gore_window: MainWindow) -> None:

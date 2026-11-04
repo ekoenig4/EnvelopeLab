@@ -14,29 +14,30 @@ set -euo pipefail
 # Gmsh wheel (panel meshing): OpenGL/X11 client libraries and the OpenMP runtime
 # (libgomp.so.1; not on minimal installs such as WSL Ubuntu, where gcc is absent).
 APT_GMSH="libglu1-mesa libxcursor1 libxft2 libxinerama1 libgomp1"
-# Qt 6 (PySide6) xcb platform plugin and VTK (PyVista) rendering.
-APT_QT="libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libfontconfig1 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0"
+# Qt 6 (PySide6) xcb platform plugin and VTK (PyVista) rendering, plus Noto Sans: the
+# interface font where the system has none but DejaVu (WSL), see envelopelab_app.theme.
+APT_QT="libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libfontconfig1 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0 fonts-noto-core"
 APT_PYTHON="python3 python3-venv python3-pip"
 APT_CALCULIX="calculix-ccx"
 APT_XVFB="xvfb xauth"
 APT_REGISTRATION="libusb-1.0-0"
 
 DNF_GMSH="mesa-libGLU libXcursor libXft libXinerama libgomp"
-DNF_QT="mesa-libEGL mesa-libGL libxkbcommon libxkbcommon-x11 fontconfig dbus-libs xcb-util-cursor xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil"
+DNF_QT="mesa-libEGL mesa-libGL libxkbcommon libxkbcommon-x11 fontconfig dbus-libs xcb-util-cursor xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil google-noto-sans-fonts"
 DNF_PYTHON="python3 python3-pip"
 DNF_CALCULIX="calculix-ccx"
 DNF_XVFB="xorg-x11-server-Xvfb xorg-x11-xauth"
 DNF_REGISTRATION="libusb1"
 
 PACMAN_GMSH="glu libxcursor libxft libxinerama gcc-libs"
-PACMAN_QT="libglvnd mesa libxkbcommon libxkbcommon-x11 fontconfig dbus xcb-util-cursor xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil"
+PACMAN_QT="libglvnd mesa libxkbcommon libxkbcommon-x11 fontconfig dbus xcb-util-cursor xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil noto-fonts"
 PACMAN_PYTHON="python python-pip"
 PACMAN_CALCULIX=""  # CalculiX is only in the AUR (calculix); see docs/dev/calculix-installation.md
 PACMAN_XVFB="xorg-server-xvfb xorg-xauth"
 PACMAN_REGISTRATION="libusb"
 
 ZYPPER_GMSH="libGLU1 libXcursor1 libXft2 libXinerama1 libgomp1"
-ZYPPER_QT="libEGL1 libGL1 libxkbcommon0 libxkbcommon-x11-0 fontconfig libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0"
+ZYPPER_QT="libEGL1 libGL1 libxkbcommon0 libxkbcommon-x11-0 fontconfig libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0 google-noto-sans-fonts"
 ZYPPER_PYTHON="python311 python311-pip"
 ZYPPER_CALCULIX=""  # not in the main repositories; see docs/dev/calculix-installation.md
 ZYPPER_XVFB="xvfb-run xauth"

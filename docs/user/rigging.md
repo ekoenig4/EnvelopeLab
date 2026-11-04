@@ -10,31 +10,55 @@ The models behind the numbers are described in [theory](../theory/rigging.md).
 
 ## The Rigging panel
 
-The **Rigging** mode (**View ▸ Rigging**, Ctrl+3) has buttons to add or remove each element and
-shows what the design gives:
+The **Rigging** mode (**View ▸ Rigging**, Ctrl+3) shows one card per element, in the same
+look as the other windows:
 
-* **Parachute**: diameter, panel count, fabric length and area, the size of one panel,
-  crown pressure, the static load on the shroud lines, shroud and centralising line
-  lengths, the shroud lines' limit tension and factor of safety, the **crown ring** and
-  **centre ring** (diameter, limit hoop force, factor of safety, mass), and the red-line
-  pull for a *seal open* and a *fully open* parachute.
+* The **toolbar** keeps the key figures in view: the rigging mass, the **lowest factor of
+  safety** of the assessed lines against the requirement, and the limit load factor (with
+  its source tag), plus a chip saying whether the requirement is met.
+* The **banner** states the worst problem first:
+
+  | Banner | When |
+  |---|---|
+  | ▲ **Rigging fails a check.** | a factor of safety below the requirement, or another error; the first two are named with their values |
+  | i **Rigging not complete.** | the parachute, flying wires or red line is not yet added |
+  | ✓ **Rigging checked.** | every assessed line meets the requirement; what is *not* assessed is listed |
+  | ✕ **Rigging not evaluated.** | the outputs could not be computed (the reason is given) |
+
+* Each **card** has its own status chip (▲ *Fails*, ✓ *Meets FoS*, i *Not assessed*), an
+  **Add** button while the element is missing (with what is missing without it) and a
+  **Remove** button once it is there. Turning vents keep **Add turning-vent pair** to add
+  more, and **Remove all**. Every change is one undo step.
+* A card lists its values and a **lines table**: count, length (Ø for a ring's diameter),
+  limit load (hoop force for a ring), strength with its source tag, factor of safety and
+  mass.
+
+What each card shows:
+
+* **Parachute**: diameter and panel count, hole diameter, seal overlap, fabric length and
+  area, the finished radial and centre panels, crown pressure, the static load on the
+  shroud lines, the red-line pull for a *seal open* and a *fully open* parachute (▲ *NOT
+  REACHABLE* when it cannot open), and the shroud and centralising lines, **crown ring**
+  and **centre ring** in its table.
+* **Flying wires**: wires and tapes per wire, suspended and limit weight, each wire's
+  length, and the wires and the load-tape legs of the crow's feet in its table.
 * **Red line**: total length (route plus spare), the confluence height and where it ends.
-* **Flying wires**: suspended and limit weight, each wire's length, the most loaded wire's
-  limit tension and factor of safety, and the same for the load-tape legs of the crow's
-  feet.
+* **Turning vents**: per vent its seam and direction, slot length and open area, thrust,
+  torque, air and heat loss fully open; the net torque and side force; the control lines in
+  its table.
 * **Scoop**: gores covered, fabric zone, slant length, bottom radius, panel widths and
   mass (wind load not assessed).
-* **Turning vents**: slot length and open area, thrust, torque, air and heat loss with the
-  vent fully open, the control-line length, and the net torque and side force.
 
-A factor of safety below the requirement is red, says **FAILS**, and is listed as an
-error in **Validation / Warnings**. Values that are not assessed (the red line's pull force,
-the centralising lines' load) say so. The parachute and rigging mass appears in the
-editor's live outputs and is subtracted from the lift margin.
+A factor of safety below the requirement says **▲ … FAILS (required …)** in its row, in
+the fail colour, turns its card's chip and the toolbar chip to ▲, is named in the banner
+and is listed as an error in **Validation / Warnings**. Values that are not assessed (the
+red line's pull force, the centralising lines' load, the scoop's wind load) say so. The
+parachute and rigging mass appears in the editor's live outputs and is subtracted from the
+lift margin.
 
 ## Parachute overlap and centre panel
 
-The **Parachute** box at the top of the Rigging panel sets two things directly:
+The **Parachute** card at the top of the Rigging panel sets two things directly:
 
 * **Overlap with the envelope (m)**: how far the parachute reaches past the top hole onto
   the envelope, measured along the fabric (`gores.seal_overlap`). Internal pressure presses
@@ -54,7 +78,7 @@ radial panels' top edges and the centre panel's edge are checked to be the same 
 Parachutes from designs saved before the centre panel existed have none; type a diameter
 to add one.
 
-**Export build pack…** (Shapes panel) writes the parachute with the envelope rows:
+**File ▸ Export build pack…** ([guide](build-pack.md)) writes the parachute with the envelope rows:
 `parachute-panel.dxf`, cut once per radial panel, and `parachute-centre.dxf`, cut once.
 The pack's output QA checks that the radial panels' tops match the centre panel's edge
 ([build pack format](../formats/build-pack.md)). A parachute whose pattern cannot be made

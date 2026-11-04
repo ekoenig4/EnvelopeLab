@@ -90,7 +90,9 @@ from envelopelab.project.session import ProjectSession
 from envelopelab.solvers.axisymmetric import AxisymmetricLoad, MembraneCheck, membrane_check
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.refresh import Refresher
+from envelopelab_app.result_view import design_banner
 from envelopelab_app.simulation import PREVIEW, SimulationManager
+from envelopelab_app.theme import StatusBanner, StatusChip, text_style
 
 HANDLE_RADIUS = 6.0  # px
 
@@ -711,10 +713,17 @@ class ShapePhysicsPanel(QGroupBox):
     curvature of the failing spans only (one undoable edit).
     """
 
+    #: Emitted after every check, so the editor's banner can follow it.
+    statusChanged = Signal()  # noqa: N815 (Qt naming)
+
     def __init__(self, controller: WorkspaceController, canvas: ProfileCanvas) -> None:
         super().__init__("Shape under load")
         self.setObjectName("shapePhysicsBox")
         self.controller = controller
+        #: Fraction of the tape needing compression (0 when it holds or the check is off),
+        #: and the check's description of it.
+        self.compressed_fraction = 0.0
+        self.compression_text = ""
         self.canvas = canvas
         layout = QVBoxLayout(self)
         self.check_on = QCheckBox("Check the shape under load")
@@ -764,6 +773,14 @@ class ShapePhysicsPanel(QGroupBox):
 
     def refresh(self) -> None:
         """Check the current design and draw what the check found."""
+        self.compressed_fraction = 0.0
+        self.compression_text = ""
+        try:
+            self._check()
+        finally:
+            self.statusChanged.emit()
+
+    def _check(self) -> None:
         session = self.controller.session
         design = self.controller.design
         if session is None or design is None or design.gores is None:
@@ -781,9 +798,11 @@ class ShapePhysicsPanel(QGroupBox):
         on = self.check_on.isChecked()
         self.canvas.set_stress_load(loaded.load if on else None)
         self.status.setText(_check_text(check, loaded.note) if on else "Check off.")
-        self.status.setStyleSheet(
-            "color: #b00020; font-weight: bold;" if on and check.compressed_fraction else ""
-        )
+        failing = bool(on and check.compressed_fraction)
+        self.status.setStyleSheet(text_style("fail") if failing else "")
+        if failing:
+            self.compressed_fraction = float(check.compressed_fraction)
+            self.compression_text = self.status.text().splitlines()[0]
         self.snap.setEnabled(bool(check.compressed_fraction or check.compressed_kinks))
         ghosts: dict[str, tuple[np.ndarray, np.ndarray, QPen]] = {}
         if self.natural_on.isChecked():
@@ -846,6 +865,8 @@ def _check_text(check: MembraneCheck, note: str) -> str:
 
 
 #: Ghost line colours (Tableau palette, as the rest of the editor).
+#: Key figures shown in the editor's title bar.
+FIGURES = ("volume", "height", "max_diameter", "gross_lift")
 GHOST_COLORS = {"envelopelab-preview": "#ff7f0e", "calculix": "#2ca02c", "target": "#9467bd"}
 SOLVERS = (("calculix", "CalculiX"), ("envelopelab-preview", "Preview"))
 
@@ -1254,9 +1275,9 @@ def _shape_style(shape: RunShape | None) -> str:
     if shape is None:
         return ""
     if not shape.record.converged or shape.solved is None:
-        return "color: #b00020; font-weight: bold;"
+        return text_style("error")
     if not shape.current:
-        return "color: #a05a00;"
+        return text_style("stale")
     return ""
 
 
@@ -1487,10 +1508,11 @@ class GoreEditor(QWidget):
             outputs_layout.addRow(text, label)
         self.output_message = QLabel()
         self.output_message.setWordWrap(True)
-        self.output_message.setStyleSheet("color: #b00020;")
+        self.output_message.setStyleSheet(text_style("error"))
         outputs_layout.addRow(self.output_message)
 
         side = QWidget()
+        side.setObjectName("sidePanel")
         side_layout = QVBoxLayout(side)
         side_layout.addWidget(QLabel("Profile control points (mouth first)"))
         side_layout.addWidget(self.points_table)
@@ -1547,8 +1569,30 @@ class GoreEditor(QWidget):
         splitter.addWidget(side_scroll)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
+        # Key figures beside the title, always in view (the full list is under Live
+        # outputs), and the banner stating what is wrong with the design, worst first.
+        self.figures: dict[str, QLabel] = {}
+        top = QWidget()
+        top.setObjectName("panelToolbar")
+        top_layout = QHBoxLayout(top)
+        top_layout.setContentsMargins(8, 4, 8, 4)
+        top_layout.addWidget(self.header)
+        top_layout.addStretch(1)
+        for key in FIGURES:
+            label = QLabel("-")
+            label.setObjectName(f"figure_{key}")
+            label.setProperty("role", "figure")
+            self.figures[key] = label
+            top_layout.addWidget(label)
+        self.margin_chip = StatusChip()
+        top_layout.addWidget(self.margin_chip)
+        self.banner = StatusBanner()
+        self.shape_physics.statusChanged.connect(self._update_banner)
         layout = QVBoxLayout(self)
-        layout.addWidget(self.header)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(top)
+        layout.addWidget(self.banner)
         layout.addWidget(splitter, 1)
 
         self.refresher = Refresher(
@@ -1953,12 +1997,50 @@ class GoreEditor(QWidget):
         r, _ = control_arrays(design)
         return f"{2 * r[0]:.3f} m / {2 * r[-1]:.3f} m"
 
+    def _show_figures(self) -> None:
+        """The key figures in the title bar, and the lift-margin chip."""
+        out = self.controller.outputs
+        texts = {
+            "volume": "-" if out is None else f"V {out.volume:.1f} m³",
+            "height": "-" if out is None else f"H {out.height:.2f} m",
+            "max_diameter": "-" if out is None else f"Ø max {out.max_diameter:.2f} m",
+            "gross_lift": "-" if out is None else f"Lift {out.gross_lift / 9.80665:.0f} kg",
+        }
+        for key, text in texts.items():
+            self.figures[key].setText(text)
+        margin = None if out is None else out.lift_margin
+        if margin is None:
+            self.margin_chip.set_status("stale", "Margin unknown" if out is not None else "")
+        elif margin < 0.0:
+            self.margin_chip.set_status("fail", f"Margin {margin:.1f} kg")
+        else:
+            self.margin_chip.set_status("ok", f"Margin {margin:.1f} kg")
+        self.margin_chip.setToolTip("Lift margin after the rigging and payload")
+
+    def _update_banner(self) -> None:
+        """State the worst problem of the design (see :func:`design_banner`)."""
+        out = self.controller.outputs
+        errors = [] if out is None else [f.message for f in out.findings if f.severity == "error"]
+        banner = design_banner(
+            self.controller.outputs_error if out is None else None,
+            errors,
+            None if out is None else out.lift_margin,
+            self.shape_physics.compressed_fraction,
+            self.shape_physics.compression_text,
+        )
+        if banner is None or self.controller.design is None:
+            self.banner.clear()
+        else:
+            self.banner.set_status(banner.kind, banner.title, banner.message)
+
     def _show_outputs(self) -> None:
         out = self.controller.outputs
         if out is None:
             for label in self.outputs.values():
                 label.setText("-")
             self.output_message.setText(self.controller.outputs_error or "")
+            self._show_figures()
+            self._update_banner()
             return
         values = {
             "meridian_length": f"{out.meridian_length:.3f} m",
@@ -1984,9 +2066,11 @@ class GoreEditor(QWidget):
             self.outputs[key].setText(text)
         margin = out.lift_margin
         self.outputs["lift_margin"].setStyleSheet(
-            "color: #b00020; font-weight: bold;" if margin is not None and margin < 0 else ""
+            text_style("fail") if margin is not None and margin < 0 else ""
         )
         self.output_message.setText("\n".join(f.message for f in out.findings))
+        self._show_figures()
+        self._update_banner()
 
     # -- edits --------------------------------------------------------------------------
 

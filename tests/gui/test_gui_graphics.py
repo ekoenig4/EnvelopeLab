@@ -52,3 +52,16 @@ def test_wayland_sessions_use_the_x11_platform_the_3d_view_needs() -> None:
     assert select_qt_platform(only_wayland, platform="linux") is None
     assert QT_PLATFORM not in only_wayland
     assert select_qt_platform({"WAYLAND_DISPLAY": "w", "DISPLAY": ":0"}, platform="win32") is None
+
+
+def test_scale_option_sets_qts_scale_factor() -> None:
+    import pytest
+
+    from envelopelab_app.graphics import QT_SCALE, configure_scale
+
+    env: dict[str, str] = {}
+    assert configure_scale(env, None) is None and QT_SCALE not in env
+    reason = configure_scale(env, 1.5)
+    assert env[QT_SCALE] == "1.5" and reason is not None and "1.5" in reason
+    with pytest.raises(ValueError):
+        configure_scale({}, 10.0)

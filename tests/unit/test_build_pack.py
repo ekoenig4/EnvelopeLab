@@ -55,13 +55,17 @@ def _copy(pack: Path, tmp_path: Path) -> Path:
 
 def test_exported_pack_passes_the_output_qa(pack: Path) -> None:
     assert check_pack(pack) == []
-    index = json.loads((pack / "index.json").read_text(encoding="utf-8"))
+    index = json.loads((pack / "cad" / "index.json").read_text(encoding="utf-8"))
     files = [s["file"] for s in index["sheets"]]
-    assert "envelope-row-A.dxf" in files and "ear-G16.dxf" in files and "horn-TIP.dxf" in files
-    assert {"ear-mark-G3-D.dxf", "ear-mark-G4-D.dxf"} <= set(files)
+    assert (
+        "cad/envelope-row-A.dxf" in files
+        and "cad/ear-G16.dxf" in files
+        and "cad/horn-TIP.dxf" in files
+    )
+    assert {"cad/ear-mark-G3-D.dxf", "cad/ear-mark-G4-D.dxf"} <= set(files)
     rows = [s for s in index["sheets"] if s["kind"] == "envelope panel"]
     assert all(s["cut_count"] == 12 for s in rows)
-    ear = next(s for s in index["sheets"] if s["file"] == "ear-G1.dxf")
+    ear = next(s for s in index["sheets"] if s["file"] == "cad/ear-G1.dxf")
     assert ear["fabric"] == "ripstop red"
     piece = SHAPES[0].pieces[0]
     assert ear["finished_width_mm"] == pytest.approx(piece.size[0] * 1000, abs=1e-3)
@@ -74,7 +78,7 @@ def test_exported_pack_passes_the_output_qa(pack: Path) -> None:
 def test_dxf_is_in_millimetres_and_carries_the_marks(pack: Path) -> None:
     hole = SHAPES[0].feed_hole
     assert hole is not None
-    doc = readfile(pack / f"ear-mark-G{hole.gore}-{hole.row}.dxf")
+    doc = readfile(pack / "cad" / f"ear-mark-G{hole.gore}-{hole.row}.dxf")
     assert doc.header["$INSUNITS"] == 4
     layers = {e.dxf.layer for e in doc.modelspace()}
     assert {"SEW", "CUT", "ATTACH", "MARKS", "HOLE", "LABEL", "CAL"} <= layers
@@ -82,7 +86,7 @@ def test_dxf_is_in_millimetres_and_carries_the_marks(pack: Path) -> None:
         e.dxf.text for e in doc.modelspace() if e.dxftype() == "TEXT" and e.dxf.layer == "MARKS"
     ]
     assert texts  # the numbered marks of this half of the footprint
-    top = readfile(pack / "ear-mark-G3-D.dxf")
+    top = readfile(pack / "cad" / "ear-mark-G3-D.dxf")
     marks = [
         e.dxf.text for e in top.modelspace() if e.dxftype() == "TEXT" and e.dxf.layer == "MARKS"
     ]
@@ -99,46 +103,84 @@ def test_calibration_label_comes_from_the_drawn_length() -> None:
     assert calibration_label(0.5, 0.1) == "must measure 500 mm at 1:1, ticks every 100 mm"
 
 
-def test_pdf_pages_are_roll_wide_and_wide_sheets_are_split(pack: Path) -> None:
-    data = (pack / "pattern.pdf").read_bytes()
-    index = json.loads((pack / "index.json").read_text(encoding="utf-8"))
-    roll = f"/MediaBox [0 0 {60 * 0.0254 * PT_PER_M:.2f} ".encode()
-    assert data.count(roll) == sum(s["pdf_pages"] for s in index["sheets"])
-    widest = max(index["sheets"], key=lambda s: s["finished_width_mm"])
-    assert widest["pdf_pages"] == math.ceil((widest["finished_width_mm"] + 90) / 1524.0)
+def test_every_piece_has_its_own_whole_page_pdf(pack: Path) -> None:
+    from envelopelab.export.qa import _page_boxes
+
+    index = json.loads((pack / "cad" / "index.json").read_text(encoding="utf-8"))
+    roll = 60 * 0.0254 * PT_PER_M
+    cut = [s for s in index["sheets"] if s["kind"] != "marking"]
+    marked_panels = {
+        (s["piece"].split()[-1], int(s["piece"].split()[1]))
+        for s in index["sheets"]
+        if s["kind"] == "marking"
+    }
+    # One file per piece, plus one per envelope panel that carries marks; one page per
+    # file, never split.
+    assert len(index["templates"]) == len(cut) + len(marked_panels)
+    for t in index["templates"]:
+        assert len(t["pages"]) == 1 and t["pages"][0]["bands"] == 1
+        ((w, h, content),) = _page_boxes(pack / t["file"])
+        assert "%CAL " in content and "%CALV " in content
+        # One side within the roll, or the page says the piece is larger than the roll.
+        assert min(w, h) <= roll + 1.0 or "LARGER THAN THE" in content
+    # The page holds the whole piece: as large as its cut outline plus the margins.
+    entry = next(t for t in index["templates"] if t["file"].endswith("-panel-C.pdf"))
+    ((w, h, _c),) = _page_boxes(pack / entry["file"])
+    row = next(s for s in index["sheets"] if s["file"] == "cad/envelope-row-C.dxf")
+    assert max(w, h) / PT_PER_M * 1000 >= row["finished_height_mm"]
+    assert max(w, h) / PT_PER_M * 1000 >= row["finished_width_mm"]
+    # The clean row panel, and one marked panel per gore that carries the ear's marks.
+    clean = next(t for t in index["templates"] if t["file"].endswith("-panel-D.pdf"))
+    assert clean["pages"][0]["markings"] == []
+    gore3 = next(t for t in index["templates"] if t["file"].endswith("-panel-D-gore-3.pdf"))
+    assert gore3["pages"][0]["markings"] == ["ear-mark-G3-D"]
+    assert any(t["file"].endswith("-panel-D-gore-4.pdf") for t in index["templates"])
+    # Every special-shape skin piece is a cutting sheet of its own.
+    names = {t["file"].split("generic-", 1)[1] for t in index["templates"]}
+    assert {f"ear-G{k}.pdf" for k in range(1, 17)} <= names
+    assert {"horn-P1.pdf", "horn-TIP.pdf", "parachute-panel.pdf"} <= names
+
+
+def test_qa_catches_a_piece_split_over_pages(pack: Path, tmp_path: Path) -> None:
+    p = _copy(pack, tmp_path)
+    index_path = p / "cad" / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["templates"][0]["pages"][0]["bands"] = 2
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    assert "template" in {f.check for f in check_pack(p)}
 
 
 def test_qa_catches_missing_and_unlisted_files(pack: Path, tmp_path: Path) -> None:
     p = _copy(pack, tmp_path)
-    (p / "horn-P1.dxf").unlink()
+    (p / "cad" / "horn-P1.dxf").unlink()
     (p / "notes.txt").write_text("x", encoding="utf-8")
     found = {(f.file, f.check) for f in check_pack(p)}
-    assert ("horn-P1.dxf", "index") in found and ("notes.txt", "index") in found
+    assert ("cad/horn-P1.dxf", "index") in found and ("notes.txt", "index") in found
 
 
 def test_qa_catches_wrong_units_and_calibration(pack: Path, tmp_path: Path) -> None:
     p = _copy(pack, tmp_path)
-    doc = readfile(p / "ear-G1.dxf")
+    doc = readfile(p / "cad" / "ear-G1.dxf")
     doc.header["$INSUNITS"] = 1
     for e in doc.modelspace():
         if e.dxf.layer == "CAL" and e.dxftype() == "LINE" and e.dxf.end.x - e.dxf.start.x > 100:
             e.dxf.end = (e.dxf.end.x + 5.0, e.dxf.end.y)
-    doc.saveas(p / "ear-G1.dxf")
+    doc.saveas(p / "cad" / "ear-G1.dxf")
     checks = {f.check for f in check_pack(p)}
     assert {"units", "calibration"} <= checks
 
 
 def test_qa_catches_unequal_sewn_edges_and_wrong_headers(pack: Path, tmp_path: Path) -> None:
     p = _copy(pack, tmp_path)
-    doc = readfile(p / "horn-P2.dxf")
+    doc = readfile(p / "cad" / "horn-P2.dxf")
     for e in doc.modelspace():
         if e.dxf.layer == "EDGE_LEFT" and isinstance(e, LWPolyline):
             e.set_points([(x * 1.01, y * 1.01) for x, y, *_ in e.get_points()])
-    doc.saveas(p / "horn-P2.dxf")
-    index = json.loads((p / "index.json").read_text(encoding="utf-8"))
+    doc.saveas(p / "cad" / "horn-P2.dxf")
+    index = json.loads((p / "cad" / "index.json").read_text(encoding="utf-8"))
     index["sheets"][7]["cut_count"] = 2
     index["roll_width_mm"] = 1000.0
-    (p / "index.json").write_text(json.dumps(index), encoding="utf-8")
+    (p / "cad" / "index.json").write_text(json.dumps(index), encoding="utf-8")
     checks = {f.check for f in check_pack(p)}
     assert {"seam", "header", "page size"} <= checks
 
@@ -152,12 +194,12 @@ def test_sheet_names_must_be_unique(tmp_path: Path) -> None:
 
 
 def test_rim_is_paired_with_the_marked_lines_and_their_ease(pack: Path) -> None:
-    index = json.loads((pack / "index.json").read_text(encoding="utf-8"))
+    index = json.loads((pack / "cad" / "index.json").read_text(encoding="utf-8"))
     rims = [p for p in index["seam_pairs"] if p["a"][0]["edge"] == "rim"]
     assert len(rims) == 2
-    ear = next(p for p in rims if p["a"][0]["file"].startswith("ear-"))
+    ear = next(p for p in rims if p["a"][0]["file"].startswith("cad/ear-"))
     assert len(ear["a"]) == 16
-    assert {r["file"] for r in ear["b"]} == {"ear-mark-G3-D.dxf", "ear-mark-G4-D.dxf"}
+    assert {r["file"] for r in ear["b"]} == {"cad/ear-mark-G3-D.dxf", "cad/ear-mark-G4-D.dxf"}
     assert all(r["edge"].startswith("attach") for r in ear["b"])
     design = SHAPES[0]
     rim = sum(
@@ -171,43 +213,43 @@ def test_rim_is_paired_with_the_marked_lines_and_their_ease(pack: Path) -> None:
 
 def test_qa_catches_a_moved_footprint_line(pack: Path, tmp_path: Path) -> None:
     p = _copy(pack, tmp_path)
-    doc = readfile(p / "ear-mark-G3-D.dxf")
+    doc = readfile(p / "cad" / "ear-mark-G3-D.dxf")
     for e in doc.modelspace():
         if e.dxf.layer == "ATTACH" and isinstance(e, LWPolyline):
             e.set_points([(x * 1.02, y * 1.02) for x, y, *_ in e.get_points()])
-    doc.saveas(p / "ear-mark-G3-D.dxf")
+    doc.saveas(p / "cad" / "ear-mark-G3-D.dxf")
     findings = [f for f in check_pack(p) if f.check == "seam"]
-    assert len(findings) == 1 and "ear-G1.dxf:rim" in findings[0].file
+    assert len(findings) == 1 and "cad/ear-G1.dxf:rim" in findings[0].file
     assert "planned ease" in findings[0].message
 
 
 def test_parachute_panels_and_centre_panel_are_in_the_pack(pack: Path) -> None:
     from envelopelab.rigging import rigging_outputs
 
-    index = json.loads((pack / "index.json").read_text(encoding="utf-8"))
+    index = json.loads((pack / "cad" / "index.json").read_text(encoding="utf-8"))
     sheets = {s["file"]: s for s in index["sheets"]}
     pr = rigging_outputs(DESIGN).parachute
     assert pr is not None and pr.panel is not None and pr.centre_panel is not None
-    radial = sheets["parachute-panel.dxf"]
+    radial = sheets["cad/parachute-panel.dxf"]
     assert radial["kind"] == "parachute panel" and radial["cut_count"] == pr.panel_count
     assert radial["finished_width_mm"] == pytest.approx(pr.panel.bottom_width * 1000, abs=1e-3)
-    centre = sheets["parachute-centre.dxf"]
+    centre = sheets["cad/parachute-centre.dxf"]
     assert centre["cut_count"] == 1
     assert centre["finished_width_mm"] == pytest.approx(pr.centre_panel.diameter * 1000, abs=0.5)
     # All radial tops are sewn to the centre panel's edge, and the QA measured it.
-    pair = next(p for p in index["seam_pairs"] if p["b"][0]["file"] == "parachute-centre.dxf")
+    pair = next(p for p in index["seam_pairs"] if p["b"][0]["file"] == "cad/parachute-centre.dxf")
     assert len(pair["a"]) == pr.panel_count and pair["ease_mm"] == 0.0
     assert {r["edge"] for r in pair["a"]} == {"top"} and pair["b"][0]["edge"] == "rim"
 
 
 def test_qa_catches_a_parachute_centre_panel_of_the_wrong_size(pack: Path, tmp_path: Path) -> None:
     p = _copy(pack, tmp_path)
-    doc = readfile(p / "parachute-centre.dxf")
+    doc = readfile(p / "cad" / "parachute-centre.dxf")
     for e in doc.modelspace():
         if e.dxf.layer == "EDGE_RIM" and isinstance(e, LWPolyline):
             e.set_points([(x * 1.01, y * 1.01) for x, y, *_ in e.get_points()])
-    doc.saveas(p / "parachute-centre.dxf")
-    assert any(f.check == "seam" and "parachute-centre.dxf" in f.message for f in check_pack(p))
+    doc.saveas(p / "cad" / "parachute-centre.dxf")
+    assert any(f.check == "seam" and "cad/parachute-centre.dxf" in f.message for f in check_pack(p))
 
 
 def test_wedge_parachute_and_no_parachute(tmp_path: Path) -> None:
@@ -216,16 +258,18 @@ def test_wedge_parachute_and_no_parachute(tmp_path: Path) -> None:
     wedges.parachute.centre_panel_diameter = None
     export_build_pack(wedges, [], tmp_path / "wedges")
     files = {
-        s["file"] for s in json.loads((tmp_path / "wedges" / "index.json").read_text())["sheets"]
+        s["file"]
+        for s in json.loads((tmp_path / "wedges" / "cad" / "index.json").read_text())["sheets"]
     }
-    assert "parachute-panel.dxf" in files and "parachute-centre.dxf" not in files
+    assert "cad/parachute-panel.dxf" in files and "cad/parachute-centre.dxf" not in files
     assert check_pack(tmp_path / "wedges") == []
     bare = DESIGN.model_copy(update={"parachute": None})
     export_build_pack(bare, [], tmp_path / "bare")
     files = {
-        s["file"] for s in json.loads((tmp_path / "bare" / "index.json").read_text())["sheets"]
+        s["file"]
+        for s in json.loads((tmp_path / "bare" / "cad" / "index.json").read_text())["sheets"]
     }
-    assert not {f for f in files if f.startswith("parachute")}
+    assert not {f for f in files if f.startswith("cad/parachute")}
 
 
 def test_a_parachute_that_cannot_be_cut_stops_the_export(tmp_path: Path) -> None:
@@ -297,23 +341,23 @@ def test_marking_sheets_say_where_and_how_the_shape_is_sewn(pack: Path) -> None:
             ticked += 1
     assert ticked > 20
     assert {"ATTACH_SIDE", "HOLE_CUT", "NOTES"} <= {
-        e.dxf.layer for e in readfile(pack / f"{marking.name}.dxf").modelspace()
+        e.dxf.layer for e in readfile(pack / "cad" / f"{marking.name}.dxf").modelspace()
     }
 
 
 def test_skin_pieces_say_what_each_edge_is_sewn_to(pack: Path) -> None:
-    ear = _texts(pack / "ear-G5.dxf", "NOTES")
+    ear = _texts(pack / "cad" / "ear-G5.dxf", "NOTES")
     assert "sew to G6 (its left side)" in ear and "sew to G4 (its right side)" in ear
     assert any(t.startswith("RIM: sew to the envelope, marks") for t in ear)
     assert "APEX of ear" in ear
-    first = _texts(pack / "ear-G1.dxf", "NOTES")
+    first = _texts(pack / "cad" / "ear-G1.dxf", "NOTES")
     assert "sew to G16 (its right side)" in first  # round the shape
-    horn = _texts(pack / "horn-P1.dxf", "NOTES")
+    horn = _texts(pack / "cad" / "horn-P1.dxf", "NOTES")
     assert "TOP: sew to the tip disc" in horn
-    assert "TIP DISC" in _texts(pack / "horn-TIP.dxf", "NOTES")
-    tip = _texts(pack / "horn-TIP.dxf", "LABEL")
+    assert "TIP DISC" in _texts(pack / "cad" / "horn-TIP.dxf", "NOTES")
+    tip = _texts(pack / "cad" / "horn-TIP.dxf", "LABEL")
     assert any(t.startswith("TIP DISC: sew round the tops") for t in tip)
-    label = _texts(pack / "ear-G5.dxf", "LABEL")
+    label = _texts(pack / "cad" / "ear-G5.dxf", "LABEL")
     assert any(t.startswith("rim marks") and "lie on the envelope at gore" in t for t in label)
 
 
@@ -325,7 +369,7 @@ def test_row_sheets_list_the_gores_to_mark(pack: Path) -> None:
             {a.gore for a in ear.attachment if a.row == row}
             | {h.gore for h in ear.feed_holes if h.row == row}
         )
-        label = _texts(pack / f"envelope-row-{row}.dxf", "LABEL")
+        label = _texts(pack / "cad" / f"envelope-row-{row}.dxf", "LABEL")
         assert any(
             t.startswith(f"ear: mark gores {', '.join(str(g) for g in gores)} of this row")
             for t in label
@@ -379,3 +423,14 @@ def test_a_capped_dome_is_sewn_round_its_cap() -> None:
 
 def _polyline_length(points: np.ndarray) -> float:
     return float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
+
+
+def test_shape_names_with_spaces_export(tmp_path: Path) -> None:
+    """Shape names are free text ("eye pod left"); the pack must still be written."""
+    shape = design_primitive(
+        Dome("eye pod left", Placement(3, 12.0, across=0.5), 1.0, 1.2, gores=8), SURFACE
+    )
+    export_build_pack(DESIGN, [shape], tmp_path / "spaces")
+    assert check_pack(tmp_path / "spaces") == []
+    names = {p.name for p in (tmp_path / "spaces").iterdir()}
+    assert "generic-eye-pod-left-G1.pdf" in names

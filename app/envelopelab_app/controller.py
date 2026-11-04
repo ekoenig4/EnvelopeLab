@@ -106,6 +106,8 @@ class WorkspaceController(QObject):
         self.fabrics = fabrics
         self.session: ProjectSession | None = None
         self.patterns_cache: PatternCache | None = None
+        #: Why the last regeneration failed (None after a success).
+        self.patterns_error: str | None = None
         self.model_cache: ModelCache | None = None
         self.selection = ""
         self._outputs: GoreOutputs | None = None
@@ -537,9 +539,11 @@ class WorkspaceController(QObject):
         try:
             rows = self.rows()
         except ValueError as exc:
+            self.patterns_error = str(exc)
             if emit:
                 self.editRejected.emit(f"patterns not generated: {exc}")
             return False
+        self.patterns_error = None
         fingerprint = self.session.fingerprints()["patterns"]
         self.patterns_cache = PatternCache(rows, fingerprint)
         self.session.tracker.mark_built("patterns", fingerprint)

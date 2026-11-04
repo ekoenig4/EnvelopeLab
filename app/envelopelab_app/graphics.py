@@ -21,6 +21,9 @@ from collections.abc import MutableMapping
 from pathlib import Path
 
 SOFTWARE_GL = "LIBGL_ALWAYS_SOFTWARE"
+QT_SCALE = "QT_SCALE_FACTOR"
+#: Accepted range of ``--scale`` (Qt accepts more; outside this the window is unusable).
+SCALE_RANGE = (0.5, 4.0)
 QT_PLATFORM = "QT_QPA_PLATFORM"
 PROC_VERSION = Path("/proc/version")
 
@@ -111,3 +114,37 @@ def select_qt_platform(
         "Wayland session: using Qt's X11 platform (xcb), which the 3D view needs; set "
         "QT_QPA_PLATFORM to choose another"
     )
+
+
+def configure_scale(environ: MutableMapping[str, str], scale: float | None) -> str | None:
+    """Set Qt's interface scale factor from the ``--scale`` option.
+
+    WSLg does not pass the Windows display scaling to Linux applications, so on a scaled
+    Windows display the window is drawn at 100 % and looks small next to Windows
+    applications. ``--scale 1.5`` (or ``QT_SCALE_FACTOR=1.5``) draws it at 150 %.
+
+    Parameters
+    ----------
+    environ : mapping
+        Environment to update (``os.environ`` in the launcher), before the QApplication
+        is created.
+    scale : float or None
+        Scale factor (dimensionless, 1 = 100 %), or None to leave Qt's own choice.
+
+    Returns
+    -------
+    str or None
+        What was set, or None when nothing was changed.
+
+    Raises
+    ------
+    ValueError
+        When ``scale`` is outside :data:`SCALE_RANGE`.
+    """
+    if scale is None:
+        return None
+    low, high = SCALE_RANGE
+    if not low <= scale <= high:
+        raise ValueError(f"--scale must be between {low:g} and {high:g}, got {scale:g}")
+    environ[QT_SCALE] = f"{scale:g}"
+    return f"interface scale {scale:g} ({QT_SCALE}={scale:g})"

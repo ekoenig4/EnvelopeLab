@@ -262,9 +262,9 @@ def test_3d_view_draws_shapes_as_sewn_pieces(gore_window: MainWindow) -> None:
     assert sewn.face_colors is not None and len(np.unique(sewn.face_colors, axis=0)) == 2
     assert len(sewn.polylines["skin_seams"]) == 16 + 1
     # The user's choice is kept when the layers are rebuilt.
-    items = [view.layer_list.item(i) for i in range(view.layer_list.count())]
-    item = next(i for i in items if i.data(Qt.ItemDataRole.UserRole) == "shape:Dome")
-    item.setCheckState(Qt.CheckState.Checked)
+    item = view.layer_item("shape:Dome")
+    assert item is not None
+    item.setCheckState(0, Qt.CheckState.Checked)
     view.refresh()
     assert view.layers["shape:Dome"].visible
 
@@ -371,9 +371,10 @@ def test_a_calculix_run_verifies_the_special_shapes(gore_window: MainWindow, qtb
         assert any(f.severity == "error" for f in record.findings)
 
 
-def test_pattern_view_shows_where_each_shape_is_sewn(gore_window: MainWindow) -> None:
-    """Every panel a shape is sewn on follows the rows as its own piece, with the footprint
-    line, the match marks and the feed hole; the rows say which gores are marked."""
+def test_shape_window_shows_where_each_shape_is_sewn(gore_window: MainWindow) -> None:
+    """The Special shapes window shows, with the selected shape, every envelope panel it is
+    sewn on (footprint line, match marks, feed hole) and which gores of each row those are;
+    the Patterns view shows only the base envelope."""
     from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsSimpleTextItem
 
     from envelopelab.export.build_pack import primitive_sheets
@@ -383,27 +384,33 @@ def test_pattern_view_shows_where_each_shape_is_sewn(gore_window: MainWindow) ->
     placed = panel.placed("Dome")
     assert placed is not None
     w.controller.regenerate_patterns()
-    w.show_panel("patterns")
-    view = w.patterns
-    view.refresh()
-
-    def texts() -> list[str]:
-        return [
-            i.text() for i in view.view.scene().items() if isinstance(i, QGraphicsSimpleTextItem)
-        ]
-
+    panel.refresh()
+    view = panel.markings
     markings = [s for s in primitive_sheets(placed) if s.kind == "marking"]
-    shown = texts()
+    assert markings and len(view.sheets) == len(markings)
+    shown = view.labels()
     for sheet in markings:
         assert f"{sheet.piece.upper()}: Dome" in shown
     numbers = {t.split()[0] for t in shown if "(G" in t}
     assert {str(m.number) for m in placed.marks} <= numbers
     assert any(t.startswith("hole: cut ") for t in shown)
-    assert any(t.startswith("Dome: mark gores") for t in shown)
-    rings = [i for i in view.view.scene().items() if isinstance(i, QGraphicsEllipseItem)]
+    rings = [i for i in view.scene().items() if isinstance(i, QGraphicsEllipseItem)]
     assert len(rings) >= 2  # the feed hole, cut and finished
-    view.show_shapes.setChecked(False)
-    assert not any(t.startswith("Dome: mark gores") for t in texts())
+    assert "Row B: Dome: mark gores" in panel.marking_notes.text()
+    assert not view.stale
+    # It opens on the marked area; a double click (fit whole) shows the whole panels.
+    view.fit()
+    assert not view.showing_all
+    view.fit(whole=True)
+    assert view.showing_all
+    # The Patterns view no longer draws any shape's panels or row notes.
+    w.show_panel("patterns")
+    w.patterns.refresh()
+    texts = [
+        i.text() for i in w.patterns.view.scene().items() if isinstance(i, QGraphicsSimpleTextItem)
+    ]
+    assert not any(": Dome" in t or t.startswith("Dome: mark gores") for t in texts)
+    assert not hasattr(w.patterns, "show_shapes")
 
 
 def test_move_feed_holes_clear_of_the_seams(gore_window: MainWindow) -> None:
@@ -450,6 +457,7 @@ def test_editor_and_results_are_in_tabs(gore_window: MainWindow) -> None:
     ]
     assert [results.tabText(i) for i in range(results.count())] == [
         "Cut pieces",
+        "Envelope panels",
         "Checks",
         "Attachment",
     ]
@@ -523,3 +531,69 @@ def test_shapes_are_reported_one_by_one_and_a_stale_batch_stops() -> None:
     stopped.done.connect(stop_after_first)
     stopped.run()
     assert [[name for name, _ in b] for b in seen] == [["A"]]
+
+
+@pytest.mark.slow
+def test_one_run_colours_the_envelope_and_its_shapes_together(
+    gore_window: MainWindow, qtbot: QtBot
+) -> None:
+    """The 3D view's run is the whole balloon: the envelope and the shapes solved with
+    it. Its parts share the fields and one colour scale; the run details list each part;
+    a shape is not a run of its own (it is reached through its layers and Go to part)."""
+    from envelopelab_app.simulation import PREVIEW
+
+    w = gore_window
+    _fed_dome(w)
+    session = w.controller.session
+    assert session is not None
+    assert w.simulation.start(PREVIEW)
+    assert w.simulation.wait(900_000)
+    qtbot.waitUntil(lambda: session.shape_run("Dome") is not None, timeout=10_000)
+    view = w.view3d
+    view.refresh()
+    assert view.run_choice.findData("shape-sim:Dome") < 0  # not a run of its own
+    assert view.run_choice.currentData() == PREVIEW
+    assert "envelope + 1 shape" in view.run_choice.currentText()
+    assert view.parts() == [PREVIEW, "shape-sim:Dome"]
+    assert view.part_choice.findData("shape:Dome") >= 0  # Go to part
+    record = session.shape_run("Dome")
+    assert record is not None
+    dome = view.part_fields["shape-sim:Dome"]
+    for name in ("fos_warp", "fos_weft", "n1", "n_warp", "wrinkle_state", "displacement"):
+        assert name in dome, (name, view.part_missing["shape-sim:Dome"].get(name))
+    assert np.isfinite(dome["deviation"].values).all()
+    skin = len(view.layers["shape-sim:Dome"].faces)
+    assert len(dome["fos_warp"].values) == skin < record.n_elements
+    # A current CalculiX run verifies the envelope only: a shape's preview simulation is
+    # never shown as verified.
+    envelope = session.project.runs[-1]
+    session.project.runs.append(envelope.model_copy(update={"solver": "calculix"}))
+    try:
+        envelope_state, shape_state = view.run_state(), view.run_state("shape-sim:Dome")
+        assert envelope_state is not None and envelope_state.verified
+        assert shape_state is not None and not shape_state.verified
+    finally:
+        session.project.runs.pop()
+    # The conservative shape summary never exceeds the lowest warp/weft factor shown.
+    low = min(float(dome[k].values.min()) for k in ("fos_warp", "fos_weft"))
+    assert record.fos["skin"] <= low * (1.0 + 1e-12)
+    # One scale: the shared values hold both parts.
+    view.field_choice.setCurrentIndex(view.field_choice.findData("n1"))
+    shared = view._shared_values("n1")
+    assert len(shared) == len(view.fields["n1"].values) + len(dome["n1"].values)
+    assert view.part_field("shape-sim:Dome") is dome["n1"]
+    # The run details have a row per part.
+    details = view.run_details.text()
+    assert ">Envelope<" in details and ">Dome<" in details
+    assert view.banner.kind in ("info", "fail", "error")
+    # The tree groups the layers; the Result group holds the envelope and the dome.
+    item = view.layer_item("shape-sim:Dome")
+    group = None if item is None else item.parent()
+    assert group is not None and group.text(0) == "Result"
+    # The Probe names the part it hit.
+    on_dome = view.layers["shape-sim:Dome"].points[0]
+    assert view.part_at(on_dome) == "shape-sim:Dome"
+    assert view.probe_text("shape-sim:Dome", 0).startswith("Dome skin · element 0")
+    on_envelope = view.layers[PREVIEW].points[0]
+    assert view.part_at(on_envelope) == PREVIEW
+    assert view.probe_text(PREVIEW, 0).startswith("Envelope · element 0")

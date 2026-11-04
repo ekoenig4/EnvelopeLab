@@ -77,19 +77,28 @@ class PdfCanvas:
         fill: RGB | None = None,
         stroke: RGB | None = None,
         width: float = 0.5,
+        dash: tuple[float, float] | None = None,
+        closed: bool = True,
     ) -> None:
-        """Draw a closed polygon, filled and/or stroked."""
+        """Draw a polygon (closed unless ``closed`` is False), filled and/or stroked, with
+        an optional dash pattern (on, off; points)."""
         if len(points) < 2:
             return
         path = [f"{points[0][0]:.2f} {points[0][1]:.2f} m"]
         path += [f"{x:.2f} {y:.2f} l" for x, y in points[1:]]
-        path.append("h")
+        if closed:
+            path.append("h")
         ops = []
         if fill is not None:
             ops.append("{:.3f} {:.3f} {:.3f} rg".format(*fill))
         if stroke is not None:
             ops.append("{:.3f} {:.3f} {:.3f} RG {:.2f} w".format(*stroke, width))
         op = "B" if fill is not None and stroke is not None else ("f" if fill is not None else "S")
+        if dash is not None:
+            self._ops.append(
+                " ".join(["q", f"[{dash[0]:.2f} {dash[1]:.2f}] 0 d", *ops, *path, op, "Q"])
+            )
+            return
         self._ops.append(" ".join(ops + path + [op]))
 
     def line(

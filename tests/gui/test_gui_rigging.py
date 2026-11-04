@@ -55,8 +55,12 @@ def test_factor_of_safety_failure_is_shown(gore_window: MainWindow) -> None:
     assert any(
         "flying wire: factor of safety" in m and "[ERROR]" in m for m in _messages(gore_window)
     )
-    items = gore_window.rigging.find_items("factor of safety")
-    assert any("FAILS" in item.text(1) for item in items)
+    panel = gore_window.rigging
+    assert any("FAILS" in text for text in panel.fos_texts())
+    # Never colour alone: the card chip, the toolbar chip and the banner say so too.
+    assert panel.card_status("flying_wires") == "fail"
+    assert panel.fos_chip.kind == "fail"
+    assert panel.banner.kind == "fail" and "flying wire" in panel.banner.text()
 
 
 def test_turning_vents_in_tree_and_properties(gore_window: MainWindow) -> None:
@@ -170,8 +174,8 @@ def test_wizard_makes_a_nomex_mouth_row_and_n_nylon_rows(window: MainWindow, qtb
         for k in range(root.child(i).child(j).childCount())  # type: ignore[union-attr]
     ]
     assert "Row A: mouth (nomex)" in labels and "Top: parachute" in labels
-    texts = window.rigging.find_items("crown ring")
-    assert texts and texts[0].text(1).endswith("m diameter")
+    ring = window.rigging.line_row("crown ring")
+    assert ring is not None and ring["Length"].startswith("Ø") and ring["Length"].endswith(" m")
     wizard.mouth_fabric.setCurrentText(NO_MOUTH_ROW)
     wizard.create_design()
     assert wizard.design is not None and len(wizard.design.gores.panel_rows) == 3  # type: ignore[union-attr]
@@ -294,3 +298,49 @@ def test_patterns_side_by_side_fill_a_wide_view(gore_window: MainWindow) -> None
     for i, a in enumerate(boxes):
         for b in boxes[i + 1 :]:
             assert not a.intersects(b)
+
+
+def test_rigging_cards_show_what_is_missing_and_the_banner_says_so(
+    gore_window: MainWindow,
+) -> None:
+    panel = gore_window.rigging
+    card = panel.cards["parachute"]
+    assert not card.empty.isHidden() and "not closed" in card.empty.text()
+    assert not card.add_button.isHidden() and card.remove_button.isHidden()
+    assert panel.card_status("parachute") is None
+    assert panel.banner.kind == "info" and "not complete" in panel.banner.text()
+    assert "parachute" in panel.banner.text()
+    _add_all(gore_window)
+    assert card.empty.isHidden() and card.add_button.isHidden()
+    assert not card.remove_button.isHidden()
+    assert panel.card_status("parachute") in ("ok", "fail", "info")
+    # Turning vents: more pairs can still be added once some exist.
+    panel.buttons["add_vents"].click()
+    vents = panel.cards["turning_vents"]
+    assert not vents.add_button.isHidden() and not vents.remove_button.isHidden()
+    assert panel.figures["mass"].text().startswith("Rigging ")
+    assert "assumed" in panel.figures["load_factor"].text()  # source tag shown
+
+
+def test_rigging_banner_states_worst_first() -> None:
+    from types import SimpleNamespace
+
+    from envelopelab.rigging.common import RiggingFinding
+    from envelopelab_app.panels.rigging import rigging_banner
+
+    assert rigging_banner(None, [], 5.0, "assumed", "no gores").kind == "error"
+    fail = SimpleNamespace(
+        findings=[RiggingFinding("fos", "error", "flying wire: factor of safety 4.87")],
+        parachute=None,
+        flying_wires=None,
+        red_line=None,
+        turning_vents=[],
+        scoop=None,
+    )
+    banner = rigging_banner(fail, ["Red line"], 5.0, "assumed")  # type: ignore[arg-type]
+    assert banner.kind == "fail" and "4.87" in banner.message
+    fail.findings = []
+    banner = rigging_banner(fail, ["Red line"], 5.0, "assumed")  # type: ignore[arg-type]
+    assert banner.kind == "info" and "red line" in banner.message
+    banner = rigging_banner(fail, [], 5.0, "assumed")  # type: ignore[arg-type]
+    assert banner.kind == "ok" and "5 (assumed)" in banner.message

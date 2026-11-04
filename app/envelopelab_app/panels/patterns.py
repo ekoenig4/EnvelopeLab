@@ -5,12 +5,9 @@ any) at the bottom, the panel rows from the mouth up, and the parachute on top. 
 is drawn in its own panel coordinates (x across, y up from its finished bottom seam, m)
 inside a container item placed at its slot of the stack.
 
-With *Show special shapes* on, every envelope panel a special shape crosses or lies over
-follows as its own piece, gore by gore, as on the build pack's marking sheets
-(:func:`envelopelab.export.build_pack.primitive_sheets`): the footprint line the shape's
-rim is sewn on with ticks on the shape's side, the numbered match marks naming their skin
-pieces, and the feed holes at their cut and finished sizes; each row says which of its
-gores are marked.
+Only the base envelope is drawn here. The envelope panels a special shape is sewn on (its
+footprint line, match marks and feed holes) are shown with that shape, in the Special
+shapes window (*Envelope panels*, :mod:`envelopelab_app.marking_view`).
 
 Rows are drawn from the *last generated* patterns. When the design changed since then the
 view says so (a STALE banner, greyed rows) until the patterns are regenerated: it never
@@ -42,6 +39,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDoubleSpinBox,
     QFormLayout,
+    QFrame,
     QGraphicsEllipseItem,
     QGraphicsItem,
     QGraphicsPathItem,
@@ -66,6 +64,7 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab.geometry.gore import PanelRow
+from envelopelab.project.deviation import PanelDeviation
 from envelopelab.project.gore_design import (
     default_allowance,
     editable_outline,
@@ -77,6 +76,8 @@ from envelopelab.rigging.parachute import CentrePanel
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.pattern_layout import shelf_layout
 from envelopelab_app.refresh import Refresher
+from envelopelab_app.result_view import diverging_rgb
+from envelopelab_app.theme import StatusBanner
 
 GAP = 0.4  # m between rows in the layout
 ZONE_FALLBACK = "#d9e7f5"
@@ -199,6 +200,13 @@ class PatternView(QGraphicsView):
         )
 
 
+#: Tessellation of the deviation overlay (its colours: result_view.diverging_rgb).
+HEAT_PER_GORE = 6
+HEAT_PER_ROW = 8
+#: Text of the banner's action.
+REGENERATE = "Regenerate patterns"
+
+
 class PatternPanel(QWidget):
     """2D pattern editor panel."""
 
@@ -206,11 +214,12 @@ class PatternPanel(QWidget):
         super().__init__()
         self.controller = controller
         self._updating = False
-        self.banner = QLabel()
-        self.banner.setObjectName("patternBanner")
-        self.banner.setWordWrap(True)
+        self.banner = StatusBanner()
+        self.banner.setObjectName("statusBanner")
+        self.banner.actionTriggered.connect(self.regenerate)
         self.view = PatternView(self)
         toolbar = QToolBar()
+        toolbar.setObjectName("panelToolbar")
         self.regenerate_action = toolbar.addAction("Regenerate patterns")
         self.regenerate_action.triggered.connect(self.regenerate)
         fit = toolbar.addAction("Fit view")
@@ -231,15 +240,21 @@ class PatternPanel(QWidget):
         self.edit_outline = QCheckBox("Edit outline (manual override)")
         self.edit_outline.toggled.connect(self._toggle_edit)
         toolbar.addWidget(self.edit_outline)
-        self.show_shapes = QCheckBox("Show special shapes")
-        self.show_shapes.setChecked(True)
-        self.show_shapes.setToolTip(
-            "Add the envelope panels each special shape is sewn on, gore by gore: the "
-            "footprint line, the match marks and the feed holes, as on the build pack's "
-            "marking sheets"
+        toolbar.addWidget(QLabel(" Overlay: "))
+        self.overlay = QComboBox()
+        self.overlay.setObjectName("patternOverlay")
+        self.overlay.addItem("None", None)
+        self.overlay.addItem("Deviation from design", "deviation")
+        self.overlay.setToolTip(
+            "Colour the panels by how far the solved envelope lies outside (red) or inside "
+            "(blue) the design there: of the gores cut from a row, the one that deviates "
+            "most at each point. Needs a current, converged run."
         )
-        self.show_shapes.toggled.connect(lambda _on: self._draw())
-        toolbar.addWidget(self.show_shapes)
+        self.overlay.activated.connect(lambda _i: self._draw())
+        toolbar.addWidget(self.overlay)
+        #: Deviation per row (and what it was made for), for the overlay.
+        self._heat: tuple[tuple[object, ...], dict[str, PanelDeviation], str] | None = None
+        self._heat_limit = 1e-3  # m
 
         form_box = QGroupBox("Selected row")
         form = QFormLayout(form_box)
@@ -322,9 +337,15 @@ class PatternPanel(QWidget):
         form.addRow(clear_ann)
         form.addRow(self.clear_override)
 
+        form_holder = QWidget()
+        form_holder.setObjectName("sidePanel")  # the shared theme draws its box as a card
+        holder_layout = QVBoxLayout(form_holder)
+        holder_layout.setContentsMargins(8, 0, 8, 8)
+        holder_layout.addWidget(form_box)
         scroll = QScrollArea()
-        scroll.setWidget(form_box)
+        scroll.setWidget(form_holder)
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.setObjectName("patternPanelSplitter")
         splitter.setChildrenCollapsible(False)
@@ -335,8 +356,16 @@ class PatternPanel(QWidget):
         splitter.setStretchFactor(1, 1)
         splitter.setSizes([700, 250])
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
         layout.addWidget(toolbar)
         layout.addWidget(self.banner)
+        self.overlay_note = QLabel()
+        self.overlay_note.setObjectName("overlayNote")
+        self.overlay_note.setWordWrap(True)
+        self.overlay_note.setContentsMargins(8, 2, 8, 2)
+        self.overlay_note.hide()
+        layout.addWidget(self.overlay_note)
         layout.addWidget(splitter)
 
         self.refresher = Refresher(
@@ -416,22 +445,37 @@ class PatternPanel(QWidget):
         session = self.controller.session
         status = self.controller.artifact_status("patterns")
         if session is None or not self.controller.is_gore:
-            self.banner.setText("No standard-gore design: nothing to draw.")
-            self.banner.setStyleSheet("")
+            self.banner.set_status("info", "No standard-gore design: nothing to draw.")
             return
-        if status == "not built":
-            self.banner.setText("Patterns have not been generated yet — press Regenerate patterns.")
-            self.banner.setStyleSheet("background: #fff3cd; padding: 4px;")
-            return
-        if status == "stale":
-            self.banner.setText(
-                "Patterns are STALE: the design changed since they were generated (shown "
-                "greyed). Press Regenerate patterns before using them."
+        if status != "current" and self.controller.patterns_error:
+            # Automatic (or pressed) regeneration failed: say why, never only "stale".
+            self.banner.set_status(
+                "error",
+                "Patterns could not be regenerated.",
+                f"{self.controller.patterns_error}. Fix the design, then regenerate "
+                "(the pieces shown, if any, are from before the edit).",
+                REGENERATE,
             )
-            self.banner.setStyleSheet("background: #f8d7da; color: #721c24; padding: 4px;")
+            if status == "not built":
+                return
+        elif status == "not built":
+            self.banner.set_status(
+                "info",
+                "Patterns have not been generated yet.",
+                "Regenerate them to draw the cut pieces.",
+                REGENERATE,
+            )
+            return
+        elif status == "stale":
+            self.banner.set_status(
+                "stale",
+                "Patterns are STALE.",
+                "The design changed since they were generated (shown greyed). Regenerate "
+                "them before using them.",
+                REGENERATE,
+            )
         else:
-            self.banner.setText("Patterns are current.")
-            self.banner.setStyleSheet("background: #d4edda; color: #155724; padding: 4px;")
+            self.banner.set_status("ok", "Patterns are current.")
         stale = status == "stale"
         design = session.design
         assert design.gores is not None
@@ -455,17 +499,14 @@ class PatternPanel(QWidget):
             pieces.append(
                 _Piece(scoop.panel.cut_outline, -(scoop.panel.finished_height + GAP), draw_scoop)
             )
-        markings = self._shape_markings() if self.show_shapes.isChecked() else ([], {})
-        sheets, row_notes = markings
+        heat = self._overlay(stale)
         for row in self.rows_by_letter().values():
             ann = session.patterns.row(row.label)
-            these = tuple(row_notes.get(row.label, []))
 
             def draw_row(
                 origin: QPointF,
                 row: PanelRow = row,
                 ann: RowPattern = ann,
-                notes: tuple[str, ...] = these,
             ) -> None:
                 self.view.offsets[row.label] = origin
                 container = self._in_container(
@@ -480,130 +521,104 @@ class PatternPanel(QWidget):
                         design.gores.count if design.gores is not None else 0,
                     ),
                 )
-                if notes:
-                    short = [n.split(" (sheets ")[0].replace(" of this row", "") for n in notes]
-                    text = QGraphicsSimpleTextItem("\n".join(short), container)
-                    text.setToolTip("\n".join(notes))
-                    font = text.font()
-                    font.setPointSizeF(7.0)
-                    text.setFont(font)
-                    text.setBrush(QBrush(QColor("#c0392b")))
-                    text.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-                    text.setPos(-0.45 * row.bottom_width, -0.15 * row.finished_height)
+                if heat is not None and row.label in heat[0]:
+                    self._draw_heat(container, heat[0][row.label], heat[1])
 
             pieces.append(_Piece(row.cut_outline, y, draw_row))
             y += row.finished_height + GAP
         pieces += self._parachute_pieces(y, stale)
         if pieces:
             y = max(y, max(float(p.stacked_y + p.outline[:, 1].max()) for p in pieces) + GAP)
-        for sheet in sheets:
-            pieces.append(_Piece(sheet.cut, y, partial(self._draw_marking, sheet, stale)))
-            y += float(sheet.cut[:, 1].max() - sheet.cut[:, 1].min()) + GAP
         for piece, origin in zip(pieces, self._origins(pieces), strict=True):
             piece.draw(origin)
             self._grow(piece.outline, origin)
         if first:
             QTimer.singleShot(0, self.fit)
 
-    def _shape_markings(self) -> tuple[list[Any], dict[str, list[str]]]:
-        """Marking sheets of the placed special shapes, and per row which gores they mark
-        (:mod:`envelopelab.export.build_pack`; shapes still being placed are left out)."""
-        from envelopelab.export.build_pack import (
-            default_hole_hem,
-            primitive_sheets,
-            shape_row_notes,
-        )
-
+    def _overlay(self, stale: bool) -> tuple[dict[str, PanelDeviation], float] | None:
+        """The deviation overlay's values per row and its colour limit (m), or None (with
+        the reason in the note) when it is off or cannot be shown."""
+        if self.overlay.currentData() != "deviation":
+            self.overlay_note.hide()
+            return None
+        self.overlay_note.show()
         session = self.controller.session
-        if session is None:
-            return [], {}
-        placed = []
-        for spec in session.state.shapes:
-            result = self.controller.shapes.result(spec.name)
-            if result is not None and result.design is not None:
-                placed.append(result.design)
-        hem, tape = default_hole_hem(session.design)
-        sheets = [
-            s
-            for d in placed
-            for s in primitive_sheets(d, "skin", None, hem, tape)
-            if s.kind == "marking"
-        ]
-        return sheets, shape_row_notes(placed)
+        record = None
+        if session is not None:
+            current = [
+                r
+                for r in session.project.runs
+                if r.converged and session.run_status(r) == "current"
+            ]
+            # A current CalculiX run (the verification) first, else the latest preview.
+            current.sort(key=lambda r: (r.solver == "calculix", r.created))
+            record = current[-1] if current else None
+        if stale or session is None or record is None:
+            why = "the patterns are stale" if stale else "no current, converged run"
+            self.overlay_note.setText(f"Deviation overlay not shown: {why}.")
+            return None
+        key = (record.run_id, self.controller.revision)
+        if self._heat is None or self._heat[0] != key:
+            arrays = session.run_arrays(record.run_id)
+            if arrays is None:
+                self.overlay_note.setText(
+                    "Deviation overlay not shown: the run's results are missing."
+                )
+                return None
+            from envelopelab.project.deviation import (
+                envelope_deviation,
+                interpolate_on_mesh,
+                panel_deviation,
+            )
+            from envelopelab.project.gore_design import display_surface
 
-    def _draw_marking(self, sheet: Any, stale: bool, origin: QPointF) -> None:
-        """One envelope panel with a shape's markings (panel coordinates, m)."""
-        self._in_container(origin, partial(self._draw_marking_items, sheet, stale))
+            design = session.design
+            positions, triangles = arrays["positions"], arrays["triangles"]
+            nodes = envelope_deviation(design, positions)
+            surface = display_surface(design, HEAT_PER_GORE, HEAT_PER_ROW)
+            values = interpolate_on_mesh(surface.points, positions, triangles, nodes)
+            rows = list(self.rows_by_letter().values())
+            grids = panel_deviation(design, rows, values, HEAT_PER_GORE, HEAT_PER_ROW)
+            finite = nodes[np.isfinite(nodes)]
+            limit = max(float(np.abs(finite).max()), 1e-3) if finite.size else 1e-3
+            note = (
+                f"Deviation from design, {record.solver_label} run of "
+                f"{record.created:%Y-%m-%d %H:%M}: red outside, blue inside, "
+                f"\u00b1{1000 * limit:.0f} mm full scale (from {1000 * finite.min():.0f} to "
+                f"{1000 * finite.max():.0f} mm at the run's nodes). Each row shows, at each "
+                "point, the gore that deviates most; hover a panel for which."
+            )
+            self._heat = (key, {g.row: g for g in grids}, note)
+            self._heat_limit = limit
+        self.overlay_note.setText(self._heat[2])
+        return self._heat[1], self._heat_limit
 
-    def _draw_marking_items(self, sheet: Any, stale: bool) -> None:
-        scene = self.view.scene()
-        grey = QColor("#9e9e9e")
-        red = grey if stale else QColor("#c0392b")
-        outline = QGraphicsPolygonItem(_polygon(sheet.finished, 0.0))
-        outline.setBrush(QBrush(QColor(200, 200, 200, 60) if stale else QColor("#fdf6e3")))
-        pen = QPen(grey if stale else QColor("#9467bd"), 1.5)
-        pen.setCosmetic(True)
-        outline.setPen(pen)
-        tip = "\n".join([sheet.piece, sheet.note, *sheet.notes, *(w for _, _, w in sheet.texts)])
-        outline.setToolTip(tip)
-        outline.setZValue(-1.0)  # under the markings (the container reorders its children)
-        scene.addItem(outline)
-
-        def path(points: np.ndarray, width: float, style: Qt.PenStyle) -> None:
-            item = QGraphicsPathItem()
-            p = QPainterPath(QPointF(float(points[0][0]), -float(points[0][1])))
-            for x, y in points[1:]:
-                p.lineTo(float(x), -float(y))
-            item.setPath(p)
-            line_pen = QPen(red, width, style)
-            line_pen.setCosmetic(True)
-            item.setPen(line_pen)
-            scene.addItem(item)
-
-        for line in sheet.lines:
-            path(line, 2.0, Qt.PenStyle.SolidLine)
-        for tick in sheet.ticks:
-            path(tick, 1.0, Qt.PenStyle.SolidLine)
-        for circles, style in (
-            (sheet.holes, Qt.PenStyle.SolidLine),
-            (sheet.hole_cuts, Qt.PenStyle.DashLine),
-        ):
-            for x, y, r in circles:
-                if r <= 0.0:
-                    continue
-                ring = QGraphicsEllipseItem(x - r, -y - r, 2 * r, 2 * r)
-                ring_pen = QPen(red, 1.0, style)
-                ring_pen.setCosmetic(True)
-                ring.setPen(ring_pen)
-                scene.addItem(ring)
-
-        def text(x: float, y: float, words: str, size: float = 6.5) -> None:
-            item = QGraphicsSimpleTextItem(words)
-            font = item.font()
-            font.setPointSizeF(size)
-            item.setFont(font)
-            item.setBrush(QBrush(red))
-            item.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-            item.setPos(x, -y)
-            scene.addItem(item)
-
-        for x, y, words in sheet.marks:
-            path(np.array([[x - 0.02, y], [x + 0.02, y]]), 1.0, Qt.PenStyle.SolidLine)
-            path(np.array([[x, y - 0.02], [x, y + 0.02]]), 1.0, Qt.PenStyle.SolidLine)
-            text(x + 0.02, y + 0.02, words)
-        for (x, y, r), (_, _, rc) in zip(sheet.holes, sheet.hole_cuts, strict=True):
-            text(x - r, y + r + 0.03, f"hole: cut {2000 * rc:.0f} / finished {2000 * r:.0f} mm")
-        lo, hi = sheet.finished.min(axis=0), sheet.finished.max(axis=0)
-        # Short on the piece; the full directions are in the tooltip and on the sheets.
-        shape = sheet.note.removeprefix("mark ").removesuffix(" on this panel before assembly")
-        label = QGraphicsSimpleTextItem(f"{sheet.piece.upper()}: {shape}")
-        label.setToolTip(tip)
-        font = label.font()
-        font.setPointSizeF(7.5)
-        label.setFont(font)
-        label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
-        label.setPos(float(lo[0]), -float(hi[1]) - 0.05)
-        scene.addItem(label)
+    def _draw_heat(self, container: QGraphicsItem, grid: PanelDeviation, limit: float) -> None:
+        """Colour one panel row by its deviation grid (under its outline and markings)."""
+        # The fabric fill would cover the colours: the overlay replaces it.
+        for child in container.childItems():
+            if not isinstance(child, QGraphicsPolygonItem):
+                continue
+            if child.brush().style() != Qt.BrushStyle.NoBrush:
+                child.setBrush(QBrush(Qt.BrushStyle.NoBrush))
+        for tri in grid.triangles:
+            corner = grid.values[tri]
+            value = float(np.nanmean(corner)) if np.isfinite(corner).any() else math.nan
+            if math.isnan(value):
+                color = QColor("#c7c7c7")
+            else:
+                r, g, b = diverging_rgb(value / limit)
+                color = QColor.fromRgbF(r, g, b, 0.85)
+            poly = QGraphicsPolygonItem(_polygon(grid.points[tri], 0.0), container)
+            poly.setBrush(QBrush(color))
+            poly.setPen(QPen(Qt.PenStyle.NoPen))
+            poly.setZValue(-0.5)
+            gores = sorted({int(g) for g in grid.gore[tri]})
+            poly.setToolTip(
+                f"Row {grid.row}: {1000 * value:+.0f} mm "
+                f"({'outside' if value > 0 else 'inside'} the design), worst of the gores "
+                f"here: gore {', '.join(map(str, gores))}"
+            )
 
     def _origins(self, pieces: list[_Piece]) -> list[QPointF]:
         """Scene origin of every piece: stacked as the assembled gore, or side by side on

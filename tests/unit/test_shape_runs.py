@@ -101,8 +101,9 @@ def test_display_arrays_round_trip(solved: tuple[ShapeRunRecord, dict[str, np.nd
     _, arrays = solved
     shown = display_from_arrays(arrays)
     again = display_arrays(shown)
-    for key, value in arrays.items():
-        assert np.array_equal(again[key], value), key
+    # The display's own arrays (the run also keeps the skin results, skin_*).
+    for key, value in again.items():
+        assert np.array_equal(arrays[key], value), key
     assert shown.pieces == 6 and len(shown.seams) == 6
 
 
@@ -137,3 +138,48 @@ def test_version_2_file_reads_without_shape_runs() -> None:
     assert project.format_version == 3 and project.shape_runs == []
     with pytest.raises(ValueError, match="version"):
         load_project_text(json.dumps({**data, "format_version": 4}))
+
+
+def test_shape_runs_keep_skin_results_for_colour_maps(
+    solved: tuple[ShapeRunRecord, dict[str, np.ndarray]],
+) -> None:
+    from envelopelab.project.run_fields import (
+        FIELD_LABELS,
+        shape_missing_fields,
+        shape_run_fields,
+    )
+
+    record, arrays = solved
+    k = len(arrays["triangles"])
+    assert arrays["skin_principal"].shape == (k, 2)
+    assert arrays["skin_strength"].shape == (k, 2)
+    assert arrays["skin_fabric_resultants"].shape == (k, 3)
+    assert arrays["skin_wrinkle_state"].shape == (k,)
+    assert arrays["skin_initial_points"].shape == arrays["points"].shape
+    fields = shape_run_fields(arrays)
+    assert set(fields) == set(FIELD_LABELS) - {"deviation"}
+    # The shape summary's skin factor is the conservative min(N_ult) / N1 bound, so it is
+    # never above the lowest warp or weft factor of any skin triangle.
+    low = min(float(fields["fos_warp"].values.min()), float(fields["fos_weft"].values.min()))
+    assert record.fos["skin"] <= low * (1.0 + 1e-12)
+    assert shape_missing_fields(arrays) == {}
+    old = {k: v for k, v in arrays.items() if not k.startswith("skin_")}
+    assert "run it again" in shape_missing_fields(old)["fos_warp"]
+
+
+def test_shape_deviation_from_its_designed_skin(
+    solved: tuple[ShapeRunRecord, dict[str, np.ndarray]],
+) -> None:
+    from envelopelab.features.scene import designed_display
+    from envelopelab.project.run_fields import shape_run_fields
+
+    _, arrays = solved
+    design = design_primitive(
+        Dome("pod", Placement(2, EQUATOR), 0.6, 0.4, gores=6), SPHERE, feed_hole_radius=0.15
+    )
+    shown = designed_display(design)
+    dev = shape_run_fields(arrays, shown.points, shown.triangles)["deviation"].values
+    assert dev.shape == (len(arrays["points"]),) and np.isfinite(dev).all()
+    # An inflated dome skin bulges out of its design somewhere, within a fraction of its
+    # 0.4 m height.
+    assert dev.max() > 0.0 and np.abs(dev).max() < 0.2

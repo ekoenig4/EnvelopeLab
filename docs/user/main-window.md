@@ -18,18 +18,30 @@ Two areas stay visible in every mode:
   element in the tree shows its values in Properties, whatever the mode.
 * the **Validation / Warnings** strip at the bottom. The layout cannot hide it, so errors,
   factor-of-safety failures and stale or unconverged results stay on screen while you
-  work in any mode.
+  work in any mode. Its header counts the findings with the same chips as the rest of the
+  application (✕ errors, ▲ warnings, i notes, or ✓ *No problems found*), and each finding
+  starts with its symbol, errors first. The **Show** menu ticks *Errors*, *Warnings* and
+  *Notes* to show or hide those rows in the list (the button then says what it hides);
+  the counts always include every finding. Click a
+  finding to select the element it is about.
 
 Mode tabs repeat the indicators of the panels they hold: **●** for unsaved changes and
-**[STALE]** when a result they show is out of date (for example *Patterns [STALE]* after
-changing the seam allowance, until you press **Regenerate patterns**). A stale panel's
+**[STALE]** when a result they show is out of date (for example *Simulation Runs
+[STALE]* after an edit, or *Patterns [STALE]* when automatic pattern regeneration is
+turned off in Preferences, until you press **Regenerate patterns**). A stale panel's
 title is drawn in red.
 
 ## Moving around the 3D view
 
 Drag with the left mouse button to orbit, the right button or the wheel to zoom, and the
-middle button (or Shift and the left button) to pan. The row of buttons under the 3D
-options places the camera exactly:
+middle button (or Shift and the left button) to pan. Click a face or an axis of the
+**orientation cube** in the top right corner to look along it. The tools on the left of
+the view are **Probe** (click an element for its zone and values), **Drag** (move special
+shapes), **Profile** (edit the profile with the spline widget), **Section** (clip the
+results with a plane) and **Reset** (reset the camera); what the toolbar, the status banner
+and the run details show is described in
+[Running simulations](running-simulations.md#results-in-the-3d-view). The row of buttons
+under the view places the camera exactly:
 
 | Button | Key | View |
 |---|---|---|

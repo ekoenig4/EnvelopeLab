@@ -111,14 +111,14 @@ Windows and macOS need no extra libraries. On Linux install:
 |---|---|
 | Python venv | `python3 python3-venv python3-pip` |
 | Gmsh (meshing) | `libglu1-mesa libxcursor1 libxft2 libxinerama1 libgomp1` |
-| Qt / VTK (the application) | `libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libfontconfig1 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0` |
+| Qt / VTK (the application) | `libegl1 libgl1 libxkbcommon0 libxkbcommon-x11-0 libfontconfig1 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0 fonts-noto-core` |
 | CalculiX (optional) | `calculix-ccx` |
 | Headless display (optional) | `xvfb xauth` |
 
 | Needed by | Fedora (`dnf install`) | Arch (`pacman -S`) | openSUSE (`zypper install`) |
 |---|---|---|---|
 | Gmsh | `mesa-libGLU libXcursor libXft libXinerama libgomp` | `glu libxcursor libxft libxinerama gcc-libs` | `libGLU1 libXcursor1 libXft2 libXinerama1 libgomp1` |
-| Qt / VTK | `mesa-libEGL mesa-libGL libxkbcommon libxkbcommon-x11 fontconfig dbus-libs xcb-util-cursor xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil` | `libglvnd mesa libxkbcommon libxkbcommon-x11 fontconfig dbus xcb-util-cursor xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil` | `libEGL1 libGL1 libxkbcommon0 libxkbcommon-x11-0 fontconfig libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0` |
+| Qt / VTK | `mesa-libEGL mesa-libGL libxkbcommon libxkbcommon-x11 fontconfig dbus-libs xcb-util-cursor xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil google-noto-sans-fonts` | `libglvnd mesa libxkbcommon libxkbcommon-x11 fontconfig dbus xcb-util-cursor xcb-util-wm xcb-util-keysyms xcb-util-image xcb-util-renderutil noto-fonts` | `libEGL1 libGL1 libxkbcommon0 libxkbcommon-x11-0 fontconfig libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-keysyms1 libxcb-image0 libxcb-render-util0 libxcb-xinerama0 libxcb-shape0 google-noto-sans-fonts` |
 | CalculiX | `calculix-ccx` | AUR `calculix` | see [CalculiX installation](../dev/calculix-installation.md) |
 | Headless display | `xorg-x11-server-Xvfb xorg-x11-xauth` | `xorg-server-xvfb xorg-xauth` | `xvfb-run xauth` |
 
@@ -139,6 +139,7 @@ envelopelab my.elproj       # open a project
 envelopelab --no-3d         # without the PyVista 3D renderer (no OpenGL needed)
 envelopelab --software-gl   # software OpenGL (Mesa llvmpipe): slower, works everywhere
 envelopelab --hardware-gl   # GPU OpenGL even where software is the default (WSL)
+envelopelab --scale 1.5     # draw the interface at 150 % (WSL on a scaled display)
 ```
 
 Under **WSL** (Windows Subsystem for Linux, WSLg) the application sets up the display
@@ -150,6 +151,29 @@ by itself and says so on start-up:
   any Linux Wayland session that also has an X server (XWayland).
 
 Your own `LIBGL_ALWAYS_SOFTWARE` and `QT_QPA_PLATFORM` settings are always respected.
+
+**The same look as on Windows.** The application draws its controls with Qt's *Fusion*
+style and its own light palette on every system, so neither the platform's native style
+nor a dark system theme changes it. A Linux system without a desktop (WSL) has only the
+fallback font DejaVu Sans, which is wide and makes the window look crowded; the
+application then uses the first installed of Segoe UI, Noto Sans, Inter, Cantarell and
+Ubuntu. Under WSL it first loads **Segoe UI from your Windows installation**
+(`/mnt/c/Windows/Fonts`, for this run only; nothing is copied), so the window reads as it
+does on Windows. `scripts/install_env.sh` installs Noto Sans (`fonts-noto-core`) for
+systems without it. A status symbol (✓ ◷ ▲ ✕) that no installed font can draw is shown as
+an ASCII symbol (`+ ~ ! x`) instead of an empty box.
+
+**Display scaling under WSL.** WSLg does not pass the Windows display scaling to Linux
+applications: on a Windows display at 150 % the window is drawn at 100 % and looks small.
+Start it larger with:
+
+```bash
+envelopelab --scale 1.5
+```
+
+`--scale` is the same as `QT_SCALE_FACTOR=1.5`; use your Windows scaling (Settings ▸
+System ▸ Display ▸ Scale) as the factor. `envelopelab --diagnose` prints the style, font,
+DPI and symbols in use.
 WSL 2 with Ubuntu 24.04 is tested in CI, but on GitHub's Windows runners without the WSLg
 desktop.
 

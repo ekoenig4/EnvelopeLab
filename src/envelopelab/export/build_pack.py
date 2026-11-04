@@ -16,11 +16,21 @@ every edge is sewn to (the rim to the envelope line with its mark numbers, each 
 the neighbouring piece, the top to the tip disc or the apex), and each envelope row says
 which of its gores carry a marking sheet or a feed hole.
 
-Each sheet is written as a DXF file in millimetres (``$INSUNITS`` = 4) and as one or more
-pages of ``pattern.pdf``, whose pages are as wide as the fabric roll; a sheet wider than
-the roll is split into strips of the roll width. ``index.json`` lists every file with
-its piece, cut count, fabric and finished size, and the pairs of edges that are sewn
-together. :func:`envelopelab.export.qa.check_pack` checks a pack against AGENTS.md §6.6.
+Each sheet is written as a DXF file in millimetres (``$INSUNITS`` = 4) in the pack's
+``cad/`` folder, and at 1:1 on the template PDFs at the top of the pack
+(:mod:`envelopelab.export.templates`: one PDF per piece, each page as large
+as its piece with one side no longer than the fabric roll). ``cad/index.json`` lists
+every file with its piece, cut count, fabric and finished size, the template pages, and
+the pairs of edges that are sewn together. :func:`envelopelab.export.qa.check_pack` checks
+a pack against AGENTS.md §6.6.
+
+Format 3 moved the DXFs and the index into ``cad/`` and replaced ``pattern.pdf`` (roll-wide
+pages) by the template files (ADR-0037). A pack can also hold *documents*
+(:mod:`envelopelab.export.documents`):
+a cover and index, a spec summary, a cut list, a rigging sheet, a sewing schedule and a
+self-contained 3D view (:mod:`envelopelab.export.viewer`), chosen with
+:class:`PackExtras`. ``index.json`` lists them under ``documents`` with the export's
+provenance.
 
 Sheet contents (DXF layers)
 ---------------------------
@@ -37,7 +47,6 @@ generated from the same values that draw the geometry, never typed.
 from __future__ import annotations
 
 import json
-import math
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,7 +56,6 @@ import numpy as np
 from ezdxf.enums import TextEntityAlignment
 
 from envelopelab.geometry.polygon import offset_polygon
-from envelopelab.report.pdf import PdfCanvas
 from envelopelab.solvers.membrane import FloatArray
 
 if TYPE_CHECKING:
@@ -57,9 +65,9 @@ if TYPE_CHECKING:
 
 MM = 1000.0  # mm per m
 PT_PER_M = 72.0 / 0.0254  # PDF points per m
-PACK_FORMAT = "envelopelab-build-pack/1"
+PACK_FORMAT = "envelopelab-build-pack/3"
+CAD_DIR = "cad"
 INDEX = "index.json"
-PDF_NAME = "pattern.pdf"
 DEFAULT_ROLL_WIDTH = 60 * 0.0254  # m (60 in roll, AGENTS.md example)
 SEWN_EDGE_TOLERANCE = 0.003  # m (AGENTS.md §6.6 default; source: assumed)
 PDF_MARGIN = 0.02  # m round each page's content
@@ -744,117 +752,18 @@ def write_dxf(sheet: Sheet, path: str | Path) -> Path:
     return target
 
 
-def _strips(sheet: Sheet, roll_width: float) -> list[tuple[float, float]]:
-    """x ranges (m) of the roll-width strips covering a sheet, with the page margins."""
-    lo = float(sheet.cut[:, 0].min()) - PDF_MARGIN
-    hi = float(sheet.cut[:, 0].max()) + PDF_MARGIN
-    usable = roll_width
-    count = max(1, math.ceil((hi - lo) / usable - 1e-9))
-    return [(lo + k * usable, lo + (k + 1) * usable) for k in range(count)]
-
-
-def write_pdf(sheets: Sequence[Sheet], path: str | Path, roll_width: float) -> list[int]:
-    """Write all sheets at 1:1 on pages as wide as the roll.
-
-    Parameters
-    ----------
-    sheets : sequence of Sheet
-        Sheets in m.
-    path : str or Path
-        Output PDF.
-    roll_width : float
-        Fabric roll width, m.
-
-    Returns
-    -------
-    list of int
-        Number of pages (strips) of each sheet.
-    """
-    page_w = roll_width * PT_PER_M
-    canvas: PdfCanvas | None = None
-    counts = []
-    for sheet in sheets:
-        strips = _strips(sheet, roll_width)
-        counts.append(len(strips))
-        y_lo = float(sheet.cut[:, 1].min()) - 0.12
-        y_hi = float(sheet.cut[:, 1].max()) + 0.18
-        size = (page_w, (y_hi - y_lo) * PT_PER_M)
-        for k, (x_lo, _) in enumerate(strips):
-            if canvas is None:
-                canvas = PdfCanvas(size)
-            else:
-                canvas.new_page(size)
-
-            def p(
-                x: float, y: float, x_lo: float = x_lo, y_lo: float = y_lo
-            ) -> tuple[float, float]:
-                return ((x - x_lo) * PT_PER_M, (y - y_lo) * PT_PER_M)
-
-            canvas.polygon([p(x, y) for x, y in sheet.cut], stroke=(0, 0, 0), width=0.8)
-            canvas.polygon([p(x, y) for x, y in sheet.finished], stroke=(0.1, 0.3, 0.8), width=0.5)
-            for line in sheet.lines:
-                q = [p(x, y) for x, y in line]
-                for a, b in zip(q[:-1], q[1:], strict=True):
-                    canvas.line(*a, *b, color=(0.8, 0.1, 0.1), width=0.8)
-            ang = np.linspace(0.0, 2 * math.pi, 73)
-            for x, y, r in sheet.holes:
-                canvas.polygon(
-                    [p(x + r * math.cos(t), y + r * math.sin(t)) for t in ang],
-                    stroke=(0.8, 0.1, 0.1),
-                )
-            for x, y, r in sheet.hole_cuts:
-                if r > 0.0:
-                    canvas.polygon(
-                        [p(x + r * math.cos(t), y + r * math.sin(t)) for t in ang],
-                        stroke=(0.0, 0.0, 0.0),
-                    )
-            for seg in sheet.ticks:
-                (ax, ay), (bx, by) = (p(float(u), float(v)) for u, v in seg)
-                canvas.line(ax, ay, bx, by, color=(0.8, 0.1, 0.1), width=0.8)
-            for x, y, text in sheet.texts:  # centred on their point (Helvetica ~0.52 em)
-                tx, ty = p(x, y)
-                canvas.text(tx - 0.26 * 10 * len(text), ty - 3.5, text, size=10)
-            for x, y, text in sheet.marks:
-                cx, cy = p(x, y)
-                canvas.line(cx - 8, cy, cx + 8, cy, width=0.8)
-                canvas.line(cx, cy - 8, cx, cy + 8, width=0.8)
-                canvas.text(cx + 6, cy + 6, text, size=10)
-            hx, hy = p(float(sheet.cut[:, 0].min()), float(sheet.cut[:, 1].max()) + 0.06)
-            strip = f"  [strip {k + 1} of {len(strips)}]" if len(strips) > 1 else ""
-            canvas.text(max(hx, 10.0), hy, sheet.header() + strip, size=12, bold=True)
-            extra = ([sheet.note] if sheet.note else []) + sheet.notes
-            for j, extra_line in enumerate(extra):
-                canvas.text(max(hx, 10.0), hy + 16 * (j + 1), extra_line, size=10)
-            # Calibration line at the left of every page: its label comes from the same
-            # length and tick that draw it; the comment lets the QA find and measure it.
-            length, tick = calibration(min(roll_width - 2 * PDF_MARGIN, 0.5))
-            x0 = PDF_MARGIN * PT_PER_M
-            y0 = 0.05 * PT_PER_M
-            canvas.comment(f"CAL {length * MM:.0f} {tick * MM:.0f}")
-            canvas.line(x0, y0, x0 + length * PT_PER_M, y0, width=1.0)
-            for j in range(int(round(length / tick)) + 1):
-                xt = x0 + j * tick * PT_PER_M
-                canvas.line(xt, y0, xt, y0 + 10, width=0.6)
-            canvas.text(x0, y0 - 14, calibration_label(length, tick), size=10)
-    if canvas is None:
-        raise BuildPackError("no sheets to write")
-    canvas.save(path)
-    return counts
-
-
-# --------------------------------------------------------------------------------------
-# Pack
-# --------------------------------------------------------------------------------------
-
-
 def write_pack(
     sheets: Sequence[Sheet],
     out_dir: str | Path,
     seam_pairs: Sequence[SeamPair] = (),
     roll_width: float = DEFAULT_ROLL_WIDTH,
     title: str = "",
+    documents: Sequence[dict[str, str]] = (),
+    provenance: dict[str, str] | None = None,
 ) -> Path:
-    """Write a build pack: one DXF per sheet, ``pattern.pdf`` and ``index.json``.
+    """Write a build pack: the 1:1 template PDFs at the top of ``out_dir``
+    (:mod:`envelopelab.export.templates`) and, in ``cad/``, one DXF per sheet and
+    ``index.json``.
 
     Parameters
     ----------
@@ -865,38 +774,56 @@ def write_pack(
     seam_pairs : sequence of SeamPair
         Edges sewn together (checked by the QA).
     roll_width : float
-        Fabric roll width, m (PDF page width).
+        Fabric roll width, m: one side of every template page is no longer.
     title : str
-        Pack title for the index.
+        Pack title (the design name; also the file-name prefix of the templates).
+    documents : sequence of dict
+        Documents already written to ``out_dir`` (``file``, ``kind``, ``description``;
+        paths relative to ``out_dir``), listed in the index.
+    provenance : dict, optional
+        Where the pack comes from (:class:`envelopelab.export.documents.Provenance`).
 
     Returns
     -------
     Path
-        The index file.
+        The index file (``cad/index.json``).
     """
+    from envelopelab.export.templates import template_files, write_template_pdf
+
     names = [s.name for s in sheets]
     if len(set(names)) != len(names):
         raise BuildPackError("sheet names must be unique")
     if roll_width <= 2 * PDF_MARGIN:
         raise BuildPackError("roll width must exceed the page margins")
+    if not sheets:
+        raise BuildPackError("no sheets to write")
     out = Path(out_dir)
-    out.mkdir(parents=True, exist_ok=True)
+    cad = out / CAD_DIR
+    cad.mkdir(parents=True, exist_ok=True)
     entries: list[dict[str, Any]] = []
     for sheet in sheets:
-        write_dxf(sheet, out / f"{sheet.name}.dxf")
-    pages = write_pdf(sheets, out / PDF_NAME, roll_width)
-    for sheet, n_pages in zip(sheets, pages, strict=True):
+        write_dxf(sheet, cad / f"{sheet.name}.dxf")
         w, h = sheet.finished_size
         entries.append(
             {
-                "file": f"{sheet.name}.dxf",
+                "file": f"{CAD_DIR}/{sheet.name}.dxf",
                 "piece": sheet.piece,
                 "kind": sheet.kind,
                 "cut_count": sheet.cut_count,
                 "fabric": sheet.fabric,
                 "finished_width_mm": round(w * MM, 3),
                 "finished_height_mm": round(h * MM, 3),
-                "pdf_pages": n_pages,
+            }
+        )
+    files = template_files(title, sheets)
+    templates = []
+    for tfile in files:
+        pages = write_template_pdf(tfile, out / tfile.name, roll_width)
+        templates.append(
+            {
+                "file": tfile.name,
+                "description": tfile.description,
+                "pages": pages,
             }
         )
     index = {
@@ -904,19 +831,21 @@ def write_pack(
         "title": title,
         "units": "mm",
         "roll_width_mm": round(roll_width * MM, 3),
-        "pdf": PDF_NAME,
+        "provenance": provenance or {},
+        "templates": templates,
+        "documents": list(documents),
         "sheets": entries,
         "seam_pairs": [
             {
-                "a": [{"file": f"{n}.dxf", "edge": e} for n, e in pair.a],
-                "b": [{"file": f"{n}.dxf", "edge": e} for n, e in pair.b],
+                "a": [{"file": f"{CAD_DIR}/{n}.dxf", "edge": e} for n, e in pair.a],
+                "b": [{"file": f"{CAD_DIR}/{n}.dxf", "edge": e} for n, e in pair.b],
                 "tolerance_mm": SEWN_EDGE_TOLERANCE * MM,
                 "ease_mm": round(pair.ease * MM, 3),
             }
             for pair in seam_pairs
         ],
     }
-    path = out / INDEX
+    path = cad / INDEX
     path.write_text(json.dumps(index, indent=2) + "\n", encoding="utf-8")
     return path
 
@@ -930,9 +859,10 @@ def export_build_pack(
     roll_width: float = DEFAULT_ROLL_WIDTH,
     marking_allowance: float | None = None,
     hole_hem: float | None = None,
+    extras: PackExtras | None = None,
 ) -> Path:
     """Export the envelope rows, the parachute, and every primitive's pieces and marking
-    sheets.
+    sheets, and the documents chosen in ``extras``.
 
     Parameters
     ----------
@@ -953,6 +883,8 @@ def export_build_pack(
     hole_hem : float, optional
         Hem turned back round each feed hole, m (default: a double fold over the design's
         hole tape, twice its width).
+    extras : PackExtras, optional
+        Documents to write with the sheets (default: none, the sheets only).
 
     Returns
     -------
@@ -974,4 +906,251 @@ def export_build_pack(
         fabric = skin_fabric if isinstance(skin_fabric, str) else skin_fabric.get(name, "skin")
         sheets += primitive_sheets(p, fabric, marking_allowance, hem, hole_tape)
         pairs += primitive_seam_pairs(p)
-    return write_pack(sheets, out_dir, pairs, roll_width, title=design.meta.name)
+    documents: list[dict[str, str]] = []
+    prov = None
+    if extras is not None and extras.include:
+        documents, prov = write_documents(
+            design, sheets, pairs, Path(out_dir), extras, patterns, primitives, roll_width
+        )
+    return write_pack(
+        sheets,
+        out_dir,
+        pairs,
+        roll_width,
+        title=design.meta.name,
+        documents=documents,
+        provenance=None if prov is None else prov.as_dict(),
+    )
+
+
+@dataclass
+class PackExtras:
+    """The documents of a build pack and what they are made from.
+
+    Attributes
+    ----------
+    include : frozenset of str
+        Keys of :data:`envelopelab.export.documents.DOCUMENTS` to write.
+    outputs : GoreOutputs, optional
+        The design's live outputs (:func:`envelopelab.project.gore_design.gore_outputs`)
+        for the spec summary, cut list (tapes) and rigging sheet; computed when missing.
+    shape_scenes : dict of str to Scene, optional
+        One 3D view per special shape (by name), written as ``<slug>-<shape>-3d.html``.
+    scene : Scene, optional
+        The 3D view to write (default :func:`envelopelab.export.viewer.design_scene`:
+        the design and its rigging, no solver result).
+    provenance : Provenance, optional
+        Where the pack comes from (default: this installation, now, an empty hash).
+    status : str
+        The structural result in one line for the index (e.g. "Preview run ...,
+        converged, not verified with CalculiX"), "" for none.
+    table_length : float
+        Cutting-table length, m (a shop limit printed in the index).
+    """
+
+    include: frozenset[str] = frozenset()
+    outputs: Any = None
+    scene: Any = None
+    shape_scenes: Any = None
+    provenance: Any = None
+    status: str = ""
+    table_length: float = 12 * 0.3048  # m (12 ft, a common cutting table; source: assumed)
+
+
+def write_documents(
+    design: DesignDocument,
+    sheets: Sequence[Sheet],
+    pairs: Sequence[SeamPair],
+    out: Path,
+    extras: PackExtras,
+    patterns: PatternSet | None = None,
+    primitives: Sequence[PrimitiveDesign] = (),
+    roll_width: float = DEFAULT_ROLL_WIDTH,
+) -> tuple[list[dict[str, str]], Any]:
+    """Write the documents of ``extras`` into ``out``; returns their index entries and the
+    provenance used. The build-pack index is written last: it lists every file."""
+    from envelopelab.export import documents as docs
+    from envelopelab.export.shop import (
+        FileEntry,
+        PackContext,
+        write_build_log,
+        write_index,
+        write_spec_summary,
+    )
+    from envelopelab.export.templates import slug, template_files
+    from envelopelab.export.viewer import design_scene, write_viewer
+
+    unknown = set(extras.include) - set(docs.DOCUMENTS)
+    if unknown:
+        raise BuildPackError(f"unknown build-pack documents: {sorted(unknown)}")
+    out.mkdir(parents=True, exist_ok=True)
+    outputs = extras.outputs
+    if outputs is None:
+        from envelopelab.project.gore_design import gore_outputs
+        from envelopelab.project.model import PatternSet as Patterns
+
+        try:
+            outputs = gore_outputs(design, patterns if patterns is not None else Patterns())
+        except ValueError:
+            outputs = None
+    prov = extras.provenance or docs.provenance(design.compute_content_hash())
+    stem = slug(design.meta.name)
+    templates = template_files(design.meta.name, sheets)
+    ctx = PackContext(
+        design,
+        outputs,
+        sheets,
+        pairs,
+        primitives,
+        templates,
+        roll_width,
+        extras.table_length,
+        prov,
+        extras.status,
+        stem,
+    )
+    written: list[tuple[Path, str, str, str, str]] = []  # path, kind, group, tag, what
+
+    def add(kind: str, *paths: Path) -> None:
+        for path in paths:
+            _key, group, tag, what = docs.document_description(path.name, stem)
+            written.append((path, kind, group, tag, what))
+
+    if "viewer" in extras.include:
+        scene = extras.scene
+        if scene is None:
+            scene = design_scene(design, None if outputs is None else outputs.rigging)
+        add("viewer", write_viewer(scene, out / docs.document_files(stem, "viewer")[0]))
+        from envelopelab.export.templates import piece_name
+
+        for shape_name, shape_scene in (extras.shape_scenes or {}).items():
+            path = write_viewer(shape_scene, out / f"{stem}-{piece_name(shape_name)}-3d.html")
+            written.append(
+                (
+                    path,
+                    "viewer",
+                    "APPENDAGES",
+                    "REF",
+                    f"{shape_name}: 3D model, designed and inflated, with its simulation metrics",
+                )
+            )
+    if "spec" in extras.include:
+        add("spec", write_spec_summary(ctx, out / docs.document_files(stem, "spec")[0]))
+    if "planning" in extras.include:
+        from envelopelab.export import planning
+
+        add(
+            "planning",
+            planning.write_layout_diagram(ctx, out),
+            *planning.write_panel_map(ctx, out),
+            planning.write_gore_layout(ctx, out / ctx.file("gore-layout.pdf")),
+            *planning.write_dimensions(ctx, out),
+        )
+    if "sewing" in extras.include:
+        from envelopelab.export.planning import write_sewing_schedule
+
+        add("sewing", write_sewing_schedule(ctx, out / docs.document_files(stem, "sewing")[0]))
+    if "build_log" in extras.include:
+        add("build_log", write_build_log(ctx, out / docs.document_files(stem, "build_log")[0]))
+    if "assembly" in extras.include:
+        from envelopelab.export import assembly
+        from envelopelab.export.templates import piece_name
+
+        written.append(
+            (
+                assembly.write_envelope_assembly(ctx, out / ctx.file("assembly-envelope.pdf")),
+                "assembly",
+                "LAYOUT & PLANNING",
+                "REF",
+                "picture instructions: the base envelope, step by step",
+            )
+        )
+        for prim in primitives:
+            shape = prim.primitive.name
+            path = out / ctx.file(f"assembly-{piece_name(shape)}.pdf")
+            written.append(
+                (
+                    assembly.write_shape_assembly(ctx, prim, path),
+                    "assembly",
+                    "APPENDAGES",
+                    "REF",
+                    f"picture instructions: {shape}, step by step",
+                )
+            )
+    if "appendages" in extras.include:
+        from envelopelab.export import appendages as app
+
+        for prim in primitives:
+            spec_name, build_name, _patterns = app.shape_files(ctx, prim)
+            name = prim.primitive.name
+            written.append(
+                (
+                    app.write_shape_spec(ctx, prim, out / spec_name),
+                    "appendages",
+                    "APPENDAGES",
+                    "REF",
+                    f"{name}: spec, marking, skin cut list, match marks, feed holes",
+                )
+            )
+            written.append(
+                (
+                    app.write_shape_build(ctx, prim, out / build_name),
+                    "appendages",
+                    "APPENDAGES",
+                    "REF",
+                    f"{name}: build procedure, step by step",
+                )
+            )
+        if design.turning_vents:
+            vents, vent_panels = app.write_turning_vents(ctx, out)
+            written.append(
+                (vents, "appendages", "APPENDAGES", "REF", "vent placement and assembly")
+            )
+            written.append(
+                (vent_panels, "appendages", "APPENDAGES", "REF", "which panels carry the vents")
+            )
+    if "top_bottom" in extras.include:
+        from envelopelab.export import appendages as app
+
+        add(
+            "top_bottom",
+            app.write_parachute(ctx, out / ctx.file("parachute.pdf")),
+            app.write_scoop(ctx, out / ctx.file("scoop.pdf")),
+        )
+    if "cad" in extras.include:
+        from envelopelab.export.cad import write_cad
+
+        for path, what in write_cad(ctx, out):
+            written.append((path, "cad", "TOP & BOTTOM / CAD", "CAD", what))
+    entries = [
+        {"file": path.name, "kind": kind, "description": what}
+        for path, kind, _group, _tag, what in written
+    ]
+    if "index" in extras.include:
+        index_name = docs.document_files(stem, "index")[0]
+        files = [FileEntry(index_name, *docs.document_description(index_name, stem)[1:])]
+        files += [FileEntry(path.name, group, tag, what) for path, _k, group, tag, what in written]
+        groups = {
+            "envelope panel": "PANEL TEMPLATES",
+            "parachute panel": "TOP & BOTTOM / CAD",
+            "skin piece": "APPENDAGES",
+        }
+        for t in templates:
+            group = groups.get(t.pages[0].sheet.kind, "PANEL TEMPLATES")
+            files.append(FileEntry(t.name, group, "1:1", t.description))
+        files.append(
+            FileEntry(
+                f"{CAD_DIR}/", "TOP & BOTTOM / CAD", "CAD", "one DXF per piece (mm), index.json"
+            )
+        )
+        ctx.files = files
+        write_index(ctx, out / index_name)
+        entries.insert(
+            0,
+            {
+                "file": index_name,
+                "kind": "index",
+                "description": docs.document_description(index_name, stem)[3],
+            },
+        )
+    return entries, prov

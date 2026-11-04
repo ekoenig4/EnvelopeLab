@@ -33,18 +33,102 @@ the status bar says so. The envelope's own solve does not include the shapes.
 ## Telling results apart
 
 * Every run row names its solver — **Preview (dynamic relaxation)** or **CalculiX
-  verification** — on a solver-coloured background; the 3D view uses the same colours
+  verification** — with a solver-coloured swatch; the 3D view uses the same colours
   (preview blue, CalculiX orange, rest mesh olive, reference mesh green; the design
-  surface in its fabric colours with dark seams) and the same names in its layer list and
-  legend.
-* Each run shows its **state** (CURRENT or STALE), whether it **converged**, the final
-  **residual** (hover for what it measures), iterations, run time, nodes/elements, mesh
-  size, volume, lift and material sources.
+  surface in its fabric colours with dark seams). Its layer list, legend and *Run* list
+  use short names (*Design surface*, *Rest mesh*, *Preview result*, *CalculiX result*,
+  *Dome (designed)*, *Dome (inflated)*, *Reference: scan.obj*); hover a layer for its full
+  description (solver, run id, construction, …).
+* Each run shows its **state** as a chip with the same symbols and colours as the 3D
+  view's banner (i *Current*, ✓ *Current* for CalculiX, ◷ *Stale*, ▲ *FoS fail*, ✕ *Not
+  converged*), whether it **converged**, the **Min FoS** (the lowest fabric factor of
+  safety, warp or weft, of a current converged preview run, marked **FAIL** in bold below
+  the required 5; "—" otherwise, hover for why), the final **residual** (hover for what it
+  measures), iterations, run time, nodes/elements, mesh size, volume, lift and material
+  sources. With no run yet, the panel says how to start one.
+* The toolbar starts runs (**Run Preview** is the main action). A chip beside it shows the
+  CalculiX version found; without CalculiX a banner says where it looked and why
+  *Run CalculiX* is disabled.
 * A run whose inputs differ from the current design is **STALE**: greyed and italic in
-  the table, `[STALE]` in the 3D layer name and in the panel titles, and listed in
+  the table, *◷ stale* after its 3D layer name ("(stale)" in the scene legend) and
+  `[STALE]` in the panel titles, and listed in
   Validation. It is never shown as current. Undoing the edit makes it current again.
-* A run that did not converge is shown **NOT CONVERGED** in red and listed as an error in
-  Validation; its numbers are not final.
+* A run that did not converge is shown **NOT CONVERGED** in red (*✕ not converged* after
+  its 3D layer name) and listed as an error in Validation; its numbers are not final.
+
+## Results in the 3D view
+
+The 3D view's toolbar chooses what it shows:
+
+* **Run**: the solve the colours, the banner and the run details describe: the latest
+  preview or CalculiX run, each **the whole balloon**, the envelope and every special shape
+  solved with it ("Preview run · envelope + 2 shapes").
+* **Colour by**: *Factor of safety, warp* or *weft* (the default for a current, converged
+  preview run), the principal, warp and weft resultants (N/m), *Wrinkling* (taut,
+  wrinkled, slack), *Displacement from the as-sewn shape* (mm), *Deviation from
+  design* (mm, see below), or *Layer colour*.
+  A field the run cannot give is listed but greyed out; hover for why (for example
+  "CalculiX does not report warp/weft resultants", or a run from an older version that
+  has to be run again).
+* **Display**: *Shaded*, *Shaded + mesh edges* or *Wireframe*.
+
+The factor of safety is coloured in bands of the required factor (5 by default, tagged
+*assumed*): everything **below the limit is orange and labelled FAIL** on the colour
+scale, whatever else is shown; above it, blues get lighter with more margin. It is the
+fabric strength of the triangle's zone over its warp or weft resultant, so the lowest
+value in a zone is the factor in the run's factor-of-safety table. Seams and tapes are not
+coloured; read them in the table.
+
+**Deviation from design** shows where the inflated envelope lies **outside** (red) or
+**inside** (blue) the designed shape, and by how many mm, on the **design surface** itself
+(white where they match; the solved mesh is drawn as a faint wireframe over it). The scale
+is symmetric and set by the largest deviation at the run's nodes. It is measured along the
+design's outward normal, so fabric that only slid along the surface reads as zero (see
+[the theory](../theory/shape-deviation.md)). Hide the design surface to colour the solved
+mesh instead. The same values can be shown on the flat panels in the Patterns view
+(*Overlay: Deviation from design*, see [editing designs](editing-designs.md)).
+
+**Special shapes** are parts of the run, not runs of their own. *Colour by* colours the
+envelope and every shape of the run together on **one scale**, so the weakest spot of the
+whole balloon stands out (the factor-of-safety limit, 5, applies to every part). Choosing a
+result field hides the design surfaces (they lie where the result does and would cover
+it); choosing *Deviation from design* shows them again, each part's deviation drawn on its
+own design (the envelope surface, *Dome (designed)*, ...). Tick them back in the layer tree
+whenever you like. The shape's skin factor in the Special shapes panel is the conservative
+bound min(N_ult,warp, N_ult,weft) / N1 (major principal resultant), so it is never above
+the lowest warp or weft value shown here. Simulations from earlier versions have no stored
+skin results: run them again for the colours.
+
+The **layer tree** groups the layers: *Design* (design surface, panel details, designed
+shapes), *Result* (the inflated envelope and shapes, the rest mesh), *Rigging* and
+*Reference*. A group's box shows or hides all its layers. **Go to part** (camera bar) fits
+the view to the envelope or a shape.
+
+A **status banner** across the top of the view always states the chosen run's state, worst
+part first, and names the part when it is a shape ("Dome: Factor of safety below the
+limit"; other parts in the same state are listed after "Also:"). It cannot be closed; it goes when the state does:
+
+| Banner | When | The view |
+|---|---|---|
+| ✕ **Not converged — values are not final.** | the solve stopped before converging, or reported an error | surface in its layer colour with red mesh edges; no field colours |
+| ◷ **Stale result.** | the design changed since the run | grey; no field colours; *Re-run* button |
+| ▲ **Factor of safety below the limit** / **A design limit is exceeded** | a zone direction under the required factor, or a temperature limit exceeded | names the zones and the minimum; failing regions orange |
+| i **Current and converged** — preview only | no current CalculiX run yet | *Run CalculiX* button |
+| ✓ **Current and converged** | a current, converged CalculiX run exists too | — |
+
+"Verified" only means a current, converged CalculiX run exists for the same design; compare
+the two runs in the Simulation Runs table. The **Run details** card beside the layer tree
+gives the solver and version, the envelope's mesh size, load case, run time and volume and
+the material source tags (**assumed** in bold), then one row per part (status, iterations,
+final residual, lowest factor of safety) and each shape's mesh and run time (hover for what
+the residual measures). The **Probe** tool (on the left of the view) shows the zone and
+every field's value of the element you click, names the part (*Envelope* or *Dome skin*),
+and flags a factor below the limit.
+
+!!! warning "Strength values"
+    In this version the fabric strengths are generic `assumed` values (see *Material
+    values* above), so the factor-of-safety colours are only as good as those values.
+    Check the materials and their sources before relying on them.
 
 ## Progress and remaining time
 

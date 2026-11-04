@@ -3,6 +3,154 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: exporting a build pack failed when a special shape's name had a space
+  ("too many values to unpack"); the export's 3D page showed the design only when the 3D
+  view had not been opened since the last change; a special shape's preview simulation
+  was labelled verified when the envelope had a current CalculiX run (CalculiX verifies
+  the envelope only).
+- Added: a marked sheet per envelope panel that carries a shape or a feed hole
+  (`<name>-panel-H-gore-3.pdf`; the row sheets are now clean), picture assembly
+  instructions for the base envelope and each special shape
+  (`<name>-assembly-*.pdf`), and a 3D page per special shape with its simulation's
+  metrics (`<name>-<shape>-3d.html`).
+- Changed: every piece of a build pack has its own 1:1 PDF, one page showing the whole
+  piece (ADR-0038): `<name>-panel-A.pdf` per envelope row, `<name>-parachute-panel.pdf`
+  and `-parachute-centre.pdf`, and `<name>-<shape>-<piece>.pdf` for every special-shape
+  skin piece. No more pair files, grouped file, per-shape pattern files or pages split
+  into bands; a piece larger than the roll both ways stays whole and its page says so.
+- Changed: the build pack's 3D page opens in a realistic look, like the builder's pack:
+  fabric colours (the inflated envelope in its zones' fabrics), smooth shading with sun,
+  sky and ground light, a sky-and-ground background, and a basket under the flying
+  wires; the factor-of-safety, deviation and other colourings stay in *Colour by*.
+- Added: the build pack's combined CAD files, as in the builder's pack:
+  `<name>-panels.dxf` (full envelope development with the features),
+  `-panel-templates.dxf` (panels on a grid) and `-appendage-patterns.dxf` (skin and
+  parachute pieces), in mm, each with a PNG preview drawn without an imaging library.
+- Changed: the build pack's appendage and top-and-bottom documents follow the builder's
+  pack: per special shape `<name>-<shape>.pdf` (spec, skin cut list, match marks, feed
+  holes, checks) and `<name>-<shape>-build.pdf` (generated build procedure with notes
+  lines); `-turning-vents.pdf` and `-vent-panels.pdf` when there are vents;
+  `-parachute.pdf` (pattern data and every rigging length) and `-scoop.pdf` (scoop,
+  each flying wire, legs). They replace the earlier rigging sheet (PDF/CSV).
+- Changed: the build pack's layout and planning documents follow the builder's pack:
+  `<name>-layout-diagram.html` (gore x row grid in the zone colours, features located),
+  `-panel-map.html/.csv`, `-gore-layout.pdf` (all gores developed with features, then one
+  page per gore), `-panel-dimensions.html/.csv` (finished and cut sizes, across the bolt,
+  along the table, spares, fabric totals), `-panel-loft.html/.csv` (widths at 0-100 %)
+  and `-sewing-schedule.html` (seam specs, tape schedule with waste, assembly sequence,
+  every seam). They replace the earlier cut list and PDF/CSV sewing schedule; the pack QA
+  checks the panel dimensions against every row header.
+- Changed: the build pack's documents follow the builder's pack: a three-sheet A3
+  `<name>-00-BUILD-PACK-INDEX.pdf` (key dimensions metric + English, features, shop
+  limits with the largest cut piece, printing rules, grouped file index tagged REF / 1:1
+  / CAD, build order naming each step's sheet, airworthiness note), an A4 metric +
+  English `<name>-spec-summary.pdf`, and `<name>-build-log.pdf` sign-off sheets; every
+  document is named after the design. The earlier cover and spec summary are replaced.
+- Changed: build pack format 3 (ADR-0037), laid out like a shop pack: the 1:1 templates
+  are named after the design and grouped (`<slug>-panels-A-B.pdf`, a row carrying a
+  shape's markings on its own `<slug>-panel-D.pdf` with every gore's marks over the one
+  panel, `-panels-grouped.pdf`, `-parachute-patterns.pdf`, `-<shape>-patterns.pdf`);
+  every page is as large as its piece with one side within the roll (no more taped
+  strips), with the panel letter, cut count, fabric, finished dimensions, warp arrow,
+  legend and calibration lines across and along. The per-piece DXFs and `index.json`
+  moved to `cad/`; `pattern.pdf` is gone. AGENTS.md §6.6 page-size rule changed to match.
+- Added: **File ▸ Export build pack…** with a dialog (folder, roll width, documents). The
+  pack (format `envelopelab-build-pack/2`, ADR-0036) can now hold a cover and index
+  (provenance, safety notice, every value tagged assumed, file list), a spec summary, a
+  cut list (pieces, areas, fabric totals, tapes), a rigging sheet (lengths, loads,
+  strengths with source, FoS, FAILS) and a sewing schedule (every seam in order with a
+  check box), as PDF and CSV/JSON, and `3d-view.html`: a self-contained offline 3D view
+  of the design, rigging, shapes and the chosen run, with the app's colourings (FoS
+  bands, deviation, ...) and status banner. The pack QA checks the documents. No
+  numerical result changes.
+- Changed: the Rigging window in the shared design: key figures in the toolbar (rigging
+  mass, lowest factor of safety against the requirement, limit load factor), a status
+  banner worst first (a failing factor of safety named with its value, rigging not
+  complete, or checked with what is not assessed), and one card per element with its own
+  status chip, Add / Remove button, values and a lines table (count, length, limit load,
+  strength with source, factor of safety, mass). No value changes.
+- Changed: the application looks the same on every system: Qt's Fusion style and a light
+  palette from the theme's colours everywhere (a dark system theme or the native style no
+  longer changes it). Where the system font is only DejaVu Sans (WSL), it uses Segoe UI
+  from the Windows installation under WSL, else Noto Sans, Inter, Cantarell or Ubuntu;
+  `scripts/install_env.sh` installs Noto Sans. Status symbols no font can draw fall back
+  to ASCII. The 3D view's tool rail buttons have a visible frame.
+- Added: `envelopelab --scale FACTOR` (the same as `QT_SCALE_FACTOR`) for WSL on a scaled
+  Windows display; `--diagnose` prints the Qt style, font, DPI and status symbols.
+- Changed: the 3D view treats a run as the whole balloon (approved mockup, board 4). The
+  *Run* list has one entry per solve, the envelope and the shapes solved with it
+  ("Preview run · envelope + 2 shapes"; CalculiX a second entry); shapes are no longer
+  separate runs. *Colour by* colours every part together on one shared scale; a result
+  field hides the design surfaces and *Deviation from design* shows them. One banner, worst
+  part first, naming the part. Grouped layer tree (Design, Result, Rigging, Reference) with
+  a box per group; run details per part; *Go to part* in the camera bar; the Probe names the
+  part. Display only.
+- Added: special-shape simulations have the envelope's colour maps in the 3D view. Each
+  solved shape is in the *Run* list (*Dome (inflated)*) with factor of safety warp/weft,
+  principal and warp/weft resultants, wrinkling, displacement and the deviation from its
+  designed skin; the banner and run details describe it. Shape runs now store their skin's
+  results (`skin_*` arrays, optional: earlier runs have none and must be run again). The
+  per-triangle factor uses warp and weft as for the envelope; the shape summary's skin
+  factor stays the conservative min(N_ult) / N1 bound (never higher, tested). No existing
+  result changes.
+- Added: *Deviation from design* heat map: where the solved envelope lies outside (red) or
+  inside (blue) the designed shape, in mm, measured along the design's outward normal at
+  the run's nodes (`envelopelab.project.deviation`). In the 3D view it colours the design
+  surface (a new *Colour by* field); in the Patterns view *Overlay: Deviation from design*
+  maps it onto the flat panels (each point shows the gore that deviates most). Current,
+  converged runs only. On the standard-gore fixture's preview: -239 mm (inside, near the
+  mouth, where the shape check reports compression) to +121 mm. No existing result
+  changes. Diverging colours are the project's own ramp (no new dependency).
+- Changed: patterns are regenerated automatically after every edit and when a project
+  opens (Preferences, *Regenerate patterns after every edit*, now on by default; it costs
+  under 1 ms per edit on the fixtures). Settings saved by an earlier version take the new
+  default once (preferences version 2); turning it off is kept. When regeneration fails,
+  the Patterns banner says why instead of only "stale". Patterns and cut files are
+  unchanged.
+- Changed: the 3D view's layer list, legend and *Run* list use short layer names
+  (*Design surface*, *Preview result*, *Dome (inflated)*, ...), with the full description
+  as the tooltip. A stale or unconverged layer still says so on its row (*◷ stale*,
+  *✕ not converged*; plain words in the scene legend), and the stale banner no longer
+  repeats the run id (it is in the run details). Display only.
+- Changed: the envelope panels a special shape is sewn on (its footprint sew line, match
+  marks and feed holes) moved from the Patterns view to the Special shapes window, in a
+  new *Envelope panels* tab shown with the selected shape (opens zoomed on the marked
+  area; double click for the whole panels). The Patterns view now shows only the base
+  envelope, and its *Show special shapes* option is gone. Display only: the build pack's
+  marking sheets are unchanged.
+- Changed: the Validation / Warnings strip uses the shared design: count chips per
+  severity (✕ errors, ▲ warnings, i notes, or ✓ no problems), the severity's symbol and
+  colour on every finding, and a *Show* menu filtering errors, warnings and notes (the
+  counts always include every finding). Display only.
+- Changed: the 2D pattern view uses the shared design: its state (current, not
+  generated, STALE) is the shared status banner with a *Regenerate patterns* button on it
+  when needed, and the *Selected row* form is drawn as a card. Display only.
+- Changed: the standard-gore editor uses the shared design: the key figures (volume,
+  height, maximum diameter, gross lift) and a lift-margin chip in its title bar, a status
+  banner stating the worst design problem (errors, compression under load, negative lift
+  margin), the side column's boxes as cards, and the theme's status colours in place of
+  hard-coded reds. Display only.
+- Changed: the Simulation Runs panel uses the shared design: an action toolbar (*Run
+  Preview* as the main action), the CalculiX version as a status chip or a banner saying
+  why it is disabled, a status chip per run (current, stale, FoS fail, not converged), a
+  solver colour swatch, a *Min FoS* column (lowest fabric factor of safety of a current
+  converged preview run, FAIL below 5) and an empty-state message. Display only.
+- Changed: the 3D view is reorganised (approved mockup): a toolbar chooses the run, the
+  field to colour by and the display mode (shaded, with mesh edges, wireframe), with a
+  screenshot button; a status banner across the view states the run's state worst first
+  (not converged, stale, factor of safety or temperature limit exceeded, current but not
+  verified with CalculiX, verified) and cannot be dismissed; tools sit on a rail left of
+  the view, an orientation cube in its corner, the camera buttons below it; the side
+  panel shows the layers with colour swatches, a *Run details* card (solver, status,
+  iterations, residual, mesh, load case, run time, volume, material sources) and the
+  *Probe* read-out. A shared theme (`envelopelab_app.theme`: colours, status banner and
+  chip) is applied to the whole application, for the other windows to follow.
+- Added: colour a run by fabric factor of safety (warp or weft), principal, warp and weft
+  resultants, wrinkle state or displacement. Factors below the required factor (5,
+  assumed) are always orange and labelled FAIL. Fields a run cannot give are listed but
+  disabled with the reason. Preview runs now store their warp/weft resultants
+  (`fabric_resultants`, ADR-0035); existing results are unchanged, older runs and
+  CalculiX runs cannot be coloured by factor of safety.
 - Fixed: the *attachment ease* check failed on most special shapes (on the Smalley 90K
   alien design 6.5 mm per match-mark interval on the antennae and 20.5 mm on the eye pods,
   against a 3 mm limit) although the rim and the marked line differed by only 0.5 % and

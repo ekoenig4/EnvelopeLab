@@ -1,7 +1,8 @@
 """Build-pack output QA (AGENTS.md §6.6): export a generic sample pack and check it.
 
 Exports the envelope rows of a generic standard-gore design with a dome, a leaned tube,
-a revolved bulb and a free-form mesh shape on it to a temporary directory and runs
+a revolved bulb and a free-form mesh shape on it, with every document (cover, spec,
+cut list, rigging, sewing schedule, 3D view), to a temporary directory and runs
 :func:`envelopelab.export.qa.check_pack`. Exits non-zero when any check fails. Run by
 ``scripts/verify.py``.
 """
@@ -11,7 +12,8 @@ from __future__ import annotations
 import sys
 import tempfile
 
-from envelopelab.export.build_pack import export_build_pack
+from envelopelab.export.build_pack import PackExtras, export_build_pack
+from envelopelab.export.documents import DOCUMENTS
 from envelopelab.export.qa import check_pack
 from envelopelab.features.primitives import (
     Dome,
@@ -42,7 +44,7 @@ def main() -> int:
         ),
     ]
     with tempfile.TemporaryDirectory() as out:
-        export_build_pack(design, shapes, out)
+        export_build_pack(design, shapes, out, extras=PackExtras(frozenset(DOCUMENTS)))
         findings = check_pack(out)
     for f in findings:
         print(f"FAIL {f.file}: {f.check}: {f.message}")

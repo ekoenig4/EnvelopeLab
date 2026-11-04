@@ -63,6 +63,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH, PackExtras
 from envelopelab.features.metrics import REQUIRED_FOS
 from envelopelab.features.primitives import CutPiece, PrimitiveDesign
 from envelopelab.project.model import SOLVER_LABELS
@@ -81,6 +82,7 @@ from envelopelab.project.shapes import (
     shape_fabrics,
 )
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.marking_view import MarkingView
 from envelopelab_app.refresh import Refresher
 
 FAIL_COLOR = "#b00020"
@@ -346,6 +348,8 @@ class ShapesPanel(QWidget):
 
     #: The user wants to drag shape ``name`` in the 3D view (the main window shows it).
     dragRequested = Signal(str)  # noqa: N815 (Qt naming)
+    #: The Export build pack… button: the main window opens its export dialog.
+    exportRequested = Signal()  # noqa: N815 (Qt naming)
 
     def __init__(self, controller: WorkspaceController) -> None:
         super().__init__()
@@ -512,6 +516,28 @@ class ShapesPanel(QWidget):
         pieces_split.setStretchFactor(0, 3)
         pieces_split.setStretchFactor(1, 1)
         self.result_tabs.addTab(pieces_split, "Cut pieces")
+        # The envelope panels the shape is sewn on (its marking sheets); the Patterns
+        # view shows only the base envelope.
+        self.markings = MarkingView()
+        self.markings.setObjectName("shapeMarkings")
+        self.marking_notes = QLabel()
+        self.marking_notes.setObjectName("shapeMarkingNotes")
+        self.marking_notes.setWordWrap(True)
+        self.marking_notes.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        envelope_panels = QWidget()
+        envelope_layout = QVBoxLayout(envelope_panels)
+        envelope_layout.setContentsMargins(0, 0, 0, 0)
+        caption = QLabel(
+            "Envelope panels this shape is sewn on, as on the build pack's marking "
+            "sheets: footprint line (ticks on the shape's side), numbered match marks, "
+            "feed holes cut (dashed) and finished (solid). Wheel: zoom; double click: marked "
+            "area / whole panel."
+        )
+        caption.setWordWrap(True)
+        envelope_layout.addWidget(caption)
+        envelope_layout.addWidget(self.markings, 1)
+        envelope_layout.addWidget(self.marking_notes)
+        self.result_tabs.addTab(envelope_panels, "Envelope panels")
         self.result_tabs.addTab(self.checks, "Checks")
         self.result_tabs.addTab(self.attachment, "Attachment")
 
@@ -677,11 +703,18 @@ class ShapesPanel(QWidget):
         self._update_buttons()
         return started
 
-    def export_pack(self, out_dir: str | Path) -> Path | None:
+    def export_pack(
+        self,
+        out_dir: str | Path,
+        extras: PackExtras | None = None,
+        roll_width: float = DEFAULT_ROLL_WIDTH,
+    ) -> Path | None:
         """Write the build pack of the envelope and every placed shape; returns the index.
 
         Refused (None) while a shape is being placed or cannot be placed, so a pack never
-        silently leaves a shape out.
+        silently leaves a shape out. ``extras`` chooses the documents written with the
+        sheets (:class:`envelopelab.export.build_pack.PackExtras`; default none);
+        ``roll_width`` is the fabric roll width, m.
         """
         from envelopelab.export.build_pack import export_build_pack
 
@@ -699,7 +732,14 @@ class ShapesPanel(QWidget):
             placed.append(design)
             fabrics[spec.name] = shape_fabrics(spec, session.design, session.patterns, design)[1]
         index = self.controller.attempt(
-            export_build_pack, session.design, placed, out_dir, session.patterns, fabrics
+            export_build_pack,
+            session.design,
+            placed,
+            out_dir,
+            session.patterns,
+            fabrics,
+            roll_width=roll_width,
+            extras=extras,
         )
         if index is not None:
             self.controller.message.emit(f"Build pack written to {out_dir}")
@@ -736,9 +776,7 @@ class ShapesPanel(QWidget):
             self.import_mesh(path)
 
     def _export_pack_dialog(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Build pack folder")
-        if path:
-            self.export_pack(path)
+        self.exportRequested.emit()
 
     def _export_blender_dialog(self) -> None:
         path, _ = QFileDialog.getSaveFileName(self, "Export to Blender", "", "OBJ (*.obj)")
@@ -1135,6 +1173,8 @@ class ShapesPanel(QWidget):
         self.pieces.clear()
         self.attachment.clear()
         self.preview.set_pieces([])
+        self.markings.set_sheets([])
+        self.marking_notes.clear()
         if spec is None:
             text = "No special shapes. Add a dome, a tube, a revolved profile or a mesh."
             self.status.setText(text if self.controller.is_gore else "")
@@ -1202,6 +1242,35 @@ class ShapesPanel(QWidget):
             for column in range(tree.columnCount()):
                 tree.resizeColumnToContents(column)
         self.preview.set_pieces(design.pieces)
+        self._show_markings(design)
+
+    def _show_markings(self, design: Any) -> None:
+        """The envelope panels ``design`` (a placed shape) is sewn on, and per row which
+        gores they are (:mod:`envelopelab.export.build_pack`)."""
+        from envelopelab.export.build_pack import (
+            default_hole_hem,
+            primitive_sheets,
+            shape_row_notes,
+        )
+
+        session = self.controller.session
+        if session is None:
+            return
+        hem, tape = default_hole_hem(session.design)
+        sheets = [
+            s for s in primitive_sheets(design, "skin", None, hem, tape) if s.kind == "marking"
+        ]
+        stale = self.controller.artifact_status("patterns") == "stale"
+        self.markings.set_sheets(sheets, stale)
+        notes = [
+            f"Row {row}: {note}"
+            for row, row_notes in shape_row_notes([design]).items()
+            for note in row_notes
+        ]
+        lines = [f"{len(sheets)} envelope panel(s) to mark."] if sheets else []
+        if stale:
+            lines.append("Patterns are STALE: regenerate them before marking (shown greyed).")
+        self.marking_notes.setText("\n".join(lines + notes))
 
     def _show_simulation(self, spec: ShapeSpec | None) -> None:
         self.sim_tree.clear()
