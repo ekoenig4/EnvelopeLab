@@ -11,7 +11,8 @@ one page each** (ADR-0038):
 
 | File | Content |
 |---|---|
-| `<slug>-panel-<R>.pdf` | Envelope row `R`, cut once per gore. A row that carries a shape's markings has every gore's footprint lines, match marks, side ticks and feed holes drawn over the one panel, each labelled `<shape> - GORE <g>` |
+| `<slug>-panel-<R>.pdf` | Envelope row `R`, clean, cut once per gore |
+| `<slug>-panel-<R>-gore-<g>.pdf` | The panel `R` of gore `g` when a shape is sewn on it or a feed hole is cut in it: the same panel with that panel's footprint lines, side ticks, numbered match marks and feed holes (every shape's marks on that panel), *mark only* (ADR-0039) |
 | `<slug>-parachute-panel.pdf`, `<slug>-parachute-centre.pdf` | The parachute radial panel and centre panel |
 | `<slug>-<shape>-<piece>.pdf` | Every skin piece of every special shape (e.g. `<slug>-eye-G1.pdf`, `<slug>-horn-TIP.pdf`) |
 
@@ -51,6 +52,8 @@ A pack can also hold **documents** (since format 2), chosen when it is exported
 |---|---|
 | `<slug>-00-BUILD-PACK-INDEX.pdf` | A3 landscape, three sheets (`envelopelab.export.shop`): the key dimensions in metric and English, the features (special shapes with their gores, rows, pieces and feed holes; turning vents; scoop; parachute; red line; flying wires), the shop limits (bolt width, cutting table, largest cut piece, with a warning when a piece exceeds them), the printing rules; the index of every file, grouped (START HERE, LAYOUT & PLANNING, PANEL TEMPLATES, APPENDAGES, TOP & BOTTOM / CAD) and tagged `REF`, `1:1` or `CAD`; the build order, each step naming its sheet; the airworthiness note and the provenance |
 | `<slug>-3d.html` | The 3D view (below), one self-contained page |
+| `<slug>-<shape>-3d.html` | Per special shape: the shape as designed and, when simulated, as inflated with every metric (factor of safety, deviation, resultants, wrinkling, displacement) and that simulation's banner; "Not simulated" otherwise |
+| `<slug>-assembly-envelope.pdf`, `<slug>-assembly-<shape>.pdf` | Picture assembly instructions (`envelopelab.export.assembly`), A3, numbered frames drawn from the pieces: parts and counts, marking, one gore bottom-up, joining gores, mouth and crown, parachute, where each shape goes, rigging, inspection; per shape: parts, marking, side seams, tip, feed holes, rim to the marked line with the numbered marks, finished |
 | `<slug>-spec-summary.pdf` | A4 landscape: key measurements in metric and English (volume, height, width, gore length, mouth, parachute hole and overlap, parachute, lines, red line, gross lift, lift margin), the configuration, the rigging factors of safety, the safety notice and every value tagged `assumed` |
 | `<slug>-build-log.pdf` | A3 landscape sign-off sheets (item, spec, done by, date, checked): panel cutting, one per special shape, the turning vents, parachute / rigging / final |
 | `<slug>-layout-diagram.html` | The gore x row grid (face = gore 1), every cell in its fabric zone's colour, every feature located (special shapes, feed holes, turning vents, scoop), with a key (`envelopelab.export.planning`) |

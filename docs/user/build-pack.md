@@ -27,7 +27,10 @@ it never leaves a shape out without saying so.
 | `<name>-00-BUILD-PACK-INDEX.pdf` | Start here (three A3 sheets): the key dimensions in metric and English, the features, the shop limits the pack is built to (bolt width, cutting table, largest piece), how to print; the index of every file (`REF` to read, `1:1` to print at actual size, `CAD`); and the build order, each step naming the sheet to work from |
 | `<name>-spec-summary.pdf` | The design at a glance, metric and English: size, volume, mouth, parachute hole and overlap, line lengths, lift and lift margin, configuration, rigging factors of safety, and **every value tagged *assumed*** (check these against datasheets before building) |
 | `<name>-build-log.pdf` | Sign-off sheets for the floor: panel cutting, each special shape, the turning vents, and the parachute, rigging and final inspection |
-| `<name>-panel-A.pdf`, `<name>-panel-B.pdf`, … | Cutting the envelope: one PDF per panel, the whole panel at 1:1 on one page; a row that carries a special shape shows every gore's marks on it (labelled by gore) |
+| `<name>-panel-A.pdf`, `<name>-panel-B.pdf`, … | Cutting the envelope: one PDF per panel, the whole panel at 1:1 on one page |
+| `<name>-panel-H-gore-3.pdf`, … | Marking: one PDF per envelope panel that carries a special shape or a feed hole, with the lines where the shape is sewn on, the numbered marks and the feed holes drawn on it |
+| `<name>-assembly-envelope.pdf`, `<name>-assembly-<shape>.pdf` | Building: picture instructions, step by step, for the base envelope and for each special shape |
+| `<name>-<shape>-3d.html` | Each special shape in 3D, designed and inflated, with its simulation's metrics |
 | `<name>-<shape>-G1.pdf`, … | Cutting each special shape: one PDF per skin piece, the whole piece at 1:1 |
 | `<name>-parachute-panel.pdf`, `<name>-parachute-centre.pdf` | Cutting the parachute |
 | `<name>-panels.dxf`, `<name>-panel-templates.dxf`, `<name>-appendage-patterns.dxf` (+ PNG previews) | CAD: the whole envelope developed with its features, the panels on a grid, and the appendage and parachute pieces, in mm |
@@ -72,7 +75,10 @@ The page needs WebGL (every current browser has it) and nothing else: it can be 
 e-mail or opened from a USB stick.
 
 Without a run (or with only the sheets exported from a script) the page shows the design
-and its rigging, with the banner *Design only*.
+and its rigging, with the banner *Design only*. Each special shape has its own page
+(`<name>-<shape>-3d.html`) with the same colour modes for its simulation. **Re-run the
+preview and the shape simulations before exporting** when you have changed the design:
+stale results are drawn grey and never coloured.
 
 ## Checking a pack
 

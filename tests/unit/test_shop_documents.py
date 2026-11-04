@@ -151,3 +151,27 @@ def test_png_writer_round_trips_its_size(tmp_path: Path) -> None:
     img = np.zeros((7, 11, 3), dtype=np.uint8)
     data = write_png(tmp_path / "x.png", img).read_bytes()
     assert struct.unpack(">II", data[16:24]) == (11, 7)
+
+
+def test_picture_assembly_sheets_for_the_envelope_and_each_shape(pack: Path) -> None:
+    env = _page_boxes(pack / "shop-sample-assembly-envelope.pdf")
+    text = "".join(c for _w, _h, c in env)
+    for step in ("Parts: cut 20", "Build one gore", "Join the 20 gores", "Sew on eye"):
+        assert step in text
+    shape = "".join(c for _w, _h, c in _page_boxes(pack / "shop-sample-assembly-eye.pdf"))
+    for step in ("Parts: 12 skin pieces", "Sew the skin pieces side by side", "Sew the rim"):
+        assert step in shape
+    # Numbered step circles: at least one frame per step.
+    assert text.count(" Tj ET") > 20
+
+
+def test_marked_panels_have_their_own_sheets(pack: Path) -> None:
+    import json
+
+    index = json.loads((pack / "cad" / "index.json").read_text(encoding="utf-8"))
+    marked = [t for t in index["templates"] if "-gore-" in t["file"]]
+    sheets = {s["file"].removeprefix("cad/").removesuffix(".dxf") for s in index["sheets"]}
+    markings = {s for s in sheets if "-mark-" in s}
+    assert marked and {m for t in marked for m in t["pages"][0]["markings"]} == markings
+    clean = [t for t in index["templates"] if t["file"].endswith(("-panel-H.pdf", "-panel-I.pdf"))]
+    assert clean and all(t["pages"][0]["markings"] == [] for t in clean)

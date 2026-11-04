@@ -330,7 +330,8 @@ def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> li
             want = f"%PAGE {entry['sheet']} {entry['band']} {entry['bands']} "
             if want not in content:
                 findings.append(QAFinding(name, "template", f"page {k}: not {entry['sheet']}"))
-            if entry["sheet"] in drawn:
+            marked = bool(entry.get("markings"))
+            if not marked and entry["sheet"] in drawn:
                 findings.append(QAFinding(name, "template", f"{entry['sheet']} on more pages"))
             drawn.add(entry["sheet"])
             drawn.update(entry.get("markings", []))

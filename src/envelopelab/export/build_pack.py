@@ -823,16 +823,7 @@ def write_pack(
             {
                 "file": tfile.name,
                 "description": tfile.description,
-                "pages": [
-                    {
-                        "sheet": sh,
-                        "band": int(b),
-                        "bands": int(n),
-                        "turned": t == "90",
-                        "markings": [] if over == "-" else over.split(","),
-                    }
-                    for _page, sh, b, n, t, over in (line.split(" ") for line in pages)
-                ],
+                "pages": pages,
             }
         )
     index = {
@@ -943,6 +934,8 @@ class PackExtras:
     outputs : GoreOutputs, optional
         The design's live outputs (:func:`envelopelab.project.gore_design.gore_outputs`)
         for the spec summary, cut list (tapes) and rigging sheet; computed when missing.
+    shape_scenes : dict of str to Scene, optional
+        One 3D view per special shape (by name), written as ``<slug>-<shape>-3d.html``.
     scene : Scene, optional
         The 3D view to write (default :func:`envelopelab.export.viewer.design_scene`:
         the design and its rigging, no solver result).
@@ -958,6 +951,7 @@ class PackExtras:
     include: frozenset[str] = frozenset()
     outputs: Any = None
     scene: Any = None
+    shape_scenes: Any = None
     provenance: Any = None
     status: str = ""
     table_length: float = 12 * 0.3048  # m (12 ft, a common cutting table; source: assumed)
@@ -1027,6 +1021,19 @@ def write_documents(
         if scene is None:
             scene = design_scene(design, None if outputs is None else outputs.rigging)
         add("viewer", write_viewer(scene, out / docs.document_files(stem, "viewer")[0]))
+        from envelopelab.export.templates import piece_name
+
+        for shape_name, shape_scene in (extras.shape_scenes or {}).items():
+            path = write_viewer(shape_scene, out / f"{stem}-{piece_name(shape_name)}-3d.html")
+            written.append(
+                (
+                    path,
+                    "viewer",
+                    "APPENDAGES",
+                    "REF",
+                    f"{shape_name}: 3D model, designed and inflated, with its simulation metrics",
+                )
+            )
     if "spec" in extras.include:
         add("spec", write_spec_summary(ctx, out / docs.document_files(stem, "spec")[0]))
     if "planning" in extras.include:
@@ -1045,6 +1052,31 @@ def write_documents(
         add("sewing", write_sewing_schedule(ctx, out / docs.document_files(stem, "sewing")[0]))
     if "build_log" in extras.include:
         add("build_log", write_build_log(ctx, out / docs.document_files(stem, "build_log")[0]))
+    if "assembly" in extras.include:
+        from envelopelab.export import assembly
+        from envelopelab.export.templates import piece_name
+
+        written.append(
+            (
+                assembly.write_envelope_assembly(ctx, out / ctx.file("assembly-envelope.pdf")),
+                "assembly",
+                "LAYOUT & PLANNING",
+                "REF",
+                "picture instructions: the base envelope, step by step",
+            )
+        )
+        for prim in primitives:
+            shape = prim.primitive.name
+            path = out / ctx.file(f"assembly-{piece_name(shape)}.pdf")
+            written.append(
+                (
+                    assembly.write_shape_assembly(ctx, prim, path),
+                    "assembly",
+                    "APPENDAGES",
+                    "REF",
+                    f"picture instructions: {shape}, step by step",
+                )
+            )
     if "appendages" in extras.include:
         from envelopelab.export import appendages as app
 

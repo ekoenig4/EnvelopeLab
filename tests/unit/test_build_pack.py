@@ -109,8 +109,14 @@ def test_every_piece_has_its_own_whole_page_pdf(pack: Path) -> None:
     index = json.loads((pack / "cad" / "index.json").read_text(encoding="utf-8"))
     roll = 60 * 0.0254 * PT_PER_M
     cut = [s for s in index["sheets"] if s["kind"] != "marking"]
-    # One file per piece, one page per file, never split.
-    assert len(index["templates"]) == len(cut)
+    marked_panels = {
+        (s["piece"].split()[-1], int(s["piece"].split()[1]))
+        for s in index["sheets"]
+        if s["kind"] == "marking"
+    }
+    # One file per piece, plus one per envelope panel that carries marks; one page per
+    # file, never split.
+    assert len(index["templates"]) == len(cut) + len(marked_panels)
     for t in index["templates"]:
         assert len(t["pages"]) == 1 and t["pages"][0]["bands"] == 1
         ((w, h, content),) = _page_boxes(pack / t["file"])
@@ -123,9 +129,12 @@ def test_every_piece_has_its_own_whole_page_pdf(pack: Path) -> None:
     row = next(s for s in index["sheets"] if s["file"] == "cad/envelope-row-C.dxf")
     assert max(w, h) / PT_PER_M * 1000 >= row["finished_height_mm"]
     assert max(w, h) / PT_PER_M * 1000 >= row["finished_width_mm"]
-    # Rows that carry a shape's markings show every gore's marks over the one panel.
-    marked = next(t for t in index["templates"] if t["file"].endswith("-panel-D.pdf"))
-    assert set(marked["pages"][0]["markings"]) >= {"ear-mark-G3-D", "ear-mark-G4-D"}
+    # The clean row panel, and one marked panel per gore that carries the ear's marks.
+    clean = next(t for t in index["templates"] if t["file"].endswith("-panel-D.pdf"))
+    assert clean["pages"][0]["markings"] == []
+    gore3 = next(t for t in index["templates"] if t["file"].endswith("-panel-D-gore-3.pdf"))
+    assert gore3["pages"][0]["markings"] == ["ear-mark-G3-D"]
+    assert any(t["file"].endswith("-panel-D-gore-4.pdf") for t in index["templates"])
     # Every special-shape skin piece is a cutting sheet of its own.
     names = {t["file"].split("generic-", 1)[1] for t in index["templates"]}
     assert {f"ear-G{k}.pdf" for k in range(1, 17)} <= names
@@ -414,3 +423,14 @@ def test_a_capped_dome_is_sewn_round_its_cap() -> None:
 
 def _polyline_length(points: np.ndarray) -> float:
     return float(np.linalg.norm(np.diff(points, axis=0), axis=1).sum())
+
+
+def test_shape_names_with_spaces_export(tmp_path: Path) -> None:
+    """Shape names are free text ("eye pod left"); the pack must still be written."""
+    shape = design_primitive(
+        Dome("eye pod left", Placement(3, 12.0, across=0.5), 1.0, 1.2, gores=8), SURFACE
+    )
+    export_build_pack(DESIGN, [shape], tmp_path / "spaces")
+    assert check_pack(tmp_path / "spaces") == []
+    names = {p.name for p in (tmp_path / "spaces").iterdir()}
+    assert "generic-eye-pod-left-G1.pdf" in names

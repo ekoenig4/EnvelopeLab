@@ -564,6 +564,16 @@ def test_one_run_colours_the_envelope_and_its_shapes_together(
     assert np.isfinite(dome["deviation"].values).all()
     skin = len(view.layers["shape-sim:Dome"].faces)
     assert len(dome["fos_warp"].values) == skin < record.n_elements
+    # A current CalculiX run verifies the envelope only: a shape's preview simulation is
+    # never shown as verified.
+    envelope = session.project.runs[-1]
+    session.project.runs.append(envelope.model_copy(update={"solver": "calculix"}))
+    try:
+        envelope_state, shape_state = view.run_state(), view.run_state("shape-sim:Dome")
+        assert envelope_state is not None and envelope_state.verified
+        assert shape_state is not None and not shape_state.verified
+    finally:
+        session.project.runs.pop()
     # The conservative shape summary never exceeds the lowest warp/weft factor shown.
     low = min(float(dome[k].values.min()) for k in ("fos_warp", "fos_weft"))
     assert record.fos["skin"] <= low * (1.0 + 1e-12)

@@ -259,6 +259,92 @@ def scene_from_view(view: View3DPanel) -> Scene:
     return scene
 
 
+def shape_scenes_from_view(view: View3DPanel) -> dict[str, Scene]:
+    """One 3D scene per special shape: the shape as designed and, when it has a
+    simulation, as sewn and inflated with every metric the view can show for it (on the
+    shape's own scale), and the banner of that simulation (stale, not converged,
+    failing, preview only). Keyed by the shape's name."""
+    from envelopelab_app.result_view import banner_for
+
+    out: dict[str, Scene] = {}
+    for key, layer in view.layers.items():
+        if not key.startswith("shape:"):
+            continue
+        name = key.removeprefix("shape:")
+        scene = Scene(
+            title=f"{view.controller.design.meta.name if view.controller.design else ''} - {name}"
+        )
+        scene.meshes.append(
+            SceneMesh(
+                key,
+                f"{name} (designed)",
+                "Design",
+                layer.points,
+                layer.faces,
+                LAYER_COLORS["shape"],
+                face_rgb=layer.face_colors,
+                role="design",
+            )
+        )
+        seams = [q for lines in layer.polylines.values() for q in lines]
+        if seams:
+            scene.lines.append(
+                SceneLines(f"{key}:seams", "Seams (designed)", "Design", seams, role="design")
+            )
+        sim_key = f"shape-sim:{name}"
+        sim = view.layers.get(sim_key)
+        if sim is None:
+            scene.status = SceneStatus(
+                "info", "Not simulated.", "Run the shape's simulation to see its metrics."
+            )
+            out[name] = scene
+            continue
+        fields, _missing = view._fields_of(sim_key)
+        notes = []
+        if not sim.converged:
+            notes.append("NOT CONVERGED: values are not final")
+        if sim.stale:
+            notes.append("stale: the design has changed since this simulation")
+        mesh = SceneMesh(
+            sim_key,
+            f"{name} (inflated)",
+            "Result",
+            sim.points,
+            sim.faces,
+            "#c7c7c7" if sim.stale else LAYER_COLORS[sim.kind],
+            note=", ".join(notes),
+            face_rgb=None if sim.stale else sim.face_colors,
+            role="result",
+        )
+        for field_name, field in fields.items():
+            mesh.colorings[field_name] = coloring(field, np.asarray(field.values, dtype=float))
+            if field_name == "deviation" and not sim.stale:
+                on = interpolate_on_mesh(layer.points, sim.points, sim.faces, field.values)
+                scene.meshes[0].colorings["deviation"] = coloring(
+                    ResultField("deviation", "node", on, "m", field.description),
+                    np.asarray(field.values, dtype=float),
+                )
+        scene.meshes.append(mesh)
+        scene.meshes[0].visible = False
+        for ln in scene.lines:
+            ln.visible = False
+        banner = banner_for(view.run_state(sim_key))
+        if banner is not None:
+            scene.status = SceneStatus(banner.kind, banner.title, banner.message)
+        record = view._records.get(sim_key)
+        if record is not None:
+            scene.notes.append(
+                f"Simulation {record.run_id}: {record.status}, {record.iterations} iterations, "
+                f"residual {record.residual:.2e}."
+            )
+        scene.notes.append(
+            "EnvelopeLab is a design aid, not certified engineering software. The builder is "
+            "responsible for airworthiness."
+        )
+        out[name] = scene
+    return out
+
+
 def status_line(view: View3DPanel) -> str:
     """The view's banner in one line, for the pack's cover."""
     if not view.banner.kind:

@@ -89,6 +89,7 @@ nav:
       - ADR-0036: adr/ADR-0036-build-pack-documents-and-3d-view.md
       - ADR-0037: adr/ADR-0037-build-pack-shop-layout.md
       - ADR-0038: adr/ADR-0038-one-pdf-per-piece.md
+      - ADR-0039: adr/ADR-0039-marked-panels-assembly-and-shape-views.md
 theme:
   name: material
 markdown_extensions:

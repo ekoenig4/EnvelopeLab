@@ -2,9 +2,11 @@
 
 Every piece to cut gets its own PDF, as a builder cuts them (ADR-0038):
 
-* ``<slug>-panel-<R>.pdf``: envelope row ``R`` (cut once per gore). A row that carries a
-  special shape's markings has every gore's footprint lines, match marks, side ticks and
-  feed holes drawn over the one panel, each labelled with its shape and gore;
+* ``<slug>-panel-<R>.pdf``: envelope row ``R``, clean (cut once per gore);
+* ``<slug>-panel-<R>-gore-<g>.pdf``: the panel ``R`` of gore ``g`` when a special shape
+  is sewn on it or a feed hole is cut in it: the same panel with that panel's footprint
+  lines, side ticks, numbered match marks and feed holes drawn on (every shape's marks
+  on that panel), to mark one cut panel before assembly;
 * ``<slug>-parachute-panel.pdf``, ``<slug>-parachute-centre.pdf``: the parachute pieces;
 * ``<slug>-<shape>-<piece>.pdf``: every skin piece of every special shape.
 
@@ -128,20 +130,44 @@ def template_files(name: str, sheets: Sequence[Sheet]) -> list[TemplateFile]:
             markings.setdefault(s.name.rsplit("-", 1)[1], []).append(s)
     files: list[TemplateFile] = []
 
-    def page(row: Sheet) -> TemplatePage:
-        marks = markings.get(_letter(row), [])
-        notes = []
-        for m in marks:
-            notes += [n for n in m.notes if n not in notes]
-        return TemplatePage(row, f"PANEL {_letter(row)}", [_overlay(m) for m in marks], notes)
+    # Marking sheets by envelope panel: (row letter, gore) -> every shape's marks there.
+    by_panel: dict[tuple[str, int], list[Sheet]] = {}
+    for m in (m for ms in markings.values() for m in ms):
+        gore = int(m.piece.split()[1])
+        by_panel.setdefault((m.name.rsplit("-", 1)[1], gore), []).append(m)
 
     for row in rows:
         letter = _letter(row)
-        marked = sorted({m.name.split("-mark-")[0] for m in markings.get(letter, [])})
-        what = f"panel {letter}, cut {row.cut_count}" + (
-            f", marked for {', '.join(marked)}" if marked else ""
+        files.append(
+            TemplateFile(
+                f"{stem}-panel-{letter}.pdf",
+                f"panel {letter}, cut {row.cut_count}",
+                [TemplatePage(row, f"PANEL {letter}")],
+            )
         )
-        files.append(TemplateFile(f"{stem}-panel-{letter}.pdf", what, [page(row)]))
+        for gore in sorted(g for (r, g) in by_panel if r == letter):
+            marks = by_panel[(letter, gore)]
+            shapes = sorted({m.name.split("-mark-")[0] for m in marks})
+            notes = [
+                f"MARK ONLY: one of the {row.cut_count} panels {letter} - the one for gore "
+                f"{gore}; mark it before the envelope is assembled"
+            ]
+            for m in marks:
+                notes += [n for n in m.notes if n not in notes]
+            files.append(
+                TemplateFile(
+                    f"{stem}-panel-{letter}-gore-{gore}.pdf",
+                    f"panel {letter} of gore {gore}, marked for {', '.join(shapes)}",
+                    [
+                        TemplatePage(
+                            row,
+                            f"PANEL {letter} - GORE {gore}",
+                            [_overlay(m) for m in marks],
+                            notes,
+                        )
+                    ],
+                )
+            )
     for s in sheets:
         if s.kind == "parachute panel":
             files.append(
@@ -228,12 +254,16 @@ def dimensions(sheet: Sheet) -> list[tuple[str, float]]:
     return out
 
 
-def write_template_pdf(tfile: TemplateFile, path: str | Path, roll_width: float) -> list[str]:
-    """Write one template file; returns the ``%PAGE`` line of every page written."""
+def write_template_pdf(
+    tfile: TemplateFile, path: str | Path, roll_width: float
+) -> list[dict[str, object]]:
+    """Write one template file; returns a record of every page written (sheet, band,
+    bands, turned, markings drawn over it). Sheet names are free text (a shape called
+    "left ear"), so the records are kept as data, never parsed back from the page."""
     from envelopelab.report.pdf import PdfCanvas
 
     canvas: PdfCanvas | None = None
-    written: list[str] = []
+    written: list[dict[str, object]] = []
     for tpage in tfile.pages:
         sheet = tpage.sheet
         lay = layout(sheet, roll_width)
@@ -261,7 +291,15 @@ def write_template_pdf(tfile: TemplateFile, path: str | Path, roll_width: float)
             over = ",".join(o.source for o in tpage.overlays if o.source) or "-"
             line = f"PAGE {sheet.name} {k + 1} {len(lay.bands)} {90 if lay.turned else 0} {over}"
             canvas.comment(line)
-            written.append(line)
+            written.append(
+                {
+                    "sheet": sheet.name,
+                    "band": k + 1,
+                    "bands": len(lay.bands),
+                    "turned": lay.turned,
+                    "markings": [o.source for o in tpage.overlays if o.source],
+                }
+            )
             _draw_page(canvas, tpage, p, size, k, len(lay.bands))
             if oversize(sheet, roll_width):
                 u = min(max(min(size) / 400.0, 1.0), 12.0)

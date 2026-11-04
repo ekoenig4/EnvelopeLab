@@ -1323,7 +1323,8 @@ class View3DPanel(QWidget):
         if key is None or record is None or session is None:
             return None
         layer = self.layers[key]
-        fields = self.part_fields.get(key, {})
+        # A shape solved with another run than the chosen one still has its own fields.
+        fields = self.part_fields.get(key) or self._fields_of(key)[0]
         failing: list[str] = []
         lows: list[float] = []
         shape = key.startswith("shape-sim:")
@@ -1341,7 +1342,9 @@ class View3DPanel(QWidget):
             finite = field.values[np.isfinite(field.values)]
             if finite.size:
                 lows.append(float(finite.min()))
-        verified = any(
+        # CalculiX verifies the envelope model only; a special shape's simulation is a
+        # preview sub-model and is never shown as verified.
+        verified = not shape and any(
             r.solver == "calculix" and r.converged and session.run_status(r) == "current"
             for r in session.project.runs
         )

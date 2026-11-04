@@ -98,6 +98,12 @@ DOCUMENTS: dict[str, DocumentSpec] = {
         "REF",
         "Build log: sign-off sheets (PDF)",
     ),
+    "assembly": DocumentSpec(
+        (),
+        "LAYOUT & PLANNING",
+        "REF",
+        "Picture assembly instructions: base envelope and each special shape (PDF)",
+    ),
     "appendages": DocumentSpec(
         (),
         "APPENDAGES",

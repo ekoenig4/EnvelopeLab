@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import QByteArray, QSettings, Qt, QTimer
 from PySide6.QtGui import QAction, QActionGroup, QCloseEvent, QKeySequence
@@ -862,23 +863,27 @@ class MainWindow(QMainWindow):
         """
         from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH, PackExtras
         from envelopelab.export.documents import DOCUMENTS, provenance
-        from envelopelab_app.pack_scene import scene_from_view, status_line
+        from envelopelab_app.pack_scene import scene_from_view, shape_scenes_from_view, status_line
 
         session = self.controller.session
         if session is None or session.design.gores is None:
             return None
         chosen = frozenset(DOCUMENTS) if include is None else include
         scene = None
+        shape_scenes: dict[str, Any] = {}
         if "viewer" in chosen:
-            if self.view3d.refresher.dirty:  # hidden since the last change: bring it up to date
-                self.view3d.refresher.run()
+            # The view may never have been shown (or not since the last change): build its
+            # layers from the current state before taking the scene from it.
+            self.view3d.refresher.run()
             scene = self.controller.attempt(scene_from_view, self.view3d)
+            shape_scenes = self.controller.attempt(shape_scenes_from_view, self.view3d) or {}
             if scene is None:
                 return None
         extras = PackExtras(
             include=chosen,
             outputs=self.controller.outputs,
             scene=scene,
+            shape_scenes=shape_scenes,
             provenance=provenance(
                 session.content_hash(), session.path.name if session.path else ""
             ),

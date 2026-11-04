@@ -97,3 +97,20 @@ def test_export_after_a_run_colours_the_result_and_keeps_its_status(
     run = next(m for m in scene["meshes"] if m["role"] == "result")
     assert run["colorings"] == {} and "stale" in run["note"]
     assert scene["status"]["kind"] == "stale"
+
+
+def test_each_special_shape_gets_its_own_3d_page(gore_window: MainWindow, tmp_path: Path) -> None:
+    from envelopelab.export.templates import slug
+
+    w = gore_window
+    assert w.shapes.add_shape("dome") == "Dome"
+    assert w.controller.shapes.wait(120_000)
+    design = w.controller.design
+    assert design is not None
+    stem = slug(design.meta.name)
+    assert w.export_build_pack(tmp_path / "pack") is not None
+    assert check_pack(tmp_path / "pack") == []
+    page = read_scene(tmp_path / "pack" / f"{stem}-Dome-3d.html")
+    assert [m["key"] for m in page["meshes"]] == ["shape:Dome"]
+    assert page["status"]["title"] == "Not simulated."  # no metrics without a simulation
+    assert (tmp_path / "pack" / f"{stem}-assembly-Dome.pdf").is_file()

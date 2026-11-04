@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: exporting a build pack failed when a special shape's name had a space
+  ("too many values to unpack"); the export's 3D page showed the design only when the 3D
+  view had not been opened since the last change; a special shape's preview simulation
+  was labelled verified when the envelope had a current CalculiX run (CalculiX verifies
+  the envelope only).
+- Added: a marked sheet per envelope panel that carries a shape or a feed hole
+  (`<name>-panel-H-gore-3.pdf`; the row sheets are now clean), picture assembly
+  instructions for the base envelope and each special shape
+  (`<name>-assembly-*.pdf`), and a 3D page per special shape with its simulation's
+  metrics (`<name>-<shape>-3d.html`).
 - Changed: every piece of a build pack has its own 1:1 PDF, one page showing the whole
   piece (ADR-0038): `<name>-panel-A.pdf` per envelope row, `<name>-parachute-panel.pdf`
   and `-parachute-centre.pdf`, and `<name>-<shape>-<piece>.pdf` for every special-shape
