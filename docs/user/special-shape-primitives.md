@@ -336,7 +336,7 @@ The pack contains:
   meets it, and each piece's name between the two ticks its top is sewn between;
 * the 1:1 templates: the envelope rows (a row that carries a shape on its own sheet, with
   every gore's marks over the one panel, labelled by gore) and each shape's skin pieces
-  (`<name>-<shape>-patterns.pdf`, one piece per page), each page as large as its piece
+  (`<name>-<shape>-<piece>.pdf`, one PDF per piece), each page showing the whole piece
   with one side within your fabric roll;
 * `cad/`: one DXF per sheet and `index.json`, with every file, piece, cut count, fabric,
   finished size, and which edges are sewn together.

@@ -103,31 +103,42 @@ def test_calibration_label_comes_from_the_drawn_length() -> None:
     assert calibration_label(0.5, 0.1) == "must measure 500 mm at 1:1, ticks every 100 mm"
 
 
-def test_templates_draw_every_sheet_with_one_side_within_the_roll(pack: Path) -> None:
+def test_every_piece_has_its_own_whole_page_pdf(pack: Path) -> None:
     from envelopelab.export.qa import _page_boxes
 
     index = json.loads((pack / "cad" / "index.json").read_text(encoding="utf-8"))
     roll = 60 * 0.0254 * PT_PER_M
-    total = 0
+    cut = [s for s in index["sheets"] if s["kind"] != "marking"]
+    # One file per piece, one page per file, never split.
+    assert len(index["templates"]) == len(cut)
     for t in index["templates"]:
-        pages = _page_boxes(pack / t["file"])
-        assert len(pages) == len(t["pages"])
-        total += len(pages)
-        for w, h, content in pages:
-            assert min(w, h) <= roll + 1.0
-            assert "%CAL " in content and "%CALV " in content
-    # The rows of this sample are 3.5 m tall and up to 4.2 m wide: neither side fits the
-    # roll, so each is split into bands across the roll.
-    row = next(
-        t for t in index["templates"] for pg in t["pages"] if pg["sheet"] == "envelope-row-C"
-    )
-    bands = [pg for pg in row["pages"] if pg["sheet"] == "envelope-row-C"]
-    assert len(bands) == math.ceil((3.513 + 0.04 + 0.05) / 1.524)
-    # Rows that carry a shape's markings get their own sheet, with every gore's marks.
+        assert len(t["pages"]) == 1 and t["pages"][0]["bands"] == 1
+        ((w, h, content),) = _page_boxes(pack / t["file"])
+        assert "%CAL " in content and "%CALV " in content
+        # One side within the roll, or the page says the piece is larger than the roll.
+        assert min(w, h) <= roll + 1.0 or "LARGER THAN THE" in content
+    # The page holds the whole piece: as large as its cut outline plus the margins.
+    entry = next(t for t in index["templates"] if t["file"].endswith("-panel-C.pdf"))
+    ((w, h, _c),) = _page_boxes(pack / entry["file"])
+    row = next(s for s in index["sheets"] if s["file"] == "cad/envelope-row-C.dxf")
+    assert max(w, h) / PT_PER_M * 1000 >= row["finished_height_mm"]
+    assert max(w, h) / PT_PER_M * 1000 >= row["finished_width_mm"]
+    # Rows that carry a shape's markings show every gore's marks over the one panel.
     marked = next(t for t in index["templates"] if t["file"].endswith("-panel-D.pdf"))
     assert set(marked["pages"][0]["markings"]) >= {"ear-mark-G3-D", "ear-mark-G4-D"}
-    assert any(t["file"].endswith("-panels-grouped.pdf") for t in index["templates"])
-    assert any(t["file"].endswith("-ear-patterns.pdf") for t in index["templates"])
+    # Every special-shape skin piece is a cutting sheet of its own.
+    names = {t["file"].split("generic-", 1)[1] for t in index["templates"]}
+    assert {f"ear-G{k}.pdf" for k in range(1, 17)} <= names
+    assert {"horn-P1.pdf", "horn-TIP.pdf", "parachute-panel.pdf"} <= names
+
+
+def test_qa_catches_a_piece_split_over_pages(pack: Path, tmp_path: Path) -> None:
+    p = _copy(pack, tmp_path)
+    index_path = p / "cad" / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["templates"][0]["pages"][0]["bands"] = 2
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    assert "template" in {f.check for f in check_pack(p)}
 
 
 def test_qa_catches_missing_and_unlisted_files(pack: Path, tmp_path: Path) -> None:

@@ -6,27 +6,26 @@ format 3 (`envelopelab-build-pack/3`, ADR-0037) its top level is laid out as a s
 works, with every file named after the design (`<slug>` = the design name in lower
 case, words joined by hyphens), and the machine-readable files are in `cad/`.
 
-**1:1 templates** (`envelopelab.export.templates`), at the top level:
+**1:1 templates** (`envelopelab.export.templates`), at the top level: **one PDF per piece,
+one page each** (ADR-0038):
 
 | File | Content |
 |---|---|
-| `<slug>-panels-<R1>-<R2>.pdf` | Envelope rows without shape markings, two to a file (an odd one out joins the file before it: `-panels-O-P-Q.pdf`), one panel per page |
-| `<slug>-panel-<R>.pdf` | A row that carries a shape's markings, on its own sheet: the panel with every gore's footprint lines, match marks, side ticks and feed holes drawn over it, each labelled `<shape> - GORE <g>` |
-| `<slug>-panels-grouped.pdf` | Every paired file in one |
-| `<slug>-parachute-patterns.pdf` | Parachute radial panel and centre panel |
-| `<slug>-<shape>-patterns.pdf` | A special shape's skin pieces, one per page |
+| `<slug>-panel-<R>.pdf` | Envelope row `R`, cut once per gore. A row that carries a shape's markings has every gore's footprint lines, match marks, side ticks and feed holes drawn over the one panel, each labelled `<shape> - GORE <g>` |
+| `<slug>-parachute-panel.pdf`, `<slug>-parachute-centre.pdf` | The parachute radial panel and centre panel |
+| `<slug>-<shape>-<piece>.pdf` | Every skin piece of every special shape (e.g. `<slug>-eye-G1.pdf`, `<slug>-horn-TIP.pdf`) |
 
-Every page is one piece at 1:1, as large as the piece plus 20 mm, with **one side no
-longer than the roll**: upright when its height fits the roll (the row height across the
-bolt, the gore width along the roll), turned a quarter when only its width fits, and
-split into numbered bands across the roll when neither does. A page shows the cut line
-(solid black), the sewn line (dotted grey), feature marks (red), the finished widths and
-height (blue), the panel letter, cut count, fabric and finished size, the warp (UP)
-arrow, a legend, the sheet header (as in the DXF) and two calibration lines, across and
-along the page, all inside the piece. Each page's stream starts with
-`%PAGE <sheet> <band> <bands> <turn> <marking sheets>`; each calibration line is preceded
-by `%CAL L T` (across) or `%CALV L T` (along), and its label (`must measure L mm at 1:1,
-ticks every T mm`, `along: …`) is generated from the same values.
+The page is the piece's cut outline plus 20 mm, so the **whole piece is on one page,
+never split**: upright when its height fits the roll (the row height across the bolt, the
+gore width along the roll), turned a quarter when only its width fits; a piece larger
+than the roll both ways stays whole and the page says `LARGER THAN THE … MM ROLL BOTH
+WAYS` in red. A page shows the cut line (solid black), the sewn line (dotted grey),
+feature marks (red), the finished widths and height (blue), the panel letter, cut count,
+fabric and finished size, the warp (UP) arrow, a legend, the sheet header (as in the DXF)
+and two calibration lines, across and along the page, inside the piece. Each page's
+stream starts with `%PAGE <sheet> 1 1 <turn> <marking sheets>`; each calibration line is
+preceded by `%CAL L T` (across) or `%CALV L T` (along), and its label (`must measure L mm
+at 1:1, ticks every T mm`, `along: …`) is generated from the same values.
 
 **`cad/`**:
 
@@ -132,7 +131,7 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
   "provenance": {"app_version": "0.1.0", "git_commit": "2753321…", "design_hash": "…",
                  "created": "2026-11-03T20:56:43+00:00", "project": "balloon.elproj"},
   "templates": [
-    {"file": "sample-panels-A-B.pdf", "description": "panels A, B",
+    {"file": "sample-panel-A.pdf", "description": "panel A, cut 20",
      "pages": [{"sheet": "envelope-row-A", "band": 1, "bands": 1, "turned": false,
                 "markings": []}, "…"]}
   ],
@@ -168,9 +167,10 @@ marks (checked per mark interval when the shape is designed).
 `envelopelab.export.qa.check_pack` checks a pack from its files alone (AGENTS.md §6.6):
 the index and the directory list the same files; every DXF is in mm; every calibration
 line, in every DXF and on every template page (across and along), measures what its
-label says; every template page is listed with its sheet and has one side no longer than
-the roll (formats 1 and 2: every `pattern.pdf` page is as wide as the roll); every sheet
-is drawn on a template page (a marking sheet over its row's panel); every header matches the index and the drawn `SEW` outline; every
+label says; every piece is on one page of its own file, never split, listed with its
+sheet, with one side no longer than the roll or the red larger-than-the-roll note
+(formats 1 and 2: every `pattern.pdf` page is as wide as the roll); every sheet is drawn
+exactly once (a marking sheet over its row's panel); every header matches the index and the drawn `SEW` outline; every
 document opens (PDFs have pages, HTML pages load nothing from outside themselves, combined
 DXFs are in mm, previews are PNG images), the
 panel dimensions list every envelope panel with the index's cut count and fabric, and the

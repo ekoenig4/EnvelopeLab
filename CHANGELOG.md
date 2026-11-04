@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: every piece of a build pack has its own 1:1 PDF, one page showing the whole
+  piece (ADR-0038): `<name>-panel-A.pdf` per envelope row, `<name>-parachute-panel.pdf`
+  and `-parachute-centre.pdf`, and `<name>-<shape>-<piece>.pdf` for every special-shape
+  skin piece. No more pair files, grouped file, per-shape pattern files or pages split
+  into bands; a piece larger than the roll both ways stays whole and its page says so.
 - Changed: the build pack's 3D page opens in a realistic look, like the builder's pack:
   fabric colours (the inflated envelope in its zones' fabrics), smooth shading with sun,
   sky and ground light, a sky-and-ground background, and a basket under the flying

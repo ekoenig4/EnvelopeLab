@@ -151,6 +151,15 @@ class PackContext:
     slug: str = "design"
     files: list[FileEntry] = field(default_factory=list)
 
+    def shape_pieces(self, shape: str) -> str:
+        """The template files of a special shape's skin pieces, as a range in words."""
+        from envelopelab.export.templates import shape_piece_files
+
+        names = shape_piece_files(self.design.meta.name, self.sheets, shape)
+        if not names:
+            return "(no skin pieces)"
+        return names[0] if len(names) == 1 else f"{names[0]} ... {names[-1]}"
+
     def file(self, suffix: str) -> str:
         """The pack file name ``<slug>-<suffix>``."""
         return f"{self.slug}-{suffix}"
@@ -168,8 +177,6 @@ class PackContext:
     def template_for(self, sheet_name: str) -> str:
         """The template file that draws ``sheet_name`` ("" when none)."""
         for t in self.templates:
-            if t.grouped and t.name.endswith("-panels-grouped.pdf"):
-                continue
             if any(p.sheet.name == sheet_name for p in t.pages):
                 return t.name
         return ""
@@ -350,7 +357,7 @@ def build_order(ctx: PackContext) -> list[tuple[str, str]]:
             (
                 f"{name.upper()} SKIN",
                 f"Cut the {len(p.pieces)} skin pieces 1:1 from "
-                f"{ctx.file(f'{_slug(name)}-patterns.pdf')} and sew them into the skin "
+                f"{ctx.shape_pieces(name)} and sew them into the skin "
                 "(seams in the sewing schedule).",
             )
         )
@@ -853,7 +860,10 @@ def build_log_sheets(ctx: PackContext) -> list[tuple[str, str, list[tuple[str, s
     for p in ctx.primitives:
         gores, rows = shape_rows(p)
         items = [
-            (f"{c.label} cut", f"from {ctx.file(_slug(p.primitive.name) + '-patterns.pdf')}")
+            (
+                f"{c.label} cut",
+                f"from {ctx.template_for(c.label) or ctx.shape_pieces(p.primitive.name)}",
+            )
             for c in p.pieces
         ]
         items += [

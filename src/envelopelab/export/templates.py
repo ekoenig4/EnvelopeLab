@@ -1,21 +1,18 @@
-"""1:1 pattern templates of a build pack (PDF), laid out as a builder cuts them.
+"""1:1 pattern templates of a build pack (PDF): one file per piece, one page per file.
 
-The cutting sheets of :mod:`envelopelab.export.build_pack` are grouped into template
-files the way a shop works:
+Every piece to cut gets its own PDF, as a builder cuts them (ADR-0038):
 
-* **envelope panels**: rows without special-shape markings two to a file
-  (``<slug>-panels-A-B.pdf``; an odd one out joins the file before it), and every row
-  that carries markings on its own sheet (``<slug>-panel-D.pdf``). One panel is cut per
-  gore, so a row's marking sheets are drawn over that single panel, each labelled with
-  its gore;
-* ``<slug>-panels-grouped.pdf``: every paired file in one;
-* ``<slug>-parachute-patterns.pdf``: the parachute's radial and centre panels;
-* ``<slug>-<shape>-patterns.pdf``: one skin piece of a special shape per page.
+* ``<slug>-panel-<R>.pdf``: envelope row ``R`` (cut once per gore). A row that carries a
+  special shape's markings has every gore's footprint lines, match marks, side ticks and
+  feed holes drawn over the one panel, each labelled with its shape and gore;
+* ``<slug>-parachute-panel.pdf``, ``<slug>-parachute-centre.pdf``: the parachute pieces;
+* ``<slug>-<shape>-<piece>.pdf``: every skin piece of every special shape.
 
-Every page is one piece at 1:1, as large as the piece (plus margins), with **one side no
-longer than the fabric roll**: drawn upright when its height fits the roll (the row
-height runs across the bolt and the gore width along the roll), turned a quarter when
-only its width fits, and split into numbered bands across the roll when neither does.
+The page is exactly the piece at 1:1 plus a 20 mm margin, so the **whole piece is always
+on one page**, never split. It is upright when its height fits the roll (the row height
+runs across the bolt, the gore width along the roll) and turned a quarter when only its
+width fits; a piece larger than the roll both ways stays whole and its page says so in
+red (it has to be cut from joined cloth or plotted in parts).
 
 A page shows the cut outline (solid), the sewn outline (dotted), feature marks in red
 (footprint lines, match marks, feed holes, side ticks), the finished widths and height in
@@ -23,7 +20,7 @@ blue, the panel letter, cut count, fabric and finished size, the warp (UP) arrow
 legend, and two calibration lines, across and along the page. Their labels are generated
 from the lengths that draw them; each line is preceded by a ``%CAL L T`` or ``%CALV L T``
 comment in the page stream so that :mod:`envelopelab.export.qa` can measure it, and each
-page by ``%PAGE <sheet> <band> <count> <turn> <marking sheets drawn over it>``.
+page by ``%PAGE <sheet> 1 1 <turn> <marking sheets drawn over it>``.
 """
 
 from __future__ import annotations
@@ -49,6 +46,11 @@ BLACK = (0.0, 0.0, 0.0)
 GREY = (0.35, 0.38, 0.42)
 RED = (0.8, 0.1, 0.1)
 BLUE = (0.11, 0.37, 0.71)
+
+
+def piece_name(name: str) -> str:
+    """A sheet name as it appears in a file name (letters kept as they are: ``eye-G1``)."""
+    return re.sub(r"[^A-Za-z0-9]+", "-", name).strip("-") or "piece"
 
 
 def slug(name: str) -> str:
@@ -87,7 +89,6 @@ class TemplateFile:
     name: str
     description: str
     pages: list[TemplatePage]
-    grouped: bool = False
 
 
 def _letter(sheet: Sheet) -> str:
@@ -126,7 +127,6 @@ def template_files(name: str, sheets: Sequence[Sheet]) -> list[TemplateFile]:
         if s.kind == "marking":
             markings.setdefault(s.name.rsplit("-", 1)[1], []).append(s)
     files: list[TemplateFile] = []
-    run: list[Sheet] = []
 
     def page(row: Sheet) -> TemplatePage:
         marks = markings.get(_letter(row), [])
@@ -135,58 +135,43 @@ def template_files(name: str, sheets: Sequence[Sheet]) -> list[TemplateFile]:
             notes += [n for n in m.notes if n not in notes]
         return TemplatePage(row, f"PANEL {_letter(row)}", [_overlay(m) for m in marks], notes)
 
-    def flush() -> None:
-        chunks = [run[i : i + 2] for i in range(0, len(run), 2)]
-        if len(chunks) > 1 and len(chunks[-1]) == 1:
-            last = chunks.pop()
-            chunks[-1] = chunks[-1] + last
-        for chunk in chunks:
-            letters = [_letter(r) for r in chunk]
-            if len(chunk) == 1:
-                fname, what = f"{stem}-panel-{letters[0]}.pdf", f"panel {letters[0]}"
-            else:
-                fname = f"{stem}-panels-{'-'.join(letters)}.pdf"
-                what = "panels " + ", ".join(letters)
-            files.append(TemplateFile(fname, what, [page(r) for r in chunk], grouped=True))
-        run.clear()
-
     for row in rows:
-        if _letter(row) in markings:
-            flush()
-            letter = _letter(row)
-            marked = sorted({m.name.split("-mark-")[0] for m in markings[letter]})
+        letter = _letter(row)
+        marked = sorted({m.name.split("-mark-")[0] for m in markings.get(letter, [])})
+        what = f"panel {letter}, cut {row.cut_count}" + (
+            f", marked for {', '.join(marked)}" if marked else ""
+        )
+        files.append(TemplateFile(f"{stem}-panel-{letter}.pdf", what, [page(row)]))
+    for s in sheets:
+        if s.kind == "parachute panel":
             files.append(
                 TemplateFile(
-                    f"{stem}-panel-{letter}.pdf",
-                    f"panel {letter}, marked for {', '.join(marked)}",
-                    [page(row)],
+                    f"{stem}-{piece_name(s.name)}.pdf",
+                    f"{s.piece}, cut {s.cut_count}",
+                    [TemplatePage(s, s.piece.upper())],
                 )
             )
-        else:
-            run.append(row)
-    flush()
-    chute = [s for s in sheets if s.kind == "parachute panel"]
-    if chute:
-        files.append(
-            TemplateFile(
-                f"{stem}-parachute-patterns.pdf",
-                "parachute radial panel" + (" and centre panel" if len(chute) > 1 else ""),
-                [TemplatePage(s, s.piece.upper()) for s in chute],
-            )
-        )
-    shapes: dict[str, list[Sheet]] = {}
     for s in sheets:
         if s.kind == "skin piece":
-            shapes.setdefault(s.name.rsplit("-", 1)[0], []).append(s)
-    for shape, pieces in shapes.items():
-        files.append(
-            TemplateFile(
-                f"{stem}-{slug(shape)}-patterns.pdf",
-                f"special shape {shape}: {len(pieces)} skin pieces, one per page",
-                [TemplatePage(s, s.piece.upper()) for s in pieces],
+            shape = s.name.rsplit("-", 1)[0]
+            files.append(
+                TemplateFile(
+                    f"{stem}-{piece_name(s.name)}.pdf",
+                    f"special shape {shape}: skin piece {s.piece}, cut {s.cut_count}",
+                    [TemplatePage(s, s.piece.upper())],
+                )
             )
-        )
     return files
+
+
+def shape_piece_files(name: str, sheets: Sequence[Sheet], shape: str) -> list[str]:
+    """The template files of a special shape's skin pieces, in order."""
+    stem = slug(name)
+    return [
+        f"{stem}-{piece_name(s.name)}.pdf"
+        for s in sheets
+        if s.kind == "skin piece" and s.name.rsplit("-", 1)[0] == shape
+    ]
 
 
 def calibration(length_available: float) -> tuple[float, float]:
@@ -211,18 +196,22 @@ class PageLayout:
 
 
 def layout(sheet: Sheet, roll_width: float) -> PageLayout:
-    """The page layout of ``sheet`` on a roll ``roll_width`` m wide (module docstring)."""
+    """The page of ``sheet`` on a roll ``roll_width`` m wide (module docstring): always
+    the whole piece on one page, upright when its height fits the roll, turned a quarter
+    when only its width fits, and upright (marked as larger than the roll) otherwise."""
     lo, hi = sheet.cut.min(axis=0), sheet.cut.max(axis=0)
     w = float(hi[0] - lo[0]) + 2 * MARGIN
     h = float(hi[1] - lo[1]) + 2 * MARGIN
-    if h <= roll_width:
-        return PageLayout(False, [(float(lo[1]) - MARGIN, float(hi[1]) + MARGIN)], w, h)
-    if w <= roll_width:
+    if h > roll_width and w <= roll_width:
         return PageLayout(True, [(float(lo[0]) - MARGIN, float(hi[0]) + MARGIN)], h, w)
-    y0, y1 = float(lo[1]) - MARGIN, float(hi[1]) + MARGIN
-    count = max(1, math.ceil((y1 - y0) / roll_width - 1e-9))
-    step = (y1 - y0) / count
-    return PageLayout(False, [(y0 + k * step, y0 + (k + 1) * step) for k in range(count)], w, step)
+    return PageLayout(False, [(float(lo[1]) - MARGIN, float(hi[1]) + MARGIN)], w, h)
+
+
+def oversize(sheet: Sheet, roll_width: float) -> bool:
+    """True when a piece is larger than the roll both ways (it cannot be cut from one
+    width of cloth; its page says so)."""
+    span = sheet.cut.max(axis=0) - sheet.cut.min(axis=0) + 2 * MARGIN
+    return bool(min(span) > roll_width)
 
 
 def _edge_length(points: FloatArray) -> float:
@@ -274,6 +263,13 @@ def write_template_pdf(tfile: TemplateFile, path: str | Path, roll_width: float)
             canvas.comment(line)
             written.append(line)
             _draw_page(canvas, tpage, p, size, k, len(lay.bands))
+            if oversize(sheet, roll_width):
+                u = min(max(min(size) / 400.0, 1.0), 12.0)
+                warn = (
+                    f"LARGER THAN THE {roll_width * 1000:.0f} MM ROLL BOTH WAYS - join cloth "
+                    "before cutting, or plot this sheet in parts"
+                )
+                canvas.text(10 * u, 8 * u, warn, size=4 * u, bold=True, color=RED)
     if canvas is None:
         raise ValueError(f"template {tfile.name} has no pages")
     canvas.save(path)

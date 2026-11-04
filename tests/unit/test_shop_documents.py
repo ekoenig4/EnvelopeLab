@@ -52,12 +52,12 @@ def pack(tmp_path_factory: pytest.TempPathFactory) -> Path:
 def test_index_spec_and_log_are_written_on_their_page_sizes(pack: Path) -> None:
     assert check_pack(pack) == []
     index = _page_boxes(pack / "shop-sample-00-BUILD-PACK-INDEX.pdf")
-    assert len(index) == 3
+    assert len(index) >= 3  # specs; file index (one line per piece, may run on); build order
     assert all(abs(w - A3_LANDSCAPE[0]) < 1 and abs(h - A3_LANDSCAPE[1]) < 1 for w, h, _ in index)
     text = "".join(c for _w, _h, c in index)
     for heading in ("BUILD PACK", "FEATURES", "SHOP LIMITS", "FILE INDEX", "BUILD ORDER"):
         assert heading in text
-    assert "shop-sample-panel-" in text and "shop-sample-eye-patterns.pdf" in text
+    assert "shop-sample-panel-" in text and "shop-sample-eye-G1.pdf" in text
     spec = _page_boxes(pack / "shop-sample-spec-summary.pdf")
     assert abs(spec[0][0] - A4_LANDSCAPE[0]) < 1
     assert "METRIC" in spec[0][2] and "ENGLISH" in spec[0][2]

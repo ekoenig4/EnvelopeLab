@@ -3,9 +3,10 @@
 :func:`check_pack` reads a pack written by :mod:`envelopelab.export.build_pack` and checks:
 
 * every file in ``index.json`` exists and every file in the directory is listed;
-* format 3: every template page is listed with its sheet, has one side no longer than the
-  roll, and carries both calibration lines (across and along), each measuring what its
-  label says; every sheet is drawn on a template page;
+* format 3: every piece is on one page of its own file (never split), listed with its
+  sheet; the page has one side no longer than the roll, or says in red that the piece
+  is larger than the roll both ways; it carries both calibration lines (across and
+  along), each measuring what its label says; every sheet is drawn exactly once;
 * every DXF declares millimetres (``$INSUNITS`` = 4);
 * every calibration line (DXF layer ``CAL`` and every PDF page) measures what its label
   says, measured from the drawn geometry, and the label was generated from the same
@@ -307,8 +308,9 @@ def _check_cal_vertical(name: str, page: int, content: str) -> list[QAFinding]:
 
 
 def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> list[QAFinding]:
-    """Template files (format 3): pages as listed, one side within the roll, both
-    calibration lines measured, every sheet drawn."""
+    """Template files (format 3): one page per piece, listed, one side within the roll
+    (or marked as larger than the roll both ways), both calibration lines measured, every
+    sheet drawn once."""
     findings: list[QAFinding] = []
     templates = index.get("templates", [])
     if not templates:
@@ -328,9 +330,15 @@ def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> li
             want = f"%PAGE {entry['sheet']} {entry['band']} {entry['bands']} "
             if want not in content:
                 findings.append(QAFinding(name, "template", f"page {k}: not {entry['sheet']}"))
+            if entry["sheet"] in drawn:
+                findings.append(QAFinding(name, "template", f"{entry['sheet']} on more pages"))
             drawn.add(entry["sheet"])
             drawn.update(entry.get("markings", []))
-            if min(w, h) > roll_pt + 1.0:
+            if int(entry.get("bands", 1)) != 1:
+                findings.append(QAFinding(name, "template", f"page {k}: piece split over pages"))
+            # A piece larger than the roll both ways stays whole on its page, which must
+            # then say so; any other page has one side within the roll.
+            if min(w, h) > roll_pt + 1.0 and "LARGER THAN THE" not in content:
                 findings.append(
                     QAFinding(
                         name, "page size", f"page {k}: {w:.0f} x {h:.0f} pt, roll {roll_pt:.0f} pt"

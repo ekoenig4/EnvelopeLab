@@ -18,7 +18,7 @@ which of its gores carry a marking sheet or a feed hole.
 
 Each sheet is written as a DXF file in millimetres (``$INSUNITS`` = 4) in the pack's
 ``cad/`` folder, and at 1:1 on the template PDFs at the top of the pack
-(:mod:`envelopelab.export.templates`: grouped as a shop cuts them, each page as large
+(:mod:`envelopelab.export.templates`: one PDF per piece, each page as large
 as its piece with one side no longer than the fabric roll). ``cad/index.json`` lists
 every file with its piece, cut count, fabric and finished size, the template pages, and
 the pairs of edges that are sewn together. :func:`envelopelab.export.qa.check_pack` checks
@@ -788,7 +788,7 @@ def write_pack(
     Path
         The index file (``cad/index.json``).
     """
-    from envelopelab.export.templates import TemplateFile, template_files, write_template_pdf
+    from envelopelab.export.templates import template_files, write_template_pdf
 
     names = [s.name for s in sheets]
     if len(set(names)) != len(names):
@@ -816,15 +816,6 @@ def write_pack(
             }
         )
     files = template_files(title, sheets)
-    grouped = [page for f in files if f.grouped for page in f.pages]
-    if len(grouped) > 1 and sum(f.grouped for f in files) > 1:
-        from envelopelab.export.templates import slug
-
-        files.append(
-            TemplateFile(
-                f"{slug(title)}-panels-grouped.pdf", "every paired panel sheet in one file", grouped
-            )
-        )
     templates = []
     for tfile in files:
         pages = write_template_pdf(tfile, out / tfile.name, roll_width)
@@ -1107,24 +1098,14 @@ def write_documents(
         index_name = docs.document_files(stem, "index")[0]
         files = [FileEntry(index_name, *docs.document_description(index_name, stem)[1:])]
         files += [FileEntry(path.name, group, tag, what) for path, _k, group, tag, what in written]
-        grouped = [t for t in templates if t.grouped]
+        groups = {
+            "envelope panel": "PANEL TEMPLATES",
+            "parachute panel": "TOP & BOTTOM / CAD",
+            "skin piece": "APPENDAGES",
+        }
         for t in templates:
-            if t in grouped or (t.pages and t.pages[0].sheet.kind == "envelope panel"):
-                group = "PANEL TEMPLATES"
-            elif t.name.endswith("-parachute-patterns.pdf"):
-                group = "TOP & BOTTOM / CAD"
-            else:
-                group = "APPENDAGES"
+            group = groups.get(t.pages[0].sheet.kind, "PANEL TEMPLATES")
             files.append(FileEntry(t.name, group, "1:1", t.description))
-        if len(grouped) > 1:
-            files.append(
-                FileEntry(
-                    f"{stem}-panels-grouped.pdf",
-                    "PANEL TEMPLATES",
-                    "1:1",
-                    "all paired panel sheets in one file",
-                )
-            )
         files.append(
             FileEntry(
                 f"{CAD_DIR}/", "TOP & BOTTOM / CAD", "CAD", "one DXF per piece (mm), index.json"

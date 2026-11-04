@@ -46,12 +46,12 @@ NOTE_LINES = 3  # blank builder-notes lines per build step
 
 
 def shape_files(ctx: PackContext, p: PrimitiveDesign) -> tuple[str, str, str]:
-    """(spec, build, patterns) file names of a special shape."""
+    """(spec, build) file names of a special shape, and its skin-piece sheets in words."""
     stem = _slug(p.primitive.name)
     return (
         ctx.file(f"{stem}.pdf"),
         ctx.file(f"{stem}-build.pdf"),
-        ctx.file(f"{stem}-patterns.pdf"),
+        ctx.shape_pieces(p.primitive.name),
     )
 
 
@@ -90,7 +90,7 @@ def write_shape_spec(ctx: PackContext, p: PrimitiveDesign, path: Path) -> Path:
                 str(c.cut_count),
                 f"{c.size[0] * 1000:.0f} x {c.size[1] * 1000:.0f}",
                 f"{c.surface_area:.3f}",
-                shape_files(ctx, p)[2],
+                ctx.template_for(c.label),
             ]
             for c in p.pieces
         ],
@@ -359,7 +359,10 @@ def write_parachute(ctx: PackContext, path: Path) -> Path:
     doc.title(
         "PARACHUTE - PATTERN DATA & RIGGING",
         "",
-        f"cut from {ctx.file('parachute-patterns.pdf')}" if pr is not None else "no parachute",
+        f"cut from {ctx.file('parachute-panel.pdf')}"
+        + (f" and {ctx.file('parachute-centre.pdf')}" if pr is not None and pr.centre_panel else "")
+        if pr is not None
+        else "no parachute",
     )
     rows = [
         (

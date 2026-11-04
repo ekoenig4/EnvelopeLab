@@ -126,8 +126,9 @@ can be reproduced.
 - Each 1:1 sheet's calibration line is measured from the exported geometry. Its label
   (e.g., "must measure 500 mm at 1:1, ticks every 100 mm") must be generated from the same
   value, never typed as text.
-- DXF units are set and correct. Every 1:1 PDF page has one side no longer than the target
-  roll width (e.g., 60 in), so it prints on that roll (ADR-0037).
+- DXF units are set and correct. Every piece has its own 1:1 PDF, one page showing the
+  whole piece; that page has one side no longer than the target roll width (e.g., 60 in),
+  or says on the page that the piece is larger than the roll both ways (ADR-0038).
 - Sewn edge pairs match in length within tolerance (default 3 mm).
 - Every file in the pack's index exists, and every file is listed in the index.
 - Each sheet header (panel, cut count, fabric, finished size) matches the design data.

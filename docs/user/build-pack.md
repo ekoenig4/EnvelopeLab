@@ -9,10 +9,11 @@ panel); the pack format is described in [Build pack](../formats/build-pack.md).
 
 * **Folder**: where the pack is written (created if needed; files of the same names are
   replaced). The last folder is remembered.
-* **Roll width**: the width of your fabric roll (default 60 in). Every 1:1 page is as
-  large as its piece with one side no longer than the roll: the row height runs across
-  the bolt and the gore width along the roll. A piece larger than the roll both ways is
-  split into numbered bands across the roll.
+* **Roll width**: the width of your fabric roll (default 60 in). Every piece has its own
+  1:1 PDF whose one page shows the whole piece, turned so that one side fits the roll
+  (the row height runs across the bolt and the gore width along the roll). A piece
+  larger than the roll both ways is never split: its page says so in red, so you can
+  join cloth before cutting or plot it on a wider plotter.
 * **Include**: the documents (all ticked by default). The cutting sheets are always
   written.
 
@@ -26,9 +27,9 @@ it never leaves a shape out without saying so.
 | `<name>-00-BUILD-PACK-INDEX.pdf` | Start here (three A3 sheets): the key dimensions in metric and English, the features, the shop limits the pack is built to (bolt width, cutting table, largest piece), how to print; the index of every file (`REF` to read, `1:1` to print at actual size, `CAD`); and the build order, each step naming the sheet to work from |
 | `<name>-spec-summary.pdf` | The design at a glance, metric and English: size, volume, mouth, parachute hole and overlap, line lengths, lift and lift margin, configuration, rigging factors of safety, and **every value tagged *assumed*** (check these against datasheets before building) |
 | `<name>-build-log.pdf` | Sign-off sheets for the floor: panel cutting, each special shape, the turning vents, and the parachute, rigging and final inspection |
-| `<name>-panels-A-B.pdf`, `<name>-panel-D.pdf`, … | Cutting the envelope: one panel per page at 1:1, two rows to a file; a row that carries a special shape on its own sheet with every gore's marks (labelled by gore) |
-| `<name>-panels-grouped.pdf` | The paired panel files in one, for printing in one go |
-| `<name>-parachute-patterns.pdf`, `<name>-<shape>-patterns.pdf` | Cutting the parachute and each special shape's skin pieces (one per page) |
+| `<name>-panel-A.pdf`, `<name>-panel-B.pdf`, … | Cutting the envelope: one PDF per panel, the whole panel at 1:1 on one page; a row that carries a special shape shows every gore's marks on it (labelled by gore) |
+| `<name>-<shape>-G1.pdf`, … | Cutting each special shape: one PDF per skin piece, the whole piece at 1:1 |
+| `<name>-parachute-panel.pdf`, `<name>-parachute-centre.pdf` | Cutting the parachute |
 | `<name>-panels.dxf`, `<name>-panel-templates.dxf`, `<name>-appendage-patterns.dxf` (+ PNG previews) | CAD: the whole envelope developed with its features, the panels on a grid, and the appendage and parachute pieces, in mm |
 | `cad/` | One DXF per piece (mm) and `index.json`, for CAD programs and the automatic checks |
 | `<name>-layout-diagram.html` | The whole envelope as a gore x row grid in its fabric colours, with every feature located |
