@@ -308,9 +308,12 @@ def _check_cal_vertical(name: str, page: int, content: str) -> list[QAFinding]:
 
 
 def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> list[QAFinding]:
-    """Template files (format 3): one page per piece, listed, one side within the roll
-    (or marked as larger than the roll both ways), both calibration lines measured, every
-    sheet drawn once."""
+    """Template files (formats 3 and 4): one page per piece, listed, no wider than the
+    roll (format 4: the page width runs across the roll; format 3: one side within it)
+    or marked as larger than the roll, both calibration lines measured, every sheet drawn
+    once."""
+    from envelopelab.export.build_pack import PACK_FORMAT
+
     findings: list[QAFinding] = []
     templates = index.get("templates", [])
     if not templates:
@@ -337,9 +340,11 @@ def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> li
             drawn.update(entry.get("markings", []))
             if int(entry.get("bands", 1)) != 1:
                 findings.append(QAFinding(name, "template", f"page {k}: piece split over pages"))
-            # A piece larger than the roll both ways stays whole on its page, which must
-            # then say so; any other page has one side within the roll.
-            if min(w, h) > roll_pt + 1.0 and "LARGER THAN THE" not in content:
+            # A piece larger than the roll stays whole on its page, which must then say so;
+            # any other page is no wider than the roll (format 4: its width runs across
+            # the roll; format 3: one side within it).
+            across = w if index.get("format") == PACK_FORMAT else min(w, h)
+            if across > roll_pt + 1.0 and "LARGER THAN THE" not in content:
                 findings.append(
                     QAFinding(
                         name, "page size", f"page {k}: {w:.0f} x {h:.0f} pt, roll {roll_pt:.0f} pt"

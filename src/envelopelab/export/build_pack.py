@@ -65,7 +65,7 @@ if TYPE_CHECKING:
 
 MM = 1000.0  # mm per m
 PT_PER_M = 72.0 / 0.0254  # PDF points per m
-PACK_FORMAT = "envelopelab-build-pack/3"
+PACK_FORMAT = "envelopelab-build-pack/4"
 CAD_DIR = "cad"
 INDEX = "index.json"
 DEFAULT_ROLL_WIDTH = 60 * 0.0254  # m (60 in roll, AGENTS.md example)

@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: 1:1 template pages are drawn in the print roll's frame (pack format 4,
+  ADR-0042): the page width runs across the roll and is never wider than it, the height
+  along the roll, so pages print at 100 % without rotating. Pieces are turned on the page
+  to fit (row height across the roll first, then upright, then the narrowest turn, so a
+  long diagonal piece that fitted no axis now fits); each page's bottom margin says how
+  it goes on the roll. The Special shapes panel shows each piece's width across the roll
+  and its turn, and **Show as printed on the roll** draws them along a strip of the roll.
+  Envelope panels lie on the roll as before (row height across) but their pages are now
+  turned a quarter. No pattern geometry changes.
 - Added: shape groups (ADR-0041): several special shapes form one object (a head with
   ears and a nose). A **Group** field in the shape editor; **Move group…** (turn round
   the envelope, move along the tape), **Mirror group…** (a mirrored copy of the other

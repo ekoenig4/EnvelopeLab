@@ -88,15 +88,20 @@ both come back when you change mode. The screen has three columns:
    areas; the **Envelope panels** the shape is sewn on; the **Checks** of the pattern;
    and the **Attachment** lines on each envelope panel.
 
-   **Pieces larger than the print roll.** Each piece's 1:1 page (its cut line plus a
-   20 mm margin) is compared with the **Print roll width** in **Preferences** (default
-   60 in, also the starting roll width of the build-pack export). The table's
-   **Page on print roll** column says *fits*, *fits turned* (only with the piece turned a
-   quarter) or **LARGER THAN … ROLL**; such a piece is filled amber in the drawing and
-   labelled *▲ larger than roll*, gets a **roll width** warning in **Checks** and is listed
-   in **Validation / Warnings**. Envelope panel rows larger than the roll are listed
-   there too. Split the piece (more panels, or a horizontal split) or plan to join paper
-   and cloth.
+   **How the pieces go on the print roll.** The roll has a fixed width (**Print roll
+   width** in **Preferences**, default 60 in, also the starting roll width of the build
+   pack) and any length. Each piece's 1:1 page (its cut line plus a 20 mm margin) is laid
+   with its width across the roll: the piece is turned a quarter if its height fits
+   across (as panels are cut across the bolt), else printed upright, else turned to its
+   narrowest. The table's **Page on print roll** column says how much of the roll's width
+   the page takes and how the piece is turned (*1324 mm across, upright (its width across
+   the roll)*; hover for the length along the roll). Tick **Show as printed on the roll**
+   above the drawing to see the pieces one after another along a strip of the roll, its
+   edges in blue, each turned as it is printed. A piece wider than the roll at any turn
+   says **LARGER THAN … ROLL**, is filled amber and labelled *▲ larger than roll*, gets a
+   **roll width** warning in **Checks** and is listed in **Validation / Warnings**.
+   Envelope panel rows larger than the roll are listed there too. Split the piece (more
+   panels, or a horizontal split) or plan to join paper.
 
    **Envelope panels** shows, for the selected shape only, every envelope panel it crosses
    or lies over, gore by gore (for example *GORE 3 ROW D: ear*), as on the build pack's

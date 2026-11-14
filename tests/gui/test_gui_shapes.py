@@ -736,3 +736,29 @@ def test_shapes_grouped_as_one_object_move_mirror_and_export_together(
     assert out is not None
     text = (tmp_path / "head.obj").read_text(encoding="utf-8")
     assert "o Tube_mirror_designed" in text and "o envelope" in text
+
+
+def test_cut_pieces_show_how_they_lie_on_the_print_roll(gore_window: MainWindow) -> None:
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("tube")
+    _placed(gore_window)
+    item = panel.pieces.topLevelItem(0)
+    assert item is not None
+    assert " mm across, " in item.text(5)
+    assert "across the roll" in item.toolTip(5)
+    preview = panel.preview
+    side_by_side, _w, _h = preview.drawn()
+    panel.on_roll_check.setChecked(True)
+    assert preview.on_roll
+    on_roll, length, height = preview.drawn()
+    roll = gore_window.prefs.print_roll_width
+    assert height == pytest.approx(roll)
+    # Laid one after another along the roll, every page within the roll's width.
+    xs = [cut[:, 0].min() for _p, (_f, cut, _r) in on_roll]
+    assert xs == sorted(xs) and max(cut[:, 0].max() for _p, (_f, cut, _r) in on_roll) <= length
+    for _piece, (_f, cut, _r) in on_roll:
+        assert cut[:, 1].min() >= 0.0 and cut[:, 1].max() <= roll
+    preview.grab()  # paints without error
+    panel.on_roll_check.setChecked(False)
+    assert len(side_by_side) == len(on_roll)

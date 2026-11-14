@@ -66,7 +66,7 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH, PackExtras
-from envelopelab.export.templates import roll_fit
+from envelopelab.export.templates import MARGIN, roll_fit, turn_points
 from envelopelab.features.metrics import REQUIRED_FOS
 from envelopelab.features.primitives import CutPiece, PrimitiveDesign
 from envelopelab.project.model import SOLVER_LABELS
@@ -228,9 +228,13 @@ def _scrolled(page: QWidget) -> QScrollArea:
 class PiecePreview(QWidget):
     """Draws the cut pieces of a shape side by side (finished line solid, cut line dashed).
 
-    A piece whose 1:1 page is wider than the print roll both ways (``oversize``) is filled
-    in the warning colour and labelled so. The mouse wheel zooms about the pointer,
-    dragging pans and a double click fits every piece again.
+    A piece whose 1:1 page is wider than the print roll however it is turned
+    (``oversize``) is filled in the warning colour and labelled so. With ``on_roll`` the
+    pieces are drawn as they are printed: one after another along a strip of the print
+    roll (its edges drawn, the roll running left to right), each turned as on its page
+    (:func:`envelopelab.export.templates.roll_fit`), so how every piece lies across the
+    roll can be seen. The mouse wheel zooms about the pointer, dragging pans and a double
+    click fits every piece again.
     """
 
     #: Zoom step per wheel notch, and the zoom range (1: every piece fits).
@@ -241,20 +245,58 @@ class PiecePreview(QWidget):
         super().__init__()
         self.pieces: list[CutPiece] = []
         self.oversize: frozenset[str] = frozenset()
+        self.on_roll = False
+        self.roll_width = DEFAULT_ROLL_WIDTH
         self.zoom = 1.0
         self.pan = QPointF(0.0, 0.0)
         self._drag: QPointF | None = None
         self.setMinimumHeight(160)
         self.setToolTip("Mouse wheel: zoom; drag: pan; double click: fit all pieces")
 
-    def set_pieces(self, pieces: list[CutPiece], oversize: frozenset[str] = frozenset()) -> None:
-        """Show these pieces (m), those labelled in ``oversize`` as larger than the roll;
-        the view fits them again when the set of pieces changes."""
+    def set_pieces(
+        self,
+        pieces: list[CutPiece],
+        oversize: frozenset[str] = frozenset(),
+        roll_width: float | None = None,
+    ) -> None:
+        """Show these pieces (m), those labelled in ``oversize`` as larger than the roll
+        ``roll_width`` (m); the view fits them again when the set of pieces changes."""
         if [p.label for p in pieces] != [p.label for p in self.pieces]:
             self.reset_view()
         self.pieces = pieces
         self.oversize = oversize
+        if roll_width is not None:
+            self.roll_width = roll_width
         self.update()
+
+    def set_on_roll(self, on: bool) -> None:
+        """Draw the pieces side by side (False) or as printed on the roll (True)."""
+        self.on_roll = on
+        self.reset_view()
+
+    def drawn(self) -> tuple[list[tuple[CutPiece, list[np.ndarray]]], float, float]:
+        """Every piece with its outlines as drawn (finished, cut, rim or empty; m, in the
+        drawing's frame) and the drawing's width and height, m."""
+        out: list[tuple[CutPiece, list[np.ndarray]]] = []
+        if not self.on_roll:
+            offsets, width, height = self.layout_offsets()
+            for piece, off in zip(self.pieces, offsets, strict=True):
+                rim = piece.rim if piece.rim is not None else np.zeros((0, 2))
+                out.append((piece, [piece.finished + off, piece.cut + off, rim + off]))
+            return out, width, height
+        # On the roll: the page frame (x across, y along) turned so the roll runs left to
+        # right, its first edge at y = 0 and the other at y = roll width.
+        x = 0.0
+        for piece in self.pieces:
+            fit = roll_fit(piece.cut, self.roll_width)
+            rim = piece.rim if piece.rim is not None else np.zeros((0, 2))
+            turned = [turn_points(a, fit.angle - 90.0) for a in (piece.finished, piece.cut, rim)]
+            lo, hi = turned[1].min(axis=0), turned[1].max(axis=0)
+            shift = np.array([x + MARGIN - lo[0], MARGIN - lo[1]])
+            out.append((piece, [a + shift for a in turned]))
+            x += float(hi[0] - lo[0]) + 2 * MARGIN
+        tallest = max((float(np.ptp(o[1][:, 1])) + 2 * MARGIN for _, o in out), default=0.0)
+        return out, x, max(self.roll_width, tallest)
 
     def reset_view(self) -> None:
         """Fit every piece in the widget."""
@@ -351,7 +393,7 @@ class PiecePreview(QWidget):
             painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No cut pieces")
             return
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        offsets, width, height = self.layout_offsets()
+        drawn, width, height = self.drawn()
         margin = self._margin
         scale = self.zoom * min(
             (self.width() - 2 * margin) / max(width, 1e-9),
@@ -359,32 +401,44 @@ class PiecePreview(QWidget):
         )
         px, py = self.pan.x(), self.pan.y()
 
-        def polygon(points: np.ndarray, offset: np.ndarray) -> QPolygonF:
-            p = (points + offset) * scale
+        def polygon(points: np.ndarray, offset: np.ndarray | None = None) -> QPolygonF:
+            p = (points if offset is None else points + offset) * scale
             return QPolygonF(
                 [QPointF(margin + px + x, self.height() - margin + py - y) for x, y in p.tolist()]
             )
 
-        for piece, offset in zip(self.pieces, offsets, strict=True):
-            path = QPainterPath()
-            path.addPolygon(polygon(piece.finished, offset))
-            path.closeSubpath()
+        if self.on_roll:
+            # The roll: a strip of its width, its edges in blue, labelled.
+            roll = self.roll_width
+            strip = np.array([[0.0, 0.0], [width, 0.0], [width, roll], [0.0, roll]])
+            painter.fillPath(_path(polygon(strip)), QBrush(QColor("#f4f7fb")))
+            painter.setPen(QPen(QColor("#1565c0"), 2.0))
+            for y in (0.0, roll):
+                painter.drawPolyline(polygon(np.array([[0.0, y], [width, y]])))
+            top = polygon(np.array([[0.0, roll]])).at(0)
+            painter.drawText(
+                QPointF(top.x() + 4.0, top.y() - 4.0),
+                f"Print roll {roll * 1000:.0f} mm wide (edges in blue) → runs along, any length",
+            )
+
+        for piece, (finished, cut, rim) in drawn:
+            path = _path(polygon(finished))
             big = piece.label in self.oversize
             painter.fillPath(path, QBrush(QColor(OVERSIZE_FILL if big else "#e8eef7")))
             painter.setPen(QPen(QColor("#1f3b73"), 1.5))
-            painter.drawPolygon(polygon(piece.finished, offset))
+            painter.drawPolygon(polygon(finished))
             pen = QPen(QColor("#555555"), 1.0)
             pen.setStyle(Qt.PenStyle.DashLine)
             painter.setPen(pen)
-            painter.drawPolygon(polygon(piece.cut, offset))
-            if piece.rim is not None:
+            painter.drawPolygon(polygon(cut))
+            if len(rim):
                 painter.setPen(QPen(QColor(FAIL_COLOR), 2.0))
-                painter.drawPolyline(polygon(piece.rim, offset))
+                painter.drawPolyline(polygon(rim))
             # The piece's short name under it (the part after the shape name).
             label = piece.label.rsplit("-", 1)[-1]
             if big:
                 label += " ▲ larger than roll"
-            box = polygon(piece.cut, offset).boundingRect()
+            box = polygon(cut).boundingRect()
             painter.setPen(QPen(QColor(WARN_COLOR if big else "#333333")))
             painter.drawText(
                 QPointF(box.center().x() - 4.0 * len(label), box.bottom() - 4.0)
@@ -392,6 +446,13 @@ class PiecePreview(QWidget):
                 else box.bottomLeft(),
                 label,
             )
+
+
+def _path(poly: QPolygonF) -> QPainterPath:
+    path = QPainterPath()
+    path.addPolygon(poly)
+    path.closeSubpath()
+    return path
 
 
 class ShapesPanel(QWidget):
@@ -651,6 +712,14 @@ class ShapesPanel(QWidget):
                 "Wheel: zoom, drag: pan, double click: fit."
             )
         )
+        self.on_roll_check = QCheckBox("Show as printed on the roll")
+        self.on_roll_check.setObjectName("shapeOnRoll")
+        self.on_roll_check.setToolTip(
+            "Lay the pieces along a strip of the print roll (Preferences ▸ Print roll "
+            "width), each turned as on its 1:1 page: the page width runs across the roll"
+        )
+        self.on_roll_check.toggled.connect(self.preview.set_on_roll)
+        drawing_layout.addWidget(self.on_roll_check)
         drawing_layout.addWidget(self.preview, 1)
         pieces_split.addWidget(drawing)
         pieces_split.addWidget(self.pieces)
@@ -1572,7 +1641,7 @@ class ShapesPanel(QWidget):
                 oversize.add(piece.label)
                 on_roll = f"LARGER THAN {roll * 1000:.0f} mm ROLL"
             else:
-                on_roll = "fits turned" if fit.turned else "fits"
+                on_roll = f"{fit.across * 1000:.0f} mm across, {fit.describe()}"
             item = QTreeWidgetItem(
                 [
                     piece.label,
@@ -1584,7 +1653,10 @@ class ShapesPanel(QWidget):
                 ]
             )
             item.setToolTip(
-                5, f"page {fit.width * 1000:.0f} × {fit.height * 1000:.0f} mm (cut line + margin)"
+                5,
+                f"1:1 page {fit.across * 1000:.0f} mm across the roll × "
+                f"{fit.along * 1000:.0f} mm along it (cut line + margin), piece "
+                f"{fit.describe()}",
             )
             if fit.oversize:
                 item.setForeground(5, QBrush(QColor(WARN_COLOR)))
@@ -1602,7 +1674,7 @@ class ShapesPanel(QWidget):
         for tree in (self.pieces, self.checks, self.attachment):
             for column in range(tree.columnCount()):
                 tree.resizeColumnToContents(column)
-        self.preview.set_pieces(design.pieces, frozenset(oversize))
+        self.preview.set_pieces(design.pieces, frozenset(oversize), roll)
         self._show_markings(design)
 
     def _show_markings(self, design: Any) -> None:

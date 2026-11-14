@@ -301,8 +301,8 @@ def shop_limits(ctx: PackContext) -> list[str]:
     ]
     if short > roll:
         lines.append(
-            f"WARNING: {name} is wider than the bolt both ways; it prints in bands "
-            "and must be pieced."
+            f"WARNING: {name} is wider than the bolt both ways with its grain square to "
+            "the bolt; it must be cut from joined cloth."
         )
     if long > table:
         lines.append(f"WARNING: {name} is longer than the table ({mm(long)}).")
@@ -314,7 +314,9 @@ def printing_rules(ctx: PackContext) -> list[str]:
     return [
         "All 1:1 sheets print at 100 % - NEVER 'fit to page' or 'shrink oversized pages'.",
         "Measure BOTH calibration lines (across and along) on every 1:1 sheet before you cut.",
-        f"Every 1:1 sheet has one side no longer than {mm(ctx.roll_width)} so it fits the roll.",
+        f"Every 1:1 sheet is no wider than the {mm(ctx.roll_width)} roll: print it with the "
+        "PAGE WIDTH ACROSS THE ROLL, without rotating (the page's bottom margin says so); "
+        "a piece may be turned on its page - lay it on the cloth by its UP / warp arrow.",
         "Solid = CUT. Dotted = SEW (finished). Red = feature marks. Blue = finished sizes.",
     ]
 

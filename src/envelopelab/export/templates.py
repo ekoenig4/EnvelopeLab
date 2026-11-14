@@ -11,10 +11,16 @@ Every piece to cut gets its own PDF, as a builder cuts them (ADR-0038):
 * ``<slug>-<shape>-<piece>.pdf``: every skin piece of every special shape.
 
 The page is exactly the piece at 1:1 plus a 20 mm margin, so the **whole piece is always
-on one page**, never split. It is upright when its height fits the roll (the row height
-runs across the bolt, the gore width along the roll) and turned a quarter when only its
-width fits; a piece larger than the roll both ways stays whole and its page says so in
-red (it has to be cut from joined cloth or plotted in parts).
+on one page**, never split. Pages are drawn in the print roll's frame (pack format 4,
+ADR-0042): the **page width runs across the roll** and is never wider than it, the
+**page height runs along the roll** and may be any length, so a page prints at 100 %
+without being rotated. The piece is turned on the page to fit (:func:`roll_fit`): a
+quarter turn first, the row height across the roll as panels are cut across the bolt,
+then upright, then the narrowest turn of a piece that fits no other way. A piece wider
+than the roll at any turn stays whole and its page says so in red (join paper or plot it
+in parts). The bottom margin of every page says how it goes on the roll: an arrow across
+the page with its width and the roll's, and the piece's turn; the UP / warp arrow turns
+with the piece, so the template is laid on the cloth by its grain, not by the page.
 
 A page shows the cut outline (solid), the sewn outline (dotted), feature marks in red
 (footprint lines, match marks, feed holes, side ticks), the finished widths and height in
@@ -211,94 +217,163 @@ def calibration(length_available: float) -> tuple[float, float]:
     return CAL_LENGTHS[-1], 0.05
 
 
-@dataclass(frozen=True)
-class PageLayout:
-    """How a sheet sits on its pages: turned a quarter or not, and the bands (m, in the
-    sheet's own y after turning) of each page."""
+#: Turns tried first, in order (deg, counter-clockwise on the page): the row height across
+#: the roll, as panels are cut across the bolt (the shop pack's rule), then upright.
+PREFERRED_TURNS = (90.0, 0.0)
 
-    turned: bool
-    bands: list[tuple[float, float]]
-    width: float  # page width, m
-    height: float  # page height of a full band, m
+
+def turn_points(points: FloatArray, angle: float) -> FloatArray:
+    """``points`` (m) turned ``angle`` degrees counter-clockwise about the origin."""
+    a = math.radians(angle)
+    c, s = math.cos(a), math.sin(a)
+    pts = np.asarray(points, dtype=np.float64)
+    out: FloatArray = np.column_stack(
+        [c * pts[:, 0] - s * pts[:, 1], s * pts[:, 0] + c * pts[:, 1]]
+    )
+    return out
 
 
 @dataclass(frozen=True)
 class RollFit:
-    """How the page of a piece lies on a roll (the page is the cut outline plus
-    :data:`MARGIN` all round, as :func:`layout` draws it).
+    """How a piece's 1:1 page lies on the print roll.
+
+    The page is drawn in the roll's frame: its **width runs across the roll** (it must not
+    be wider than the roll) and its **height along the roll** (any length). The page is
+    the cut outline, turned ``angle`` degrees, plus :data:`MARGIN` all round.
 
     Attributes
     ----------
-    width, height : float
-        Page width and height with the piece upright, m.
+    angle : float
+        Turn of the piece on the page, deg counter-clockwise: 90 puts the piece's height
+        (its UP / warp arrow) across the roll, 0 is upright, anything else the narrowest
+        turn of a piece that fits no other way.
+    across : float
+        Page width, across the roll, m.
+    along : float
+        Page height, along the roll, m.
     roll_width : float
         Roll width, m.
     """
 
-    width: float
-    height: float
+    angle: float
+    across: float
+    along: float
     roll_width: float
 
     @property
-    def turned(self) -> bool:
-        """True when the page fits the roll only turned a quarter."""
-        return self.height > self.roll_width and self.width <= self.roll_width
+    def fits(self) -> bool:
+        """True when the page is no wider than the roll."""
+        return self.across <= self.roll_width
 
     @property
     def oversize(self) -> bool:
-        """True when the page is wider than the roll both ways."""
-        return self.short_side > self.roll_width
+        """True when the piece is wider than the roll however it is turned."""
+        return not self.fits
 
     @property
     def short_side(self) -> float:
-        """The page's shorter side, m: it must not be wider than the roll."""
-        return min(self.width, self.height)
+        """The page's width across the roll, m (the narrowest found)."""
+        return self.across
+
+    def describe(self) -> str:
+        """How the piece is printed, in words (e.g. ``turned 90° (its height across the
+        roll)``)."""
+        if self.angle == 90.0:
+            return "turned 90° (its height across the roll)"
+        if self.angle == 0.0:
+            return "upright (its width across the roll)"
+        return f"turned {self.angle:.1f}°"
 
 
 def roll_fit(cut: FloatArray, roll_width: float) -> RollFit:
-    """How the page of a piece with cut outline ``cut`` lies on a roll.
+    """How the 1:1 page of a piece with cut outline ``cut`` lies on the roll.
+
+    The turns of :data:`PREFERRED_TURNS` are tried in order and the first whose page is
+    no wider than the roll is taken. Otherwise the piece is turned to its narrowest: the
+    width of a convex outline is least across one of its hull edges (rotating calipers,
+    [Toussaint]), so every hull edge is laid along the roll in turn and the narrowest
+    page kept; when even that is wider than the roll the piece is oversize.
 
     Parameters
     ----------
     cut : ndarray, shape (n, 2)
-        Cut outline of the piece as it is drawn on its page, m.
+        Cut outline of the piece, m.
     roll_width : float
-        Width of the roll the page is printed on (and the cloth it is cut from), m.
+        Width of the roll the page is printed on, m.
 
     Returns
     -------
     RollFit
-        Page size (m) upright, and whether it fits upright, turned or not at all.
+        Turn (deg) and page size across and along the roll (m).
+
+    References
+    ----------
+    .. [Toussaint] G. T. Toussaint, "Solving geometric problems with the rotating
+       calipers", Proc. IEEE MELECON '83 (1983).
     """
-    span = np.asarray(cut, dtype=np.float64).max(axis=0) - np.asarray(cut).min(axis=0)
-    return RollFit(float(span[0]) + 2 * MARGIN, float(span[1]) + 2 * MARGIN, float(roll_width))
+    pts = np.asarray(cut, dtype=np.float64)
+
+    def page(angle: float) -> RollFit:
+        span = np.ptp(turn_points(pts, angle), axis=0)
+        return RollFit(
+            angle, float(span[0]) + 2 * MARGIN, float(span[1]) + 2 * MARGIN, float(roll_width)
+        )
+
+    for angle in PREFERRED_TURNS:
+        fit = page(angle)
+        if fit.fits:
+            return fit
+    from scipy.spatial import ConvexHull
+
+    hull = pts[ConvexHull(pts).vertices]
+    edges = np.roll(hull, -1, axis=0) - hull
+    # Turn each edge to run up the page (along the roll); angles in (-90, 90].
+    turns = 90.0 - np.degrees(np.arctan2(edges[:, 1], edges[:, 0]))
+    turns = 90.0 - np.mod(90.0 - turns, 180.0)
+    return min((page(round(float(a), 3)) for a in turns), key=lambda f: f.across)
+
+
+@dataclass(frozen=True)
+class PageLayout:
+    """How a sheet sits on its page, in the roll's frame (:class:`RollFit`): the turn
+    (deg), the page width across the roll and height along it (m), and the lower-left
+    corner (m) of the turned cut outline, :data:`MARGIN` inside the page's corner."""
+
+    angle: float
+    width: float
+    height: float
+    origin: tuple[float, float]
+
+    def to_page(self, x: float, y: float) -> tuple[float, float]:
+        """Page coordinates (pt) of the sheet point ``(x, y)`` (m)."""
+        ((px, py),) = turn_points(np.array([[x, y]]), self.angle)
+        return (
+            (float(px) - self.origin[0] + MARGIN) * PT_PER_M,
+            (float(py) - self.origin[1] + MARGIN) * PT_PER_M,
+        )
 
 
 def layout(sheet: Sheet, roll_width: float) -> PageLayout:
-    """The page of ``sheet`` on a roll ``roll_width`` m wide (module docstring): always
-    the whole piece on one page, upright when its height fits the roll, turned a quarter
-    when only its width fits, and upright (marked as larger than the roll) otherwise."""
-    lo, hi = sheet.cut.min(axis=0), sheet.cut.max(axis=0)
+    """The page of ``sheet`` on a roll ``roll_width`` m wide (:func:`roll_fit`): always
+    the whole piece on one page, the page's width across the roll and height along it."""
     fit = roll_fit(sheet.cut, roll_width)
-    w, h = fit.width, fit.height
-    if fit.turned:
-        return PageLayout(True, [(float(lo[0]) - MARGIN, float(hi[0]) + MARGIN)], h, w)
-    return PageLayout(False, [(float(lo[1]) - MARGIN, float(hi[1]) + MARGIN)], w, h)
+    lo = turn_points(sheet.cut, fit.angle).min(axis=0)
+    return PageLayout(fit.angle, fit.across, fit.along, (float(lo[0]), float(lo[1])))
 
 
 def oversize(sheet: Sheet, roll_width: float) -> bool:
-    """True when a piece is larger than the roll both ways (it cannot be cut from one
-    width of cloth; its page says so)."""
+    """True when a piece is wider than the roll however it is turned (it cannot be
+    printed on one width of the roll; its page says so)."""
     return roll_fit(sheet.cut, roll_width).oversize
 
 
 def roll_checks(pieces: Sequence[tuple[str, FloatArray]], roll_width: float) -> list[DesignCheck]:
     """Check that every piece's 1:1 page fits the roll (:func:`roll_fit`).
 
-    A piece whose page is wider than the roll both ways cannot be printed on one width
-    of the roll nor cut from one width of cloth: it gets a *warning* of its own (paper
-    and cloth must be joined, or the piece split with more panels or a horizontal split).
-    When every piece fits, one informative check gives the widest short side.
+    A piece whose page is wider than the roll however it is turned cannot be printed on
+    one width of the roll: it gets a *warning* of its own (paper must be joined, or the
+    piece split with more panels or a horizontal split). When every piece fits, one
+    informative check gives the widest page across the roll.
 
     Parameters
     ----------
@@ -310,7 +385,8 @@ def roll_checks(pieces: Sequence[tuple[str, FloatArray]], roll_width: float) -> 
     Returns
     -------
     list of DesignCheck
-        Named ``roll width``; value and limit in m (the page's short side and the roll).
+        Named ``roll width``; value and limit in m (the page's width across the roll and
+        the roll).
     """
     from envelopelab.features.primitives import DesignCheck
 
@@ -327,10 +403,10 @@ def roll_checks(pieces: Sequence[tuple[str, FloatArray]], roll_width: float) -> 
                     roll_width,
                     "m",
                     "warning",
-                    f"piece {label} needs a page of {fit.width * 1000:.0f} x "
-                    f"{fit.height * 1000:.0f} mm: LARGER THAN THE {roll_width * 1000:.0f} mm "
-                    "ROLL BOTH WAYS; join paper and cloth, or split the piece (more panels "
-                    "or a horizontal split)",
+                    f"piece {label} is {fit.across * 1000:.0f} mm across the roll at its "
+                    f"narrowest ({fit.describe()}): LARGER THAN THE {roll_width * 1000:.0f} mm "
+                    "ROLL AT ANY TURN; join paper, or split the piece (more panels or a "
+                    "horizontal split)",
                 )
             )
     if pieces and not out:
@@ -341,8 +417,8 @@ def roll_checks(pieces: Sequence[tuple[str, FloatArray]], roll_width: float) -> 
                 roll_width,
                 "m",
                 "info",
-                f"every piece's page fits the {roll_width * 1000:.0f} mm roll (widest short "
-                f"side {widest * 1000:.0f} mm)",
+                f"every piece's page fits the {roll_width * 1000:.0f} mm roll (widest "
+                f"{widest * 1000:.0f} mm across it)",
             )
         )
     return out
@@ -375,51 +451,58 @@ def write_template_pdf(
     for tpage in tfile.pages:
         sheet = tpage.sheet
         lay = layout(sheet, roll_width)
-        lo, hi = sheet.cut.min(axis=0), sheet.cut.max(axis=0)
-        for k, (b0, b1) in enumerate(lay.bands):
-            size = (lay.width * PT_PER_M, (b1 - b0) * PT_PER_M)
-            if canvas is None:
-                canvas = PdfCanvas(size)
-            else:
-                canvas.new_page(size)
-            x_ref = float(lo[0]) - MARGIN
-
-            def p(
-                x: float,
-                y: float,
-                b0: float = b0,
-                x_ref: float = x_ref,
-                turned: bool = lay.turned,
-                y_top: float = float(hi[1]) + MARGIN,
-            ) -> tuple[float, float]:
-                if turned:  # the piece's x runs up the page, its y to the left
-                    return ((y_top - y) * PT_PER_M, (x - b0) * PT_PER_M)
-                return ((x - x_ref) * PT_PER_M, (y - b0) * PT_PER_M)
-
-            over = ",".join(o.source for o in tpage.overlays if o.source) or "-"
-            line = f"PAGE {sheet.name} {k + 1} {len(lay.bands)} {90 if lay.turned else 0} {over}"
-            canvas.comment(line)
-            written.append(
-                {
-                    "sheet": sheet.name,
-                    "band": k + 1,
-                    "bands": len(lay.bands),
-                    "turned": lay.turned,
-                    "markings": [o.source for o in tpage.overlays if o.source],
-                }
-            )
-            _draw_page(canvas, tpage, p, size, k, len(lay.bands))
-            if oversize(sheet, roll_width):
-                u = min(max(min(size) / 400.0, 1.0), 12.0)
-                warn = (
-                    f"LARGER THAN THE {roll_width * 1000:.0f} MM ROLL BOTH WAYS - join cloth "
-                    "before cutting, or plot this sheet in parts"
-                )
-                canvas.text(10 * u, 8 * u, warn, size=4 * u, bold=True, color=RED)
+        size = (lay.width * PT_PER_M, lay.height * PT_PER_M)
+        if canvas is None:
+            canvas = PdfCanvas(size)
+        else:
+            canvas.new_page(size)
+        over = ",".join(o.source for o in tpage.overlays if o.source) or "-"
+        canvas.comment(f"PAGE {sheet.name} 1 1 {lay.angle:g} {over}")
+        written.append(
+            {
+                "sheet": sheet.name,
+                "band": 1,
+                "bands": 1,
+                "turn_deg": lay.angle,
+                "across_roll_mm": round(lay.width * 1000.0, 1),
+                "along_roll_mm": round(lay.height * 1000.0, 1),
+                "markings": [o.source for o in tpage.overlays if o.source],
+            }
+        )
+        _draw_page(canvas, tpage, lay.to_page, size, 0, 1)
+        _draw_roll(canvas, lay, size, roll_width)
     if canvas is None:
         raise ValueError(f"template {tfile.name} has no pages")
     canvas.save(path)
     return written
+
+
+def _draw_roll(canvas: object, lay: PageLayout, size: tuple[float, float], roll: float) -> None:
+    """How the page goes on the roll, in its bottom margin: a double arrow across the
+    page labelled with its width and the roll's, and the piece's turn; in red when the
+    page is wider than the roll."""
+    from envelopelab.report.pdf import PdfCanvas
+
+    assert isinstance(canvas, PdfCanvas)
+    pw, _ph = size
+    fits = lay.width <= roll
+    colour = BLUE if fits else RED
+    y = 0.55 * MARGIN * PT_PER_M
+    s = min(0.3 * MARGIN * PT_PER_M, 9.0)
+    canvas.line(4.0, y, pw - 4.0, y, color=colour, width=0.8)
+    for x, d in ((4.0, 1.0), (pw - 4.0, -1.0)):
+        canvas.line(x, y, x + d * s, y + 0.5 * s, color=colour, width=0.8)
+        canvas.line(x, y, x + d * s, y - 0.5 * s, color=colour, width=0.8)
+    turn = "upright" if lay.angle == 0.0 else f"piece turned {lay.angle:g} deg"
+    text = (
+        f"ACROSS THE ROLL: {lay.width * 1000:.0f} mm of the {roll * 1000:.0f} mm roll - "
+        f"{turn} - print at 100 %, page width across the roll, do not rotate"
+        if fits
+        else f"LARGER THAN THE {roll * 1000:.0f} MM ROLL AT ANY TURN: {lay.width * 1000:.0f} mm "
+        "across at its narrowest - join paper, or plot this sheet in parts"
+    )
+    size_t = min(s, 0.9 * (pw - 16.0) / max(len(text), 1) / 0.5)
+    canvas.text(2.0 * s, y + 0.35 * s, text, size=size_t, bold=not fits, color=colour)
 
 
 def _draw_page(

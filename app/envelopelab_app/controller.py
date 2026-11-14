@@ -419,7 +419,7 @@ class WorkspaceController(QObject):
 
     def envelope_roll_findings(self) -> list[DesignFinding]:
         """A warning per envelope panel row whose 1:1 page is wider than the print roll
-        both ways (:func:`envelopelab.export.templates.roll_fit`)."""
+        however it is turned (:func:`envelopelab.export.templates.roll_fit`)."""
         try:
             rows = self.rows()
         except ValueError:
@@ -433,9 +433,9 @@ class WorkspaceController(QObject):
                     DesignFinding(
                         "roll width",
                         "warning",
-                        f"row {row.label}: panel page {fit.width * 1000:.0f} x "
-                        f"{fit.height * 1000:.0f} mm is LARGER THAN THE {roll * 1000:.0f} mm "
-                        "print roll both ways; join paper and cloth or add a panel row",
+                        f"row {row.label}: panel is {fit.across * 1000:.0f} mm across the "
+                        f"roll at its narrowest ({fit.describe()}), LARGER THAN THE "
+                        f"{roll * 1000:.0f} mm print roll; join paper or add a panel row",
                         f"row:{row.label}",
                     )
                 )
