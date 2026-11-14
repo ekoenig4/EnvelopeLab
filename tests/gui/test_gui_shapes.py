@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -597,3 +598,47 @@ def test_one_run_colours_the_envelope_and_its_shapes_together(
     on_envelope = view.layers[PREVIEW].points[0]
     assert view.part_at(on_envelope) == PREVIEW
     assert view.probe_text(PREVIEW, 0).startswith("Envelope · element 0")
+
+
+def test_pieces_larger_than_the_print_roll_are_warned(gore_window: MainWindow) -> None:
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("dome")
+    _placed(gore_window)
+    assert not panel.preview.oversize
+    roll_column = panel.pieces.headerItem().text(5)
+    assert roll_column == "Page on print roll"
+    assert not any("shape Dome: piece" in m for m in _messages(gore_window))
+
+    # A roll narrower than the pieces: every piece is warned, nothing else changes.
+    gore_window.apply_preferences(replace(gore_window.prefs, print_roll_width=0.1))
+    items = [panel.pieces.topLevelItem(i) for i in range(panel.pieces.topLevelItemCount())]
+    texts = [item.text(5) for item in items if item is not None]
+    assert all("LARGER THAN 100 mm ROLL" in t for t in texts)
+    assert panel.preview.oversize == {p.label for p in panel.preview.pieces}
+    assert "need attention" in panel.status.text()
+    found = [m for m in _messages(gore_window) if "[WARNING] shape Dome: piece" in m]
+    assert len(found) == panel.pieces.topLevelItemCount()
+    # The envelope panels are checked against the same roll (the fixture's 2.5 m rows are
+    # larger than a 60 in roll too, so only the roll's width in the message changes).
+    assert any(
+        m.startswith("[WARNING] row ") and "THE 100 mm print roll" in m
+        for m in _messages(gore_window)
+    )
+
+    gore_window.apply_preferences(replace(gore_window.prefs, print_roll_width=60 * 0.0254))
+    assert not panel.preview.oversize
+    assert not any("shape Dome: piece" in m for m in _messages(gore_window))
+    assert not any("THE 100 mm print roll" in m for m in _messages(gore_window))
+
+
+def test_export_dialog_starts_from_the_print_roll_preference(gore_window: MainWindow) -> None:
+    from envelopelab_app.dialogs import PreferencesDialog
+    from envelopelab_app.export_dialog import ExportPackDialog
+
+    prefs = replace(gore_window.prefs, print_roll_width=72 * 0.0254)
+    dialog = PreferencesDialog(prefs, gore_window)
+    assert dialog.print_roll.value() == pytest.approx(72.0)
+    assert dialog.result_preferences().print_roll_width == pytest.approx(72 * 0.0254)
+    export = ExportPackDialog(gore_window, "", prefs.print_roll_width)
+    assert export.roll_width() == pytest.approx(72 * 0.0254)

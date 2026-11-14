@@ -14,6 +14,9 @@ panel); the pack format is described in [Build pack](../formats/build-pack.md).
   (the row height runs across the bolt and the gore width along the roll). A piece
   larger than the roll both ways is never split: its page says so in red, so you can
   join cloth before cutting or plot it on a wider plotter.
+  The dialog starts from the **Print roll width** in **Preferences**; with that width
+  the Special shapes panel and **Validation / Warnings** already warn about every panel
+  larger than the roll before you export.
 * **Include**: the documents (all ticked by default). The cutting sheets are always
   written.
 

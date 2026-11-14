@@ -64,6 +64,7 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH, PackExtras
+from envelopelab.export.templates import roll_fit
 from envelopelab.features.metrics import REQUIRED_FOS
 from envelopelab.features.primitives import CutPiece, PrimitiveDesign
 from envelopelab.project.model import SOLVER_LABELS
@@ -89,6 +90,8 @@ FAIL_COLOR = "#b00020"
 WARN_COLOR = "#8a6d3b"
 OK_COLOR = "#2e7d32"
 SEVERITY_COLORS = {"error": FAIL_COLOR, "warning": WARN_COLOR, "info": "#31708f"}
+#: Fill of a cut piece whose page is larger than the print roll both ways.
+OVERSIZE_FILL = "#f6e3b4"
 KIND_LABELS: dict[str, str] = {
     "dome": "Dome",
     "tube": "Tube",
@@ -184,8 +187,9 @@ def _scrolled(page: QWidget) -> QScrollArea:
 class PiecePreview(QWidget):
     """Draws the cut pieces of a shape side by side (finished line solid, cut line dashed).
 
-    The mouse wheel zooms about the pointer, dragging pans and a double click fits every
-    piece again.
+    A piece whose 1:1 page is wider than the print roll both ways (``oversize``) is filled
+    in the warning colour and labelled so. The mouse wheel zooms about the pointer,
+    dragging pans and a double click fits every piece again.
     """
 
     #: Zoom step per wheel notch, and the zoom range (1: every piece fits).
@@ -195,17 +199,20 @@ class PiecePreview(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.pieces: list[CutPiece] = []
+        self.oversize: frozenset[str] = frozenset()
         self.zoom = 1.0
         self.pan = QPointF(0.0, 0.0)
         self._drag: QPointF | None = None
         self.setMinimumHeight(160)
         self.setToolTip("Mouse wheel: zoom; drag: pan; double click: fit all pieces")
 
-    def set_pieces(self, pieces: list[CutPiece]) -> None:
-        """Show these pieces (m); the view fits them again when the set of pieces changes."""
+    def set_pieces(self, pieces: list[CutPiece], oversize: frozenset[str] = frozenset()) -> None:
+        """Show these pieces (m), those labelled in ``oversize`` as larger than the roll;
+        the view fits them again when the set of pieces changes."""
         if [p.label for p in pieces] != [p.label for p in self.pieces]:
             self.reset_view()
         self.pieces = pieces
+        self.oversize = oversize
         self.update()
 
     def reset_view(self) -> None:
@@ -321,7 +328,8 @@ class PiecePreview(QWidget):
             path = QPainterPath()
             path.addPolygon(polygon(piece.finished, offset))
             path.closeSubpath()
-            painter.fillPath(path, QBrush(QColor("#e8eef7")))
+            big = piece.label in self.oversize
+            painter.fillPath(path, QBrush(QColor(OVERSIZE_FILL if big else "#e8eef7")))
             painter.setPen(QPen(QColor("#1f3b73"), 1.5))
             painter.drawPolygon(polygon(piece.finished, offset))
             pen = QPen(QColor("#555555"), 1.0)
@@ -333,8 +341,10 @@ class PiecePreview(QWidget):
                 painter.drawPolyline(polygon(piece.rim, offset))
             # The piece's short name under it (the part after the shape name).
             label = piece.label.rsplit("-", 1)[-1]
+            if big:
+                label += " ▲ larger than roll"
             box = polygon(piece.cut, offset).boundingRect()
-            painter.setPen(QPen(QColor("#333333")))
+            painter.setPen(QPen(QColor(WARN_COLOR if big else "#333333")))
             painter.drawText(
                 QPointF(box.center().x() - 4.0 * len(label), box.bottom() - 4.0)
                 if box.height() > 30.0
@@ -411,7 +421,14 @@ class ShapesPanel(QWidget):
         self.checks.setMinimumHeight(110)
         self.pieces = QTreeWidget()
         self.pieces.setHeaderLabels(
-            ["Piece", "Cut", "Finished W × H (m)", "Flat area (m²)", "3D area (m²)"]
+            [
+                "Piece",
+                "Cut",
+                "Finished W × H (m)",
+                "Flat area (m²)",
+                "3D area (m²)",
+                "Page on print roll",
+            ]
         )
         self.attachment = QTreeWidget()
         self.attachment.setHeaderLabels(["Envelope panel", "Attachment line (m)"])
@@ -828,9 +845,10 @@ class ShapesPanel(QWidget):
         result = self.controller.shapes.result(name)
         if result is None:
             return None
-        if result.design is None or any(c.severity == "error" for c in result.design.checks):
+        checks = self.controller.shape_checks(name)
+        if result.design is None or any(c.severity == "error" for c in checks):
             return FAIL_COLOR
-        if not result.design.ok:
+        if not all(c.passed for c in checks):
             return WARN_COLOR
         return None
 
@@ -1190,7 +1208,8 @@ class ShapesPanel(QWidget):
             self.status.setText(f"{spec.name} CANNOT BE PLACED: {result.error}")
             self.status.setStyleSheet(f"color: {FAIL_COLOR}; font-weight: bold;")
             return
-        failed = [c for c in design.checks if c.severity != "info"]
+        checks = self.controller.shape_checks(spec.name)
+        failed = [c for c in checks if c.severity != "info"]
         if failed:
             worst = "error" if any(c.severity == "error" for c in failed) else "warning"
             self.status.setText(
@@ -1203,7 +1222,7 @@ class ShapesPanel(QWidget):
                 f"{design.footprint_length:.3f} m, designed height {design.designed_height:.3f} m"
             )
             self.status.setStyleSheet(f"color: {OK_COLOR};")
-        for check in design.checks:
+        for check in checks:
             item = QTreeWidgetItem(
                 [
                     check.name,
@@ -1215,19 +1234,32 @@ class ShapesPanel(QWidget):
             item.setToolTip(0, check.message)
             item.setForeground(3, QBrush(QColor(SEVERITY_COLORS[check.severity])))
             self.checks.addTopLevelItem(item)
+        roll = self.controller.prefs.print_roll_width
+        oversize: set[str] = set()
         for piece in design.pieces:
             w, h = piece.size
-            self.pieces.addTopLevelItem(
-                QTreeWidgetItem(
-                    [
-                        piece.label,
-                        str(piece.cut_count),
-                        f"{w:.3f} × {h:.3f}",
-                        f"{piece.flat_area:.4f}",
-                        f"{piece.surface_area:.4f}",
-                    ]
-                )
+            fit = roll_fit(piece.cut, roll)
+            if fit.oversize:
+                oversize.add(piece.label)
+                on_roll = f"LARGER THAN {roll * 1000:.0f} mm ROLL"
+            else:
+                on_roll = "fits turned" if fit.turned else "fits"
+            item = QTreeWidgetItem(
+                [
+                    piece.label,
+                    str(piece.cut_count),
+                    f"{w:.3f} × {h:.3f}",
+                    f"{piece.flat_area:.4f}",
+                    f"{piece.surface_area:.4f}",
+                    on_roll,
+                ]
             )
+            item.setToolTip(
+                5, f"page {fit.width * 1000:.0f} × {fit.height * 1000:.0f} mm (cut line + margin)"
+            )
+            if fit.oversize:
+                item.setForeground(5, QBrush(QColor(WARN_COLOR)))
+            self.pieces.addTopLevelItem(item)
         for column in range(self.pieces.columnCount()):
             self.pieces.resizeColumnToContents(column)
         for tree in (self.pieces, self.checks, self.attachment):
@@ -1241,7 +1273,7 @@ class ShapesPanel(QWidget):
         for tree in (self.pieces, self.checks, self.attachment):
             for column in range(tree.columnCount()):
                 tree.resizeColumnToContents(column)
-        self.preview.set_pieces(design.pieces)
+        self.preview.set_pieces(design.pieces, frozenset(oversize))
         self._show_markings(design)
 
     def _show_markings(self, design: Any) -> None:

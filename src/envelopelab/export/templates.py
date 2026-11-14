@@ -40,6 +40,7 @@ from envelopelab.solvers.membrane import FloatArray
 
 if TYPE_CHECKING:
     from envelopelab.export.build_pack import Sheet
+    from envelopelab.features.primitives import DesignCheck
 
 PT_PER_M = 72.0 / 0.0254
 MARGIN = 0.02  # m round the cut outline (the header, legend and scales sit inside the piece)
@@ -221,14 +222,66 @@ class PageLayout:
     height: float  # page height of a full band, m
 
 
+@dataclass(frozen=True)
+class RollFit:
+    """How the page of a piece lies on a roll (the page is the cut outline plus
+    :data:`MARGIN` all round, as :func:`layout` draws it).
+
+    Attributes
+    ----------
+    width, height : float
+        Page width and height with the piece upright, m.
+    roll_width : float
+        Roll width, m.
+    """
+
+    width: float
+    height: float
+    roll_width: float
+
+    @property
+    def turned(self) -> bool:
+        """True when the page fits the roll only turned a quarter."""
+        return self.height > self.roll_width and self.width <= self.roll_width
+
+    @property
+    def oversize(self) -> bool:
+        """True when the page is wider than the roll both ways."""
+        return self.short_side > self.roll_width
+
+    @property
+    def short_side(self) -> float:
+        """The page's shorter side, m: it must not be wider than the roll."""
+        return min(self.width, self.height)
+
+
+def roll_fit(cut: FloatArray, roll_width: float) -> RollFit:
+    """How the page of a piece with cut outline ``cut`` lies on a roll.
+
+    Parameters
+    ----------
+    cut : ndarray, shape (n, 2)
+        Cut outline of the piece as it is drawn on its page, m.
+    roll_width : float
+        Width of the roll the page is printed on (and the cloth it is cut from), m.
+
+    Returns
+    -------
+    RollFit
+        Page size (m) upright, and whether it fits upright, turned or not at all.
+    """
+    span = np.asarray(cut, dtype=np.float64).max(axis=0) - np.asarray(cut).min(axis=0)
+    return RollFit(float(span[0]) + 2 * MARGIN, float(span[1]) + 2 * MARGIN, float(roll_width))
+
+
 def layout(sheet: Sheet, roll_width: float) -> PageLayout:
     """The page of ``sheet`` on a roll ``roll_width`` m wide (module docstring): always
     the whole piece on one page, upright when its height fits the roll, turned a quarter
     when only its width fits, and upright (marked as larger than the roll) otherwise."""
     lo, hi = sheet.cut.min(axis=0), sheet.cut.max(axis=0)
-    w = float(hi[0] - lo[0]) + 2 * MARGIN
-    h = float(hi[1] - lo[1]) + 2 * MARGIN
-    if h > roll_width and w <= roll_width:
+    fit = roll_fit(sheet.cut, roll_width)
+    w, h = fit.width, fit.height
+    if fit.turned:
         return PageLayout(True, [(float(lo[0]) - MARGIN, float(hi[0]) + MARGIN)], h, w)
     return PageLayout(False, [(float(lo[1]) - MARGIN, float(hi[1]) + MARGIN)], w, h)
 
@@ -236,8 +289,63 @@ def layout(sheet: Sheet, roll_width: float) -> PageLayout:
 def oversize(sheet: Sheet, roll_width: float) -> bool:
     """True when a piece is larger than the roll both ways (it cannot be cut from one
     width of cloth; its page says so)."""
-    span = sheet.cut.max(axis=0) - sheet.cut.min(axis=0) + 2 * MARGIN
-    return bool(min(span) > roll_width)
+    return roll_fit(sheet.cut, roll_width).oversize
+
+
+def roll_checks(pieces: Sequence[tuple[str, FloatArray]], roll_width: float) -> list[DesignCheck]:
+    """Check that every piece's 1:1 page fits the roll (:func:`roll_fit`).
+
+    A piece whose page is wider than the roll both ways cannot be printed on one width
+    of the roll nor cut from one width of cloth: it gets a *warning* of its own (paper
+    and cloth must be joined, or the piece split with more panels or a horizontal split).
+    When every piece fits, one informative check gives the widest short side.
+
+    Parameters
+    ----------
+    pieces : sequence of (str, ndarray)
+        Label and cut outline (m) of each piece, as drawn on its page.
+    roll_width : float
+        Roll width, m.
+
+    Returns
+    -------
+    list of DesignCheck
+        Named ``roll width``; value and limit in m (the page's short side and the roll).
+    """
+    from envelopelab.features.primitives import DesignCheck
+
+    out: list[DesignCheck] = []
+    widest = 0.0
+    for label, cut in pieces:
+        fit = roll_fit(cut, roll_width)
+        widest = max(widest, fit.short_side)
+        if fit.oversize:
+            out.append(
+                DesignCheck(
+                    "roll width",
+                    fit.short_side,
+                    roll_width,
+                    "m",
+                    "warning",
+                    f"piece {label} needs a page of {fit.width * 1000:.0f} x "
+                    f"{fit.height * 1000:.0f} mm: LARGER THAN THE {roll_width * 1000:.0f} mm "
+                    "ROLL BOTH WAYS; join paper and cloth, or split the piece (more panels "
+                    "or a horizontal split)",
+                )
+            )
+    if pieces and not out:
+        out.append(
+            DesignCheck(
+                "roll width",
+                widest,
+                roll_width,
+                "m",
+                "info",
+                f"every piece's page fits the {roll_width * 1000:.0f} mm roll (widest short "
+                f"side {widest * 1000:.0f} mm)",
+            )
+        )
+    return out
 
 
 def _edge_length(points: FloatArray) -> float:

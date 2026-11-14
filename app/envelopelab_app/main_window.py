@@ -837,7 +837,7 @@ class MainWindow(QMainWindow):
             self.controller.editRejected.emit("a build pack needs a standard-gore design")
             return
         folder = str(self.settings.value("export/pack_folder", "") or "")
-        dialog = ExportPackDialog(self, folder)
+        dialog = ExportPackDialog(self, folder, self.prefs.print_roll_width)
         if dialog.exec():
             self.settings.setValue("export/pack_folder", str(dialog.path()))
             self.export_build_pack(dialog.path(), dialog.include(), dialog.roll_width())
@@ -859,9 +859,9 @@ class MainWindow(QMainWindow):
         include : frozenset of str, optional
             Document keys.
         roll_width : float, optional
-            Fabric roll width, m (default 60 in).
+            Fabric roll width, m (default: the *Print roll width* preference).
         """
-        from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH, PackExtras
+        from envelopelab.export.build_pack import PackExtras
         from envelopelab.export.documents import DOCUMENTS, provenance
         from envelopelab_app.pack_scene import scene_from_view, shape_scenes_from_view, status_line
 
@@ -890,7 +890,7 @@ class MainWindow(QMainWindow):
             status=status_line(self.view3d),
         )
         return self.shapes.export_pack(
-            out_dir, extras, DEFAULT_ROLL_WIDTH if roll_width is None else roll_width
+            out_dir, extras, self.prefs.print_roll_width if roll_width is None else roll_width
         )
 
     def reference_dialog(self) -> None:
@@ -910,6 +910,7 @@ class MainWindow(QMainWindow):
         for name, value in prefs.__dict__.items():
             setattr(self.prefs, name, value)
         save_preferences(self.settings, self.prefs)
+        self.controller.preferences_changed()
         self._apply_autosave_interval()
         self.simulation.detect_calculix()
 

@@ -28,11 +28,18 @@ INCH = 0.0254  # m
 class ExportPackDialog(QDialog):
     """Choose the folder, the fabric roll width and the documents of a build pack.
 
+    ``roll_width`` (m) is the starting roll width (the *Print roll width* preference).
+
     The 1:1 templates and ``cad/`` (one DXF per piece and ``index.json``) are always
     written; the documents are optional.
     """
 
-    def __init__(self, parent: QWidget | None = None, folder: str = "") -> None:
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        folder: str = "",
+        roll_width: float = DEFAULT_ROLL_WIDTH,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Export build pack")
         self.folder = QLineEdit(folder)
@@ -48,7 +55,7 @@ class ExportPackDialog(QDialog):
         self.roll.setRange(10.0, 200.0)
         self.roll.setDecimals(1)
         self.roll.setSuffix(" in")
-        self.roll.setValue(DEFAULT_ROLL_WIDTH / INCH)
+        self.roll.setValue(roll_width / INCH)
         self.roll.setToolTip("Fabric roll width: one side of every 1:1 page is no longer")
         form = QFormLayout()
         form.addRow("Folder", row)

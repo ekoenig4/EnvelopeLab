@@ -65,6 +65,16 @@ both come back when you change mode. The screen has three columns:
    areas; the **Envelope panels** the shape is sewn on; the **Checks** of the pattern;
    and the **Attachment** lines on each envelope panel.
 
+   **Pieces larger than the print roll.** Each piece's 1:1 page (its cut line plus a
+   20 mm margin) is compared with the **Print roll width** in **Preferences** (default
+   60 in, also the starting roll width of the build-pack export). The table's
+   **Page on print roll** column says *fits*, *fits turned* (only with the piece turned a
+   quarter) or **LARGER THAN … ROLL**; such a piece is filled amber in the drawing and
+   labelled *▲ larger than roll*, gets a **roll width** warning in **Checks** and is listed
+   in **Validation / Warnings**. Envelope panel rows larger than the roll are listed
+   there too. Split the piece (more panels, or a horizontal split) or plan to join paper
+   and cloth.
+
    **Envelope panels** shows, for the selected shape only, every envelope panel it crosses
    or lies over, gore by gore (for example *GORE 3 ROW D: ear*), as on the build pack's
    marking sheets: the footprint line the shape's rim is sewn on, with short ticks on the

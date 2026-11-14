@@ -31,6 +31,8 @@ from envelopelab.materials.repository import (
 )
 from envelopelab_app.settings import Preferences
 
+INCH = 0.0254  # m
+
 
 class PreferencesDialog(QDialog):
     """Edit a copy of the preferences; ``result_preferences()`` returns it."""
@@ -73,6 +75,16 @@ class PreferencesDialog(QDialog):
         self.material_library.setPlaceholderText(
             "$ENVELOPELAB_MATERIAL_LIBRARY or materials.sqlite in the application data folder"
         )
+        self.print_roll = QDoubleSpinBox()
+        self.print_roll.setObjectName("printRollWidth")
+        self.print_roll.setRange(10.0, 200.0)
+        self.print_roll.setDecimals(1)
+        self.print_roll.setSuffix(" in")
+        self.print_roll.setValue(prefs.print_roll_width / INCH)
+        self.print_roll.setToolTip(
+            "Roll the 1:1 templates are printed on (and the cloth is cut from): a panel "
+            "whose page is wider than it both ways gets a warning"
+        )
         form = QFormLayout()
         form.addRow("Autosave every", self.autosave)
         form.addRow("Preview mesh edge length", self.preview_mesh)
@@ -83,6 +95,7 @@ class PreferencesDialog(QDialog):
         form.addRow(self.enable_3d)
         form.addRow("Recovery folder", self.recovery)
         form.addRow("Fabric library file (next start)", self.material_library)
+        form.addRow("Print roll width", self.print_roll)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -114,6 +127,7 @@ class PreferencesDialog(QDialog):
             enable_3d=self.enable_3d.isChecked(),
             recovery_dir=self.recovery.text().strip(),
             material_library=self.material_library.text().strip(),
+            print_roll_width=float(self.print_roll.value()) * INCH,
         )
 
 

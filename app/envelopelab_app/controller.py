@@ -17,8 +17,9 @@ from typing import Any, TypeVar
 from PySide6.QtCore import QObject, Signal
 
 from envelopelab.design.model import DesignDocument
+from envelopelab.export.templates import roll_checks, roll_fit
 from envelopelab.features.metrics import REQUIRED_FOS
-from envelopelab.features.primitives import EnvelopeSurface
+from envelopelab.features.primitives import DesignCheck, EnvelopeSurface
 from envelopelab.geometry.gore import PanelRow
 from envelopelab.materials.repository import (
     Fabric,
@@ -400,6 +401,46 @@ class WorkspaceController(QObject):
             self.session.add_shape_run(sim.record, sim.arrays)
             sim.arrays = None
 
+    def preferences_changed(self) -> None:
+        """The preferences changed: recompute what depends on them (the roll width
+        checks of the shapes and the envelope panels)."""
+        self.bump()
+        self.shapesChanged.emit()
+
+    def shape_checks(self, name: str) -> list[DesignCheck]:
+        """Pattern checks of placed shape ``name`` and whether each piece's page fits the
+        print roll (:func:`envelopelab.export.templates.roll_checks`); empty when it is
+        not placed."""
+        result = self.shapes.result(name)
+        if result is None or result.design is None:
+            return []
+        pieces = [(p.label, p.cut) for p in result.design.pieces]
+        return list(result.design.checks) + roll_checks(pieces, self.prefs.print_roll_width)
+
+    def envelope_roll_findings(self) -> list[DesignFinding]:
+        """A warning per envelope panel row whose 1:1 page is wider than the print roll
+        both ways (:func:`envelopelab.export.templates.roll_fit`)."""
+        try:
+            rows = self.rows()
+        except ValueError:
+            return []
+        roll = self.prefs.print_roll_width
+        out = []
+        for row in rows:
+            fit = roll_fit(row.cut_outline, roll)
+            if fit.oversize:
+                out.append(
+                    DesignFinding(
+                        "roll width",
+                        "warning",
+                        f"row {row.label}: panel page {fit.width * 1000:.0f} x "
+                        f"{fit.height * 1000:.0f} mm is LARGER THAN THE {roll * 1000:.0f} mm "
+                        "print roll both ways; join paper and cloth or add a panel row",
+                        f"row:{row.label}",
+                    )
+                )
+        return out
+
     def shape_findings(self) -> list[DesignFinding]:
         """Findings of the special shapes: placement errors, pattern checks, simulations."""
         s = self.session
@@ -419,7 +460,7 @@ class WorkspaceController(QObject):
                     )
                 )
             else:
-                for check in result.design.checks:
+                for check in self.shape_checks(spec.name):
                     if check.severity != "info":
                         out.append(
                             DesignFinding(
@@ -584,6 +625,7 @@ class WorkspaceController(QObject):
                 rows = []
             if rows:
                 out += seam_mismatches(rows, s.patterns)
+                out += self.envelope_roll_findings()
             try:
                 for text in check_locks(s.design, s.project.locks):
                     out.append(DesignFinding("lock", "error", f"lock not met: {text}", "locks"))

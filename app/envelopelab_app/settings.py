@@ -8,6 +8,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QSettings, QStandardPaths
 
+from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH
+
 MAX_RECENT = 10
 
 
@@ -38,6 +40,10 @@ class Preferences:
         Fabric library file shared by all designs; empty: ``$ENVELOPELAB_MATERIAL_LIBRARY``
         or ``materials.sqlite`` in the application data folder (takes effect at the next
         start).
+    print_roll_width : float
+        Width of the roll the 1:1 templates are printed on and the cloth is cut from, m
+        (default 60 in). Every piece whose page is wider than it both ways gets a
+        warning, and the build-pack export starts from it.
     """
 
     autosave_minutes: float = 2.0
@@ -49,6 +55,7 @@ class Preferences:
     enable_3d: bool = True
     recovery_dir: str = ""
     material_library: str = ""
+    print_roll_width: float = DEFAULT_ROLL_WIDTH
 
     def resolved_recovery_dir(self) -> Path:
         """Autosave directory."""

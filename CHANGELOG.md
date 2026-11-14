@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: warnings on every panel larger than the print roll. A **Print roll width**
+  preference (default 60 in) is compared with each special-shape piece's and envelope
+  row's 1:1 page; a piece larger than the roll both ways is marked in the Special shapes
+  panel (table column, amber in the drawing, a *roll width* check) and listed in
+  Validation / Warnings. The build-pack export starts from the same width.
 - Fixed: exporting a build pack failed when a special shape's name had a space
   ("too many values to unpack"); the export's 3D page showed the design only when the 3D
   view had not been opened since the last change; a special shape's preview simulation
