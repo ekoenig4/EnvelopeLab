@@ -146,6 +146,7 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
     {"file": "cad/ear-G1.dxf", "piece": "ear-G1", "kind": "skin piece", "cut_count": 1,
      "fabric": "ripstop red", "finished_width_mm": 392.1, "finished_height_mm": 1855.0}
   ],
+  "shape_groups": {"Head": ["face", "ear", "ear mirror"]},
   "seam_pairs": [
     {"a": [{"file": "cad/ear-G1.dxf", "edge": "right"}],
      "b": [{"file": "cad/ear-G2.dxf", "edge": "left"}],
@@ -156,6 +157,10 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
   ]
 }
 ```
+
+`shape_groups` lists the special shapes of every group (one object made of several
+shapes, ADR-0041) by name; it is empty when no shape is grouped, and each grouped shape's
+skin sheets name the object.
 
 `kind` is `envelope panel`, `parachute panel`, `skin piece` or `marking` (cut count 0). A
 seam pair lists the finished edges sewn together, with lengths summed on each side (all

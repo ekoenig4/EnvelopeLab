@@ -323,6 +323,7 @@ def primitive_sheets(
     seam_allowance: float | None = None,
     hole_hem: float = 0.0,
     hole_tape: str = "",
+    group: str | None = None,
 ) -> list[Sheet]:
     """Sheets of a placed primitive: its skin pieces and its envelope marking sheets.
 
@@ -339,6 +340,8 @@ def primitive_sheets(
         in radius than finished (0: cut at the finished size).
     hole_tape : str
         Tape class the feed-hole hem is turned over (named on the sheet).
+    group : str, optional
+        The object (shape group) the primitive belongs to, named on its skin sheets.
 
     Returns
     -------
@@ -372,8 +375,8 @@ def primitive_sheets(
                 cut=piece.cut,
                 edges=edges,
                 marks=marks,
-                note=f"part of {name}: sew the seams between the pieces first, then the rim "
-                "to the envelope",
+                note=f"part of {name}{f' (object {group})' if group else ''}: sew the seams "
+                "between the pieces first, then the rim to the envelope",
                 texts=texts,
                 notes=notes,
                 ticks=ticks,
@@ -783,6 +786,7 @@ def write_pack(
     title: str = "",
     documents: Sequence[dict[str, str]] = (),
     provenance: dict[str, str] | None = None,
+    shape_groups: dict[str, list[str]] | None = None,
 ) -> Path:
     """Write a build pack: the 1:1 template PDFs at the top of ``out_dir``
     (:mod:`envelopelab.export.templates`) and, in ``cad/``, one DXF per sheet and
@@ -805,6 +809,8 @@ def write_pack(
         paths relative to ``out_dir``), listed in the index.
     provenance : dict, optional
         Where the pack comes from (:class:`envelopelab.export.documents.Provenance`).
+    shape_groups : dict of str to list of str, optional
+        Members of every shape group (object), listed in the index.
 
     Returns
     -------
@@ -858,6 +864,7 @@ def write_pack(
         "templates": templates,
         "documents": list(documents),
         "sheets": entries,
+        "shape_groups": shape_groups or {},
         "seam_pairs": [
             {
                 "a": [{"file": f"{CAD_DIR}/{n}.dxf", "edge": e} for n, e in pair.a],
@@ -883,6 +890,7 @@ def export_build_pack(
     marking_allowance: float | None = None,
     hole_hem: float | None = None,
     extras: PackExtras | None = None,
+    groups: dict[str, str] | None = None,
 ) -> Path:
     """Export the envelope rows, the parachute, and every primitive's pieces and marking
     sheets, and the documents chosen in ``extras``.
@@ -908,6 +916,9 @@ def export_build_pack(
         hole tape, twice its width).
     extras : PackExtras, optional
         Documents to write with the sheets (default: none, the sheets only).
+    groups : dict of str to str, optional
+        Shape group (object) of each primitive that has one, by primitive name; listed in
+        ``index.json`` (``shape_groups``) and named on the skin sheets.
 
     Returns
     -------
@@ -927,7 +938,8 @@ def export_build_pack(
     for p in primitives:
         name = p.primitive.name
         fabric = skin_fabric if isinstance(skin_fabric, str) else skin_fabric.get(name, "skin")
-        sheets += primitive_sheets(p, fabric, marking_allowance, hem, hole_tape)
+        group = (groups or {}).get(name)
+        sheets += primitive_sheets(p, fabric, marking_allowance, hem, hole_tape, group)
         pairs += primitive_seam_pairs(p)
     documents: list[dict[str, str]] = []
     prov = None
@@ -943,7 +955,20 @@ def export_build_pack(
         title=design.meta.name,
         documents=documents,
         provenance=None if prov is None else prov.as_dict(),
+        shape_groups=_group_lists(primitives, groups or {}),
     )
+
+
+def _group_lists(
+    primitives: Sequence[PrimitiveDesign], groups: dict[str, str]
+) -> dict[str, list[str]]:
+    """Members of every shape group, in the order of the primitives."""
+    out: dict[str, list[str]] = {}
+    for p in primitives:
+        group = groups.get(p.primitive.name)
+        if group:
+            out.setdefault(group, []).append(p.primitive.name)
+    return out
 
 
 @dataclass

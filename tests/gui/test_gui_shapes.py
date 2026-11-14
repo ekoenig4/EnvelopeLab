@@ -686,3 +686,53 @@ def test_panel_layout_turns_widens_and_splits_the_pieces(gore_window: MainWindow
     gore_window.undo()
     _placed(gore_window)
     assert session.state.shapes[0].splits == [0.5]
+
+
+def test_shapes_grouped_as_one_object_move_mirror_and_export_together(
+    gore_window: MainWindow, tmp_path: Path
+) -> None:
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    session = gore_window.controller.session
+    assert session is not None
+    panel.add_shape("dome")
+    panel.add_shape("tube")
+    _placed(gore_window)
+    assert not panel.move_group_button.isEnabled()
+    for name in ("Dome", "Tube"):
+        panel.select(name)
+        panel.group_combo.setCurrentText("Head")
+        panel._group_edited()
+    _placed(gore_window)
+    assert [s.group for s in session.state.shapes] == ["Head", "Head"]
+    assert panel.list.item(0).text().startswith("Head ▸ Dome")
+    assert panel.move_group_button.isEnabled() and panel.mirror_group_button.isEnabled()
+
+    before = {s.name: s.placement for s in session.state.shapes}
+    assert panel.move_group(1.0, 0.5)
+    after = {s.name: s.placement for s in session.state.shapes}
+    for name, p in before.items():
+        assert after[name].gore == p.gore % 12 + 1
+        assert after[name].tape_position == pytest.approx(p.tape_position + 0.5)
+
+    # Dragging one member takes the whole group (one undo step).
+    view = gore_window.view3d
+    history = len(session.stack.history())
+    start = session.state.shapes[0].placement
+    assert view.begin_shape_drag("Dome")
+    view.drag_shape_to(_surface_point(gore_window, start.gore + 2, start.tape_position))
+    assert view.end_shape_drag()
+    assert len(session.stack.history()) == history + 1
+    tube = next(s for s in session.state.shapes if s.name == "Tube")
+    assert tube.placement.gore == after["Tube"].gore + 2
+
+    assert panel.mirror_group(0.0, copy=True)
+    names = [s.name for s in session.state.shapes]
+    assert names == ["Dome", "Tube", "Dome mirror", "Tube mirror"]
+    _placed(gore_window)
+    assert not any("[ERROR]" in m and "mirror" in m for m in _messages(gore_window))
+
+    out = panel.export_blender(tmp_path / "head.obj", "Head")
+    assert out is not None
+    text = (tmp_path / "head.obj").read_text(encoding="utf-8")
+    assert "o Tube_mirror_designed" in text and "o envelope" in text

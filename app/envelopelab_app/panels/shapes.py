@@ -70,6 +70,7 @@ from envelopelab.export.templates import roll_fit
 from envelopelab.features.metrics import REQUIRED_FOS
 from envelopelab.features.primitives import CutPiece, PrimitiveDesign
 from envelopelab.project.model import SOLVER_LABELS
+from envelopelab.project.shape_groups import group_names
 from envelopelab.project.shapes import (
     CAP_PANEL_TOP_WIDTH,
     MeshShape,
@@ -176,6 +177,43 @@ def _values(path: tuple[str, ...], value: Any) -> dict[str, Any]:
     if len(path) == 1:
         return {path[0]: value}
     return {path[0]: {path[1]: value}}
+
+
+def _ask(
+    parent: QWidget,
+    title: str,
+    fields: list[tuple[str, float, float, float, int]],
+    check: str | None = None,
+) -> list[float] | None:
+    """A small dialog of numbers (label, minimum, maximum, value, decimals) and an
+    optional tick box (its state comes last, 1 or 0); None when cancelled."""
+    from PySide6.QtWidgets import QDialog, QDialogButtonBox
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    form = QFormLayout(dialog)
+    boxes = []
+    for label, lo, hi, value, decimals in fields:
+        box = QDoubleSpinBox()
+        box.setRange(lo, hi)
+        box.setDecimals(decimals)
+        box.setValue(value)
+        form.addRow(label, box)
+        boxes.append(box)
+    tick = QCheckBox(check) if check else None
+    if tick is not None:
+        tick.setChecked(True)
+        form.addRow(tick)
+    buttons = QDialogButtonBox(
+        QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+    )
+    buttons.accepted.connect(dialog.accept)
+    buttons.rejected.connect(dialog.reject)
+    form.addRow(buttons)
+    if not dialog.exec():
+        return None
+    out = [float(b.value()) for b in boxes]
+    return out + ([1.0 if tick.isChecked() else 0.0] if tick is not None else [])
 
 
 def _scrolled(page: QWidget) -> QScrollArea:
@@ -526,6 +564,23 @@ class ShapesPanel(QWidget):
         self.drag_button.clicked.connect(self._request_drag)
         self.export_blender_button = QPushButton("Export to Blender (OBJ)…")
         self.export_blender_button.clicked.connect(self._export_blender_dialog)
+        # -- shape groups (objects made of several shapes) ------------------------------
+        self.move_group_button = QPushButton("Move group…")
+        self.move_group_button.setObjectName("shapeMoveGroup")
+        self.move_group_button.setToolTip(
+            "Move every shape of the selected shape's group round the envelope and along "
+            "the tape, feed holes with them (one undo step)"
+        )
+        self.move_group_button.clicked.connect(self._move_group_dialog)
+        self.mirror_group_button = QPushButton("Mirror group…")
+        self.mirror_group_button.setObjectName("shapeMirrorGroup")
+        self.mirror_group_button.setToolTip(
+            "Mirror the group about a gore line: add a mirrored copy of every shape (the "
+            "other side of a face) or mirror the shapes in place (one undo step)"
+        )
+        self.mirror_group_button.clicked.connect(self._mirror_group_dialog)
+        self.export_group_button = QPushButton("Export group to Blender…")
+        self.export_group_button.clicked.connect(self._export_group_dialog)
         sim_box = QWidget()
         sim_layout = QVBoxLayout(sim_box)
         sim_row = QHBoxLayout()
@@ -548,6 +603,9 @@ class ShapesPanel(QWidget):
             self.add_button,
             self.duplicate_button,
             self.remove_button,
+            self.move_group_button,
+            self.mirror_group_button,
+            self.export_group_button,
             self.export_pack_button,
             self.export_blender_button,
         ):
@@ -820,6 +878,7 @@ class ShapesPanel(QWidget):
                 return None
             placed.append(design)
             fabrics[spec.name] = shape_fabrics(spec, session.design, session.patterns, design)[1]
+        groups = {s.name: s.group for s in session.state.shapes if s.group}
         index = self.controller.attempt(
             export_build_pack,
             session.design,
@@ -829,13 +888,15 @@ class ShapesPanel(QWidget):
             fabrics,
             roll_width=roll_width,
             extras=extras,
+            groups=groups,
         )
         if index is not None:
             self.controller.message.emit(f"Build pack written to {out_dir}")
         return index
 
-    def export_blender(self, path: str | Path) -> Path | None:
-        """Write the envelope, the placed shapes and their current simulations as OBJ."""
+    def export_blender(self, path: str | Path, group: str | None = None) -> Path | None:
+        """Write the envelope, the placed shapes and their current simulations as OBJ
+        (only the shapes of ``group`` when given)."""
         from envelopelab.features.scene import display_object, export_scene
         from envelopelab.project.shapes import envelope_surface
 
@@ -843,11 +904,12 @@ class ShapesPanel(QWidget):
         if session is None or session.design.gores is None:
             return None
         service = self.controller.shapes
-        designs = [d for d in (self.placed(s.name) for s in session.state.shapes) if d]
+        names = [s.name for s in session.state.shapes if group is None or s.group == group]
+        designs = [d for d in (self.placed(n) for n in names) if d]
         solved = [
             display_object(name, sim.display, sim.record.converged)
             for name, sim in service.simulations.items()
-            if service.simulation_status(name) == "current"
+            if name in names and service.simulation_status(name) == "current"
         ]
         surface = self.controller.attempt(envelope_surface, session.design, session.patterns)
         if surface is None:
@@ -902,7 +964,8 @@ class ShapesPanel(QWidget):
         self.list.blockSignals(True)
         self.list.clear()
         for spec in specs:
-            item = QListWidgetItem(f"{spec.name}  ({KIND_LABELS[spec.kind]})")
+            prefix = f"{spec.group} ▸ " if spec.group else ""
+            item = QListWidgetItem(f"{prefix}{spec.name}  ({KIND_LABELS[spec.kind]})")
             item.setData(Qt.ItemDataRole.UserRole, spec.name)
             colour = self._state_colour(spec.name)
             if colour:
@@ -948,6 +1011,13 @@ class ShapesPanel(QWidget):
         self.cancel_button.setEnabled(running)
         self.export_pack_button.setEnabled(gore)
         self.export_blender_button.setEnabled(gore)
+        grouped = has and self.group() is not None
+        for button in (
+            self.move_group_button,
+            self.mirror_group_button,
+            self.export_group_button,
+        ):
+            button.setEnabled(grouped)
 
     def _update_form(self, spec: ShapeSpec | None) -> None:
         design = self.controller.design
@@ -959,6 +1029,11 @@ class ShapesPanel(QWidget):
         if spec is None:
             return
         self.name_edit.setText(spec.name)  # also undoes a refused rename
+        self.group_combo.blockSignals(True)
+        self.group_combo.clear()
+        self.group_combo.addItems(["", *group_names(self.specs())])
+        self.group_combo.setCurrentText(spec.group or "")
+        self.group_combo.blockSignals(False)
         data = spec.model_dump(mode="json")
         for path, box in self.fields.items():
             box.blockSignals(True)
@@ -1026,6 +1101,20 @@ class ShapesPanel(QWidget):
         )
         self.form.addRow("Name", self.name_edit)
         self.form.addRow("Kind", QLabel(KIND_LABELS[spec.kind]))
+        self.group_combo = QComboBox()
+        self.group_combo.setObjectName("shapeGroup")
+        self.group_combo.setEditable(True)
+        self.group_combo.setToolTip(
+            "Object this shape belongs to: shapes of one group are moved, mirrored and "
+            "exported together (type a new name to start a group, clear it to take the "
+            "shape out)"
+        )
+        line = self.group_combo.lineEdit()
+        if line is not None:
+            line.setPlaceholderText("none")
+            line.editingFinished.connect(self._group_edited)
+        self.group_combo.activated.connect(lambda _i: self._group_edited())
+        self.form.addRow("Group", self.group_combo)
         if isinstance(spec, MeshShape):
             mesh_label = QLabel(
                 f"{spec.source or 'imported'}: {len(spec.vertices)} vertices, "
@@ -1132,6 +1221,78 @@ class ShapesPanel(QWidget):
             self.smooth_check = QCheckBox("Smooth profile (spline through the points)")
             self.smooth_check.toggled.connect(lambda on: self.set_value(("smooth",), bool(on)))
             self.form.addRow("", self.smooth_check)
+
+    # -- shape groups ----------------------------------------------------------------
+
+    def group(self) -> str | None:
+        """Group of the selected shape (None: none, or no shape selected)."""
+        spec = self.spec()
+        return None if spec is None else spec.group
+
+    def _group_edited(self) -> None:
+        text = self.group_combo.currentText().strip()
+        if not self.set_value(("group",), text or None):
+            spec = self.spec()
+            self.group_combo.blockSignals(True)
+            self.group_combo.setCurrentText("" if spec is None else spec.group or "")
+            self.group_combo.blockSignals(False)
+
+    def move_group(self, d_gore: float, d_tape: float, group: str | None = None) -> bool:
+        """Move ``group`` (default: the selected shape's) ``d_gore`` gore widths round the
+        envelope and ``d_tape`` m up the tape (one undo step)."""
+        group = group or self.group()
+        if group is None:
+            return False
+        return bool(self.controller.edit("move_shape_group", group, d_gore, d_tape))
+
+    def mirror_group(self, line: float, copy: bool = True, group: str | None = None) -> bool:
+        """Mirror ``group`` (default: the selected shape's) about the gore line ``line``
+        (gore position: gore n's centreline is n - 0.5, the seam after it n): a mirrored
+        copy of every shape off the line, or the shapes in place (one undo step)."""
+        group = group or self.group()
+        if group is None:
+            return False
+        before = self.controller.revision
+        out = self.controller.edit("mirror_shape_group", group, line, copy)
+        if out is None:
+            return False
+        if copy and not out:
+            self.controller.message.emit(f"{group}: every shape lies on the mirror line")
+        return self.controller.revision != before
+
+    def _move_group_dialog(self) -> None:
+        values = _ask(
+            self,
+            f"Move group {self.group()}",
+            [
+                ("Round the envelope (gores)", -100.0, 100.0, 0.0, 2),
+                ("Up the tape (m)", -100.0, 100.0, 0.0, 3),
+            ],
+        )
+        if values is not None:
+            self.move_group(values[0], values[1])
+
+    def _mirror_group_dialog(self) -> None:
+        spec = self.spec()
+        if spec is None:
+            return
+        here = spec.placement.gore + spec.placement.across  # gore line through the base
+        values = _ask(
+            self,
+            f"Mirror group {self.group()}",
+            [("Mirror line (gore: 6 = centre of gore 6, 6.5 = seam 6|7)", 0.5, 999.0, here, 2)],
+            "Add a mirrored copy (untick: mirror in place)",
+        )
+        if values is not None:
+            line, copy = values[0] - 0.5, bool(values[1])
+            self.mirror_group(line, copy)
+
+    def _export_group_dialog(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Export group to Blender", f"{self.group()}.obj", "OBJ (*.obj)"
+        )
+        if path:
+            self.export_blender(path, self.group())
 
     # -- panel layout ----------------------------------------------------------------
 

@@ -1759,6 +1759,150 @@ def duplicate_shape(session: ProjectSession, name: str) -> str:
     return new
 
 
+def _gore_frame(session: ProjectSession) -> tuple[int, float]:
+    """Gore count and load-tape length (m) shapes are placed with."""
+    from envelopelab.project.gore_design import design_profile
+
+    design = session.design
+    if design.gores is None:
+        raise ValueError("special shapes are placed on a standard-gore design")
+    return design.gores.count, float(design_profile(design).meridian_length)
+
+
+def set_shape_group(session: ProjectSession, names: Sequence[str], group: str | None) -> bool:
+    """Put shapes ``names`` in ``group`` (None: take them out of their group); one step.
+
+    Raises
+    ------
+    KeyError
+        For an unknown shape.
+    ValueError
+        For an invalid group name (nothing is changed).
+    """
+
+    def mutate(shapes: list[dict[str, Any]]) -> None:
+        known = {s["name"] for s in shapes}
+        for name in names:
+            if name not in known:
+                raise KeyError(f"no special shape {name!r}")
+        for shape in shapes:
+            if shape["name"] in names:
+                shape["group"] = group
+
+    what = f"Group {', '.join(names)} as {group}" if group else f"Ungroup {', '.join(names)}"
+    return session.edit_shapes(what, mutate)
+
+
+def rename_shape_group(session: ProjectSession, old: str, new: str) -> bool:
+    """Rename group ``old`` to ``new`` (every member; one step).
+
+    Raises
+    ------
+    KeyError
+        For an unknown group.
+    ValueError
+        When ``new`` is taken or invalid.
+    """
+
+    def mutate(shapes: list[dict[str, Any]]) -> None:
+        groups = {s.get("group") for s in shapes}
+        if old not in groups:
+            raise KeyError(f"no shape group {old!r}")
+        if new in groups:
+            raise ValueError(f"a shape group named {new!r} exists")
+        for shape in shapes:
+            if shape.get("group") == old:
+                shape["group"] = new
+
+    return session.edit_shapes(f"Rename shape group {old} to {new}", mutate)
+
+
+def move_shape_group(session: ProjectSession, group: str, d_gore: float, d_tape: float) -> bool:
+    """Move every shape of ``group`` ``d_gore`` gore widths round the envelope and
+    ``d_tape`` m up the tape, feed holes with them (one step;
+    :func:`envelopelab.project.shape_groups.moved`).
+
+    Raises
+    ------
+    KeyError
+        For an unknown group.
+    ValueError
+        When a shape or feed hole would leave the envelope (nothing is changed).
+    """
+    from envelopelab.project.shape_groups import group_members, moved
+
+    members = group_members(session.state.shapes, group)
+    if not members:
+        raise KeyError(f"no shape group {group!r}")
+    gores, length = _gore_frame(session)
+    new = {s.name: moved(s, d_gore, d_tape, gores, length) for s in members}
+
+    def mutate(shapes: list[dict[str, Any]]) -> None:
+        for i, shape in enumerate(shapes):
+            if shape["name"] in new:
+                shapes[i] = new[shape["name"]]
+
+    return session.edit_shapes(f"Move shape group {group}", mutate)
+
+
+def mirror_shape_group(
+    session: ProjectSession, group: str, line: float, copy: bool = True
+) -> list[str]:
+    """Mirror the shapes of ``group`` in the meridian plane at gore position ``line``
+    (gore widths from the first seam; :func:`envelopelab.project.shape_groups.mirrored`).
+
+    ``copy``: add a mirrored copy of every member whose base point is not on the line
+    (``<name> mirror``, in the same group); otherwise mirror the members in place. One
+    undo step either way.
+
+    Returns
+    -------
+    list of str
+        The names of the shapes added (empty when mirrored in place).
+
+    Raises
+    ------
+    KeyError
+        For an unknown group.
+    """
+    from envelopelab.project.shape_groups import group_members, mirrored, on_line
+
+    members = group_members(session.state.shapes, group)
+    if not members:
+        raise KeyError(f"no shape group {group!r}")
+    gores, _ = _gore_frame(session)
+    if not copy:
+        new = {s.name: mirrored(s, line, gores) for s in members}
+
+        def flip(shapes: list[dict[str, Any]]) -> None:
+            for i, shape in enumerate(shapes):
+                if shape["name"] in new:
+                    shapes[i] = new[shape["name"]]
+
+        session.edit_shapes(f"Mirror shape group {group}", flip)
+        return []
+    taken = {s.name for s in session.state.shapes}
+    added: list[dict[str, Any]] = []
+    for spec in members:
+        if on_line(spec, line, gores):
+            continue
+        data = mirrored(spec, line, gores)
+        base, k = f"{spec.name} mirror", 2
+        name = base
+        while name in taken:
+            name, k = f"{base} {k}", k + 1
+        taken.add(name)
+        data["name"] = name
+        added.append(data)
+
+    def append(shapes: list[dict[str, Any]]) -> None:
+        shapes.extend(added)
+
+    if added:
+        session.edit_shapes(f"Mirror copy of shape group {group}", append)
+    return [d["name"] for d in added]
+
+
 def move_feed_holes_clear(
     session: ProjectSession, placed: dict[str, PrimitiveDesign] | None = None
 ) -> list[str]:

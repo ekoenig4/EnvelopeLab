@@ -243,3 +243,9 @@ def test_shape_files_carry_the_panel_layout() -> None:
     with pytest.raises(ShapeFileError, match=r"(?s)special_shapes\[0\].*panel_widths: 2 widths"):
         sf2 = parse_shape_file(_raw([DOME | {"panel_widths": [1, 2]}]), PATH)
         sf2.shapes(sf2.design())
+
+
+def test_shape_files_carry_the_group() -> None:
+    sf = parse_shape_file(_raw([DOME | {"group": "Head"}]), PATH)
+    (spec,) = sf.shapes(sf.design())
+    assert spec.group == "Head"

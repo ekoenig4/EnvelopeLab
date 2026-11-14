@@ -378,6 +378,25 @@ taller than designed, and taller than the same model with its skin resting in th
 shape. Read the projected height and the inflated shape as the prediction. The wrinkled
 fraction depends on the mesh and is an indicator only.
 
+## Shape groups
+
+Several shapes can form one object (`group`, `envelopelab.project.shape_groups`). A
+member's base point is at gore position \( g = n - \tfrac12 + a \) (gore number \(n\),
+fraction \(a\) across from the centreline) and tape position \(s\). Moving the group maps
+\( g' = (g + \Delta g) \bmod N \), \( s' = s + \Delta s \) for every base point and feed
+hole. A turn \( \Delta g \) is a rotation about the envelope's axis, a symmetry of the
+surface of revolution, so a whole-gore turn leaves every pattern unchanged (tested). A
+shift along the tape keeps each shape but not the arc between members, which scales
+about as \( r(s')/r(s) \).
+
+Mirroring in the meridian plane at \( g_m \) maps \( g' = 2g_m - g \) and reverses every
+direction round the shape's own axis: lean direction \( \psi' = -\psi \), seam turn
+\( \phi'_{off} = -\phi_{off} \), panel widths \( w_1, w_M, \dots, w_2 \) (piece 1 stays
+centred on the seam turn), and a mesh's \( y' = -y \) with every triangle turned over. The
+mirrored shape's pattern is the mirror image of the original's (equal piece areas and
+footprint length, tested). Groups have no pattern, check or simulation of their own;
+members that touch are not joined or checked against each other.
+
 ## Valid range
 
 The footprint must stay on the convex part of the envelope between the mouth and the

@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: shape groups (ADR-0041): several special shapes form one object (a head with
+  ears and a nose). A **Group** field in the shape editor; **Move group…** (turn round
+  the envelope, move along the tape), **Mirror group…** (a mirrored copy of the other
+  side, or in place, about a gore line) and **Export group to Blender…**; dragging a
+  grouped shape moves the whole group. The build pack lists the groups and names each
+  skin sheet's object. Shapes keep their own patterns; no numerical result changes.
 - Added: panel layout of special shapes (ADR-0040). A **Panel layout** tab sets the seam
   turn (where the panels meet round the axis), the relative width of every gore or panel,
   and horizontal splits that cut every piece across into tiers (`Ear-G3A`, `Ear-G3B`, …),

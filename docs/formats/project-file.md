@@ -15,7 +15,7 @@ around it:
 | `state.patterns.rows.<letter>` | Pattern annotations of one panel row: printed label, grain angle (degrees from the panel x axis), fabric zone, seam-allowance override (m), notches, tape paths and feature locations (panel coordinates, m), and an optional **manual outline override** (m) with the time, reason and the geometry hash it was drawn over. |
 | `locks` | Constraint locks of the gore editor (height m, volume m³, maximum diameter m, gore count). |
 | `profile_target` | Optional; written only while the gore profile is compensated for the solved shape. The intended inflated tape line: control points (radius, height, m), interpolation, start time and the largest deviation (m) before each compensation step. The drawn control points are then the cut line. |
-| `state.shapes` | Special shapes placed on the envelope (version 2): `kind` (`dome`, `tube`, `revolved` or `mesh`), unique `name`, `placement` (gore from 1, tape position m, fraction across the gore, lean and lean direction in degrees), the shape's sizes (m) or revolved profile (m) or mesh vertices (m) and triangles, panel or gore count, match marks per piece, feed-hole radius (m, optional), seam allowance (m) and skin fabric id (optional), and from version 4 the panel layout: `seam_offset_deg` (turn of the seams round the axis, degrees), `panel_widths` (relative width of every gore or panel; empty: equal) and `splits` (horizontal splits as fractions of the profile from the base circle; not for mesh shapes). Version 1 files read as having no shapes; versions 1 to 3 as having equal, unturned and unsplit pieces. |
+| `state.shapes` | Special shapes placed on the envelope (version 2): `kind` (`dome`, `tube`, `revolved` or `mesh`), unique `name`, `placement` (gore from 1, tape position m, fraction across the gore, lean and lean direction in degrees), the shape's sizes (m) or revolved profile (m) or mesh vertices (m) and triangles, panel or gore count, match marks per piece, feed-hole radius (m, optional), seam allowance (m) and skin fabric id (optional), and from version 4 the panel layout: `seam_offset_deg` (turn of the seams round the axis, degrees), `panel_widths` (relative width of every gore or panel; empty: equal) and `splits` (horizontal splits as fractions of the profile from the base circle; not for mesh shapes) and `group` (optional name of the object the shape belongs to, ADR-0041). Version 1 files read as having no shapes; versions 1 to 3 as having equal, unturned and unsplit pieces. |
 | `snapshots` | Named copies of `state` with their design content hash. |
 | `versions` | Committed design versions (`version_id`, `parent_id`, message, state). |
 | `provenance` | Append-only log of flagged edits (manual overrides and their undo). |
@@ -486,6 +486,21 @@ clean exit, and offered for recovery at the next start otherwise.
           "minimum": 3,
           "title": "Gores",
           "type": "integer"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_\\- ]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group"
         },
         "height": {
           "exclusiveMinimum": 0.0,
@@ -1005,6 +1020,21 @@ clean exit, and offered for recovery at the next start otherwise.
           },
           "title": "Feed Holes",
           "type": "array"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_\\- ]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group"
         },
         "kind": {
           "const": "mesh",
@@ -1645,6 +1675,21 @@ clean exit, and offered for recovery at the next start otherwise.
           "minimum": 3,
           "title": "Gores",
           "type": "integer"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_\\- ]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group"
         },
         "kind": {
           "const": "revolved",
@@ -2674,6 +2719,21 @@ clean exit, and offered for recovery at the next start otherwise.
           },
           "title": "Feed Holes",
           "type": "array"
+        },
+        "group": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_\\- ]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Group"
         },
         "kind": {
           "const": "tube",

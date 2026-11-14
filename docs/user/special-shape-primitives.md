@@ -138,6 +138,23 @@ both come back when you change mode. The screen has three columns:
    centre panel) and every shape's pieces and marking sheets (DXF, PDF and `index.json`,
    section 4). **Export to Blender (OBJ)…** writes the
    envelope, every shape and every current shape simulation (section 5).
+7. **Groups: several shapes as one object.** A head with ears and a nose is several
+   shapes; give them the same **Group** (in **Placement & size**, type a name or pick
+   one; clear it to take a shape out). The list shows grouped shapes as
+   *Head ▸ Ear (Dome)*. Every shape keeps its own pieces, checks and simulation; the
+   group moves and mirrors them together, each in one undo step:
+   * **Move group…** turns every member round the envelope (in gores) and moves it up or
+     down the tape (in m), feed holes with it. A turn keeps the shapes exactly; a move
+     along the tape keeps each shape, but the gores narrow towards the mouth and the
+     crown, so the members end up a little closer or further apart. Dragging a grouped
+     shape in the 3D view moves its whole group.
+   * **Mirror group…** mirrors about a gore line (6 = the centreline of gore 6, 6.5 = the
+     seam between gores 6 and 7). With *Add a mirrored copy* ticked it adds the other side
+     (`Ear mirror`, in the same group), leaving out the shapes on the line itself; unticked
+     it mirrors the group in place. The lean, seam turn and panel widths are mirrored
+     too, and a mesh shape is mirrored with it.
+   * **Export group to Blender…** writes the envelope and that group's shapes only. The
+     build pack lists the groups in its `index.json`, and every skin sheet names its object.
 
 Nothing is hidden. A shape that cannot be placed (for example a base too large for the
 local curvature), a failed check, a simulation that did NOT converge, a factor of safety

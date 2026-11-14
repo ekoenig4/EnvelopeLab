@@ -1852,7 +1852,22 @@ class View3DPanel(QWidget):
             self.info.setText("")
             return False
         values = {"gore": p.gore, "tape_position": p.tape_position, "across": p.across}
-        moved = bool(self.controller.edit("update_shape", drag.name, {"placement": values}))
+        session = self.controller.session
+        spec = (
+            None
+            if session is None
+            else next((x for x in session.state.shapes if x.name == drag.name), None)
+        )
+        design = self.controller.design
+        if spec is not None and spec.group and design is not None and design.gores is not None:
+            # A grouped shape takes its whole group with it (one undo step).
+            n = design.gores.count
+            d_gore = (p.gore + p.across) - (s.gore + s.across)
+            d_gore = (d_gore + 0.5 * n) % n - 0.5 * n
+            d_tape = p.tape_position - s.tape_position
+            moved = bool(self.controller.edit("move_shape_group", spec.group, d_gore, d_tape))
+        else:
+            moved = bool(self.controller.edit("update_shape", drag.name, {"placement": values}))
         self.info.setText(
             f"Moved {drag.name} to gore {p.gore}, {p.tape_position:.3f} m up the tape; it is "
             "being placed (see Special shapes)"

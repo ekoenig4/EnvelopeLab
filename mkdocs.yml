@@ -91,6 +91,7 @@ nav:
       - ADR-0038: adr/ADR-0038-one-pdf-per-piece.md
       - ADR-0039: adr/ADR-0039-marked-panels-assembly-and-shape-views.md
       - ADR-0040: adr/ADR-0040-shape-panel-layout.md
+      - ADR-0041: adr/ADR-0041-shape-groups.md
 theme:
   name: material
 markdown_extensions:

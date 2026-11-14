@@ -274,7 +274,9 @@ The other keys are those of the project's shape specification, in its units:
 * the panel layout is plain numbers: `seam_offset_deg` (turn of the seams round the
   shape's axis, degrees), `panel_widths` (relative width of every gore or panel, one per
   piece) and `splits` (horizontal splits as fractions of the profile from the base
-  circle; not for `mesh`), for example `panel_widths: [2, 1, 1, 1]`, `splits: [0.4]`.
+  circle; not for `mesh`), for example `panel_widths: [2, 1, 1, 1]`, `splits: [0.4]`;
+* `group` names the object a shape belongs to (shapes with the same group are moved,
+  mirrored and exported together).
 
 Use `zone` (resolved through `zones`) or `fabric` (a fabric id) for the skin. An error
 names the entry and key, for example `special_shapes[2].placement.row`.

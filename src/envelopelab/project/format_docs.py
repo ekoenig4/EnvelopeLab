@@ -43,7 +43,8 @@ KEYS: tuple[tuple[str, str], ...] = (
         "and skin fabric id (optional), and from version 4 the panel layout: "
         "`seam_offset_deg` (turn of the seams round the axis, degrees), `panel_widths` "
         "(relative width of every gore or panel; empty: equal) and `splits` (horizontal "
-        "splits as fractions of the profile from the base circle; not for mesh shapes). "
+        "splits as fractions of the profile from the base circle; not for mesh shapes) "
+        "and `group` (optional name of the object the shape belongs to, ADR-0041). "
         "Version 1 files read as having no shapes; versions 1 to 3 as having equal, "
         "unturned and unsplit pieces.",
     ),

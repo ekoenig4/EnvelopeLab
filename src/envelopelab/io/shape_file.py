@@ -762,6 +762,7 @@ SHAPE_KEYS = frozenset(
         "seam_offset_deg",
         "panel_widths",
         "splits",
+        "group",
     }
 )
 

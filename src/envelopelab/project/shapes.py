@@ -124,6 +124,10 @@ class _ShapeBase(BaseModel):
         profile's length from the base circle to the tip, increasing in (0, 1). The tiers
         are sewn edge to edge; their pieces are labelled ``A`` (at the rim), ``B``, ...
         Not for mesh shapes.
+    group : str or None
+        Name of the object the shape belongs to (several shapes with the same group are
+        moved, mirrored and exported together, :mod:`envelopelab.project.shape_groups`;
+        None: on its own).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -139,6 +143,9 @@ class _ShapeBase(BaseModel):
     seam_offset_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
     panel_widths: list[float] = Field(default_factory=list)
     splits: list[float] = Field(default_factory=list, max_length=MAX_SPLITS)
+    group: str | None = Field(
+        default=None, min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_\- ]+$"
+    )
 
     @model_validator(mode="after")
     def _layout(self) -> _ShapeBase:
