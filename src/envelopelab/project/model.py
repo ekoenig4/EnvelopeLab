@@ -15,7 +15,8 @@ JSON file that wraps one design document (unchanged, in the design schema) with
 * **constraint locks** of the standard-gore editor, and the **profile target** (the
   intended inflated tape line) while the profile is compensated for the solved shape;
 * the **special shapes** placed on the envelope (domes, tubes, revolved and mesh shapes,
-  :mod:`envelopelab.project.shapes`), part of the design state since version 2.
+  :mod:`envelopelab.project.shapes`), part of the design state since version 2, with
+  their panel layouts (seam turn, panel widths, horizontal splits) since version 4.
 
 Version 1 files (no shapes) are read as version 2 files with no shapes (ADR-0020).
 
@@ -37,9 +38,9 @@ from envelopelab.design.model import DesignDocument, load_design_document
 from envelopelab.project.shapes import ShapeSpec
 
 PROJECT_FORMAT: Literal["envelopelab.project"] = "envelopelab.project"
-PROJECT_FORMAT_VERSION: Literal[3] = 3
+PROJECT_FORMAT_VERSION: Literal[4] = 4
 #: Older versions :func:`load_project_text` still reads (see :func:`migrate_project_data`).
-READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3)
+READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3, 4)
 PROJECT_SUFFIX = ".elproj"
 
 NotchEdge = Literal["left", "right", "bottom", "top"]
@@ -506,7 +507,7 @@ class Project(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     format: Literal["envelopelab.project"] = PROJECT_FORMAT
-    format_version: Literal[3] = PROJECT_FORMAT_VERSION
+    format_version: Literal[4] = PROJECT_FORMAT_VERSION
     state: DesignState
     locks: ConstraintLocks = Field(default_factory=ConstraintLocks)
     profile_target: ProfileTarget | None = None
@@ -544,7 +545,9 @@ def migrate_project_data(raw: dict[str, Any]) -> dict[str, Any]:
 
     Version 1 states have no ``shapes``; they read as states without special shapes.
     Versions 1 and 2 have no ``shape_runs``; they read as projects without saved shape
-    simulations.
+    simulations. Versions 1 to 3 have no shape panel layouts (``seam_offset_deg``,
+    ``panel_widths``, ``splits``); their shapes read with equal, unturned, unsplit pieces
+    (ADR-0040).
 
     Raises
     ------

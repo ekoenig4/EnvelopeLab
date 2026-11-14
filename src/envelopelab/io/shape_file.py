@@ -759,6 +759,9 @@ SHAPE_KEYS = frozenset(
         "profile",
         "smooth",
         "mesh",
+        "seam_offset_deg",
+        "panel_widths",
+        "splits",
     }
 )
 

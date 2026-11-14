@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: panel layout of special shapes (ADR-0040). A **Panel layout** tab sets the seam
+  turn (where the panels meet round the axis), the relative width of every gore or panel,
+  and horizontal splits that cut every piece across into tiers (`Ear-G3A`, `Ear-G3B`, …),
+  each flattened on its own and sewn edge to edge (new *split seam match* check). The
+  build pack, its QA seam pairs, sewing directions, assembly instructions, the 3D view
+  and the shape simulation follow the layout. Mesh shapes take the turn and widths.
+  Shape files accept `seam_offset_deg`, `panel_widths` and `splits`.
+- Changed: the project format is version 4 (shape panel layouts); versions 1 to 3 still
+  open, their shapes with equal, unturned and unsplit pieces. Shapes with the default
+  layout give bit-identical patterns and simulations.
 - Added: warnings on every panel larger than the print roll. A **Print roll width**
   preference (default 60 in) is compared with each special-shape piece's and envelope
   row's 1:1 page; a piece larger than the roll both ways is marked in the Special shapes

@@ -40,7 +40,12 @@ KEYS: tuple[tuple[str, str], ...] = (
         "fraction across the gore, lean and lean direction in degrees), the shape's sizes "
         "(m) or revolved profile (m) or mesh vertices (m) and triangles, panel or gore "
         "count, match marks per piece, feed-hole radius (m, optional), seam allowance (m) "
-        "and skin fabric id (optional). Version 1 files read as having no shapes.",
+        "and skin fabric id (optional), and from version 4 the panel layout: "
+        "`seam_offset_deg` (turn of the seams round the axis, degrees), `panel_widths` "
+        "(relative width of every gore or panel; empty: equal) and `splits` (horizontal "
+        "splits as fractions of the profile from the base circle; not for mesh shapes). "
+        "Version 1 files read as having no shapes; versions 1 to 3 as having equal, "
+        "unturned and unsplit pieces.",
     ),
     ("`snapshots`", "Named copies of `state` with their design content hash."),
     ("`versions`", "Committed design versions (`version_id`, `parent_id`, message, state)."),

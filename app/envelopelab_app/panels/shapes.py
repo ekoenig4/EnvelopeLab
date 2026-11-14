@@ -1,8 +1,10 @@
 """Special shapes panel: domes, tubes, revolved and imported mesh shapes on the envelope.
 
 The panel has three columns: the project's special shapes; the selected one's editor in
-tabs (*Placement & size*, *Profile* for a revolved shape, *Feed holes & cap*,
-*Simulation*; every change is one undoable edit of the design state); and in tabs what
+tabs (*Placement & size*, *Profile* for a revolved shape, *Feed holes & cap*, *Panel
+layout* (where the seams sit round the axis, how wide each gore or panel is, and where
+they are split across), *Simulation*; every change is one undoable edit of the design
+state); and in tabs what
 :mod:`envelopelab.features.primitives` derives from it: the cut pieces (a drawing of their
 outlines that zooms with the mouse wheel and pans by dragging, and their sizes), the
 pattern checks and the attachment lines on the envelope panels. The shape simulation
@@ -79,6 +81,7 @@ from envelopelab.project.shapes import (
     cap_diameter,
     default_shape,
     mesh_shape,
+    piece_count,
     pointed,
     shape_fabrics,
 )
@@ -415,6 +418,68 @@ class ShapesPanel(QWidget):
         row_buttons.addWidget(del_row)
         profile_layout.addLayout(row_buttons)
 
+        # -- panel layout ----------------------------------------------------------------
+        self.layout_box = QWidget()
+        self.layout_box.setObjectName("shapePanelLayout")
+        self.seam_turn = QDoubleSpinBox()
+        self.seam_turn.setObjectName("shapeSeamTurn")
+        self.seam_turn.setRange(-180.0, 180.0)
+        self.seam_turn.setDecimals(1)
+        self.seam_turn.setSuffix(" °")
+        self.seam_turn.setKeyboardTracking(False)
+        self.seam_turn.setToolTip(
+            "Turn every seam round the shape's axis: the first gore or panel is centred this "
+            "far round from the direction up the tape (0°), towards the next gore (90°)"
+        )
+        self.seam_turn.valueChanged.connect(
+            lambda v: self.set_value(("seam_offset_deg",), round(float(v), 1))
+        )
+        self.widths_table = QTableWidget(0, 2)
+        self.widths_table.setObjectName("shapePanelWidths")
+        self.widths_table.setHorizontalHeaderLabels(["Relative width", "Spans round the axis"])
+        self.widths_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.widths_table.setMinimumHeight(140)
+        self.widths_table.setToolTip(
+            "Relative width of every gore or panel, piece 1 first: 2 is twice as wide as 1"
+        )
+        self.widths_table.itemChanged.connect(self._width_edited)
+        equal = QPushButton("Equal widths")
+        equal.setObjectName("shapeEqualWidths")
+        equal.clicked.connect(lambda: self.set_value(("panel_widths",), []))
+        self.splits_table = QTableWidget(0, 1)
+        self.splits_table.setObjectName("shapeSplits")
+        self.splits_table.setHorizontalHeaderLabels(["Split at (% of the profile)"])
+        self.splits_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.splits_table.setMinimumHeight(100)
+        self.splits_table.setToolTip(
+            "Where every gore or panel is cut across: per cent of the profile's length from "
+            "the base circle (0) to the tip (100). Tiers are labelled A (at the rim), B, ..."
+        )
+        self.splits_table.itemChanged.connect(self._split_edited)
+        self.add_split_button = QPushButton("Add split")
+        self.add_split_button.setObjectName("shapeAddSplit")
+        self.add_split_button.clicked.connect(self.add_split)
+        self.remove_split_button = QPushButton("Remove split")
+        self.remove_split_button.clicked.connect(self.remove_split)
+        self.layout_note = QLabel()
+        self.layout_note.setObjectName("shapeLayoutNote")
+        self.layout_note.setWordWrap(True)
+        layout_form = QFormLayout(self.layout_box)
+        layout_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        layout_form.addRow("Seam turn", self.seam_turn)
+        widths = QVBoxLayout()
+        widths.addWidget(self.widths_table)
+        widths.addWidget(equal)
+        layout_form.addRow("Panel widths", widths)
+        splits = QVBoxLayout()
+        splits.addWidget(self.splits_table)
+        split_buttons = QHBoxLayout()
+        split_buttons.addWidget(self.add_split_button)
+        split_buttons.addWidget(self.remove_split_button)
+        splits.addLayout(split_buttons)
+        layout_form.addRow("Horizontal splits", splits)
+        layout_form.addRow(self.layout_note)
+
         # -- results ---------------------------------------------------------------------
         self.checks = QTreeWidget()
         self.checks.setHeaderLabels(["Check", "Value", "Limit", "Result"])
@@ -504,6 +569,7 @@ class ShapesPanel(QWidget):
             (place, "Placement && size"),
             (self.profile_box, "Profile"),
             (holes_page, "Feed holes && cap"),
+            (self.layout_box, "Panel layout"),
             (sim_box, "Simulation"),
         ):
             self.editor_tabs.addTab(_scrolled(page), title)
@@ -686,7 +752,13 @@ class ShapesPanel(QWidget):
         if path == ("name",):
             # Selected under its new name before the edit refreshes the panel.
             self.selected = str(value)
-        ok = bool(self.controller.edit("update_shape", old, _values(path, value)))
+        values = _values(path, value)
+        if spec is not None and path in (("gores",), ("panels",)) and spec.panel_widths:
+            # Keep the widths given and make the new pieces as wide as the last one.
+            count = int(value)
+            widths = list(spec.panel_widths)[:count]
+            values["panel_widths"] = widths + [widths[-1]] * (count - len(widths))
+        ok = bool(self.controller.edit("update_shape", old, values))
         if not ok:
             self.selected = old
             self.refresh()
@@ -922,6 +994,7 @@ class ShapesPanel(QWidget):
         self.cap_diameter.setValue(cap_diameter(spec))
         self.cap_diameter.setEnabled(capped and spec.cap_diameter is not None)
         self.cap_diameter.blockSignals(False)
+        self._fill_layout(spec)
         self.fabric_combo.blockSignals(True)
         index = self.fabric_combo.findData(spec.fabric or "")
         self.fabric_combo.setCurrentIndex(max(index, 0))
@@ -1059,6 +1132,101 @@ class ShapesPanel(QWidget):
             self.smooth_check = QCheckBox("Smooth profile (spline through the points)")
             self.smooth_check.toggled.connect(lambda on: self.set_value(("smooth",), bool(on)))
             self.form.addRow("", self.smooth_check)
+
+    # -- panel layout ----------------------------------------------------------------
+
+    def _fill_layout(self, spec: ShapeSpec) -> None:
+        """Show ``spec``'s panel layout: seam turn, widths (and the angle each piece
+        spans), splits."""
+        count = piece_count(spec)
+        widths = spec.panel_widths or [1.0] * count
+        total = sum(widths)
+        self.seam_turn.blockSignals(True)
+        self.seam_turn.setValue(spec.seam_offset_deg)
+        self.seam_turn.blockSignals(False)
+        self.widths_table.blockSignals(True)
+        self.widths_table.setRowCount(count)
+        self.widths_table.setVerticalHeaderLabels([str(k + 1) for k in range(count)])
+        for k, w in enumerate(widths):
+            self.widths_table.setItem(k, 0, QTableWidgetItem(f"{w:g}"))
+            span = QTableWidgetItem(f"{360.0 * w / total:.1f}°")
+            span.setFlags(span.flags() & ~Qt.ItemFlag.ItemIsEditable)
+            self.widths_table.setItem(k, 1, span)
+        self.widths_table.blockSignals(False)
+        mesh = isinstance(spec, MeshShape)
+        self.splits_table.blockSignals(True)
+        self.splits_table.setRowCount(len(spec.splits))
+        letters = [chr(ord("A") + i) for i in range(len(spec.splits) + 1)]
+        self.splits_table.setVerticalHeaderLabels(
+            [f"{letters[i]}|{letters[i + 1]}" for i in range(len(spec.splits))]
+        )
+        for i, f in enumerate(spec.splits):
+            self.splits_table.setItem(i, 0, QTableWidgetItem(f"{100.0 * f:.1f}"))
+        self.splits_table.blockSignals(False)
+        for widget in (self.splits_table, self.add_split_button, self.remove_split_button):
+            widget.setEnabled(not mesh)
+        tiers = len(spec.splits) + 1
+        text = (
+            f"{count} {'gores' if spec.kind in ('dome', 'revolved') else 'panels'} round the "
+            f"axis{' (equal)' if not spec.panel_widths else ''}"
+        )
+        text += f" in {tiers} tiers, A at the rim" if tiers > 1 else ", one tier"
+        if mesh:
+            text += "; a mesh shape's panels cannot be split across"
+        self.layout_note.setText(text + ".")
+
+    def set_panel_widths(self, widths: list[float]) -> bool:
+        """Set the relative widths of the gores or panels (empty: all equal)."""
+        return self.set_value(("panel_widths",), [float(w) for w in widths])
+
+    def set_splits(self, fractions: list[float]) -> bool:
+        """Set the horizontal splits (fractions of the profile, sorted here)."""
+        return self.set_value(("splits",), sorted(round(float(f), 4) for f in fractions))
+
+    def add_split(self) -> bool:
+        """Add a horizontal split in the middle of the tallest tier."""
+        spec = self.spec()
+        if spec is None or isinstance(spec, MeshShape):
+            return False
+        edges = [0.0, *spec.splits, 1.0]
+        gaps = [b - a for a, b in zip(edges, edges[1:], strict=False)]
+        i = gaps.index(max(gaps))
+        return self.set_splits([*spec.splits, round(0.5 * (edges[i] + edges[i + 1]), 3)])
+
+    def remove_split(self) -> bool:
+        """Remove the selected horizontal split (the top one when none is selected)."""
+        spec = self.spec()
+        if spec is None or not spec.splits:
+            return False
+        row = self.splits_table.currentRow()
+        row = row if 0 <= row < len(spec.splits) else len(spec.splits) - 1
+        return self.set_splits([f for i, f in enumerate(spec.splits) if i != row])
+
+    def _width_edited(self, item: QTableWidgetItem) -> None:
+        spec = self.spec()
+        if spec is None or item.column() != 0:
+            return
+        widths = list(spec.panel_widths or [1.0] * piece_count(spec))
+        try:
+            widths[item.row()] = float(item.text())
+        except ValueError:
+            self._fill_layout(spec)
+            return
+        if not self.set_panel_widths(widths):
+            self._fill_layout(spec)
+
+    def _split_edited(self, item: QTableWidgetItem) -> None:
+        spec = self.spec()
+        if spec is None:
+            return
+        splits = list(spec.splits)
+        try:
+            splits[item.row()] = float(item.text()) / 100.0
+        except ValueError:
+            self._fill_layout(spec)
+            return
+        if not self.set_splits(splits):
+            self._fill_layout(spec)
 
     def _holes(self) -> list[dict[str, Any]]:
         spec = self.spec()

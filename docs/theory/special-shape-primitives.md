@@ -88,6 +88,44 @@ The skin is cut into \(M\) pieces between the meridians
 \( \phi_j = 2\pi j/M - \pi/M \), so piece 1 is centred on the top of the feature. Each
 meridian runs from its footprint point (\(t = 0\)) to the tip (\(t = 1\)).
 
+### Panel layout: seam turn, panel widths and horizontal splits
+
+The layout of the pieces is the builder's choice (`seam_angles`, `split_heights`):
+
+* **Seam turn** \( \phi_{off} \) turns every seam round the axis.
+* **Panel widths** \( w_k > 0 \), one per piece, set how much of the turn each piece
+  spans: \( \Delta_k = 2\pi w_k / \sum w \). Piece 1 stays centred on the seam turn, so
+  \[
+  \phi_0 = \phi_{off} - \tfrac{1}{2}\Delta_0, \qquad
+  \phi_j = \phi_0 + \sum_{k<j} \Delta_k .
+  \]
+  With equal widths and no turn this is the layout above, to the last bit.
+* **Horizontal splits** \( 0 < f_1 < \dots < f_n < 1 \) cut every piece across at the
+  meridian arc lengths \( u_i = f_i\,\ell \) from the base circle, where \( \ell \) is the
+  meridian's length to the tip (or the cap's edge). On a surface of revolution a split is
+  a circle round the axis. Tier 0 runs from the footprint to \(u_1\), tier \(i\) from
+  \(u_i\) to \(u_{i+1}\), and the last one to the tip. Each tier is a band with its own
+  parameter \(t\) from 0 (lower edge) to 1 (upper edge), developed like a whole skin:
+  exactly for a frustum, as a classic gore with true-length seams otherwise. Every split
+  must lie above the footprint all round (\( u_1 > \max u_0(\phi) + 0.02\,\ell \)), and
+  splits lie at least 2 % of the profile apart and from its ends (assumed).
+
+The top edge of a lower piece and the bottom edge of the piece above it both lie at the
+parallel \(u_i\): each is laid straight with the circle's true arc length, so the two match
+exactly (check *split seam match*). The shear and stretch of a dome gore are found tier
+by tier, so a split moves the flattening strain: each tier is equalised to its own seam
+lengths. For a 12-gore half-spheroid dome of radius 0.8 m and height 0.6 m, one split at
+45 % takes the flat-to-designed area of the whole skin from 98.0 % to 98.4 %, and puts
+−3.1 % in the top tier instead of −2.0 % along the whole gore; the preview simulation
+then predicts a slightly lower dome (0.568 m against 0.592 m, mesh 70 mm). The area
+distortion check reports the worst piece and the simulation shows the shape that follows.
+Unequal widths make the wide gores more distorted (the distortion of a gore grows with
+its width squared, see below); the narrowest piece sets the automatic cap diameter
+\( d = w_{top} \sum w / (\pi \min w) \).
+
+Mesh shapes take the seam turn and panel widths (the cut half-planes move with them) but
+no horizontal splits: their panels must stay discs from the footprint to the pole.
+
 ### Tube panels: exact developments
 
 This applies to tubes and to revolved profiles of a single straight segment.
@@ -127,7 +165,8 @@ gores (see [Special-shape primitives](../validation/special-shape-primitives.md)
 | footprint between mouth and crown | tape clearance, m | > 0 |
 | rim length | sum of rim edges − footprint length, m | 3 mm (assumed, AGENTS.md sewn edges) |
 | attachment ease | largest \(|e_j|\): rim minus marked line between two match marks, m | 3 mm (assumed, AGENTS.md sewn edges) |
-| skin seam match | largest length difference of the two sides of a seam, m | 3 mm (assumed) |
+| skin seam match | largest length difference of the two sides of a seam (every tier), m | 3 mm (assumed) |
+| split seam match | largest length difference of a piece's top and the bottom of the piece above it, m | 3 mm (assumed) |
 | seam flattening | largest relative difference of a flat seam edge from its 3D seam | 2 % (assumed) |
 | area distortion | largest relative difference of a piece's flat and designed area | 1 % (assumed) |
 | cap seam match | panel tops summed − the cap's edge, m (mesh shapes; a parametric tip disc is a circle of the tops' radius) | 3 mm (assumed) |
@@ -277,10 +316,13 @@ nodes were numbered differently.
 
 `primitive_appendage` builds an `AppendageSpec` with `skin_mode="designed"`. The skin
 factory triangulates every cut piece **in its own flat coordinates** around the footprint
-nodes of the host mesh. Seam, rim, tip and apex nodes are shared between the pieces that
-meet there, and interior nodes start on the designed shape through the inverse of the
-piece's development. Every triangle therefore rests in the cut cloth and the seams are mesh
-lines.
+nodes of the host mesh. Seam, rim, split, tip and apex nodes are shared between the
+pieces that meet there, and interior nodes start on the designed shape through the
+inverse of the piece's development. Every triangle therefore rests in the cut cloth and
+the seams are mesh lines. A node on a horizontal split keeps its meridian arc length
+\(u\) and angle \(\phi\), so the tier below (\(t = 1\)) and the tier above (\(t = 0\)) share
+it; each split is a seam of its own (`<name>:split <i>`). Unequal pieces get nodes on the
+cap's edge and on each split in proportion to their widths.
 
 **Faceting correction.** A flat triangle stands in for a patch of curved cloth: its sides
 are chords of the designed surface, but the cut cloth between its corners follows the

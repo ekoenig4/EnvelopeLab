@@ -33,7 +33,7 @@ both come back when you change mode. The screen has three columns:
 * on the left, the list of special shapes with **Add shape**, **Duplicate**, **Remove**
   and the exports;
 * in the middle, the selected shape's editor in tabs: **Placement & size**, **Profile**
-  (revolved shapes only), **Feed holes & cap** and **Simulation**;
+  (revolved shapes only), **Feed holes & cap**, **Panel layout** and **Simulation**;
 * on the right, what the shape gives, in tabs: **Cut pieces** (a drawing and a table),
   **Envelope panels** (where it is sewn on the envelope), **Checks** and **Attachment**.
 
@@ -57,6 +57,29 @@ both come back when you change mode. The screen has three columns:
    a 637 mm cap, a 16-panel one 509 mm), but at most half the shape's base diameter;
    untick it to type a diameter, or 0 to bring the pieces to a point. Every change is one
    undo step.
+
+   **Panel layout** decides how the skin is cut:
+
+   * **Seam turn** (degrees) turns every seam round the shape's axis. Gore or panel 1 is
+     centred this far round from the direction up the tape (0°), towards the next gore
+     at 90°. Use it to keep a seam off a face, a marking or a feed hole.
+   * **Panel widths**: one relative width per gore or panel, piece 1 first (2 is twice as
+     wide as 1); the second column shows the angle each piece spans. **Equal widths**
+     makes them all the same again. Changing the number of gores or panels keeps the
+     widths of the first ones (new ones get the last width).
+   * **Horizontal splits** cut every gore or panel across, in per cent of the profile's
+     length from the base circle (0) to the tip (100). **Add split** splits the tallest
+     tier in the middle; **Remove split** removes the selected one (or the top one). The
+     tiers are sewn edge to edge and the pieces are named with their tier letter, `A` at
+     the rim: `Ear-G3A`, `Ear-G3B`, … A split must lie above the footprint all round (a
+     leaning shape's footprint climbs up one side); the shape says so if it does not.
+     Splitting a large piece is the way to make it fit the print roll. Mesh shapes take
+     the seam turn and widths but cannot be split across.
+
+   Every 1:1 sheet says what each edge is sewn to (for an upper tier, *BOTTOM: sew to
+   G3A (its top)*), and the shape's assembly instructions sew each tier into a ring, then
+   ring onto ring. The same keys (`seam_offset_deg`, `panel_widths`, `splits`) can be
+   written in a [shape file](../formats/shape-file.md).
 3. The shape is placed in the background while you keep editing; the list says
    **being placed…** until it is done (usually under a second). The right-hand column then
    shows the **Cut pieces**: a drawing of every piece, named under it (finished line

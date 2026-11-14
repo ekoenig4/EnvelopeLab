@@ -35,7 +35,7 @@ at 1:1, ticks every T mm`, `along: …`) is generated from the same values.
 | `cad/envelope-row-<R>.dxf` | Envelope row panel `R`, cut once per gore |
 | `cad/parachute-panel.dxf` | Parachute radial panel, cut once per radial panel; bottom = the parachute edge |
 | `cad/parachute-centre.dxf` | Parachute centre panel (a circle), cut once; only when the parachute has one |
-| `cad/<shape>-G<k>.dxf`, `cad/<shape>-P<k>.dxf` | Skin gore or panel `k` of a special shape |
+| `cad/<shape>-G<k>.dxf`, `cad/<shape>-P<k>.dxf` | Skin gore or panel `k` of a special shape; with horizontal splits each tier's piece has its letter, `A` at the rim (`cad/<shape>-G<k>A.dxf`, `-G<k>B.dxf`, …) and an upper tier's piece has a `bottom` edge, paired with the `top` of the piece below it in `seam_pairs` |
 | `cad/<shape>-TIP.dxf` | Flat tip disc of a tube or revolved shape |
 | `cad/<shape>-mark-G<g>-<R>.dxf` | Marking sheet: envelope panel (gore `g`, row `R`) with the shape's footprint line, match marks and feed hole |
 | `cad/index.json` | The index (below); it lists every other file of the pack |

@@ -14,7 +14,7 @@ import math
 from typing import TYPE_CHECKING, Annotated, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 if TYPE_CHECKING:
     from envelopelab.design.model import DesignDocument
@@ -33,6 +33,8 @@ CAP_PANEL_TOP_WIDTH = 0.10
 #: An automatic cap's diameter is at most this fraction of the shape's base diameter
 #: (source: assumed; keeps the cap on the top of small shapes).
 CAP_MAX_FRACTION = 0.5
+#: Most horizontal splits of a shape (one tier letter each, A to Z).
+MAX_SPLITS = 25
 
 
 class ShapePlacement(BaseModel):
@@ -110,6 +112,18 @@ class _ShapeBase(BaseModel):
         would otherwise meet in a point (a dome, a revolved profile ending on the axis, a
         pointed tube, a mesh). None: automatic (:func:`cap_diameter`); 0: no cap, the
         pieces meet in a point.
+    seam_offset_deg : float
+        Turn of every seam round the shape's axis, deg: the first gore or panel is
+        centred this far round from the direction up the tape (0), towards the next gore
+        (90). Where the panels meet.
+    panel_widths : list of float
+        Relative width of every gore or panel round the axis, one per piece, piece 1
+        first (empty: all equal). ``[2, 1, 1]`` makes piece 1 half the shape.
+    splits : list of float
+        Horizontal splits: where every gore or panel is cut across, as fractions of the
+        profile's length from the base circle to the tip, increasing in (0, 1). The tiers
+        are sewn edge to edge; their pieces are labelled ``A`` (at the rim), ``B``, ...
+        Not for mesh shapes.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -122,6 +136,26 @@ class _ShapeBase(BaseModel):
     seam_allowance: float = Field(default=0.0125, ge=0.0)
     fabric: str | None = None
     cap_diameter: float | None = Field(default=None, ge=0.0)
+    seam_offset_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
+    panel_widths: list[float] = Field(default_factory=list)
+    splits: list[float] = Field(default_factory=list, max_length=MAX_SPLITS)
+
+    @model_validator(mode="after")
+    def _layout(self) -> _ShapeBase:
+        count = piece_count(self)  # type: ignore[arg-type]
+        if self.panel_widths and len(self.panel_widths) != count:
+            raise ValueError(
+                f"panel_widths: {len(self.panel_widths)} widths for {count} gores or panels"
+            )
+        if any(not w > 0.0 for w in self.panel_widths):
+            raise ValueError("panel_widths: every width must be positive")
+        if any(not 0.0 < f < 1.0 for f in self.splits) or any(
+            b <= a for a, b in zip(self.splits, self.splits[1:], strict=False)
+        ):
+            raise ValueError("splits: fractions must increase within (0, 1)")
+        if self.splits and getattr(self, "kind", None) == "mesh":
+            raise ValueError("splits: a mesh shape's panels cannot be split across")
+        return self
 
 
 class DomeShape(_ShapeBase):
@@ -186,14 +220,47 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
     placement = Placement(pl.gore, pl.tape_position, pl.across, pl.lean_deg, pl.lean_toward_deg)
     marks = spec.marks_per_piece
     rc = 0.5 * cap_diameter(spec)
+    layout = {
+        "seam_offset": math.radians(spec.seam_offset_deg),
+        "panel_widths": tuple(float(w) for w in spec.panel_widths),
+    }
+    splits = tuple(float(f) for f in spec.splits)
     if isinstance(spec, DomeShape):
-        return Dome(spec.name, placement, spec.base_radius, spec.height, spec.gores, marks, rc)
+        return Dome(
+            spec.name,
+            placement,
+            spec.base_radius,
+            spec.height,
+            spec.gores,
+            marks,
+            rc,
+            splits=splits,
+            **layout,  # type: ignore[arg-type]
+        )
     if isinstance(spec, TubeShape):
         if rc > 0.0:  # a pointed tube cut off where it is as wide as the cap
             length = spec.length * (1.0 - rc / spec.base_radius)
-            return Tube(spec.name, placement, spec.base_radius, rc, length, spec.panels, marks)
+            return Tube(
+                spec.name,
+                placement,
+                spec.base_radius,
+                rc,
+                length,
+                spec.panels,
+                marks,
+                splits=splits,
+                **layout,  # type: ignore[arg-type]
+            )
         return Tube(
-            spec.name, placement, spec.base_radius, spec.tip_radius, spec.length, spec.panels, marks
+            spec.name,
+            placement,
+            spec.base_radius,
+            spec.tip_radius,
+            spec.length,
+            spec.panels,
+            marks,
+            splits=splits,
+            **layout,  # type: ignore[arg-type]
         )
     if isinstance(spec, RevolvedShape):
         return Revolved(
@@ -204,13 +271,15 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
             spec.smooth,
             marks,
             rc,
+            splits=splits,
+            **layout,  # type: ignore[arg-type]
         )
     mesh = ReferenceMesh(
         np.asarray(spec.vertices, dtype=np.float64),
         np.asarray(spec.triangles, dtype=np.int64),
         spec.source,
     )
-    return FreeformShape(spec.name, placement, mesh, spec.panels, marks, rc)
+    return FreeformShape(spec.name, placement, mesh, spec.panels, marks, rc, **layout)  # type: ignore[arg-type]
 
 
 def piece_count(spec: ShapeSpec) -> int:
@@ -233,10 +302,16 @@ def auto_cap_diameter(spec: ShapeSpec) -> float:
     r"""Automatic cap diameter of a pointed shape, m.
 
     Every one of the M pieces' tops is at least :data:`CAP_PANEL_TOP_WIDTH` wide, so
-    :math:`d = M\,w_{top}/\pi`, but at most :data:`CAP_MAX_FRACTION` of the base diameter
-    (both assumed). Rounded to 1 mm.
+    :math:`d = M\,w_{top}/\pi` for equal pieces, and
+    :math:`d = w_{top} \sum w / (\pi \min w)` for pieces of relative widths :math:`w`
+    (the narrowest top is then :math:`w_{top}`), but at most :data:`CAP_MAX_FRACTION` of
+    the base diameter (both assumed). Rounded to 1 mm.
     """
-    d = piece_count(spec) * CAP_PANEL_TOP_WIDTH / math.pi
+    if spec.panel_widths:
+        w = spec.panel_widths
+        d = CAP_PANEL_TOP_WIDTH * sum(w) / (math.pi * min(w))
+    else:
+        d = piece_count(spec) * CAP_PANEL_TOP_WIDTH / math.pi
     d = min(d, CAP_MAX_FRACTION * 2.0 * base_radius(spec))
     return round(d, 3)
 

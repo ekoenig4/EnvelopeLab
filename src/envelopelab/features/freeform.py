@@ -65,6 +65,7 @@ from scipy.sparse.linalg import splu
 from scipy.spatial import cKDTree
 
 from envelopelab.features.builder import DesignedSkin, FeatureBuildError, HostSurface, _mesh_disc
+from envelopelab.features.primitives import seam_angles
 from envelopelab.geometry.polygon import offset_polygon, signed_area
 from envelopelab.solvers.membrane import FloatArray, IntArray
 
@@ -493,6 +494,11 @@ class _MeshSkin:
     cap_mask: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=bool))
     cap_floor: float = 0.0
 
+    @property
+    def equal(self) -> bool:
+        """True when every panel is equally wide round the axis."""
+        return not self.shape.panel_widths
+
     def phi_of(self, points: FloatArray) -> FloatArray:
         rel = np.asarray(points).reshape(-1, 3) - self.base
         return np.arctan2(rel @ self.b2, rel @ self.b1)
@@ -516,9 +522,12 @@ class _MeshSkin:
 
     def panel_of(self, phi: float) -> int:
         m = len(self.panels)
-        width = 2 * math.pi / m
         start = self.panels[0].phi_a
-        return int(((phi - start) % (2 * math.pi)) // width) % m
+        rel = (phi - start) % (2 * math.pi)
+        if self.equal:
+            return int(rel // (2 * math.pi / m)) % m
+        ends = np.array([p.phi_b - start for p in self.panels])
+        return min(int(np.searchsorted(ends, rel, side="right")), m - 1)
 
     def rim_flat(self, k: int, phi: FloatArray) -> FloatArray:
         """Flat rim points of panel ``k`` at angles ``phi`` (rad), m."""
@@ -612,7 +621,8 @@ def build_mesh_skin(
 
     # Cut along the seam half-planes (each ends at the pole, which lies on every plane).
     m = shape.panels
-    seams = 2.0 * math.pi * np.arange(m) / m - math.pi / m
+    full = seam_angles(shape)
+    seams = full[:-1]
     for ph in seams:
         d = math.cos(ph) * b1 + math.sin(ph) * b2
         n = -math.sin(ph) * b1 + math.cos(ph) * b2
@@ -655,7 +665,10 @@ def build_mesh_skin(
     # Assign the other triangles to panels by centroid angle.
     cen = x[tri].mean(axis=1) - base
     cphi = np.mod(np.arctan2(cen @ b2, cen @ b1) - seams[0], 2 * math.pi)
-    which = np.minimum((cphi // (2 * math.pi / m)).astype(int), m - 1)
+    if shape.panel_widths:
+        which = np.minimum(np.searchsorted(full - full[0], cphi, side="right") - 1, m - 1)
+    else:
+        which = np.minimum((cphi // (2 * math.pi / m)).astype(int), m - 1)
     which[cap_tri] = -1
     on_rim = np.zeros(len(x), dtype=bool)
     on_rim[rim] = True
@@ -737,7 +750,7 @@ def build_mesh_skin(
                 right,
                 left,
                 float(seams[k]),
-                float(seams[k]) + 2 * math.pi / m,
+                float(full[k + 1]) if shape.panel_widths else float(seams[k]) + 2 * math.pi / m,
                 top=top,
                 glob=used,
             )
@@ -893,19 +906,26 @@ class _MeshFactory:
 
         design, skin = self.design, self.skin
         m = len(skin.panels)
-        width = 2 * math.pi / m
         start = skin.panels[0].phi_a
+        # Where each panel starts and ends round the axis from the first seam, rad (equal
+        # panels keep the arithmetic of a whole number of widths).
+        if skin.equal:
+            width = 2 * math.pi / m
+            a_rel, b_rel = width * np.arange(m), width * np.arange(1, m + 1)
+        else:
+            a_rel = np.array([p.phi_a - start for p in skin.panels])
+            b_rel = np.array([p.phi_b - start for p in skin.panels])
         world = _from_chart(design, rim_chart)
         phi_rel = np.mod(skin.phi_of(world) - start, 2 * math.pi)
         notes: list[str] = []
         seam_node = []
         for j in range(m):
-            gap = np.abs(np.mod(phi_rel - j * width + math.pi, 2 * math.pi) - math.pi)
+            gap = np.abs(np.mod(phi_rel - a_rel[j] + math.pi, 2 * math.pi) - math.pi)
             seam_node.append(int(np.argmin(gap)))
         if len(set(seam_node)) != m:
             raise FeatureBuildError(f"{design.primitive.name}: panels too narrow for the mesh size")
         for j, k in enumerate(seam_node):
-            phi_rel[k] = j * width
+            phi_rel[k] = a_rel[j]
         seam_set = set(seam_node)
         # Shared seam nodes: 3D points along each seam at about the mesh size.
         seam_frac = []
@@ -934,7 +954,7 @@ class _MeshFactory:
                 (
                     i
                     for i in range(len(rim_chart))
-                    if i not in seam_set and k * width <= phi_rel[i] < (k + 1) * width
+                    if i not in seam_set and a_rel[k] <= phi_rel[i] < b_rel[k]
                 ),
                 key=lambda i: float(phi_rel[i]),
             )

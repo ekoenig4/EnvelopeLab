@@ -270,7 +270,11 @@ The other keys are those of the project's shape specification, in its units:
   `seam_allowance` are lengths with a unit;
 * `revolved` takes `profile: {unit, points: [[rho, zeta], ...]}`;
 * `mesh` takes `mesh: {file, up, scale}`, read with `envelopelab.io.blender.read_shape_mesh`
-  in the frame of a mesh shape: z out of the envelope, x up the tape.
+  in the frame of a mesh shape: z out of the envelope, x up the tape;
+* the panel layout is plain numbers: `seam_offset_deg` (turn of the seams round the
+  shape's axis, degrees), `panel_widths` (relative width of every gore or panel, one per
+  piece) and `splits` (horizontal splits as fractions of the profile from the base
+  circle; not for `mesh`), for example `panel_widths: [2, 1, 1, 1]`, `splits: [0.4]`.
 
 Use `zone` (resolved through `zones`) or `fabric` (a fabric id) for the skin. An error
 names the entry and key, for example `special_shapes[2].placement.row`.

@@ -347,16 +347,15 @@ def primitive_sheets(
     """
     name = design.primitive.name
     out: list[Sheet] = []
-    rim_pieces = [p for p in design.pieces if p.rim is not None]
-    tip = [p for p in design.pieces if p.rim is None]
-    order = {p.label: k for k, p in enumerate(rim_pieces)}
+    skin = {(p.tier, p.index): p for p in design.pieces if p.role == "panel"}
+    tip = [p for p in design.pieces if p.role == "tip"]
     for piece in design.pieces:
         own = [m for m in design.marks if m.piece == piece.label]
         marks = [(m.piece_xy[0], m.piece_xy[1], str(m.number)) for m in own]
         edges = {k: v for k, v in piece.edges.items()}
         if piece.rim is not None:
             edges["rim"] = piece.rim
-        texts, notes = _piece_directions(piece, own, rim_pieces, tip, order, name)
+        texts, notes = _piece_directions(piece, own, skin, design.primitive.pieces, tip, name)
         ticks = [
             np.vstack([pt, pt + TICK_LENGTH * (piece.finished.mean(axis=0) - pt) / d])
             for pt in (np.asarray(q, dtype=np.float64) for q in piece.seam_points)
@@ -513,13 +512,18 @@ def _side_ticks(line: FloatArray, sign: float) -> list[FloatArray]:
 def _piece_directions(
     piece: Any,
     own_marks: Sequence[Any],
-    rim_pieces: Sequence[Any],
+    skin: dict[tuple[int, int], Any],
+    m: int,
     tip: Sequence[Any],
-    order: dict[str, int],
     name: str,
 ) -> tuple[list[tuple[float, float, str]], list[str]]:
-    """What every edge of a skin piece is sewn to: texts placed on the piece, and notes."""
+    """What every edge of a skin piece is sewn to: texts placed on the piece, and notes.
+
+    ``skin`` holds the gores or panels by (tier, index round the axis); ``m`` is the
+    number round the axis.
+    """
     centre = piece.finished.mean(axis=0)
+    tiers = len(skin) // m
 
     def at(points: FloatArray) -> tuple[float, float]:
         pts = np.asarray(points, dtype=np.float64)
@@ -531,7 +535,7 @@ def _piece_directions(
 
     texts: list[tuple[float, float, str]] = []
     notes: list[str] = []
-    if piece.rim is None:  # the tip disc or cap
+    if piece.role == "tip":  # the tip disc or cap
         texts.append((float(centre[0]), float(centre[1]), "TIP DISC"))
         notes.append(f"TIP DISC: sew round the tops of all {name} panels")
         if piece.seam_points:
@@ -540,23 +544,30 @@ def _piece_directions(
                 inward = centre - mid
                 norm = float(np.linalg.norm(inward))
                 p = mid + (0.6 * TEXT_INSET * inward / norm if norm > 0.0 else 0.0)
-                label = _short(rim_pieces[k % len(rim_pieces)].label, name)
+                label = _short(skin[(tiers - 1, k % m)].label, name)
                 texts.append((float(p[0]), float(p[1]), label))
             notes.append(
                 "the ticks on the edge are where the seams between the panels meet it: sew "
                 "each panel's top between the ticks either side of its name"
             )
         return texts, notes
-    k, m = order[piece.label], len(rim_pieces)
-    nxt = _short(rim_pieces[(k + 1) % m].label, name)
-    prv = _short(rim_pieces[(k - 1) % m].label, name)
+    k, i = piece.index, piece.tier
+    nxt = _short(skin[(i, (k + 1) % m)].label, name)
+    prv = _short(skin[(i, (k - 1) % m)].label, name)
     numbers = sorted(mk.number for mk in own_marks)
     span = f", marks {numbers[0]}-{numbers[-1]}" if numbers else ""
-    texts.append((*at(piece.rim), f"RIM: sew to the envelope{span}"))
+    if piece.rim is not None:
+        texts.append((*at(piece.rim), f"RIM: sew to the envelope{span}"))
+    else:  # a piece of an upper tier: its bottom is sewn to the top of the piece below
+        below = _short(skin[(i - 1, k)].label, name)
+        texts.append((*at(piece.edges["bottom"]), f"BOTTOM: sew to {below} (its top)"))
     texts.append((*at(piece.edges["right"]), f"sew to {nxt} (its left side)"))
     texts.append((*at(piece.edges["left"]), f"sew to {prv} (its right side)"))
     top = np.asarray(piece.edges.get("top", np.zeros((0, 2))))
-    if tip and len(top) > 1:
+    if i < tiers - 1:
+        above = _short(skin[(i + 1, k)].label, name)
+        texts.append((*at(top), f"TOP: sew to {above} (its bottom)"))
+    elif tip and len(top) > 1:
         texts.append((*at(top), "TOP: sew to the tip disc"))
     elif len(top):
         texts.append((float(top[0][0]), float(top[0][1]) - TEXT_INSET, f"APEX of {name}"))
@@ -612,7 +623,9 @@ def shape_row_notes(primitives: Sequence[PrimitiveDesign]) -> dict[str, list[str
 
 
 def primitive_seam_pairs(design: PrimitiveDesign) -> list[SeamPair]:
-    """Edges of a primitive sewn together: skin seams, tip, and the rim to the envelope.
+    """Edges of a primitive sewn together: skin seams (in every tier), the horizontal
+    splits (each piece's top to the bottom of the piece above it), tip, and the rim to
+    the envelope.
 
     The rim is sewn to the footprint lines marked on the envelope panels (the marking
     sheets of :func:`primitive_sheets`). Those lines are on the flat panels, so they
@@ -620,15 +633,25 @@ def primitive_seam_pairs(design: PrimitiveDesign) -> list[SeamPair]:
     (:attr:`~envelopelab.features.primitives.PrimitiveDesign.mark_ease`, checked per
     match-mark interval); the pair carries that total as its ``ease``.
     """
-    pieces = [p for p in design.pieces if p.rim is not None]
-    m = len(pieces)
+    m = design.primitive.pieces
+    by = {(p.tier, p.index): p for p in design.pieces if p.role == "panel"}
+    tiers = len(by) // m
+    pieces = [by[(0, k)] for k in range(m)]
     pairs = [
-        SeamPair(((pieces[k].label, "right"),), ((pieces[(k + 1) % m].label, "left"),))
+        SeamPair(((by[(i, k)].label, "right"),), ((by[(i, (k + 1) % m)].label, "left"),))
+        for i in range(tiers)
         for k in range(m)
     ]
-    tip = [p for p in design.pieces if p.rim is None]
+    # Horizontal splits: every piece's top to the bottom of the piece above it.
+    pairs += [
+        SeamPair(((by[(i, k)].label, "top"),), ((by[(i + 1, k)].label, "bottom"),))
+        for i in range(tiers - 1)
+        for k in range(m)
+    ]
+    tip = [p for p in design.pieces if p.role == "tip"]
     if tip:
-        pairs.append(SeamPair(tuple((p.label, "top") for p in pieces), ((tip[0].label, "top"),)))
+        top = tuple((by[(tiers - 1, k)].label, "top") for k in range(m))
+        pairs.append(SeamPair(top, ((tip[0].label, "top"),)))
     lines: list[tuple[str, str]] = []
     for gore, row in sorted({(a.gore, a.row) for a in design.attachment}):
         runs = [a for a in design.attachment if (a.gore, a.row) == (gore, row)]

@@ -134,12 +134,13 @@ class ShapeDisplay:
         Skin triangles.
     piece : ndarray of int, shape (t,)
         Cut piece of every triangle: 0 .. m-1 for the gores or panels in order round the
-        axis, m for a flat tip disc.
+        axis (every tier of a split shape alike; the splits are drawn as seams), m for a
+        flat tip disc.
     pieces : int
         Number of gores or panels m.
     seams : list of ndarray
         Sewn lines (each shape (k, 3), m): every skin seam from the rim to the pole or tip,
-        and the tip seam of a tip disc.
+        every horizontal split, and the tip seam of a tip disc.
     rim : ndarray, shape (r, 3)
         The rim, sewn to the envelope along the footprint (closed: first point repeated), m.
     """
@@ -163,10 +164,12 @@ def _piece_of(
     seams = _seams(prim)
     rel = centroids - design.base_point
     phi = np.arctan2(rel @ design.b2, rel @ design.b1)
-    width = 2.0 * math.pi / m
-    out: IntArray = np.minimum(
-        (np.mod(phi - seams[0], 2.0 * math.pi) // width).astype(np.int64), m - 1
-    )
+    rel_phi = np.mod(phi - seams[0], 2.0 * math.pi)
+    out: IntArray
+    if prim.panel_widths:
+        out = np.minimum(np.searchsorted(seams - seams[0], rel_phi, side="right") - 1, m - 1)
+    else:
+        out = np.minimum((rel_phi // (2.0 * math.pi / m)).astype(np.int64), m - 1)
     if tip is not None:
         out[tip] = m
     return out
@@ -187,7 +190,7 @@ def designed_display(design: PrimitiveDesign, rows: int = 60, per_piece: int = 1
     ShapeDisplay
         Envelope frame, m.
     """
-    from envelopelab.features.primitives import _seams
+    from envelopelab.features.primitives import _seams, split_heights
 
     prim = design.primitive
     skin = design._skin
@@ -210,7 +213,15 @@ def designed_display(design: PrimitiveDesign, rows: int = 60, per_piece: int = 1
     cols = m * per_piece
     seams_phi = _seams(prim)
     t = np.linspace(0.0, 1.0, rows)
-    phi = seams_phi[0] + np.linspace(0.0, 2.0 * math.pi, cols, endpoint=False)
+    if prim.panel_widths:
+        phi = np.concatenate(
+            [
+                np.linspace(seams_phi[k], seams_phi[k + 1], per_piece, endpoint=False)
+                for k in range(m)
+            ]
+        )
+    else:
+        phi = seams_phi[0] + np.linspace(0.0, 2.0 * math.pi, cols, endpoint=False)
     tt, pp = np.meshgrid(t, phi, indexing="ij")
     pts = skin.at(tt.ravel(), pp.ravel())
     tri = _grid(pts, rows, cols, True)
@@ -218,6 +229,9 @@ def designed_display(design: PrimitiveDesign, rows: int = 60, per_piece: int = 1
     column = np.repeat(np.tile(np.arange(cols), rows - 1), 2)
     piece = (column // per_piece).astype(np.int64)
     seams = [skin.at(t, np.full(rows, float(p))) for p in seams_phi[:-1]]
+    # Horizontal splits: circles round the skin at their meridian arc lengths.
+    around = seams_phi[0] + np.linspace(0.0, 2.0 * math.pi, cols + 1)
+    seams += [skin.at_u(np.full(len(around), u), around) for u in split_heights(prim, skin.total)]
     if prim.closed_tip:
         centre = design.base_point + prim.tip_height * design.axis
         c = len(pts)
@@ -305,7 +319,7 @@ def simulated_display(
     seams = [
         pts[chain]
         for s in model.seams
-        if s.name.startswith(f"{name}:seam") or s.name == f"{name}:tip seam"
+        if s.name.startswith((f"{name}:seam", f"{name}:split")) or s.name == f"{name}:tip seam"
         for chain in _chains(s.edges)
     ]
     rim_nodes = np.asarray(appendage.rim_nodes, dtype=np.int64)

@@ -454,6 +454,7 @@ def test_editor_and_results_are_in_tabs(gore_window: MainWindow) -> None:
         "Placement && size",
         "Profile",
         "Feed holes && cap",
+        "Panel layout",
         "Simulation",
     ]
     assert [results.tabText(i) for i in range(results.count())] == [
@@ -642,3 +643,46 @@ def test_export_dialog_starts_from_the_print_roll_preference(gore_window: MainWi
     assert dialog.result_preferences().print_roll_width == pytest.approx(72 * 0.0254)
     export = ExportPackDialog(gore_window, "", prefs.print_roll_width)
     assert export.roll_width() == pytest.approx(72 * 0.0254)
+
+
+def test_panel_layout_turns_widens_and_splits_the_pieces(gore_window: MainWindow) -> None:
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("dome")
+    _placed(gore_window)
+    session = gore_window.controller.session
+    assert session is not None
+    assert panel.widths_table.rowCount() == 16
+    assert "16 gores round the axis (equal), one tier" in panel.layout_note.text()
+
+    panel.seam_turn.setValue(10.0)
+    _placed(gore_window)
+    assert session.state.shapes[0].seam_offset_deg == pytest.approx(10.0)
+
+    assert panel.set_panel_widths([2.0] + [1.0] * 15)
+    _placed(gore_window)
+    item = panel.widths_table.item(0, 1)
+    assert item is not None and item.text() == f"{360.0 * 2 / 17:.1f}°"
+
+    assert panel.add_split()
+    _placed(gore_window)
+    assert session.state.shapes[0].splits == [0.5]
+    labels = [panel.pieces.topLevelItem(i) for i in range(panel.pieces.topLevelItemCount())]
+    names = [i.text(0) for i in labels if i is not None]
+    assert names[:2] == ["Dome-G1A", "Dome-G2A"] and "Dome-G16B" in names
+    assert names[-1] == "Dome-TIP" and len(names) == 2 * 16 + 1
+    assert "in 2 tiers, A at the rim" in panel.layout_note.text()
+    assert not any("shape Dome" in m and "[ERROR]" in m for m in _messages(gore_window))
+
+    # Fewer gores keep the widths given for the first ones.
+    panel.fields[("gores",)].setValue(8)
+    _placed(gore_window)
+    assert session.state.shapes[0].panel_widths == [2.0] + [1.0] * 7
+    assert panel.widths_table.rowCount() == 8
+
+    assert panel.remove_split()
+    _placed(gore_window)
+    assert session.state.shapes[0].splits == []
+    gore_window.undo()
+    _placed(gore_window)
+    assert session.state.shapes[0].splits == [0.5]
