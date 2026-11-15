@@ -1,7 +1,7 @@
 """Where the special shapes sit on the balloon: a 3D sketch and a gore map, side by side.
 
-Shown under the shape editor in the Special shapes mode (ADR-0044), so positions typed
-as numbers can be seen at once:
+Shown in the *On the balloon* tab of the Special shapes mode's right column (ADR-0044),
+so positions typed as numbers can be seen at once:
 
 * **3D**: the envelope (gore and row seams), every shape as designed (the selected one
   in magenta), the symmetry axes in green (dashed where they run behind the envelope).
@@ -37,7 +37,7 @@ from PySide6.QtGui import (
     QPolygonF,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QSplitter, QVBoxLayout, QWidget
 
 SELECTED = "#d6008f"
 OTHER = "#e98fc2"
@@ -445,7 +445,8 @@ class BalloonSketch(QWidget):
 
 
 class PlacementView(QWidget):
-    """The 3D sketch and the gore map side by side, with a caption (module docstring)."""
+    """The 3D sketch over the gore map (a splitter shares the height), with a caption
+    (module docstring)."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -460,14 +461,16 @@ class PlacementView(QWidget):
         )
         caption.setWordWrap(True)
         caption.setObjectName("placementCaption")
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(self.sketch, 1)
-        row.addWidget(self.map, 1)
+        self.split = QSplitter(Qt.Orientation.Vertical)
+        self.split.setObjectName("placementSplitter")
+        self.split.addWidget(self.sketch)
+        self.split.addWidget(self.map)
+        self.split.setStretchFactor(0, 1)
+        self.split.setStretchFactor(1, 1)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(caption)
-        layout.addLayout(row, 1)
+        layout.addWidget(self.split, 1)
 
     def set_data(self, data: PlacementData) -> None:
         """Draw ``data`` in both views."""

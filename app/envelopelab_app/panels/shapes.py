@@ -10,10 +10,10 @@ outlines that zooms with the mouse wheel and pans by dragging, and their sizes),
 pattern checks and the attachment lines on the envelope panels. The shape simulation
 with the preview solver is on the *Simulation* tab. Placing a shape runs in a worker thread
 (:class:`~envelopelab_app.shapes_service.ShapeService`), so editing never waits for it;
-the panel says "being placed…" until the result arrives. Under the editor, a 3D sketch and
-a gore map show where every shape and symmetry axis sits on the balloon
-(:mod:`envelopelab_app.placement_view`); a shape is selected by clicking it on the map and
-moved by dragging it there.
+the panel says "being placed…" until the result arrives. The *On the balloon* tab of the
+right column shows where every shape and symmetry axis sits on the balloon, a 3D sketch
+over a gore map (:mod:`envelopelab_app.placement_view`); a shape is selected by clicking
+it on the map and moved by dragging it there.
 
 Nothing is hidden: a shape that cannot be placed, a failed check, an unconverged or
 stale simulation and a factor of safety below the requirement are shown in red here and
@@ -749,23 +749,7 @@ class ShapesPanel(QWidget):
         mirror_row.addWidget(self.mirror_label, 1)
         mirror_row.addWidget(self.unlink_button)
         middle_layout.addLayout(mirror_row)
-        # The editor above, where the shapes sit on the balloon below (3D and gore map).
-        self.placement = PlacementView()
-        self.placement.map.shapeClicked.connect(self.select)
-        self.placement.map.shapeMoved.connect(
-            lambda name, placement: self.controller.place_shape(name, placement)
-        )
-        self.middle_split = QSplitter(Qt.Orientation.Vertical)
-        self.middle_split.setObjectName("shapeEditorSplitter")
-        self.middle_split.addWidget(self.editor_tabs)
-        self.middle_split.addWidget(self.placement)
-        self.middle_split.setStretchFactor(0, 1)
-        self.middle_split.setStretchFactor(1, 1)
-        self.middle_split.setCollapsible(0, False)
-        self.placement.setMinimumHeight(240)
-        self.editor_tabs.setMinimumHeight(160)
-        self.middle_split.setSizes([360, 320])
-        middle_layout.addWidget(self.middle_split, 1)
+        middle_layout.addWidget(self.editor_tabs, 1)
 
         # Column 3: what is derived from it, in tabs.
         self.result_tabs = QTabWidget()
@@ -795,6 +779,13 @@ class ShapesPanel(QWidget):
         pieces_split.setStretchFactor(0, 3)
         pieces_split.setStretchFactor(1, 1)
         self.result_tabs.addTab(pieces_split, "Cut pieces")
+        # Where the shapes sit on the balloon: the 3D sketch over the gore map.
+        self.placement = PlacementView()
+        self.placement.map.shapeClicked.connect(self.select)
+        self.placement.map.shapeMoved.connect(
+            lambda name, placement: self.controller.place_shape(name, placement)
+        )
+        self.result_tabs.addTab(self.placement, "On the balloon")
         # The envelope panels the shape is sewn on (its marking sheets); the Patterns
         # view shows only the base envelope.
         self.markings = MarkingView()

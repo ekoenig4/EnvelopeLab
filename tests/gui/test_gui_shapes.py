@@ -459,6 +459,7 @@ def test_editor_and_results_are_in_tabs(gore_window: MainWindow) -> None:
     ]
     assert [results.tabText(i) for i in range(results.count())] == [
         "Cut pieces",
+        "On the balloon",
         "Envelope panels",
         "Checks",
         "Attachment",
@@ -819,6 +820,8 @@ def test_placement_views_show_and_move_the_shapes(gore_window: MainWindow) -> No
     _placed(gore_window)
     panel.add_axis("Face centre", 5.5)
     view = panel.placement
+    assert panel.result_tabs.indexOf(view) == 1  # the On the balloon tab
+    panel.result_tabs.setCurrentWidget(view)
     data = view.map.data
     assert [s.name for s in data.shapes] == ["Dome", "Tube"]
     assert [a[0] for a in data.axes] == ["Face centre"]

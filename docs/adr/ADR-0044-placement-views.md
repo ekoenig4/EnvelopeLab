@@ -9,8 +9,8 @@ A shape's position is typed as numbers (gore, tape position, fraction across, le
 or a symmetry axis was while editing it.
 
 ## Decision
-* Under the shape editor (a splitter shares the height), the Special shapes mode shows a
-  **3D sketch** and a **gore map** side by side, both with every shape, its footprint,
+* An **On the balloon** tab of the Special shapes mode's right column, next to the shape
+  editor, shows a **3D sketch** over a **gore map** (a splitter shares the height), both with every shape, its footprint,
   feed holes and the symmetry axes, the selected shape highlighted.
 * The geometry is in the core (`envelopelab.project.placement_map`, typed and tested): the
   gore map lays the gores side by side at their true flat width with the panel's own

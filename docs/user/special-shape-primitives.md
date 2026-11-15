@@ -33,15 +33,15 @@ both come back when you change mode. The screen has three columns:
 * on the left, the list of special shapes with **Add shape**, **Duplicate**, **Remove**
   and the exports;
 * in the middle, the selected shape's editor in tabs: **Placement & size**, **Profile**
-  (revolved shapes only), **Feed holes & cap**, **Panel layout** and **Simulation**, and
-  under it **where the shapes sit on the balloon** (below);
-* on the right, what the shape gives, in tabs: **Cut pieces** (a drawing and a table),
-  **Envelope panels** (where it is sewn on the envelope), **Checks** and **Attachment**.
+  (revolved shapes only), **Feed holes & cap**, **Panel layout** and **Simulation**;
+* on the right, in tabs: **Cut pieces** (a drawing and a table), **On the balloon**
+  (where the shapes sit, below), **Envelope panels** (where it is sewn on the
+  envelope), **Checks** and **Attachment**.
 
-**Where on the balloon.** Under the editor (drag the bar between them to share the
-height), two drawings show every shape, its footprint and feed holes, and the symmetry
+**On the balloon.** This tab shows a 3D sketch over a gore map (drag the bar between
+them to share the height): every shape, its footprint and feed holes, and the symmetry
 axes, the selected shape in magenta and the axes in green. They follow every number you
-type:
+type in the editor next to them:
 
 * **3D**: the envelope with its gore and row seams and the shapes as designed. It turns to
   face a shape when you select it; drag to turn it, use the wheel to zoom, double click
