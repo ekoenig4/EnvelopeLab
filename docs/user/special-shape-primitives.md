@@ -33,9 +33,24 @@ both come back when you change mode. The screen has three columns:
 * on the left, the list of special shapes with **Add shape**, **Duplicate**, **Remove**
   and the exports;
 * in the middle, the selected shape's editor in tabs: **Placement & size**, **Profile**
-  (revolved shapes only), **Feed holes & cap**, **Panel layout** and **Simulation**;
+  (revolved shapes only), **Feed holes & cap**, **Panel layout** and **Simulation**, and
+  under it **where the shapes sit on the balloon** (below);
 * on the right, what the shape gives, in tabs: **Cut pieces** (a drawing and a table),
   **Envelope panels** (where it is sewn on the envelope), **Checks** and **Attachment**.
+
+**Where on the balloon.** Under the editor (drag the bar between them to share the
+height), two drawings show every shape, its footprint and feed holes, and the symmetry
+axes, the selected shape in magenta and the axes in green. They follow every number you
+type:
+
+* **3D**: the envelope with its gore and row seams and the shapes as designed. It turns to
+  face a shape when you select it; drag to turn it, use the wheel to zoom, double click
+  to face the selected shape again. An axis is dashed where it runs behind the envelope.
+* **Gore map**: the gores side by side as they are cut, at their true flat width, gore
+  numbers along the top and row letters down the side; hover for the gore, row and tape
+  position under the pointer. **Click** a shape to select it; **drag** it to move it
+  (one undo step: a grouped shape takes its group, a mirror twin its original). The
+  wheel zooms, the right button pans, a double click fits the map.
 
 1. **Add shape** ▸ **Dome**, **Tube** or **Revolved profile** adds a shape sized from your
    envelope on gore 1, about halfway up the tape. **Import mesh (OBJ/STL/PLY)…** adds a

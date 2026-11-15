@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: the Special shapes mode shows where the shapes sit on the balloon, under the
+  editor: a 3D sketch (turn, zoom; faces the selected shape) and a gore map (the gores
+  side by side as cut) with every footprint, feed hole and symmetry axis. Click a shape
+  on the map to select it, drag it to move it.
 - Added: symmetry axes and linked mirror twins (ADR-0043). Named axes (a gore line,
   shown as *centre of gore 6* or *seam 6|7*) are listed under the shapes and drawn on
   the envelope in the 3D view. **Mirror…** adds a shape's mirror twin across an axis;

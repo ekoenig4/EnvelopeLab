@@ -94,6 +94,7 @@ nav:
       - ADR-0041: adr/ADR-0041-shape-groups.md
       - ADR-0042: adr/ADR-0042-pages-in-the-roll-frame.md
       - ADR-0043: adr/ADR-0043-symmetry-axes-and-mirror-twins.md
+      - ADR-0044: adr/ADR-0044-placement-views.md
 theme:
   name: material
 markdown_extensions:

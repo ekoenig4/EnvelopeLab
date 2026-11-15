@@ -401,6 +401,31 @@ class WorkspaceController(QObject):
             self.session.add_shape_run(sim.record, sim.arrays)
             sim.arrays = None
 
+    def place_shape(self, name: str, placement: Any) -> bool:
+        """Move shape ``name``'s base point to ``placement``'s gore, tape position and
+        fraction across (its lean kept) in one undo step; a grouped shape takes its whole
+        group with it (and a mirror twin its source, :mod:`envelopelab.project.symmetry`).
+        True when it moved."""
+        session, design = self.session, self.design
+        spec = (
+            None
+            if session is None
+            else next((x for x in session.state.shapes if x.name == name), None)
+        )
+        if spec is None or design is None or design.gores is None:
+            return False
+        p, s = placement, spec.placement
+        if (p.gore, p.tape_position, p.across) == (s.gore, s.tape_position, s.across):
+            return False
+        if spec.group:
+            n = design.gores.count
+            d_gore = (p.gore + p.across) - (s.gore + s.across)
+            d_gore = (d_gore + 0.5 * n) % n - 0.5 * n
+            d_tape = p.tape_position - s.tape_position
+            return bool(self.edit("move_shape_group", spec.group, d_gore, d_tape))
+        values = {"gore": p.gore, "tape_position": p.tape_position, "across": p.across}
+        return bool(self.edit("update_shape", name, {"placement": values}))
+
     def preferences_changed(self) -> None:
         """The preferences changed: recompute what depends on them (the roll width
         checks of the shapes and the envelope panels)."""

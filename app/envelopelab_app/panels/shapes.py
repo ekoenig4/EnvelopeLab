@@ -10,7 +10,10 @@ outlines that zooms with the mouse wheel and pans by dragging, and their sizes),
 pattern checks and the attachment lines on the envelope panels. The shape simulation
 with the preview solver is on the *Simulation* tab. Placing a shape runs in a worker thread
 (:class:`~envelopelab_app.shapes_service.ShapeService`), so editing never waits for it;
-the panel says "being placed…" until the result arrives.
+the panel says "being placed…" until the result arrives. Under the editor, a 3D sketch and
+a gore map show where every shape and symmetry axis sits on the balloon
+(:mod:`envelopelab_app.placement_view`); a shape is selected by clicking it on the map and
+moved by dragging it there.
 
 Nothing is hidden: a shape that cannot be placed, a failed check, an unconverged or
 stale simulation and a factor of safety below the requirement are shown in red here and
@@ -89,6 +92,7 @@ from envelopelab.project.shapes import (
 from envelopelab.project.symmetry import axis_gore_label
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.marking_view import MarkingView
+from envelopelab_app.placement_view import PlacedShape, PlacementData, PlacementView
 from envelopelab_app.refresh import Refresher
 
 FAIL_COLOR = "#b00020"
@@ -470,6 +474,8 @@ class ShapesPanel(QWidget):
         self.selected: str | None = None
         self.mesh_mm = DEFAULT_MESH_MM
         self._form_key: tuple[str, str, int] | None = None
+        self._placement_key: str | None = None
+        self._placement_cache: tuple[Any, Any] = (None, None)
         self.fields: dict[tuple[str, ...], QSpinBox | QDoubleSpinBox] = {}
 
         # -- shape list ------------------------------------------------------------------
@@ -743,7 +749,23 @@ class ShapesPanel(QWidget):
         mirror_row.addWidget(self.mirror_label, 1)
         mirror_row.addWidget(self.unlink_button)
         middle_layout.addLayout(mirror_row)
-        middle_layout.addWidget(self.editor_tabs, 1)
+        # The editor above, where the shapes sit on the balloon below (3D and gore map).
+        self.placement = PlacementView()
+        self.placement.map.shapeClicked.connect(self.select)
+        self.placement.map.shapeMoved.connect(
+            lambda name, placement: self.controller.place_shape(name, placement)
+        )
+        self.middle_split = QSplitter(Qt.Orientation.Vertical)
+        self.middle_split.setObjectName("shapeEditorSplitter")
+        self.middle_split.addWidget(self.editor_tabs)
+        self.middle_split.addWidget(self.placement)
+        self.middle_split.setStretchFactor(0, 1)
+        self.middle_split.setStretchFactor(1, 1)
+        self.middle_split.setCollapsible(0, False)
+        self.placement.setMinimumHeight(240)
+        self.editor_tabs.setMinimumHeight(160)
+        self.middle_split.setSizes([360, 320])
+        middle_layout.addWidget(self.middle_split, 1)
 
         # Column 3: what is derived from it, in tabs.
         self.result_tabs = QTabWidget()
@@ -1119,6 +1141,7 @@ class ShapesPanel(QWidget):
 
     def _show_selected(self) -> None:
         spec = self.spec()
+        self.placement.set_data(self.placement_data())
         self._update_form(spec)
         self._show_result(spec)
         self._show_simulation(spec)
@@ -1401,6 +1424,67 @@ class ShapesPanel(QWidget):
         if group is None:
             return False
         return bool(self.controller.edit("move_shape_group", group, d_gore, d_tape))
+
+    # -- where the shapes sit -------------------------------------------------------
+
+    def placement_data(self) -> PlacementData:
+        """What the 3D sketch and the gore map draw: the envelope, every shape (as placed,
+        or only its base point while it is being placed or cannot be), its feed holes and
+        the symmetry axes (:mod:`envelopelab.project.placement_map`)."""
+        from envelopelab.features.scene import designed_display
+        from envelopelab.project import placement_map as pm
+        from envelopelab.project.gore_design import display_points
+        from envelopelab.project.shapes import display_offset
+        from envelopelab.project.symmetry import symmetry_lines
+
+        session = self.controller.session
+        surface = self.controller.envelope_surface()
+        if session is None or surface is None or session.design.gores is None:
+            return PlacementData()
+        design = session.design
+        key = session.content_hash()
+        if self._placement_key != key:
+            self._placement_cache = (pm.gore_map(surface), pm.envelope_sketch(design))
+            self._placement_key = key
+        gore_map, sketch = self._placement_cache
+        axes = [
+            (a.name, pm.axis_line(gore_map, a), symmetry_lines(design, [a]))
+            for a in session.state.symmetry_axes
+        ]
+        shapes = []
+        for spec in session.state.shapes:
+            g, s = pm.gore_position(spec.placement), spec.placement.tape_position
+            holes: list[np.ndarray] = []
+            if spec.feed_hole_radius is not None:
+                holes += pm.ring_lines(gore_map, g, s, spec.feed_hole_radius)
+            for h in spec.feed_holes:
+                holes += pm.ring_lines(gore_map, h.gore - 0.5 + h.across, h.tape_position, h.radius)
+            result = self.controller.shapes.result(spec.name)
+            placed = None if result is None else result.design
+            if placed is not None:
+                shown = designed_display(placed, rows=14, per_piece=3)
+                shift = display_offset(design, placed)
+                points, triangles = shown.points + shift, shown.triangles
+                footprint = pm.footprint_lines(gore_map, placed)
+                base3d = placed.base_point + shift
+            else:
+                theta = surface.theta_at(spec.placement.gore, spec.placement.across)
+                base3d = display_points(design, np.array([s]), np.array([theta]))[0]
+                points, triangles = np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64)
+                footprint = []
+            shapes.append(
+                PlacedShape(
+                    spec.name,
+                    footprint,
+                    holes,
+                    gore_map.points(np.array([g]), np.array([s]))[0],
+                    points,
+                    triangles,
+                    np.asarray(base3d, float),
+                    spec.placement,
+                )
+            )
+        return PlacementData(gore_map, sketch, axes, shapes, self.selected)
 
     # -- symmetry axes and mirror twins ----------------------------------------------
 

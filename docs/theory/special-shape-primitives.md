@@ -407,6 +407,20 @@ shape back to within the stored rounding (\(10^{-6}\) of a gore width; tested ov
 placements, lean directions and panel layouts). Moving a group by \( \Delta g \) also
 moves the axes of its twins by \( \Delta g \), which keeps the pair a rigid copy of itself.
 
+## Gore map
+
+The Special shapes panel draws where every shape sits on a **gore map**
+(`envelopelab.project.placement_map`): the gores side by side as cut, gore \(k\) the column
+centred on \( x_k = (k + \tfrac12) W \) with \( W = 2 w_{max}(1 + 0.06) \), its outline
+\( x_k \pm w(s) \) up the tape \( y = s \). A point at gore position \(g\) and tape position
+\(s\) is drawn at \( x = x_k + 2(g - k - \tfrac12)\,w(s) \), \( y = s \) with
+\( k = \lfloor g \rfloor \bmod N \): the panel's own \(x\) for lobe gores, the same fraction
+across the gore's half width for flat-chord rows (their seam bows are not drawn).
+Dragging on the map inverts this (`map_to_placement`, tested as a round trip). A
+footprint that crosses a seam is drawn in each gore it covers, broken at the seam; the
+gaps between columns are only for display. A feed hole is drawn as a circle in the
+tangent plane, its hoop extent divided by \(2w(s)\) at each height.
+
 ## Valid range
 
 The footprint must stay on the convex part of the envelope between the mouth and the

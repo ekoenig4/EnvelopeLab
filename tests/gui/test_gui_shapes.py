@@ -804,3 +804,51 @@ def test_symmetry_axes_and_linked_mirror_twins(gore_window: MainWindow) -> None:
     assert panel.unlink_selected()
     assert session.state.shapes[1].mirror is None
     assert panel.unlink_button.isHidden()
+
+
+def test_placement_views_show_and_move_the_shapes(gore_window: MainWindow) -> None:
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    session = gore_window.controller.session
+    assert session is not None
+    panel.add_shape("dome")
+    panel.add_shape("tube")
+    _placed(gore_window)
+    panel.add_axis("Face centre", 5.5)
+    view = panel.placement
+    data = view.map.data
+    assert [s.name for s in data.shapes] == ["Dome", "Tube"]
+    assert [a[0] for a in data.axes] == ["Face centre"]
+    assert data.selected == "Tube"
+    assert all(len(s.triangles) and s.footprint for s in data.shapes)
+    # The 3D sketch faces the selected shape.
+    tube = data.shapes[1]
+    rel = tube.base3d - view.sketch._centre()
+    assert view.sketch.azimuth == pytest.approx(np.degrees(np.arctan2(rel[1], rel[0])))
+    view.sketch.grab()
+    view.map.grab()
+
+    # Click the dome on the map: it is selected.
+    mapv = view.map
+    mapv.resize(600, 400)
+    dome = data.shapes[0]
+    at = mapv.to_screen(float(dome.base[0]), float(dome.base[1])).toPoint()
+    QTest.mouseClick(mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at)
+    assert panel.selected == "Dome"
+    # Drag it one gore to the right on the map: it moves there, in one undo step.
+    before = session.state.shapes[0].placement
+    target = mapv.to_screen(float(dome.base[0]) + mapv.data.gore_map.column, float(dome.base[1]))
+    history = len(session.stack.history())
+    QTest.mousePress(mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at)
+    QTest.mouseMove(mapv, QPoint(at.x() + 5, at.y()))
+    QTest.mouseMove(mapv, target.toPoint())
+    QTest.mouseRelease(
+        mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, target.toPoint()
+    )
+    after = session.state.shapes[0].placement
+    assert after.gore == before.gore % 12 + 1
+    assert after.tape_position == pytest.approx(before.tape_position, abs=0.05)
+    assert len(session.stack.history()) == history + 1
