@@ -36,6 +36,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from envelopelab.design.model import DesignDocument, load_design_document
 from envelopelab.project.shapes import ShapeSpec
+from envelopelab.project.symmetry import SymmetryAxis
 
 PROJECT_FORMAT: Literal["envelopelab.project"] = "envelopelab.project"
 PROJECT_FORMAT_VERSION: Literal[4] = 4
@@ -237,12 +238,19 @@ class DesignState(BaseModel):
     design: DesignDocument
     patterns: PatternSet = Field(default_factory=PatternSet)
     shapes: list[ShapeSpec] = Field(default_factory=list)
+    symmetry_axes: list[SymmetryAxis] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _unique_shape_names(self) -> DesignState:
         names = [s.name for s in self.shapes]
         if len(set(names)) != len(names):
             raise ValueError("special shape names must be unique")
+        axes = [a.name for a in self.symmetry_axes]
+        if len(set(axes)) != len(axes):
+            raise ValueError("symmetry axis names must be unique")
+        for s in self.shapes:
+            if s.mirror is not None and (s.mirror.of not in names or s.mirror.axis not in axes):
+                raise ValueError(f"{s.name}: mirror of an unknown shape or axis")
         return self
 
 
@@ -525,6 +533,7 @@ def state_to_data(state: DesignState) -> dict[str, Any]:
         "design": state.design.with_updated_hash().model_dump(by_alias=True, mode="json"),
         "patterns": state.patterns.model_dump(mode="json"),
         "shapes": [s.model_dump(mode="json") for s in state.shapes],
+        "symmetry_axes": [a.model_dump(mode="json") for a in state.symmetry_axes],
     }
 
 
@@ -536,6 +545,7 @@ def state_from_data(data: dict[str, Any]) -> DesignState:
             "design": design,
             "patterns": PatternSet.model_validate(data["patterns"]),
             "shapes": data.get("shapes", []),
+            "symmetry_axes": data.get("symmetry_axes", []),
         }
     )
 
@@ -547,7 +557,7 @@ def migrate_project_data(raw: dict[str, Any]) -> dict[str, Any]:
     Versions 1 and 2 have no ``shape_runs``; they read as projects without saved shape
     simulations. Versions 1 to 3 have no shape panel layouts (``seam_offset_deg``,
     ``panel_widths``, ``splits``); their shapes read with equal, unturned, unsplit pieces
-    (ADR-0040).
+    (ADR-0040), and no symmetry axes or mirror twins (ADR-0043).
 
     Raises
     ------

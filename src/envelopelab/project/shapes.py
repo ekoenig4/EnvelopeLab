@@ -16,11 +16,15 @@ from typing import TYPE_CHECKING, Annotated, Literal
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from envelopelab.project.symmetry import MirrorLink, SymmetryAxis
+
 if TYPE_CHECKING:
     from envelopelab.design.model import DesignDocument
     from envelopelab.features.primitives import EnvelopeSurface, Primitive, PrimitiveDesign
     from envelopelab.project.model import PatternSet
     from envelopelab.solvers.membrane import FloatArray
+
+__all__ = ["MirrorLink", "SymmetryAxis"]
 
 ShapeKind = Literal["dome", "tube", "revolved", "mesh"]
 SHAPE_KINDS: tuple[ShapeKind, ...] = ("dome", "tube", "revolved", "mesh")
@@ -128,6 +132,10 @@ class _ShapeBase(BaseModel):
         Name of the object the shape belongs to (several shapes with the same group are
         moved, mirrored and exported together, :mod:`envelopelab.project.shape_groups`;
         None: on its own).
+    mirror : MirrorLink or None
+        For a mirror twin: the shape it mirrors and the symmetry axis it is mirrored
+        across (:mod:`envelopelab.project.symmetry`); the twin is kept the mirror image
+        of that shape after every edit. None: an ordinary shape.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -146,6 +154,7 @@ class _ShapeBase(BaseModel):
     group: str | None = Field(
         default=None, min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_\- ]+$"
     )
+    mirror: MirrorLink | None = None
 
     @model_validator(mode="after")
     def _layout(self) -> _ShapeBase:

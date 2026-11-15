@@ -83,6 +83,7 @@ from envelopelab.project.shapes import (
     placement_at,
     shape_fabrics,
 )
+from envelopelab.project.symmetry import axis_gore_label, symmetry_lines
 from envelopelab.rigging.common import seam_azimuth
 from envelopelab.solvers.results import DEFAULT_REQUIRED_FOS, ResultField
 from envelopelab_app.camera import (
@@ -121,6 +122,7 @@ LAYER_COLORS = {
     "shape": "#e7298a",
     "shape-simulated": "#7570b3",
     "marks": "#2b8cbe",
+    "symmetry": "#00a087",
 }
 #: Line colours of the rigging layer, per element kind.
 RIGGING_COLORS = {
@@ -139,10 +141,11 @@ RIGGING_COLORS = {
     "feed_holes": "#ff00ff",
     "skin_seams": "#1a1a1a",
     "skin_rim": "#1a1a1a",
+    "symmetry_axes": "#00a087",
 }
 #: Groups of the layer tree, in order: title and the layer kinds it holds.
 LAYER_GROUPS = (
-    ("Design", ("design", "marks", "shape")),
+    ("Design", ("design", "marks", "symmetry", "shape")),
     ("Result", ("envelopelab-preview", "calculix", "shape-simulated", "rest")),
     ("Rigging", ("rigging",)),
     ("Reference", ("reference",)),
@@ -151,6 +154,7 @@ LAYER_GROUPS = (
 SHORT_NAMES = {
     "design": "Design surface",
     "marks": "Panel details",
+    "symmetry": "Symmetry axes",
     "rigging": "Rigging",
     "rest": "Rest mesh",
     "envelopelab-preview": "Preview result",
@@ -172,6 +176,7 @@ LINE_WIDTHS = {
     "feed_holes": 3,
     "skin_seams": 2,
     "skin_rim": 3,
+    "symmetry_axes": 5,
 }
 #: Brightness of every second gore, so that neighbouring gores are told apart.
 ALTERNATE_GORE_SHADE = 0.8
@@ -804,6 +809,18 @@ class View3DPanel(QWidget):
                     np.zeros((0, 3)),
                     np.zeros((0, 3), dtype=np.int64),
                     polylines=marks,
+                )
+            axes = session.state.symmetry_axes
+            if axes:
+                n = session.design.gores.count
+                self.layers["symmetry"] = Layer(
+                    "symmetry",
+                    "symmetry",
+                    "Symmetry axes (design, current): "
+                    + ", ".join(f"{a.name} ({axis_gore_label(a.line, n)})" for a in axes),
+                    np.zeros((0, 3)),
+                    np.zeros((0, 3), dtype=np.int64),
+                    polylines={"symmetry_axes": symmetry_lines(session.design, axes)},
                 )
             lines = self.controller.rigging_polylines()
             if lines:

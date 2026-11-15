@@ -153,13 +153,30 @@ both come back when you change mode. The screen has three columns:
      along the tape keeps each shape, but the gores narrow towards the mouth and the
      crown, so the members end up a little closer or further apart. Dragging a grouped
      shape in the 3D view moves its whole group.
-   * **Mirror group…** mirrors about a gore line (6 = the centreline of gore 6, 6.5 = the
-     seam between gores 6 and 7). With *Add a mirrored copy* ticked it adds the other side
-     (`Ear mirror`, in the same group), leaving out the shapes on the line itself; unticked
-     it mirrors the group in place. The lean, seam turn and panel widths are mirrored
-     too, and a mesh shape is mirrored with it.
+   * **Mirror group…** adds a linked mirror twin of every member across a symmetry axis
+     (step 8), leaving out the shapes standing on the axis itself.
    * **Export group to Blender…** writes the envelope and that group's shapes only. The
      build pack lists the groups in its `index.json`, and every skin sheet names its object.
+8. **Symmetry: axes and mirror twins.** A face's left and right ears are one shape and
+   its mirror image. Name the plane they are mirrored in once, then let EnvelopeLab keep
+   the two sides symmetric:
+   * **Symmetry axes** (under the shape list): **Add axis…** asks for a name and a gore
+     line (6 = the centreline of gore 6, 6.5 = the seam between gores 6 and 7; it starts
+     at the selected shape's base) and says where it lies (*centre of gore 6*,
+     *seam 6|7*). The list shows each axis and how many twins use it; **Edit…** (or a
+     double click) moves or renames it, **Remove** deletes an axis no twin uses. The 3D
+     View draws every axis as a green line on the envelope from the mouth to the crown
+     (layer *Symmetry axes*).
+   * **Mirror…** adds the selected shape's **mirror twin** across an axis you pick (or a
+     new one): `Ear mirror`, mirrored in everything: position, lean direction, feed
+     holes, seam turn, panel widths, a mesh's geometry, every size, and its group.
+   * The twin stays linked: **edit or drag either side and the other follows** as its
+     mirror image (one undo step). Moving an axis moves its twins; moving a group carries
+     the axes of the twins in it. The list marks linked shapes with ⇄ (*Ear mirror (Dome)
+     ⇄ mirror of Ear*), and the selected shape says what it mirrors or is mirrored by.
+   * **Unlink** makes a twin an ordinary shape again (it keeps its geometry). Removing the
+     original leaves its twin as an ordinary shape. A shape standing on an axis is its
+     own mirror image and cannot be mirrored across it.
 
 Nothing is hidden. A shape that cannot be placed (for example a base too large for the
 local curvature), a failed check, a simulation that did NOT converge, a factor of safety

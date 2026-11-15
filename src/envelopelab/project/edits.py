@@ -1725,6 +1725,12 @@ def update_shape(session: ProjectSession, name: str, values: dict[str, Any]) -> 
                 raise ValueError("the kind of a shape cannot be changed")
             else:
                 shape[key] = value
+        new_name = values.get("name", name)
+        if new_name != name:
+            for other in shapes:
+                link = other.get("mirror")
+                if link and link["of"] == name:
+                    link["of"] = new_name
 
     return session.edit_shapes(f"Edit shape {values.get('name', name)}", mutate)
 
@@ -1737,6 +1743,11 @@ def remove_shape(session: ProjectSession, name: str) -> bool:
         if index is None:
             raise KeyError(f"no special shape {name!r}")
         del shapes[index]
+        # Its mirror twins stay, as ordinary shapes.
+        for other in shapes:
+            link = other.get("mirror")
+            if link and link["of"] == name:
+                other["mirror"] = None
 
     return session.edit_shapes(f"Remove shape {name}", mutate)
 
@@ -1749,6 +1760,7 @@ def duplicate_shape(session: ProjectSession, name: str) -> str:
     new = unique_shape_name(session, f"{name} copy")
     data = spec.model_dump(mode="json")
     data["name"] = new
+    data["mirror"] = None  # a copy of a twin is an ordinary shape
     count = session.design.gores.count if session.design.gores is not None else 1
     data["placement"]["gore"] = data["placement"]["gore"] % count + 1
 
@@ -1836,17 +1848,45 @@ def move_shape_group(session: ProjectSession, group: str, d_gore: float, d_tape:
         raise KeyError(f"no shape group {group!r}")
     gores, length = _gore_frame(session)
     new = {s.name: moved(s, d_gore, d_tape, gores, length) for s in members}
+    inside = set(new)
+    # The axes the group's twins are mirrored across turn with the group; a twin pair
+    # split between the group and other shapes, or an axis shared with other shapes,
+    # cannot move with it.
+    carried: set[str] = set()
+    for s in session.state.shapes:
+        if s.mirror is None:
+            continue
+        pair = {s.name, s.mirror.of}
+        if pair & inside and not pair <= inside:
+            raise ValueError(
+                f"{s.name} mirrors {s.mirror.of} across {s.mirror.axis}: put both in "
+                f"group {group} (or unlink them) to move it"
+            )
+        if pair <= inside:
+            carried.add(s.mirror.axis)
+    for s in session.state.shapes:
+        if s.mirror is not None and s.mirror.axis in carried and s.name not in inside:
+            raise ValueError(
+                f"axis {s.mirror.axis} also mirrors {s.mirror.of}, outside group {group}"
+            )
 
-    def mutate(shapes: list[dict[str, Any]]) -> None:
+    def mutate(shapes: list[dict[str, Any]], axes: list[dict[str, Any]]) -> None:
         for i, shape in enumerate(shapes):
             if shape["name"] in new:
                 shapes[i] = new[shape["name"]]
+        for axis in axes:
+            if axis["name"] in carried:
+                axis["line"] = round((axis["line"] + d_gore) % gores, 6)
 
-    return session.edit_shapes(f"Move shape group {group}", mutate)
+    return session.edit_symmetry(f"Move shape group {group}", mutate)
 
 
 def mirror_shape_group(
-    session: ProjectSession, group: str, line: float, copy: bool = True
+    session: ProjectSession,
+    group: str,
+    line: float | None = None,
+    copy: bool = True,
+    axis: str | None = None,
 ) -> list[str]:
     """Mirror the shapes of ``group`` in the meridian plane at gore position ``line``
     (gore widths from the first seam; :func:`envelopelab.project.shape_groups.mirrored`).
@@ -1871,6 +1911,19 @@ def mirror_shape_group(
     if not members:
         raise KeyError(f"no shape group {group!r}")
     gores, _ = _gore_frame(session)
+    if axis is not None:
+        # Linked twins of every member that is not a twin and not on the axis.
+        twinned = {s.mirror.of for s in session.state.shapes if s.mirror is not None}
+        names = [
+            s.name
+            for s in members
+            if s.mirror is None
+            and s.name not in twinned
+            and not on_line(s, _axis_line(session, axis), gores)
+        ]
+        return _add_twins(session, names, axis, f"Mirror shape group {group} across {axis}")
+    if line is None:
+        raise ValueError("give a mirror line or an axis")
     if not copy:
         new = {s.name: mirrored(s, line, gores) for s in members}
 
@@ -1893,6 +1946,7 @@ def mirror_shape_group(
             name, k = f"{base} {k}", k + 1
         taken.add(name)
         data["name"] = name
+        data["mirror"] = None  # an independent copy, not a linked twin
         added.append(data)
 
     def append(shapes: list[dict[str, Any]]) -> None:
@@ -1901,6 +1955,155 @@ def mirror_shape_group(
     if added:
         session.edit_shapes(f"Mirror copy of shape group {group}", append)
     return [d["name"] for d in added]
+
+
+def _axis_line(session: ProjectSession, axis: str) -> float:
+    found = next((a for a in session.state.symmetry_axes if a.name == axis), None)
+    if found is None:
+        raise KeyError(f"no symmetry axis {axis!r}")
+    return float(found.line)
+
+
+def add_symmetry_axis(session: ProjectSession, name: str, line: float) -> bool:
+    """Add the symmetry axis ``name`` at gore position ``line`` (gore widths from the
+    first seam; gore n's centreline is n - 0.5).
+
+    Raises
+    ------
+    ValueError
+        When the name is taken or invalid.
+    """
+    gores, _ = _gore_frame(session)
+
+    def mutate(_shapes: list[dict[str, Any]], axes: list[dict[str, Any]]) -> None:
+        if any(a["name"] == name for a in axes):
+            raise ValueError(f"a symmetry axis named {name!r} exists")
+        axes.append({"name": name, "line": round(float(line) % gores, 6)})
+
+    return session.edit_symmetry(f"Add symmetry axis {name}", mutate)
+
+
+def update_symmetry_axis(
+    session: ProjectSession, name: str, line: float | None = None, new_name: str | None = None
+) -> bool:
+    """Move (``line``, gore position) or rename the symmetry axis ``name``; its mirror
+    twins follow (one step).
+
+    Raises
+    ------
+    KeyError
+        For an unknown axis.
+    ValueError
+        When the new name is taken or invalid.
+    """
+    gores, _ = _gore_frame(session)
+
+    def mutate(shapes: list[dict[str, Any]], axes: list[dict[str, Any]]) -> None:
+        axis = next((a for a in axes if a["name"] == name), None)
+        if axis is None:
+            raise KeyError(f"no symmetry axis {name!r}")
+        if line is not None:
+            axis["line"] = round(float(line) % gores, 6)
+        if new_name is not None and new_name != name:
+            if any(a["name"] == new_name for a in axes):
+                raise ValueError(f"a symmetry axis named {new_name!r} exists")
+            axis["name"] = new_name
+            for s in shapes:
+                link = s.get("mirror")
+                if link and link["axis"] == name:
+                    link["axis"] = new_name
+
+    return session.edit_symmetry(f"Edit symmetry axis {name}", mutate)
+
+
+def remove_symmetry_axis(session: ProjectSession, name: str) -> bool:
+    """Remove the symmetry axis ``name``.
+
+    Raises
+    ------
+    KeyError
+        For an unknown axis.
+    ValueError
+        While mirror twins are mirrored across it (unlink or remove them first).
+    """
+    users = [s.name for s in session.state.shapes if s.mirror and s.mirror.axis == name]
+    if users:
+        raise ValueError(
+            f"symmetry axis {name} mirrors {', '.join(users)}; unlink or remove them first"
+        )
+
+    def mutate(_shapes: list[dict[str, Any]], axes: list[dict[str, Any]]) -> None:
+        index = next((i for i, a in enumerate(axes) if a["name"] == name), None)
+        if index is None:
+            raise KeyError(f"no symmetry axis {name!r}")
+        del axes[index]
+
+    return session.edit_symmetry(f"Remove symmetry axis {name}", mutate)
+
+
+def _add_twins(session: ProjectSession, names: list[str], axis: str, what: str) -> list[str]:
+    """Add a linked mirror twin of every shape of ``names`` across ``axis``."""
+    from envelopelab.project.symmetry import mirrored_data
+
+    gores, _ = _gore_frame(session)
+    line = _axis_line(session, axis)
+    taken = {s.name for s in session.state.shapes}
+    added: list[dict[str, Any]] = []
+    for name in names:
+        spec = next(s for s in session.state.shapes if s.name == name)
+        base, k = f"{name} mirror", 2
+        new = base
+        while new in taken:
+            new, k = f"{base} {k}", k + 1
+        taken.add(new)
+        data = mirrored_data(spec.model_dump(mode="json"), line, gores)
+        data.update(name=new, mirror={"of": name, "axis": axis})
+        added.append(data)
+    if added:
+        session.edit_shapes(what, lambda shapes: shapes.extend(added))
+    return [d["name"] for d in added]
+
+
+def mirror_shape(session: ProjectSession, name: str, axis: str) -> str:
+    """Add a mirror twin of shape ``name`` across the symmetry axis ``axis``: named
+    ``<name> mirror``, kept the mirror image of ``name`` after every edit (either side
+    can be edited or dragged); returns its name.
+
+    Raises
+    ------
+    KeyError
+        For an unknown shape or axis.
+    ValueError
+        For a twin, a shape that already has a twin across that axis, or a shape whose
+        base point lies on the axis (it would be its own mirror image).
+    """
+    from envelopelab.project.shape_groups import on_line
+
+    spec = next((s for s in session.state.shapes if s.name == name), None)
+    if spec is None:
+        raise KeyError(f"no special shape {name!r}")
+    if spec.mirror is not None:
+        raise ValueError(f"{name} is already the mirror twin of {spec.mirror.of}")
+    if any(
+        s.mirror and s.mirror.of == name and s.mirror.axis == axis for s in session.state.shapes
+    ):
+        raise ValueError(f"{name} already has a mirror twin across {axis}")
+    gores, _ = _gore_frame(session)
+    if on_line(spec, _axis_line(session, axis), gores):
+        raise ValueError(f"{name} stands on axis {axis}: it is its own mirror image")
+    return _add_twins(session, [name], axis, f"Mirror shape {name} across {axis}")[0]
+
+
+def unlink_mirror(session: ProjectSession, name: str) -> bool:
+    """Make the mirror twin ``name`` an ordinary shape (it keeps its current geometry)."""
+
+    def mutate(shapes: list[dict[str, Any]]) -> None:
+        shape = next((s for s in shapes if s["name"] == name), None)
+        if shape is None:
+            raise KeyError(f"no special shape {name!r}")
+        shape["mirror"] = None
+
+    return session.edit_shapes(f"Unlink mirror twin {name}", mutate)
 
 
 def move_feed_holes_clear(

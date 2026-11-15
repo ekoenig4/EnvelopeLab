@@ -397,6 +397,16 @@ mirrored shape's pattern is the mirror image of the original's (equal piece area
 footprint length, tested). Groups have no pattern, check or simulation of their own;
 members that touch are not joined or checked against each other.
 
+**Symmetry axes and mirror twins** (`envelopelab.project.symmetry`, ADR-0043). A named
+axis stores \( g_m \). A twin is stored in full as the mirror image of its source across
+its axis, so its pattern, checks and simulation are those of an ordinary shape. After
+every edit of the shapes or axes the link is restored: an edit that changed a twin but
+not its source is first carried to the source (the mirror of the edited twin), then
+every twin is made the mirror image of its source again. Mirroring twice gives the
+shape back to within the stored rounding (\(10^{-6}\) of a gore width; tested over random
+placements, lean directions and panel layouts). Moving a group by \( \Delta g \) also
+moves the axes of its twins by \( \Delta g \), which keeps the pair a rigid copy of itself.
+
 ## Valid range
 
 The footprint must stay on the convex part of the envelope between the mouth and the

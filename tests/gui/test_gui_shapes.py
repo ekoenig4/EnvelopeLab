@@ -762,3 +762,45 @@ def test_cut_pieces_show_how_they_lie_on_the_print_roll(gore_window: MainWindow)
     preview.grab()  # paints without error
     panel.on_roll_check.setChecked(False)
     assert len(side_by_side) == len(on_roll)
+
+
+def test_symmetry_axes_and_linked_mirror_twins(gore_window: MainWindow) -> None:
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    session = gore_window.controller.session
+    assert session is not None
+    panel.add_shape("dome")
+    _placed(gore_window)
+    assert not panel.edit_axis_button.isEnabled()
+    assert panel.add_axis("Face centre", 5.5)
+    item = panel.axes_list.item(0)
+    assert item is not None and item.text() == "Face centre — centre of gore 6"
+    assert "symmetry" in gore_window.view3d.labels()
+    assert "Face centre (centre of gore 6)" in gore_window.view3d.labels()["symmetry"]
+
+    assert panel.mirror_selected("Face centre") == "Dome mirror"
+    _placed(gore_window)
+    assert panel.selected == "Dome mirror"
+    assert panel.mirror_label.text().startswith("⇄ Mirror twin of Dome across axis Face centre")
+    assert not panel.unlink_button.isHidden() and not panel.mirror_button.isEnabled()
+    texts = [panel.list.item(i).text() for i in range(panel.list.count())]
+    assert texts[0].endswith("⇄") and texts[1].endswith("⇄ mirror of Dome")
+    assert not any("[ERROR]" in m for m in _messages(gore_window))
+
+    # Dragging the twin moves the original as its mirror image (one undo step).
+    view = gore_window.view3d
+    history = len(session.stack.history())
+    assert view.begin_shape_drag("Dome mirror")
+    view.drag_shape_to(_surface_point(gore_window, 8, 6.0, 0.25))
+    assert view.end_shape_drag()
+    assert len(session.stack.history()) == history + 1
+    dome, twin = session.state.shapes
+    g_dome = dome.placement.gore - 0.5 + dome.placement.across
+    g_twin = twin.placement.gore - 0.5 + twin.placement.across
+    assert (g_dome + g_twin) % 12 == pytest.approx(11.0 % 12)
+    assert dome.placement.tape_position == pytest.approx(6.0)
+
+    panel.select("Dome mirror")
+    assert panel.unlink_selected()
+    assert session.state.shapes[1].mirror is None
+    assert panel.unlink_button.isHidden()

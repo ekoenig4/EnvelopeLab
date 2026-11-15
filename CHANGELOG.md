@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: symmetry axes and linked mirror twins (ADR-0043). Named axes (a gore line,
+  shown as *centre of gore 6* or *seam 6|7*) are listed under the shapes and drawn on
+  the envelope in the 3D view. **Mirror…** adds a shape's mirror twin across an axis;
+  editing or dragging either side keeps the other its mirror image (position, lean,
+  feed holes, panel layout, sizes, mesh geometry), moving an axis moves its twins, and
+  **Unlink** frees a twin. **Mirror group…** now makes linked twins across an axis.
 - Changed: 1:1 template pages are drawn in the print roll's frame (pack format 4,
   ADR-0042): the page width runs across the roll and is never wider than it, the height
   along the roll, so pages print at 100 % without rotating. Pieces are turned on the page

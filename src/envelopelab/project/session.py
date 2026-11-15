@@ -118,12 +118,24 @@ def _shapes_data(state: DesignState) -> list[dict[str, Any]]:
     return [s.model_dump(mode="json") for s in state.shapes]
 
 
+def _axes_data(state: DesignState) -> list[dict[str, Any]]:
+    return [a.model_dump(mode="json") for a in state.symmetry_axes]
+
+
 def _state_from(
-    design: dict[str, Any], patterns: dict[str, Any], shapes: list[dict[str, Any]]
+    design: dict[str, Any],
+    patterns: dict[str, Any],
+    shapes: list[dict[str, Any]],
+    axes: list[dict[str, Any]] | None = None,
 ) -> DesignState:
     doc = DesignDocument.model_validate(design)
     return DesignState.model_validate(
-        {"design": doc, "patterns": PatternSet.model_validate(patterns), "shapes": shapes}
+        {
+            "design": doc,
+            "patterns": PatternSet.model_validate(patterns),
+            "shapes": shapes,
+            "symmetry_axes": axes or [],
+        }
     )
 
 
@@ -334,7 +346,9 @@ class ProjectSession:
         design_a, patterns_a = _state_data(state)
         if stamp:
             design_b["meta"]["modified"] = design_a["meta"]["modified"] = None
-        same_shapes = _shapes_data(before) == _shapes_data(state)
+        same_shapes = _shapes_data(before) == _shapes_data(state) and _axes_data(
+            before
+        ) == _axes_data(state)
         if design_b == design_a and patterns_b == patterns_a and same_shapes:
             return False
         after = state.model_copy(deep=True)
@@ -379,7 +393,17 @@ class ProjectSession:
         # Row-anchored crest-loft stations follow their rows through every edit.
         sync_taper_anchors(design)
         shapes = _shapes_data(self.project.state)
-        return self.apply_state(_state_from(design, patterns, shapes), description, provenance)
+        axes = _axes_data(self.project.state)
+        gores = design.get("gores") or {}
+        if axes and gores.get("count"):
+            # A gore count change moves the axes' azimuths: mirror the twins again.
+            from envelopelab.project.symmetry import sync_twins
+
+            shapes = copy.deepcopy(shapes)
+            sync_twins(shapes, shapes, axes, int(gores["count"]))
+        return self.apply_state(
+            _state_from(design, patterns, shapes, axes), description, provenance
+        )
 
     def edit_shapes(self, description: str, mutate: Callable[[list[dict[str, Any]]], None]) -> bool:
         """Edit a JSON copy of the special shapes, validate and apply (one undo step).
@@ -402,10 +426,34 @@ class ProjectSession:
         ValueError
             When the edited data is not a valid list of shapes (nothing is changed).
         """
+        return self.edit_symmetry(description, lambda shapes, _axes: mutate(shapes))
+
+    def edit_symmetry(
+        self,
+        description: str,
+        mutate: Callable[[list[dict[str, Any]], list[dict[str, Any]]], None],
+    ) -> bool:
+        """Edit JSON copies of the special shapes and the symmetry axes, keep every
+        mirror twin the mirror image of its source
+        (:func:`envelopelab.project.symmetry.sync_twins`), validate and apply (one undo
+        step).
+
+        Raises
+        ------
+        ValueError
+            When the edited data is not valid (nothing is changed).
+        """
+        from envelopelab.project.symmetry import sync_twins
+
         design, patterns = _state_data(self.project.state)
-        shapes = copy.deepcopy(_shapes_data(self.project.state))
-        mutate(shapes)
-        return self.apply_state(_state_from(design, patterns, shapes), description)
+        before = _shapes_data(self.project.state)
+        shapes = copy.deepcopy(before)
+        axes = copy.deepcopy(_axes_data(self.project.state))
+        mutate(shapes, axes)
+        gores = self.project.state.design.gores
+        if gores is not None:
+            sync_twins(before, shapes, axes, gores.count)
+        return self.apply_state(_state_from(design, patterns, shapes, axes), description)
 
     def set_design_value(
         self, path: Sequence[str | int], value: Any, description: str | None = None

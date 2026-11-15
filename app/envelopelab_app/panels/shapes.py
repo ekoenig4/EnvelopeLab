@@ -86,6 +86,7 @@ from envelopelab.project.shapes import (
     pointed,
     shape_fabrics,
 )
+from envelopelab.project.symmetry import axis_gore_label
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.marking_view import MarkingView
 from envelopelab_app.refresh import Refresher
@@ -636,12 +637,45 @@ class ShapesPanel(QWidget):
         self.mirror_group_button = QPushButton("Mirror group…")
         self.mirror_group_button.setObjectName("shapeMirrorGroup")
         self.mirror_group_button.setToolTip(
-            "Mirror the group about a gore line: add a mirrored copy of every shape (the "
-            "other side of a face) or mirror the shapes in place (one undo step)"
+            "Add a linked mirror twin of every shape of the group across a symmetry axis "
+            "(the other side of a face); shapes on the axis are left as they are"
         )
         self.mirror_group_button.clicked.connect(self._mirror_group_dialog)
         self.export_group_button = QPushButton("Export group to Blender…")
         self.export_group_button.clicked.connect(self._export_group_dialog)
+        # -- symmetry: named axes and linked mirror twins ---------------------------------
+        self.mirror_button = QPushButton("Mirror…")
+        self.mirror_button.setObjectName("shapeMirror")
+        self.mirror_button.setToolTip(
+            "Add the mirror image of the selected shape across a symmetry axis, as a linked "
+            "twin: edit or drag either side and the other follows"
+        )
+        self.mirror_button.clicked.connect(self._mirror_dialog)
+        self.axes_list = QListWidget()
+        self.axes_list.setObjectName("symmetryAxes")
+        self.axes_list.setMaximumHeight(90)
+        self.axes_list.setToolTip(
+            "Symmetry axes: meridian planes of the envelope that shapes are mirrored across "
+            "(drawn on the envelope in the 3D view)"
+        )
+        self.axes_list.itemDoubleClicked.connect(lambda _i: self._edit_axis_dialog())
+        self.add_axis_button = QPushButton("Add axis…")
+        self.add_axis_button.setObjectName("addSymmetryAxis")
+        self.add_axis_button.clicked.connect(self._add_axis_dialog)
+        self.edit_axis_button = QPushButton("Edit…")
+        self.edit_axis_button.clicked.connect(self._edit_axis_dialog)
+        self.remove_axis_button = QPushButton("Remove")
+        self.remove_axis_button.clicked.connect(self._remove_axis)
+        self.mirror_label = QLabel()
+        self.mirror_label.setObjectName("shapeMirrorLink")
+        self.mirror_label.setWordWrap(True)
+        self.unlink_button = QPushButton("Unlink")
+        self.unlink_button.setObjectName("shapeUnlinkMirror")
+        self.unlink_button.setToolTip(
+            "Make this mirror twin an ordinary shape (it keeps its geometry and stops "
+            "following the shape it mirrors)"
+        )
+        self.unlink_button.clicked.connect(self.unlink_selected)
         sim_box = QWidget()
         sim_layout = QVBoxLayout(sim_box)
         sim_row = QHBoxLayout()
@@ -663,6 +697,7 @@ class ShapesPanel(QWidget):
         for button in (
             self.add_button,
             self.duplicate_button,
+            self.mirror_button,
             self.remove_button,
             self.move_group_button,
             self.mirror_group_button,
@@ -672,6 +707,14 @@ class ShapesPanel(QWidget):
         ):
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             left_layout.addWidget(button)
+        axes_title = QLabel("Symmetry axes")
+        axes_title.setProperty("role", "muted")
+        left_layout.addWidget(axes_title)
+        left_layout.addWidget(self.axes_list)
+        axis_buttons = QHBoxLayout()
+        for button in (self.add_axis_button, self.edit_axis_button, self.remove_axis_button):
+            axis_buttons.addWidget(button)
+        left_layout.addLayout(axis_buttons)
 
         # Column 2: the selected shape's editor in tabs.
         self.editor_tabs = QTabWidget()
@@ -696,6 +739,10 @@ class ShapesPanel(QWidget):
         middle_layout = QVBoxLayout(middle)
         middle_layout.setContentsMargins(0, 0, 0, 0)
         middle_layout.addWidget(self.status)
+        mirror_row = QHBoxLayout()
+        mirror_row.addWidget(self.mirror_label, 1)
+        mirror_row.addWidget(self.unlink_button)
+        middle_layout.addLayout(mirror_row)
         middle_layout.addWidget(self.editor_tabs, 1)
 
         # Column 3: what is derived from it, in tabs.
@@ -1032,9 +1079,17 @@ class ShapesPanel(QWidget):
             self.selected = names[0] if names else None
         self.list.blockSignals(True)
         self.list.clear()
+        twinned = {s.mirror.of for s in specs if s.mirror is not None}
         for spec in specs:
             prefix = f"{spec.group} ▸ " if spec.group else ""
-            item = QListWidgetItem(f"{prefix}{spec.name}  ({KIND_LABELS[spec.kind]})")
+            suffix = (
+                f"  ⇄ mirror of {spec.mirror.of}"
+                if spec.mirror is not None
+                else "  ⇄"
+                if spec.name in twinned
+                else ""
+            )
+            item = QListWidgetItem(f"{prefix}{spec.name}  ({KIND_LABELS[spec.kind]}){suffix}")
             item.setData(Qt.ItemDataRole.UserRole, spec.name)
             colour = self._state_colour(spec.name)
             if colour:
@@ -1043,6 +1098,7 @@ class ShapesPanel(QWidget):
             if spec.name == self.selected:
                 self.list.setCurrentItem(item)
         self.list.blockSignals(False)
+        self._fill_axes()
         self._show_selected()
 
     def _state_colour(self, name: str) -> str | None:
@@ -1070,6 +1126,14 @@ class ShapesPanel(QWidget):
 
     def _update_buttons(self) -> None:
         has = self.spec() is not None
+        spec = self.spec()
+        self.mirror_button.setEnabled(spec is not None and spec.mirror is None)
+        session = self.controller.session
+        has_axes = session is not None and bool(session.state.symmetry_axes)
+        self.add_axis_button.setEnabled(self.controller.is_gore)
+        self.edit_axis_button.setEnabled(has_axes)
+        self.remove_axis_button.setEnabled(has_axes)
+        self._show_mirror_link(spec)
         running = self.controller.shape_simulator.running
         gore = self.controller.is_gore
         self.add_button.setEnabled(gore)
@@ -1087,6 +1151,30 @@ class ShapesPanel(QWidget):
             self.export_group_button,
         ):
             button.setEnabled(grouped)
+
+    def _show_mirror_link(self, spec: ShapeSpec | None) -> None:
+        """The banner over the editor: what the selected shape mirrors, or is mirrored by."""
+        text = ""
+        twin = spec is not None and spec.mirror is not None
+        if spec is not None and spec.mirror is not None:
+            text = (
+                f"⇄ Mirror twin of {spec.mirror.of} across axis {spec.mirror.axis}: edit or "
+                "drag either side and the other follows."
+            )
+        elif spec is not None:
+            twins = [s for s in self.specs() if s.mirror is not None and s.mirror.of == spec.name]
+            if twins:
+                text = (
+                    "⇄ Mirrored by "
+                    + ", ".join(
+                        f"{t.name} across {t.mirror.axis}"  # type: ignore[union-attr]
+                        for t in twins
+                    )
+                    + ": edit or drag either side and the other follows."
+                )
+        self.mirror_label.setText(text)
+        self.mirror_label.setVisible(bool(text))
+        self.unlink_button.setVisible(twin)
 
     def _update_form(self, spec: ShapeSpec | None) -> None:
         design = self.controller.design
@@ -1314,15 +1402,155 @@ class ShapesPanel(QWidget):
             return False
         return bool(self.controller.edit("move_shape_group", group, d_gore, d_tape))
 
-    def mirror_group(self, line: float, copy: bool = True, group: str | None = None) -> bool:
-        """Mirror ``group`` (default: the selected shape's) about the gore line ``line``
-        (gore position: gore n's centreline is n - 0.5, the seam after it n): a mirrored
-        copy of every shape off the line, or the shapes in place (one undo step)."""
+    # -- symmetry axes and mirror twins ----------------------------------------------
+
+    def axes(self) -> list[Any]:
+        """The project's symmetry axes."""
+        session = self.controller.session
+        return [] if session is None else list(session.state.symmetry_axes)
+
+    def _gores(self) -> int:
+        design = self.controller.design
+        return design.gores.count if design is not None and design.gores is not None else 1
+
+    def _fill_axes(self) -> None:
+        current = self.axes_list.currentItem()
+        chosen = None if current is None else current.data(Qt.ItemDataRole.UserRole)
+        self.axes_list.blockSignals(True)
+        self.axes_list.clear()
+        for axis in self.axes():
+            users = [s.name for s in self.specs() if s.mirror and s.mirror.axis == axis.name]
+            text = f"{axis.name} — {axis_gore_label(axis.line, self._gores())}"
+            item = QListWidgetItem(text + (f"  ({len(users)} twin(s))" if users else ""))
+            item.setData(Qt.ItemDataRole.UserRole, axis.name)
+            self.axes_list.addItem(item)
+            if axis.name == chosen:
+                self.axes_list.setCurrentItem(item)
+        self.axes_list.blockSignals(False)
+
+    def add_axis(self, name: str, line: float) -> bool:
+        """Add the symmetry axis ``name`` at gore position ``line`` (gore widths from the
+        first seam; gore n's centreline is n - 0.5)."""
+        return bool(self.controller.edit("add_symmetry_axis", name, line))
+
+    def mirror_selected(self, axis: str) -> str | None:
+        """Add a linked mirror twin of the selected shape across ``axis``; its name."""
+        if self.selected is None:
+            return None
+        twin = self.controller.edit("mirror_shape", self.selected, axis)
+        if twin:
+            self.select(str(twin))
+        return str(twin) if twin else None
+
+    def unlink_selected(self) -> bool:
+        """Make the selected mirror twin an ordinary shape."""
+        if self.selected is None:
+            return False
+        return bool(self.controller.edit("unlink_mirror", self.selected))
+
+    def _axis_values(self, title: str, name: str, line: float) -> tuple[str, float] | None:
+        """Ask for an axis name and its gore line (gore number: 6 = centre of gore 6)."""
+        from PySide6.QtWidgets import QDialog, QDialogButtonBox
+
+        n = self._gores()
+        dialog = QDialog(self)
+        dialog.setWindowTitle(title)
+        form = QFormLayout(dialog)
+        name_edit = QLineEdit(name)
+        spin = QDoubleSpinBox()
+        spin.setRange(0.5, n + 0.5)
+        spin.setDecimals(2)
+        spin.setSingleStep(0.5)
+        spin.setWrapping(True)
+        spin.setValue(line + 0.5)
+        where = QLabel()
+        spin.valueChanged.connect(lambda v: where.setText(axis_gore_label(float(v) - 0.5, n)))
+        where.setText(axis_gore_label(line, n))
+        form.addRow("Name", name_edit)
+        form.addRow("Gore line (6 = centre of gore 6, 6.5 = seam 6|7)", spin)
+        form.addRow("Lies on", where)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(dialog.accept)
+        buttons.rejected.connect(dialog.reject)
+        form.addRow(buttons)
+        if not dialog.exec() or not name_edit.text().strip():
+            return None
+        return name_edit.text().strip(), (float(spin.value()) - 0.5) % n
+
+    def _base_line(self) -> float:
+        """Gore position of the selected shape's base point (or gore 1's centreline)."""
+        spec = self.spec()
+        if spec is None:
+            return 0.5
+        return spec.placement.gore - 0.5 + spec.placement.across
+
+    def _add_axis_dialog(self) -> str | None:
+        names = {a.name for a in self.axes()}
+        k, base = 1, "Axis"
+        while f"{base} {k}" in names:
+            k += 1
+        values = self._axis_values("Add symmetry axis", f"{base} {k}", self._base_line())
+        if values is None or not self.add_axis(*values):
+            return None
+        return values[0]
+
+    def _chosen_axis(self) -> Any:
+        item = self.axes_list.currentItem() or self.axes_list.item(0)
+        if item is None:
+            return None
+        name = item.data(Qt.ItemDataRole.UserRole)
+        return next((a for a in self.axes() if a.name == name), None)
+
+    def _edit_axis_dialog(self) -> None:
+        axis = self._chosen_axis()
+        if axis is None:
+            return
+        values = self._axis_values(f"Edit symmetry axis {axis.name}", axis.name, axis.line)
+        if values is not None:
+            self.controller.edit("update_symmetry_axis", axis.name, values[1], values[0])
+
+    def _remove_axis(self) -> None:
+        axis = self._chosen_axis()
+        if axis is not None:
+            self.controller.edit("remove_symmetry_axis", axis.name)
+
+    def _pick_axis(self, title: str) -> str | None:
+        """Choose a symmetry axis (or make a new one) for a mirror."""
+        from PySide6.QtWidgets import QInputDialog
+
+        new = "New axis…"
+        n = self._gores()
+        items = [f"{a.name} — {axis_gore_label(a.line, n)}" for a in self.axes()] + [new]
+        choice, ok = QInputDialog.getItem(self, title, "Mirror across", items, 0, False)
+        if not ok:
+            return None
+        if choice == new:
+            return self._add_axis_dialog()
+        return str(choice).split(" — ", 1)[0]
+
+    def _mirror_dialog(self) -> None:
+        axis = self._pick_axis(f"Mirror {self.selected}")
+        if axis is not None:
+            self.mirror_selected(axis)
+
+    def mirror_group(
+        self,
+        line: float | None = None,
+        copy: bool = True,
+        group: str | None = None,
+        axis: str | None = None,
+    ) -> bool:
+        """Mirror ``group`` (default: the selected shape's): across the symmetry axis
+        ``axis`` as linked twins, or about the gore line ``line`` (gore position: gore n's
+        centreline is n - 0.5, the seam after it n) as independent copies or in place
+        (one undo step)."""
         group = group or self.group()
         if group is None:
             return False
         before = self.controller.revision
-        out = self.controller.edit("mirror_shape_group", group, line, copy)
+        out = self.controller.edit("mirror_shape_group", group, line, copy, axis)
         if out is None:
             return False
         if copy and not out:
@@ -1342,19 +1570,9 @@ class ShapesPanel(QWidget):
             self.move_group(values[0], values[1])
 
     def _mirror_group_dialog(self) -> None:
-        spec = self.spec()
-        if spec is None:
-            return
-        here = spec.placement.gore + spec.placement.across  # gore line through the base
-        values = _ask(
-            self,
-            f"Mirror group {self.group()}",
-            [("Mirror line (gore: 6 = centre of gore 6, 6.5 = seam 6|7)", 0.5, 999.0, here, 2)],
-            "Add a mirrored copy (untick: mirror in place)",
-        )
-        if values is not None:
-            line, copy = values[0] - 0.5, bool(values[1])
-            self.mirror_group(line, copy)
+        axis = self._pick_axis(f"Mirror group {self.group()}")
+        if axis is not None:
+            self.mirror_group(axis=axis)
 
     def _export_group_dialog(self) -> None:
         path, _ = QFileDialog.getSaveFileName(

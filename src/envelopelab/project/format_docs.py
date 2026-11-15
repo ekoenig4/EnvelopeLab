@@ -44,9 +44,16 @@ KEYS: tuple[tuple[str, str], ...] = (
         "`seam_offset_deg` (turn of the seams round the axis, degrees), `panel_widths` "
         "(relative width of every gore or panel; empty: equal) and `splits` (horizontal "
         "splits as fractions of the profile from the base circle; not for mesh shapes) "
-        "and `group` (optional name of the object the shape belongs to, ADR-0041). "
+        "`group` (optional name of the object the shape belongs to, ADR-0041) and "
+        "`mirror` (a mirror twin's source shape `of` and symmetry `axis`, ADR-0043). "
         "Version 1 files read as having no shapes; versions 1 to 3 as having equal, "
         "unturned and unsplit pieces.",
+    ),
+    (
+        "`state.symmetry_axes`",
+        "Named symmetry axes (version 4, ADR-0043): `name` and `line`, the gore position "
+        "of the meridian plane (gore widths from the first seam; gore n's centreline is "
+        "n - 0.5). Mirror twins are mirrored across them. Older files read as having none.",
     ),
     ("`snapshots`", "Named copies of `state` with their design content hash."),
     ("`versions`", "Committed design versions (`version_id`, `parent_id`, message, state)."),
