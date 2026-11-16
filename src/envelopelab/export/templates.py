@@ -327,10 +327,12 @@ def roll_fit(cut: FloatArray, roll_width: float) -> RollFit:
 
     hull = pts[ConvexHull(pts).vertices]
     edges = np.roll(hull, -1, axis=0) - hull
-    # Turn each edge to run up the page (along the roll); angles in (-90, 90].
-    turns = 90.0 - np.degrees(np.arctan2(edges[:, 1], edges[:, 0]))
-    turns = 90.0 - np.mod(90.0 - turns, 180.0)
-    return min((page(round(float(a), 3)) for a in turns), key=lambda f: f.across)
+    # Turn each edge to run up the page (along the roll); angles in (-90, 90]. Every
+    # turn's width across the roll at once: hull x after the turn, per turn (row).
+    turns = np.round(90.0 - np.mod(np.degrees(np.arctan2(edges[:, 1], edges[:, 0])), 180.0), 3)
+    a = np.radians(turns)
+    across = np.ptp(np.cos(a)[:, None] * hull[:, 0] - np.sin(a)[:, None] * hull[:, 1], axis=1)
+    return page(float(turns[int(np.argmin(across))]))
 
 
 @dataclass(frozen=True)
