@@ -117,3 +117,42 @@ def test_a_nudge_moves_the_base_point_by_the_step_on_the_flat_gore() -> None:
     far = nudged(MAP, p, 1.2 * w, 0.0)
     assert far.gore == 5
     assert nudged(MAP, p, 0.0, 100.0).tape_position < MAP.length
+
+
+@given(st.floats(0.0, 7.999), st.floats(0.1, 9.5))
+@settings(max_examples=60, deadline=None)
+def test_the_gore_position_under_a_map_point_round_trips(g: float, s: float) -> None:
+    from envelopelab.project.placement_map import gore_position_at
+
+    ((x, y),) = MAP.points(np.array([g]), np.array([s]))
+    back = gore_position_at(MAP, float(x), float(y))
+    assert back is not None and back == pytest.approx(g, abs=1e-9)
+    assert gore_position_at(MAP, -1.0, s) is None
+
+
+def test_snapping_goes_to_the_nearest_centreline_or_seam() -> None:
+    from envelopelab.project.placement_map import snap
+
+    assert snap(2.4) == 2.5 and snap(2.76) == 3.0 and snap(0.1) == 0.0
+
+
+def test_a_mirror_image_on_the_map_and_in_3d() -> None:
+    from envelopelab.project.placement_map import azimuth_position, mirrored_lines, reflect
+
+    spec = default_shape("dome", SESSION.design, "D").model_copy(
+        update={"placement": ShapePlacement(gore=2, tape_position=4.5, across=0.3)}
+    )
+    placed = shape_design(spec, SURFACE)
+    g = np.asarray(SURFACE.gore_position(placed.footprint_theta))
+    # Across the seam 3|4 (gore position 3): the image lies round gore position 6 - 1.8.
+    image = np.vstack(mirrored_lines(MAP, g, placed.footprint_s, 3.0))
+    centre = 0.5 * (image[:, 0].min() + image[:, 0].max()) / MAP.column
+    assert centre == pytest.approx(6.0 - 1.8, abs=0.05)
+    pts = np.asarray(placed.footprint_points)
+    n = MAP.gores
+    mirrored = reflect(pts, 3.0, n)
+    assert np.linalg.norm(mirrored, axis=1) == pytest.approx(np.linalg.norm(pts, axis=1))
+    assert mirrored[:, 2] == pytest.approx(pts[:, 2])
+    a, b = azimuth_position(pts[0], n), azimuth_position(mirrored[0], n)
+    assert (a + b) % n == pytest.approx(6.0 % n, abs=1e-9)
+    assert reflect(mirrored, 3.0, n) == pytest.approx(pts)

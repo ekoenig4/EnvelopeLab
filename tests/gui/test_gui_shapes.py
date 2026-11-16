@@ -941,3 +941,153 @@ def test_hidden_result_tabs_are_filled_when_shown(gore_window: MainWindow) -> No
     panel.result_tabs.setCurrentIndex(1)  # Cut pieces
     assert panel.pieces.topLevelItemCount() == 16 + 1
     assert panel.checks.topLevelItemCount() >= 1
+
+
+def _map_point(panel: Any, g: float, frac: float = 0.5) -> Any:
+    """Widget point of gore position ``g`` at ``frac`` of the tape on the gore map."""
+    gm = panel.placement.map.data.gore_map
+    ((x, y),) = gm.points(np.array([g]), np.array([frac * gm.length]))
+    return panel.placement.map.to_screen(float(x), float(y)).toPoint()
+
+
+def test_an_axis_is_seen_while_it_is_placed(gore_window: MainWindow) -> None:
+    from PySide6.QtTest import QTest
+
+    gore_window.resize(1600, 1000)
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    session = gore_window.controller.session
+    assert session is not None
+    panel.add_shape("dome")
+    _placed(gore_window)
+    place, mapv = panel.placement, panel.placement.map
+    panel.begin_add_axis()
+    assert place.axis_bar.isVisibleTo(place) and mapv.axis_mode
+    assert panel.result_tabs.currentWidget() is place
+    # The pointer shows where the axis would go (snapped to the centre of gore 3) ...
+    QTest.mouseMove(mapv, _map_point(panel, 2.4))
+    preview = mapv.preview
+    assert preview is not None and preview.hover is not None
+    assert preview.hover[:, 0] == pytest.approx(2.5 * mapv.data.gore_map.column)
+    assert preview.hover3d and preview.ghosts  # and the dome's mirror image across it
+    # ... a click puts it there; the bar says where; Place adds it.
+    QTest.mouseClick(
+        mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, _map_point(panel, 2.4)
+    )
+    assert place.axis_line.value() == pytest.approx(3.0)
+    assert place.axis_where.text() == "centre of gore 3"
+    place.axis_name.setText("Face centre")
+    place.axis_ok.click()
+    assert [(a.name, a.line) for a in session.state.symmetry_axes] == [("Face centre", 2.5)]
+    assert not place.axis_bar.isVisibleTo(place) and not mapv.axis_mode
+
+    # Typing the gore line moves the preview too; Escape cancels.
+    panel.begin_add_axis()
+    place.axis_line.setValue(6.5)
+    assert panel._axis is not None and panel._axis.line == pytest.approx(6.0)
+    QTest.keyClick(mapv, Qt.Key.Key_Escape)
+    assert not place.axis_bar.isVisibleTo(place)
+    assert len(session.state.symmetry_axes) == 1
+
+
+def test_mirror_shows_the_mirror_image_before_the_axis_is_placed(
+    gore_window: MainWindow,
+) -> None:
+    from PySide6.QtTest import QTest
+
+    gore_window.resize(1600, 1000)
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    session = gore_window.controller.session
+    assert session is not None
+    panel.add_shape("dome")
+    _placed(gore_window)
+    dome = session.state.shapes[0].placement
+    g_dome = dome.gore - 0.5 + dome.across
+    place, mapv = panel.placement, panel.placement.map
+    panel.begin_mirror()
+    QTest.mouseMove(mapv, _map_point(panel, 3.0))  # the seam 3|4
+    preview = mapv.preview
+    assert preview is not None and preview.map_line is None  # not placed yet
+    ghost = np.vstack(preview.ghosts)
+    gm = mapv.data.gore_map
+    centre_g = (ghost[:, 0].min() + ghost[:, 0].max()) / 2 / gm.column
+    assert abs(centre_g - (6.0 - g_dome)) < 0.6  # mirrored across gore position 3
+    assert len(preview.ghosts3d) == 1
+    QTest.mouseClick(
+        mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, _map_point(panel, 3.0)
+    )
+    place.axis_ok.click()
+    _placed(gore_window)
+    names = [s.name for s in session.state.shapes]
+    assert names == ["Dome", "Dome mirror"]
+    twin = session.state.shapes[1]
+    assert twin.mirror is not None and twin.mirror.axis == "Axis 1"
+    assert (twin.placement.gore - 0.5 + twin.placement.across) == pytest.approx(6.0 - g_dome)
+    # Mirroring across an existing axis: choosing it fixes the line; the pointer does not
+    # move it.
+    panel.add_shape("tube")
+    _placed(gore_window)
+    panel.begin_mirror()
+    place.axis_target.setCurrentIndex(1)  # Across Axis 1
+    assert not place.axis_line.isEnabled()
+    QTest.mouseClick(
+        mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, _map_point(panel, 5.0)
+    )
+    assert panel._axis is not None and panel._axis.line == pytest.approx(3.0)
+    place.axis_ok.click()
+    assert [s.name for s in session.state.shapes][-1] == "Tube mirror"
+
+
+def test_dragging_an_axis_on_the_map_moves_it_and_its_twins(gore_window: MainWindow) -> None:
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+
+    gore_window.resize(1600, 1000)
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    session = gore_window.controller.session
+    assert session is not None
+    panel.add_shape("dome")
+    _placed(gore_window)
+    panel.add_axis("Face centre", 2.5)
+    panel.mirror_selected("Face centre")
+    _placed(gore_window)
+    panel.select("Dome")
+    mapv = panel.placement.map
+    start = _map_point(panel, 2.5, 0.8)  # on the axis, away from the shapes
+    target = _map_point(panel, 3.5, 0.8)
+    history = len(session.stack.history())
+    QTest.mousePress(mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+    assert mapv.preview is not None and mapv.preview.ghosts  # the twin's new place, live
+    QTest.mouseMove(mapv, QPoint(start.x() + 3, start.y()))
+    QTest.mouseMove(mapv, target)
+    QTest.mouseRelease(mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, target)
+    assert session.state.symmetry_axes[0].line == pytest.approx(3.5)
+    assert len(session.stack.history()) == history + 1
+    dome, twin = session.state.shapes
+    g = dome.placement.gore - 0.5 + dome.placement.across
+    gt = twin.placement.gore - 0.5 + twin.placement.across
+    assert (g + gt) % 12 == pytest.approx(7.0)
+    assert not panel.placement.axis_bar.isVisibleTo(panel.placement)
+
+
+def test_the_3d_view_places_an_axis_too(gore_window: MainWindow) -> None:
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+
+    gore_window.resize(1600, 1000)
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("dome")
+    _placed(gore_window)
+    QApplication.processEvents()
+    panel.begin_add_axis()
+    sketch = panel.placement.sketch
+    centre = QPoint(sketch.width() // 2, sketch.height() // 2)
+    QTest.mouseClick(sketch, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, centre)
+    line = panel._axis.line  # type: ignore[union-attr]
+    assert line is not None and (line * 2) == pytest.approx(round(line * 2))  # snapped
+    assert sketch.preview is not None and sketch.preview.lines3d
+    sketch.grab()

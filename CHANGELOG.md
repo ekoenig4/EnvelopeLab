@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: symmetry axes are placed on the On the balloon tab instead of in a dialog: the
+  axis follows the pointer on the gore map and the 3D view (snapped to gore centres and
+  seams), a click puts it there, and the mirror images it would make are drawn dashed
+  while you decide. **Mirror…** and **Mirror group…** work the same way, or across an
+  existing axis; an axis can be dragged on the gore map, its twins following.
 - Changed: **On the balloon** is the first tab of the Special shapes mode and opens by
   default. Nudge the selected shape with ◀ ▶ ▲ ▼ (10-250 mm steps) or the arrow keys in
   either view, or drag it in the 3D view as well as on the gore map. The 3D view is drawn

@@ -155,6 +155,50 @@ def axis_line(m: GoreMap, axis: SymmetryAxis) -> FloatArray:
     return m.points(np.full(MAP_SAMPLES, axis.line), s)
 
 
+def gore_position_at(m: GoreMap, x: float, y: float) -> float | None:
+    """Gore position (gore widths from the first seam) of map point ``(x, y)`` (m): the
+    inverse of :meth:`GoreMap.points`, clamped to the gore's seams; None off the map."""
+    if not (0.0 <= y <= m.length and 0.0 <= x <= m.gores * m.column):
+        return None
+    k = int(min(max(math.floor(x / m.column), 0), m.gores - 1))
+    w = max(float(m.half_width(np.array([y]))[0]), 1e-9)
+    across = min(max((x - (k + 0.5) * m.column) / (2.0 * w), -0.5), 0.5)
+    return k + 0.5 + across
+
+
+def snap(g: float, step: float = 0.5) -> float:
+    """``g`` (gore widths) to the nearest multiple of ``step``: with 0.5, the nearest
+    gore centreline or seam."""
+    return round(g / step) * step
+
+
+def azimuth_position(point: FloatArray, gores: int) -> float:
+    """Gore position of a 3D point's azimuth round the envelope axis (z), in [0, N)."""
+    theta = math.atan2(float(point[1]), float(point[0])) % (2.0 * math.pi)
+    return theta / (2.0 * math.pi / gores)
+
+
+def mirrored_lines(m: GoreMap, g: FloatArray, s: FloatArray, line: float) -> list[FloatArray]:
+    """A closed curve given by gore and tape positions, mirrored across the axis at gore
+    position ``line`` (:math:`g' = 2 g_m - g`), as map polylines: where a mirror twin's
+    footprint would lie."""
+    return m.polylines(2.0 * line - np.asarray(g, float), s, closed=True)
+
+
+def reflect(points: FloatArray, line: float, gores: int) -> FloatArray:
+    r"""3D points (envelope frame, z up the axis) mirrored in the meridian plane at gore
+    position ``line``: azimuth :math:`\theta_m = 2\pi g_m / N`,
+    :math:`x' = x \cos 2\theta_m + y \sin 2\theta_m`,
+    :math:`y' = x \sin 2\theta_m - y \cos 2\theta_m`, :math:`z' = z`."""
+    a = 2.0 * (2.0 * math.pi * line / gores)
+    p = np.asarray(points, float)
+    c, s = math.cos(a), math.sin(a)
+    out: FloatArray = np.column_stack(
+        [c * p[:, 0] + s * p[:, 1], s * p[:, 0] - c * p[:, 1], p[:, 2]]
+    )
+    return out
+
+
 def map_to_placement(m: GoreMap, x: float, y: float, current: ShapePlacement) -> ShapePlacement:
     """The placement whose base point is drawn at map point ``(x, y)`` (m): gore from
     the column, tape position ``y`` (kept 1 mm inside the tape) and the fraction across

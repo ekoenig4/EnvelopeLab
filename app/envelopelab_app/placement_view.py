@@ -50,9 +50,13 @@ from PySide6.QtGui import (
     QWheelEvent,
 )
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
+    QDoubleSpinBox,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QPushButton,
     QSplitter,
     QToolButton,
     QVBoxLayout,
@@ -62,6 +66,9 @@ from PySide6.QtWidgets import (
 SELECTED = "#d6008f"
 OTHER = "#e98fc2"
 AXIS = "#00a087"
+#: The axis being placed (chosen: dashed and bright; under the pointer: dotted).
+AXIS_PREVIEW = "#00c853"
+GHOST = "#d6008f"
 SEAM = "#4d4d4d"
 GORE_FILL = ("#eef2f8", "#e3e9f2")
 ENVELOPE = (0.86, 0.89, 0.94)
@@ -99,6 +106,10 @@ class PlacedShape:
         Base point on the envelope.
     placement : Any
         The shape's placement (its lean is kept when it is moved).
+    footprint_gs : (ndarray, ndarray) or None
+        Footprint as gore positions and tape positions (m), for its mirror image.
+    footprint3d : ndarray or None
+        Footprint on the envelope (3D, m), for its mirror image.
     """
 
     name: str
@@ -109,6 +120,40 @@ class PlacedShape:
     triangles: np.ndarray
     base3d: np.ndarray
     placement: Any
+    footprint_gs: tuple[np.ndarray, np.ndarray] | None = None
+    footprint3d: np.ndarray | None = None
+
+
+@dataclass
+class AxisPreview:
+    """A symmetry axis being placed, as the views draw it (m).
+
+    Attributes
+    ----------
+    name : str
+        Axis name.
+    label : str
+        Where it lies, in words (``centre of gore 6``).
+    map_line : ndarray or None
+        The chosen axis on the gore map (None: not chosen yet).
+    lines3d : list of ndarray
+        The chosen axis on the envelope.
+    hover : ndarray or None
+        The axis under the pointer on the gore map (where a click puts it).
+    hover3d : list of ndarray
+        The axis under the pointer on the envelope.
+    ghosts, ghosts3d : list of ndarray
+        Footprints of the mirror images the axis would make (gore map; envelope).
+    """
+
+    name: str
+    label: str = ""
+    map_line: np.ndarray | None = None
+    lines3d: list[np.ndarray] = field(default_factory=list)
+    hover: np.ndarray | None = None
+    hover3d: list[np.ndarray] = field(default_factory=list)
+    ghosts: list[np.ndarray] = field(default_factory=list)
+    ghosts3d: list[np.ndarray] = field(default_factory=list)
 
 
 @dataclass
@@ -162,12 +207,14 @@ def _same(a: list[np.ndarray] | None, b: list[np.ndarray]) -> bool:
     )
 
 
-def _pen(colour: str, width: float, dashed: bool = False) -> QPen:
+def _pen(colour: str, width: float, dashed: bool = False, dotted: bool = False) -> QPen:
     """A pen whose width is in pixels whatever the painter's transform."""
     pen = QPen(QColor(colour), width)
     pen.setCosmetic(True)
     if dashed:
         pen.setStyle(Qt.PenStyle.DashLine)
+    if dotted:
+        pen.setStyle(Qt.PenStyle.DotLine)
     return pen
 
 
@@ -181,12 +228,23 @@ class GoreMapView(QWidget):
     shapeClicked = Signal(str)  # noqa: N815 (Qt naming)
     #: A shape was dragged to a new placement (name, placement).
     shapeMoved = Signal(str, object)  # noqa: N815 (Qt naming)
+    #: Placing an axis: the gore position under the pointer, and whether it was chosen
+    #: (pressed or dragged) or only hovered.
+    axisPointed = Signal(float, bool)  # noqa: N815 (Qt naming)
+    #: An existing axis was pressed (its name): it is being dragged.
+    axisGrabbed = Signal(str)  # noqa: N815 (Qt naming)
+    #: The drag of a grabbed axis ended.
+    axisReleased = Signal()  # noqa: N815 (Qt naming)
 
     MARGIN = 14.0
 
     def __init__(self) -> None:
         super().__init__()
         self.data = PlacementData()
+        #: Placing an axis: the pointer places it instead of picking shapes.
+        self.axis_mode = False
+        self.preview: AxisPreview | None = None
+        self._axis_drag = False
         self.zoom, self.pan = 1.0, QPointF(0.0, 0.0)
         self.bounds = QRectF(0.0, 0.0, 1.0, 1.0)
         self._pan_from: QPointF | None = None
@@ -305,11 +363,45 @@ class GoreMapView(QWidget):
             self.update()
         event.accept()
 
+    def gore_at(self, p: QPointF) -> float | None:
+        """Gore position under widget point ``p`` (None off the map)."""
+        from envelopelab.project.placement_map import gore_position_at
+
+        if self.data.gore_map is None:
+            return None
+        return gore_position_at(self.data.gore_map, *self.to_world(p))
+
+    def axis_at(self, p: QPointF) -> str | None:
+        """The symmetry axis drawn within 6 px of widget point ``p``."""
+        for name, line, _lines3d in self.data.axes:
+            xy = np.array([[q.x(), q.y()] for q in map(lambda r: self.to_screen(*r), line)])
+            if float(np.min(np.hypot(xy[:, 0] - p.x(), xy[:, 1] - p.y()))) < 6.0:
+                return name
+        return None
+
+    def set_preview(self, preview: AxisPreview | None) -> None:
+        self.preview = preview
+        self.update()
+
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
         if event.button() == Qt.MouseButton.RightButton:
             self._pan_from = event.position()
             return
         if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self.axis_mode:
+            g = self.gore_at(event.position())
+            if g is not None:
+                self._axis_drag = True
+                self.axisPointed.emit(g, True)
+            return
+        axis = self.axis_at(event.position()) if self.shape_at(event.position()) is None else None
+        if axis is not None:
+            self.axisGrabbed.emit(axis)
+            self._axis_drag = True
+            g = self.gore_at(event.position())
+            if g is not None:
+                self.axisPointed.emit(g, True)
             return
         name = self.shape_at(event.position())
         if name is None:
@@ -323,6 +415,10 @@ class GoreMapView(QWidget):
             self.pan += event.position() - self._pan_from
             self._pan_from = event.position()
             self.update()
+        if self.axis_mode or self._axis_drag:
+            g = self.gore_at(event.position())
+            if g is not None:
+                self.axisPointed.emit(g, self._axis_drag)
         if self._drag is not None:
             self._drag = (self._drag[0], self._drag[1], event.position())
             self.update()
@@ -338,6 +434,10 @@ class GoreMapView(QWidget):
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
         if event.button() == Qt.MouseButton.RightButton:
             self._pan_from = None
+            return
+        if event.button() == Qt.MouseButton.LeftButton and self._axis_drag:
+            self._axis_drag = False
+            self.axisReleased.emit()
             return
         if event.button() != Qt.MouseButton.LeftButton or self._drag is None:
             return
@@ -385,7 +485,21 @@ class GoreMapView(QWidget):
             painter.strokePath(footprint, _pen(colour, 2.4 if selected else 1.4))
             painter.strokePath(holes, _pen(colour, 1.0, dashed=True))
             painter.restore()
+        preview = self.preview
+        if preview is not None:
+            if preview.hover is not None:
+                painter.strokePath(_path([preview.hover]), _pen(AXIS_PREVIEW, 1.2, dotted=True))
+            if preview.map_line is not None:
+                painter.strokePath(_path([preview.map_line]), _pen(AXIS_PREVIEW, 3.0, True))
+            painter.strokePath(_path(preview.ghosts), _pen(GHOST, 1.6, dashed=True))
         painter.restore()
+        if preview is not None and preview.map_line is not None:
+            top = t.map(QPointF(float(preview.map_line[-1][0]), float(preview.map_line[-1][1])))
+            painter.setPen(QPen(QColor(AXIS_PREVIEW)))
+            bold = QFont(painter.font())
+            bold.setBold(True)
+            painter.setFont(bold)
+            painter.drawText(QPointF(top.x() + 4, top.y() + 26), f"{preview.name}: {preview.label}")
         # Labels in pixels: gore numbers, row letters, axis and shape names.
         small = QFont(painter.font())
         small.setPointSizeF(max(small.pointSizeF() - 1.5, 6.0))
@@ -437,10 +551,15 @@ class BalloonSketch(QWidget):
 
     #: A shape was dragged to a new placement (name, placement).
     shapeMoved = Signal(str, object)  # noqa: N815 (Qt naming)
+    #: Placing an axis: gore position under the pointer and whether it was chosen.
+    axisPointed = Signal(float, bool)  # noqa: N815 (Qt naming)
 
     def __init__(self) -> None:
         super().__init__()
         self.data = PlacementData()
+        self.axis_mode = False
+        self.preview: AxisPreview | None = None
+        self._axis_drag = False
         self.azimuth, self.elevation, self.zoom = -90.0, 10.0, 1.0
         self._turn: QPointF | None = None
         self._drag: tuple[str, np.ndarray | None] | None = None  # shape, envelope point
@@ -530,7 +649,25 @@ class BalloonSketch(QWidget):
         out: np.ndarray = pts[front][i]
         return out
 
+    def set_preview(self, preview: AxisPreview | None) -> None:
+        self.preview = preview
+        self.update()
+
+    def _gore_at(self, p: QPointF) -> float | None:
+        from envelopelab.project.placement_map import azimuth_position
+
+        if self.data.sketch is None or self.data.gore_map is None:
+            return None
+        point = self._envelope_point(p)
+        return None if point is None else azimuth_position(point, self.data.gore_map.gores)
+
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        if self.axis_mode and event.button() == Qt.MouseButton.LeftButton:
+            g = self._gore_at(event.position())
+            if g is not None:
+                self._axis_drag = True
+                self.axisPointed.emit(g, True)
+                return
         name = self._shape_near(event.position()) if self.data.place_at else None
         if name is not None and event.button() == Qt.MouseButton.LeftButton:
             self._drag = (name, None)
@@ -538,6 +675,11 @@ class BalloonSketch(QWidget):
         self._turn = event.position()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        if self.axis_mode and self._turn is None:
+            g = self._gore_at(event.position())
+            if g is not None:
+                self.axisPointed.emit(g, self._axis_drag)
+            return
         if self._drag is not None:
             self._drag = (self._drag[0], self._envelope_point(event.position()))
             self.update()
@@ -550,6 +692,7 @@ class BalloonSketch(QWidget):
             self.update()
 
     def mouseReleaseEvent(self, _event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        self._axis_drag = False
         drag, self._drag = self._drag, None
         self._turn = None
         self.update()  # the full picture again
@@ -576,6 +719,7 @@ class BalloonSketch(QWidget):
             painter.fillRect(self.rect(), QColor("#f7f9fc"))
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             self._draw_lines(painter, light=True)
+            self._draw_preview(painter)
             return
         view_key = (self.azimuth, self.elevation, self.zoom, self.width(), self.height())
         key = (*view_key, id(self.data))
@@ -588,6 +732,7 @@ class BalloonSketch(QWidget):
             p.end()
             self._picture = (key, picture)
         painter.drawPixmap(0, 0, self._picture[1])
+        self._draw_preview(painter)
         if self._drag is not None and self._drag[1] is not None:
             ((x, y),) = self._projector()(self._drag[1][None])
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -595,6 +740,41 @@ class BalloonSketch(QWidget):
             painter.setBrush(QBrush(QColor(SELECTED)))
             painter.drawEllipse(QPointF(float(x), float(y)), 6.0, 6.0)
             painter.drawText(QPointF(float(x) + 9, float(y) - 6), f"move {self._drag[0]}")
+
+    def _draw_preview(self, painter: QPainter) -> None:
+        """The axis being placed (dashed where it runs behind) and the mirror images it
+        would make (their footprints, on the side facing the viewer)."""
+        preview = self.preview
+        if preview is None or self.data.sketch is None:
+            return
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        view, _r, _u = self._frame()
+        centre = _centre(self.data.sketch)
+        screen = self._projector()
+
+        def stroke(polyline: np.ndarray, pen: QPen, hidden: QPen | None) -> None:
+            front = (polyline - centre) @ view > 0.0
+            xy = screen(polyline)
+            for visible, use in ((True, pen), (False, hidden)):
+                if use is None:
+                    continue
+                seg = (front[:-1] & front[1:]) if visible else ~(front[:-1] & front[1:])
+                path = QPainterPath()
+                for i in np.flatnonzero(seg):
+                    path.moveTo(*xy[i])
+                    path.lineTo(*xy[i + 1])
+                painter.strokePath(path, use)
+
+        for line in preview.hover3d:
+            stroke(line, _pen(AXIS_PREVIEW, 1.2, dotted=True), None)
+        for line in preview.lines3d:
+            stroke(line, _pen(AXIS_PREVIEW, 3.0, dashed=True), _pen(AXIS_PREVIEW, 1.0, True))
+        for loop in preview.ghosts3d:
+            stroke(np.vstack([loop, loop[:1]]), _pen(GHOST, 2.0, dashed=True), None)
+        if preview.lines3d:
+            ((x, y),) = screen(preview.lines3d[0][-12:-11])
+            painter.setPen(QPen(QColor(AXIS_PREVIEW)))
+            painter.drawText(QPointF(float(x) + 6, float(y)), f"{preview.name}: {preview.label}")
 
     def _envelope_picture(self, view_key: tuple[float, ...]) -> QPixmap:
         """The shaded envelope and its seams for the current view, drawn once per view
@@ -723,12 +903,16 @@ class BalloonGpuView(QWidget):
 
     #: A shape was dragged to a new placement (name, placement).
     shapeMoved = Signal(str, object)  # noqa: N815 (Qt naming)
+    #: Placing an axis: gore position under the pointer and whether it was chosen.
+    axisPointed = Signal(float, bool)  # noqa: N815 (Qt naming)
 
     def __init__(self) -> None:
         super().__init__()
         from pyvistaqt import QtInteractor
 
         self.data = PlacementData()
+        self.axis_mode = False
+        self._axis_drag = False
         self.plotter = QtInteractor(self, auto_update=False)
         self.plotter.set_background("#f7f9fc")
         self.plotter.enable_lightkit()
@@ -877,7 +1061,60 @@ class BalloonGpuView(QWidget):
         key = next((k for k, a in actors.items() if a is picker.GetActor()), None)
         return None if key is None else (key, np.array(picker.GetPickPosition()))
 
+    def set_preview(self, preview: AxisPreview | None) -> None:
+        """Draw the axis being placed and the mirror images it would make."""
+        p = self.plotter
+        for key in ("axis-preview", "axis-hover", "axis-ghosts"):
+            p.remove_actor(key)
+        if preview is not None:
+            if preview.lines3d:
+                p.add_mesh(
+                    _lines(preview.lines3d),
+                    color=AXIS_PREVIEW,
+                    line_width=6,
+                    name="axis-preview",
+                    pickable=False,
+                    reset_camera=False,
+                )
+            if preview.hover3d:
+                p.add_mesh(
+                    _lines(preview.hover3d),
+                    color=AXIS_PREVIEW,
+                    line_width=2,
+                    opacity=0.6,
+                    name="axis-hover",
+                    pickable=False,
+                    reset_camera=False,
+                )
+            if preview.ghosts3d:
+                loops = [np.vstack([g, g[:1]]) for g in preview.ghosts3d]
+                p.add_mesh(
+                    _lines(loops),
+                    color=GHOST,
+                    line_width=3,
+                    name="axis-ghosts",
+                    pickable=False,
+                    reset_camera=False,
+                )
+        p.render()
+
+    def _axis_point(self) -> float | None:
+        from envelopelab.project.placement_map import azimuth_position
+
+        hit = self._pick(["envelope"])
+        if hit is None or self.data.gore_map is None:
+            return None
+        return azimuth_position(hit[1], self.data.gore_map.gores)
+
     def _press(self, style: Any, _event: str) -> None:
+        if self.axis_mode:
+            g = self._axis_point()
+            if g is not None:
+                self._axis_drag = True
+                self.axisPointed.emit(g, True)
+                return
+            style.OnLeftButtonDown()
+            return
         hit = self._pick([*sorted(self._shape_keys), "envelope"]) if self.data.place_at else None
         if hit is None or not hit[0].startswith("shape:"):
             style.OnLeftButtonDown()
@@ -885,6 +1122,13 @@ class BalloonGpuView(QWidget):
         self._drag = (hit[0].removeprefix("shape:"), None)
 
     def _move(self, style: Any, _event: str) -> None:
+        if self.axis_mode and (self._axis_drag or not style.GetState()):
+            g = self._axis_point()
+            if g is not None:
+                self.axisPointed.emit(g, self._axis_drag)
+            if not self._axis_drag:
+                style.OnMouseMove()
+            return
         if self._drag is None:
             style.OnMouseMove()
             return
@@ -903,6 +1147,9 @@ class BalloonGpuView(QWidget):
             self.plotter.render()
 
     def _release(self, style: Any, _event: str) -> None:
+        if self._axis_drag:
+            self._axis_drag = False
+            return
         drag, self._drag = self._drag, None
         if drag is None:
             style.OnLeftButtonUp()
@@ -941,6 +1188,17 @@ class PlacementView(QWidget):
     nudged = Signal(float, float)
     #: A shape was dragged to a new placement in the 3D view or on the map.
     shapeMoved = Signal(str, object)  # noqa: N815 (Qt naming)
+    #: Placing an axis: gore position pointed at in either view, and whether chosen.
+    axisPointed = Signal(float, bool)  # noqa: N815 (Qt naming)
+    #: An existing axis was grabbed on the map (its name), and its drag ended.
+    axisGrabbed = Signal(str)  # noqa: N815 (Qt naming)
+    axisReleased = Signal()  # noqa: N815 (Qt naming)
+    #: The axis bar's Place button, its Cancel button (or Escape), the gore line typed,
+    #: and the choice of axis to mirror across (an axis name, or "" for a new one).
+    axisAccepted = Signal()  # noqa: N815 (Qt naming)
+    axisCancelled = Signal()  # noqa: N815 (Qt naming)
+    axisTyped = Signal(float)  # noqa: N815 (Qt naming)
+    axisTargetChosen = Signal(str)  # noqa: N815 (Qt naming)
 
     def __init__(self, gpu: bool = False) -> None:
         super().__init__()
@@ -984,6 +1242,7 @@ class PlacementView(QWidget):
         self.step.setCurrentIndex(2)
         bar.addWidget(self.step)
         bar.addStretch(1)
+        self.axis_bar = self._axis_bar()
         self.split = QSplitter(Qt.Orientation.Vertical)
         self.split.setObjectName("placementSplitter")
         self.split.addWidget(self.sketch)
@@ -992,9 +1251,14 @@ class PlacementView(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.addWidget(caption)
         layout.addLayout(bar)
+        layout.addWidget(self.axis_bar)
         layout.addWidget(self.split, 1)
         self.sketch.shapeMoved.connect(self.shapeMoved)
         self.map.shapeMoved.connect(self.shapeMoved)
+        for source in (self.sketch, self.map):
+            source.axisPointed.connect(self.axisPointed)
+        self.map.axisGrabbed.connect(self.axisGrabbed)
+        self.map.axisReleased.connect(self.axisReleased)
         for view in (self.sketch, self.map):
             view.installEventFilter(self)
 
@@ -1019,6 +1283,8 @@ class PlacementView(QWidget):
             return False
         view = BalloonGpuView()
         view.shapeMoved.connect(self.shapeMoved)
+        view.axisPointed.connect(self.axisPointed)
+        view.axis_mode = self.map.axis_mode
         view.plotter.installEventFilter(self)
         self.split.replaceWidget(0, view)
         self.sketch.hide()
@@ -1032,6 +1298,122 @@ class PlacementView(QWidget):
         self.view3d.set_data(data)  # type: ignore[attr-defined]
         self.map.set_data(data)
 
+    # -- placing a symmetry axis -------------------------------------------------------
+
+    def _axis_bar(self) -> QWidget:
+        """The bar shown while an axis is placed: what is being done, which axis (when
+        mirroring), its name, its gore line, snapping, where it lies, Place and Cancel."""
+        bar = QWidget()
+        bar.setObjectName("axisBar")
+        bar.setStyleSheet(f"#axisBar {{ border: 2px solid {AXIS_PREVIEW}; border-radius: 4px; }}")
+        self.axis_title = QLabel()
+        self.axis_title.setWordWrap(True)
+        self.axis_target = QComboBox()
+        self.axis_target.setObjectName("axisTarget")
+        self.axis_target.setToolTip("Mirror across an existing axis, or place a new one")
+        self.axis_target.currentIndexChanged.connect(
+            lambda _i: self.axisTargetChosen.emit(str(self.axis_target.currentData() or ""))
+        )
+        self.axis_name = QLineEdit()
+        self.axis_name.setObjectName("axisName")
+        self.axis_name.setPlaceholderText("axis name")
+        self.axis_line = QDoubleSpinBox()
+        self.axis_line.setObjectName("axisLine")
+        self.axis_line.setDecimals(2)
+        self.axis_line.setSingleStep(0.5)
+        self.axis_line.setWrapping(True)
+        self.axis_line.setPrefix("gore ")
+        self.axis_line.setKeyboardTracking(False)
+        self.axis_line.setToolTip("Gore line: 6 = the centreline of gore 6, 6.5 = seam 6|7")
+        self.axis_line.valueChanged.connect(lambda v: self.axisTyped.emit(float(v) - 0.5))
+        self.axis_snap = QCheckBox("Snap to gore centres and seams")
+        self.axis_snap.setObjectName("axisSnap")
+        self.axis_snap.setChecked(True)
+        self.axis_where = QLabel()
+        self.axis_where.setObjectName("axisWhere")
+        self.axis_ok = QPushButton("Place axis")
+        self.axis_ok.setObjectName("axisPlace")
+        self.axis_ok.setDefault(True)
+        self.axis_ok.clicked.connect(self.axisAccepted)
+        cancel = QPushButton("Cancel")
+        cancel.setObjectName("axisCancel")
+        cancel.clicked.connect(self.axisCancelled)
+        row = QHBoxLayout()
+        row.addWidget(self.axis_target)
+        row.addWidget(self.axis_name)
+        row.addWidget(self.axis_line)
+        row.addWidget(self.axis_snap)
+        row.addWidget(self.axis_where, 1)
+        row.addWidget(self.axis_ok)
+        row.addWidget(cancel)
+        layout = QVBoxLayout(bar)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.addWidget(self.axis_title)
+        layout.addLayout(row)
+        bar.hide()
+        return bar
+
+    def begin_axis(
+        self,
+        title: str,
+        accept: str,
+        name: str,
+        gores: int,
+        targets: list[str] | None = None,
+    ) -> None:
+        """Show the axis bar and let the pointer place the axis in both views.
+
+        ``targets``: the existing axes offered when mirroring (a "New axis" choice is
+        added first); None hides the choice.
+        """
+        self.axis_title.setText(title)
+        self.axis_ok.setText(accept)
+        self.axis_name.setText(name)
+        self.axis_line.blockSignals(True)
+        self.axis_line.setRange(0.5, gores + 0.5)
+        self.axis_line.blockSignals(False)
+        self.axis_target.blockSignals(True)
+        self.axis_target.clear()
+        if targets is not None:
+            self.axis_target.addItem("New axis (place it)", "")
+            for t in targets:
+                self.axis_target.addItem(f"Across {t}", t)
+        self.axis_target.setVisible(targets is not None)
+        self.axis_target.blockSignals(False)
+        self.set_axis_mode(True)
+        self.axis_bar.show()
+        self.axis_name.setFocus()
+
+    def end_axis(self) -> None:
+        """Hide the axis bar and stop placing; the pointer picks shapes again."""
+        self.axis_bar.hide()
+        self.set_axis_mode(False)
+        self.set_preview(None)
+
+    def set_axis_mode(self, on: bool) -> None:
+        """Let the pointer place an axis (True) or pick and move shapes (False)."""
+        for view in (self.sketch, self.map, self.gpu_view):
+            if view is not None:
+                view.axis_mode = on
+        self.map.setCursor(Qt.CursorShape.CrossCursor if on else Qt.CursorShape.ArrowCursor)
+        self.sketch.setCursor(Qt.CursorShape.CrossCursor if on else Qt.CursorShape.ArrowCursor)
+
+    def show_axis_line(self, line: float, where: str, editable: bool = True) -> None:
+        """Show the chosen gore line (gore position) and where it lies in the bar."""
+        self.axis_line.blockSignals(True)
+        self.axis_line.setValue(line + 0.5)
+        self.axis_line.blockSignals(False)
+        self.axis_line.setEnabled(editable)
+        self.axis_name.setEnabled(editable)
+        self.axis_snap.setEnabled(editable)
+        self.axis_where.setText(where)
+
+    def set_preview(self, preview: AxisPreview | None) -> None:
+        """Draw the axis being placed (and the mirror images it would make) in both
+        views."""
+        self.map.set_preview(preview)
+        self.view3d.set_preview(preview)  # type: ignore[attr-defined]
+
     def nudge(self, hoop: float, tape: float, factor: float = 1.0) -> None:
         """Nudge the selected shape ``hoop``, ``tape`` steps (round, up) by the chosen step."""
         step = float(self.step.currentData()) * factor
@@ -1040,6 +1422,9 @@ class PlacementView(QWidget):
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802 (Qt API)
         if event.type() == QEvent.Type.KeyPress:
             assert isinstance(event, QKeyEvent)
+            if event.key() == Qt.Key.Key_Escape and self.axis_bar.isVisible():
+                self.axisCancelled.emit()
+                return True
             d = ARROWS.get(Qt.Key(event.key()))
             if d is not None:
                 shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)

@@ -73,6 +73,7 @@ from envelopelab.export.templates import MARGIN, roll_fit, turn_points
 from envelopelab.features.metrics import REQUIRED_FOS
 from envelopelab.features.primitives import CutPiece, PrimitiveDesign
 from envelopelab.project.model import SOLVER_LABELS
+from envelopelab.project.placement_map import snap
 from envelopelab.project.shape_groups import group_names
 from envelopelab.project.shapes import (
     CAP_PANEL_TOP_WIDTH,
@@ -93,7 +94,12 @@ from envelopelab.project.shapes import (
 from envelopelab.project.symmetry import axis_gore_label
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.marking_view import MarkingView
-from envelopelab_app.placement_view import PlacedShape, PlacementData, PlacementView
+from envelopelab_app.placement_view import (
+    AxisPreview,
+    PlacedShape,
+    PlacementData,
+    PlacementView,
+)
 from envelopelab_app.refresh import Refresher
 
 FAIL_COLOR = "#b00020"
@@ -220,6 +226,26 @@ def _ask(
         return None
     out = [float(b.value()) for b in boxes]
     return out + ([1.0 if tick.isChecked() else 0.0] if tick is not None else [])
+
+
+@dataclass
+class _AxisSession:
+    """A symmetry axis being placed in the On the balloon tab.
+
+    ``mode``: "add", "edit" (``axis`` is moved), "mirror" or "mirror group"; ``line``
+    the chosen gore position (None: not yet), ``hover`` the one under the pointer;
+    ``targets`` the shapes whose mirror images are previewed; ``fixed`` an existing axis
+    was chosen to mirror across; ``grabbed`` it was started by dragging an axis on the
+    map (done when the drag ends)."""
+
+    mode: str
+    axis: str | None
+    line: float | None
+    targets: list[str]
+    hover: float | None = None
+    fixed: bool = False
+    grabbed: bool = False
+    group: str | None = None
 
 
 def _scrolled(page: QWidget) -> QScrollArea:
@@ -792,6 +818,15 @@ class ShapesPanel(QWidget):
             lambda name, placement: self.controller.place_shape(name, placement)
         )
         self.placement.nudged.connect(self.nudge)
+        self._axis: _AxisSession | None = None
+        self.placement.axisPointed.connect(self._axis_pointed)
+        self.placement.axisTyped.connect(self._axis_typed)
+        self.placement.axisTargetChosen.connect(self._axis_target)
+        self.placement.axisAccepted.connect(self.accept_axis)
+        self.placement.axisCancelled.connect(self.cancel_axis)
+        self.placement.axisGrabbed.connect(self._axis_grabbed)
+        self.placement.axisReleased.connect(self._axis_released)
+        self.placement.axis_name.textEdited.connect(lambda _t: self._update_axis_preview())
         self.result_tabs.insertTab(0, self.placement, "On the balloon")
         self.result_tabs.setCurrentIndex(0)
         self._results_stale = False
@@ -1150,6 +1185,8 @@ class ShapesPanel(QWidget):
         if key != self._placement_shown:
             self._placement_shown = key
             self.placement.set_data(self.placement_data())
+            if self._axis is not None:
+                self._update_axis_preview()  # the mirror images follow the new data
         self._update_form(spec)
         self._show_result(spec)
         self._show_simulation(spec)
@@ -1481,14 +1518,20 @@ class ShapesPanel(QWidget):
                         shown.triangles,
                         pm.footprint_lines(gore_map, placed),
                         placed.base_point + shift,
+                        (
+                            np.asarray(placed.surface.gore_position(placed.footprint_theta)),
+                            np.asarray(placed.footprint_s),
+                        ),
+                        np.asarray(placed.footprint_points)[::4] + shift,
                     )
                     self._drawn[spec.name] = cached
-                _p, _m, points, triangles, footprint, base3d = cached
+                _p, _m, points, triangles, footprint, base3d, gs, fp3d = cached
             else:
                 theta = surface.theta_at(spec.placement.gore, spec.placement.across)
                 base3d = display_points(design, np.array([s]), np.array([theta]))[0]
                 points, triangles = np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64)
                 footprint = []
+                gs, fp3d = None, None
             shapes.append(
                 PlacedShape(
                     spec.name,
@@ -1499,6 +1542,8 @@ class ShapesPanel(QWidget):
                     triangles,
                     np.asarray(base3d, float),
                     spec.placement,
+                    gs,
+                    fp3d,
                 )
             )
         specs = {s.name: s for s in session.state.shapes}
@@ -1568,36 +1613,7 @@ class ShapesPanel(QWidget):
             return False
         return bool(self.controller.edit("unlink_mirror", self.selected))
 
-    def _axis_values(self, title: str, name: str, line: float) -> tuple[str, float] | None:
-        """Ask for an axis name and its gore line (gore number: 6 = centre of gore 6)."""
-        from PySide6.QtWidgets import QDialog, QDialogButtonBox
-
-        n = self._gores()
-        dialog = QDialog(self)
-        dialog.setWindowTitle(title)
-        form = QFormLayout(dialog)
-        name_edit = QLineEdit(name)
-        spin = QDoubleSpinBox()
-        spin.setRange(0.5, n + 0.5)
-        spin.setDecimals(2)
-        spin.setSingleStep(0.5)
-        spin.setWrapping(True)
-        spin.setValue(line + 0.5)
-        where = QLabel()
-        spin.valueChanged.connect(lambda v: where.setText(axis_gore_label(float(v) - 0.5, n)))
-        where.setText(axis_gore_label(line, n))
-        form.addRow("Name", name_edit)
-        form.addRow("Gore line (6 = centre of gore 6, 6.5 = seam 6|7)", spin)
-        form.addRow("Lies on", where)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        form.addRow(buttons)
-        if not dialog.exec() or not name_edit.text().strip():
-            return None
-        return name_edit.text().strip(), (float(spin.value()) - 0.5) % n
+    # -- placing a symmetry axis, seen while it is placed -----------------------------
 
     def _base_line(self) -> float:
         """Gore position of the selected shape's base point (or gore 1's centreline)."""
@@ -1606,15 +1622,12 @@ class ShapesPanel(QWidget):
             return 0.5
         return spec.placement.gore - 0.5 + spec.placement.across
 
-    def _add_axis_dialog(self) -> str | None:
+    def _free_axis_name(self) -> str:
         names = {a.name for a in self.axes()}
-        k, base = 1, "Axis"
-        while f"{base} {k}" in names:
+        k = 1
+        while f"Axis {k}" in names:
             k += 1
-        values = self._axis_values("Add symmetry axis", f"{base} {k}", self._base_line())
-        if values is None or not self.add_axis(*values):
-            return None
-        return values[0]
+        return f"Axis {k}"
 
     def _chosen_axis(self) -> Any:
         item = self.axes_list.currentItem() or self.axes_list.item(0)
@@ -1623,37 +1636,223 @@ class ShapesPanel(QWidget):
         name = item.data(Qt.ItemDataRole.UserRole)
         return next((a for a in self.axes() if a.name == name), None)
 
-    def _edit_axis_dialog(self) -> None:
-        axis = self._chosen_axis()
+    def _start_axis(self, session: _AxisSession, title: str, accept: str, name: str) -> None:
+        """Open the axis bar on the On the balloon tab and let the pointer place it."""
+        self.result_tabs.setCurrentWidget(self.placement)
+        self._axis = session
+        targets = [a.name for a in self.axes()] if session.mode.startswith("mirror") else None
+        self.placement.begin_axis(title, accept, name, self._gores(), targets)
+        if session.line is not None:
+            self.placement.show_axis_line(
+                session.line, axis_gore_label(session.line, self._gores())
+            )
+        else:
+            self.placement.show_axis_line(self._base_line(), "click on the map or the 3D view")
+        self._update_axis_preview()
+
+    def begin_add_axis(self) -> None:
+        """Place a new symmetry axis: it starts on the selected shape's base point, follows
+        the pointer, and a click (or the gore line typed) puts it there; Place adds it.
+        The selected shape's mirror image across it is shown as it moves."""
+        spec = self.spec()
+        targets = [spec.name] if spec is not None and spec.mirror is None else []
+        line = snap(self._base_line()) if spec is not None else 0.5
+        self._start_axis(
+            _AxisSession("add", None, line, targets),
+            "Place a new symmetry axis: move the pointer over the gore map or the 3D view "
+            "and click where it goes (or type the gore line). Dashed magenta: where the "
+            "selected shape's mirror image would be.",
+            "Place axis",
+            self._free_axis_name(),
+        )
+
+    def begin_edit_axis(self, name: str | None = None, grabbed: bool = False) -> None:
+        """Move or rename axis ``name`` (default: the one chosen in the list), seeing it and
+        where its mirror twins go while it moves."""
+        axis = (
+            next((a for a in self.axes() if a.name == name), None)
+            if name is not None
+            else self._chosen_axis()
+        )
         if axis is None:
             return
-        values = self._axis_values(f"Edit symmetry axis {axis.name}", axis.name, axis.line)
-        if values is not None:
-            self.controller.edit("update_symmetry_axis", axis.name, values[1], values[0])
+        sources = [s.mirror.of for s in self.specs() if s.mirror and s.mirror.axis == axis.name]
+        self._start_axis(
+            _AxisSession("edit", axis.name, float(axis.line), sources, grabbed=grabbed),
+            f"Move axis {axis.name}: click or drag on the gore map or the 3D view (or type "
+            "the gore line). Dashed magenta: where its mirror twins go.",
+            "Move axis",
+            axis.name,
+        )
+
+    def begin_mirror(self) -> None:
+        """Mirror the selected shape: pick an existing axis or place a new one, seeing
+        where the mirror image lands while the axis moves; then add the linked twin."""
+        spec = self.spec()
+        if spec is None or spec.mirror is not None:
+            return
+        self._start_axis(
+            _AxisSession("mirror", None, None, [spec.name]),
+            f"Mirror {spec.name}: move the pointer to see where its mirror image lands, and "
+            "click to place the axis (or choose an existing axis).",
+            "Mirror across it",
+            self._free_axis_name(),
+        )
+
+    def begin_mirror_group(self) -> None:
+        """Mirror the selected shape's group across an axis placed or chosen the same
+        way, seeing every member's mirror image."""
+        group = self.group()
+        if group is None:
+            return
+        members = [s.name for s in self.specs() if s.group == group and s.mirror is None]
+        self._start_axis(
+            _AxisSession("mirror group", None, None, members, group=group),
+            f"Mirror group {group}: move the pointer to see where the mirror images land, "
+            "and click to place the axis (or choose an existing axis).",
+            "Mirror across it",
+            self._free_axis_name(),
+        )
+
+    def _axis_pointed(self, g: float, chosen: bool) -> None:
+        session = self._axis
+        if session is None or session.fixed:
+            return
+        if self.placement.axis_snap.isChecked():
+            g = snap(g)
+        g %= self._gores()
+        if chosen:
+            session.line = g
+            self.placement.show_axis_line(g, axis_gore_label(g, self._gores()))
+        else:
+            session.hover = g
+            if session.line is None:  # nothing chosen yet: the bar follows the pointer
+                self.placement.show_axis_line(
+                    g, f"pointer: {axis_gore_label(g, self._gores())}, click to place it"
+                )
+        self._update_axis_preview()
+
+    def _axis_typed(self, g: float) -> None:
+        if self._axis is not None and not self._axis.fixed:
+            self._axis.line = g % self._gores()
+            self.placement.show_axis_line(self._axis.line, axis_gore_label(g, self._gores()))
+            self._update_axis_preview()
+
+    def _axis_target(self, name: str) -> None:
+        """Mirror across the existing axis ``name`` ("": place a new one)."""
+        session = self._axis
+        if session is None:
+            return
+        axis = next((a for a in self.axes() if a.name == name), None)
+        session.fixed = axis is not None
+        session.axis = None if axis is None else axis.name
+        session.line = None if axis is None else float(axis.line)
+        if axis is not None:
+            self.placement.show_axis_line(
+                axis.line, axis_gore_label(axis.line, self._gores()), editable=False
+            )
+        else:
+            self.placement.show_axis_line(self._base_line(), "click on the map or the 3D view")
+        self._update_axis_preview()
+
+    def axis_preview(self) -> AxisPreview | None:
+        """What the views draw while an axis is placed: the chosen axis, the one under the
+        pointer, and the mirror images the axis would make (at the chosen axis, or at the
+        one under the pointer until one is chosen)."""
+        from envelopelab.project.placement_map import axis_line, mirrored_lines, reflect
+        from envelopelab.project.symmetry import SymmetryAxis, symmetry_lines
+
+        session, data = self._axis, self.placement.data
+        if session is None or data.gore_map is None or self.controller.design is None:
+            return None
+        m, design, n = data.gore_map, self.controller.design, self._gores()
+
+        def lines(g: float) -> tuple[np.ndarray, list[np.ndarray]]:
+            axis = SymmetryAxis(name="preview", line=g % n)
+            return axis_line(m, axis), symmetry_lines(design, [axis])
+
+        name = self.placement.axis_name.text().strip() or "axis"
+        chosen = session.line
+        preview = AxisPreview(
+            name if not session.fixed else str(session.axis),
+            axis_gore_label(chosen, n) if chosen is not None else "not placed yet",
+        )
+        if chosen is not None:
+            preview.map_line, preview.lines3d = lines(chosen)
+        if session.hover is not None and not session.fixed:
+            preview.hover, preview.hover3d = lines(session.hover)
+        ghost = chosen if chosen is not None else session.hover
+        if ghost is not None:
+            for shape in data.shapes:
+                if shape.name not in session.targets:
+                    continue
+                if shape.footprint_gs is not None:
+                    preview.ghosts += mirrored_lines(m, *shape.footprint_gs, ghost)
+                if shape.footprint3d is not None:
+                    preview.ghosts3d.append(reflect(shape.footprint3d, ghost, n))
+        return preview
+
+    def _update_axis_preview(self) -> None:
+        self.placement.set_preview(self.axis_preview())
+
+    def accept_axis(self) -> bool:
+        """Do what the axis bar was opened for (add, move, mirror); True when done."""
+        session = self._axis
+        if session is None:
+            return False
+        if session.line is None:
+            self.controller.editRejected.emit(
+                "place the axis first: click on the gore map or the 3D view"
+            )
+            return False
+        name = self.placement.axis_name.text().strip()
+        line = session.line
+        ok: Any
+        if session.mode == "add":
+            ok = self.controller.edit("add_symmetry_axis", name, line)
+        elif session.mode == "edit":
+            ok = self.controller.edit("update_symmetry_axis", session.axis, line, name)
+        else:
+            axis = session.axis
+            if axis is None:  # a new axis first, then the twins across it
+                if not self.controller.edit("add_symmetry_axis", name, line):
+                    return False
+                axis = name
+            if session.mode == "mirror":
+                ok = self.mirror_selected(axis)
+            else:
+                ok = self.mirror_group(group=session.group, axis=axis)
+        if ok is None or ok is False:
+            return False
+        self.cancel_axis()
+        return True
+
+    def cancel_axis(self) -> None:
+        """Close the axis bar without changing anything."""
+        self._axis = None
+        self.placement.end_axis()
+
+    def _axis_grabbed(self, name: str) -> None:
+        if self._axis is None:
+            self.begin_edit_axis(name, grabbed=True)
+
+    def _axis_released(self) -> None:
+        if self._axis is not None and self._axis.grabbed:
+            self.accept_axis()
+
+    def _add_axis_dialog(self) -> None:
+        self.begin_add_axis()
+
+    def _edit_axis_dialog(self) -> None:
+        self.begin_edit_axis()
 
     def _remove_axis(self) -> None:
         axis = self._chosen_axis()
         if axis is not None:
             self.controller.edit("remove_symmetry_axis", axis.name)
 
-    def _pick_axis(self, title: str) -> str | None:
-        """Choose a symmetry axis (or make a new one) for a mirror."""
-        from PySide6.QtWidgets import QInputDialog
-
-        new = "New axis…"
-        n = self._gores()
-        items = [f"{a.name} — {axis_gore_label(a.line, n)}" for a in self.axes()] + [new]
-        choice, ok = QInputDialog.getItem(self, title, "Mirror across", items, 0, False)
-        if not ok:
-            return None
-        if choice == new:
-            return self._add_axis_dialog()
-        return str(choice).split(" — ", 1)[0]
-
     def _mirror_dialog(self) -> None:
-        axis = self._pick_axis(f"Mirror {self.selected}")
-        if axis is not None:
-            self.mirror_selected(axis)
+        self.begin_mirror()
 
     def mirror_group(
         self,
@@ -1690,9 +1889,7 @@ class ShapesPanel(QWidget):
             self.move_group(values[0], values[1])
 
     def _mirror_group_dialog(self) -> None:
-        axis = self._pick_axis(f"Mirror group {self.group()}")
-        if axis is not None:
-            self.mirror_group(axis=axis)
+        self.begin_mirror_group()
 
     def _export_group_dialog(self) -> None:
         path, _ = QFileDialog.getSaveFileName(

@@ -407,3 +407,26 @@ def test_on_the_balloon_tab_draws_on_the_graphics_card(
     assert w.controller.shapes.wait(120_000)
     qtbot.waitUntil(lambda: gpu.data.shapes[0].placement.tape_position > tape, timeout=10_000)
     w.close()
+
+
+def test_axis_preview_on_the_graphics_card(qtbot: QtBot, settings: QSettings) -> None:
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.resize(1600, 1000)
+    w.show()
+    w.open_project(GORE_PROJECT)
+    w.show_panel("shapes")
+    panel = w.shapes
+    panel.add_shape("dome")
+    assert w.controller.shapes.wait(120_000)
+    qtbot.waitUntil(lambda: panel.placement.gpu_view is not None, timeout=10_000)
+    gpu = panel.placement.gpu_view
+    assert gpu is not None
+    panel.begin_mirror()
+    assert gpu.axis_mode
+    panel.placement.axis_line.setValue(4.0)  # the seam 3|4, typed
+    assert {"axis-preview", "axis-ghosts"} <= set(gpu.plotter.actors)
+    panel.cancel_axis()
+    assert not gpu.axis_mode
+    assert "axis-preview" not in gpu.plotter.actors
+    w.close()

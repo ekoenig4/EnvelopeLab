@@ -175,23 +175,34 @@ in the editor next to them, and you can move the selected shape on either:
      along the tape keeps each shape, but the gores narrow towards the mouth and the
      crown, so the members end up a little closer or further apart. Dragging a grouped
      shape in the 3D view moves its whole group.
-   * **Mirror group…** adds a linked mirror twin of every member across a symmetry axis
-     (step 8), leaving out the shapes standing on the axis itself.
+   * **Mirror group…** adds a linked mirror twin of every member across a symmetry axis,
+     placed or chosen as in step 8 with every member's mirror image shown while you
+     decide; shapes standing on the axis itself are left out.
    * **Export group to Blender…** writes the envelope and that group's shapes only. The
      build pack lists the groups in its `index.json`, and every skin sheet names its object.
 8. **Symmetry: axes and mirror twins.** A face's left and right ears are one shape and
    its mirror image. Name the plane they are mirrored in once, then let EnvelopeLab keep
    the two sides symmetric:
-   * **Symmetry axes** (under the shape list): **Add axis…** asks for a name and a gore
-     line (6 = the centreline of gore 6, 6.5 = the seam between gores 6 and 7; it starts
-     at the selected shape's base) and says where it lies (*centre of gore 6*,
-     *seam 6|7*). The list shows each axis and how many twins use it; **Edit…** (or a
-     double click) moves or renames it, **Remove** deletes an axis no twin uses. The 3D
-     View draws every axis as a green line on the envelope from the mouth to the crown
-     (layer *Symmetry axes*).
-   * **Mirror…** adds the selected shape's **mirror twin** across an axis you pick (or a
-     new one): `Ear mirror`, mirrored in everything: position, lean direction, feed
-     holes, seam turn, panel widths, a mesh's geometry, every size, and its group.
+   * **Placing an axis, seen as you go.** **Add axis…** (under the shape list) opens a
+     green-framed bar on the **On the balloon** tab. Move the pointer over the gore map or
+     the 3D view: a dotted green line shows where the axis would go, snapped to the
+     nearest gore centreline or seam (untick *Snap* to place it anywhere). **Click** to put
+     it there (or drag along, or type the gore line: 6 = the centreline of gore 6, 6.5 =
+     the seam between gores 6 and 7): it is drawn dashed, and the bar says where it lies
+     (*centre of gore 6*, *seam 6|7*). A dashed magenta outline shows where the selected
+     shape's mirror image would land. Name it and press **Place axis** (Escape or
+     **Cancel** leaves everything as it was).
+   * The list under the shapes shows each axis and how many twins use it; **Edit…** (or
+     a double click) moves or renames it the same way, with its twins' new places shown
+     dashed as it moves. You can also **drag an axis on the gore map**: its twins follow
+     when you let go (one undo step). **Remove** deletes an axis no twin uses. The 3D View
+     draws every axis as a green line from the mouth to the crown (layer *Symmetry axes*).
+   * **Mirror…** adds the selected shape's **mirror twin**: the same bar opens, and as you
+     move the pointer the dashed magenta outline shows where the mirror image would land
+     for an axis there. Click to place a new axis, or choose an existing one in the bar
+     (*Across Face centre*), and press **Mirror across it**: `Ear mirror` is added,
+     mirrored in everything: position, lean direction, feed holes, seam turn, panel
+     widths, a mesh's geometry, every size, and its group.
    * The twin stays linked: **edit or drag either side and the other follows** as its
      mirror image (one undo step). Moving an axis moves its twins; moving a group carries
      the axes of the twins in it. The list marks linked shapes with ⇄ (*Ear mirror (Dome)

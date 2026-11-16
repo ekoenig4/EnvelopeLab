@@ -96,6 +96,7 @@ nav:
       - ADR-0043: adr/ADR-0043-symmetry-axes-and-mirror-twins.md
       - ADR-0044: adr/ADR-0044-placement-views.md
       - ADR-0045: adr/ADR-0045-responsive-placement.md
+      - ADR-0046: adr/ADR-0046-placing-axes-in-the-views.md
 theme:
   name: material
 markdown_extensions:
