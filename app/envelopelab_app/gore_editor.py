@@ -1316,19 +1316,20 @@ class GoreEditor(QWidget):
         self.points_table.itemSelectionChanged.connect(self._table_selection)
         tools = self._build_point_tools()
 
-        self.rows_table = QTableWidget(0, 5)
+        self.rows_table = QTableWidget(0, 6)
         self.rows_table.setHorizontalHeaderLabels(
-            ["row", "height (m)", "zone", "bow bottom (mm)", "bow top (mm)"]
+            ["row", "height (m)", "zone", "bow bottom (mm)", "bow top (mm)", "half gores"]
         )
         self.rows_table.setToolTip(
             "Flat-chord gores: seam bows, positive outward, at the middle of the panel's "
             "bottom and top seams.\nMeasured bows are edited here; bows from a crest loft "
             "are shown read-only (Freeze as measured bows to edit them).\n"
             "Type over a row's name to rename it everywhere; clear its zone for the "
-            "design's first zone."
+            "design's first zone.\nHalf gores: tick to cut each panel of the row as two "
+            "halves sewn down the gore centre (narrower pieces for the print roll)."
         )
         self.rows_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        for col in (0, 3, 4):
+        for col in (0, 3, 4, 5):
             self.rows_table.horizontalHeader().setSectionResizeMode(
                 col, QHeaderView.ResizeMode.ResizeToContents
             )
@@ -1482,7 +1483,7 @@ class GoreEditor(QWidget):
             value.editingFinished.connect(lambda n=name: self._lock_value_edited(n))
             self.lock_values[name] = value
             locks_layout.addRow(box, value)
-        locks_layout.addRow("Gores N", self.gore_count)
+        self.panels_box = self._build_panels_box()
 
         self.outputs: dict[str, QLabel] = {}
         outputs_box = QGroupBox("Live outputs")
@@ -1515,6 +1516,7 @@ class GoreEditor(QWidget):
         side = QWidget()
         side.setObjectName("sidePanel")
         side_layout = QVBoxLayout(side)
+        side_layout.addWidget(self.panels_box)
         side_layout.addWidget(QLabel("Profile control points (mouth first)"))
         side_layout.addWidget(self.points_table)
         buttons = QHBoxLayout()
@@ -1614,9 +1616,111 @@ class GoreEditor(QWidget):
             defer_hidden=lambda: controller.defer_hidden,
         )
         controller.fileChanged.connect(self._update_header)
+        # A new print roll width (Preferences) is announced with the shapes' change.
+        controller.shapesChanged.connect(self._show_roll_status)
         self.refresh()
 
     # -- refresh ------------------------------------------------------------------------
+
+    def _build_panels_box(self) -> QGroupBox:
+        """Gore count, half gores and how the panels fit the print roll, at the top."""
+        box = QGroupBox("Panels and print roll")
+        box.setObjectName("panelsBox")
+        box.setToolTip(
+            "Change how the envelope is divided into panels at any time (each change is "
+            "one undoable edit): more gores make every panel narrower; half gores cut each "
+            "panel in two down the gore centre; Split row (below) makes shorter rows."
+        )
+        form = QFormLayout(box)
+        self.gore_count.setObjectName("goreCount")
+        self.gore_count.setToolTip(
+            "Number of gores N. Every panel's width changes with it (the special shapes "
+            "keep their place by gore number). Locked under Constraint locks if ticked."
+        )
+        form.addRow("Gores N", self.gore_count)
+        halves = QHBoxLayout()
+        for key, text, tip in (
+            ("all", "All rows", "Cut every row's panels as two half gores"),
+            ("oversize", "Rows too wide", "Half gores for the rows larger than the roll"),
+            ("none", "None", "Cut every panel whole"),
+        ):
+            button = QPushButton(text)
+            button.setObjectName(f"halfGores_{key}")
+            button.setToolTip(tip)
+            button.clicked.connect(lambda _c=False, k=key: self.set_half_gores(k))
+            halves.addWidget(button)
+        form.addRow("Half gores", halves)
+        self.roll_status = QLabel("-")
+        self.roll_status.setObjectName("rollStatus")
+        self.roll_status.setWordWrap(True)
+        suggest = QPushButton("Suggest…")
+        suggest.setObjectName("rollSuggest")
+        suggest.setToolTip(
+            "Work out the gore count, half gores or rows that make every panel fit the "
+            "print roll (Preferences ▸ Print roll width); nothing is changed"
+        )
+        suggest.clicked.connect(self.suggest_roll_fit)
+        status = QHBoxLayout()
+        status.addWidget(self.roll_status, 1)
+        status.addWidget(suggest)
+        form.addRow("Print roll", status)
+        self.roll_advice_text = QLabel()
+        self.roll_advice_text.setObjectName("rollAdvice")
+        self.roll_advice_text.setWordWrap(True)
+        self.roll_advice_text.hide()
+        form.addRow(self.roll_advice_text)
+        return box
+
+    def set_half_gores(self, which: str) -> None:
+        """Half gores for ``which`` rows: ``all``, ``none`` or ``oversize`` (the rows with
+        a piece larger than the print roll)."""
+        if which == "oversize":
+            rows = sorted({f.row for f in self.controller.envelope_piece_fits() if not f.fits})
+            if not rows:
+                self.controller.message.emit("Every panel fits the print roll already")
+                return
+            self.controller.edit("set_half_gores", rows, True)
+        else:
+            self.controller.edit("set_half_gores", None, which == "all")
+
+    def _show_roll_status(self) -> None:
+        fits = self.controller.envelope_piece_fits()
+        roll = self.controller.prefs.print_roll_width * 1000
+        bad = [f for f in fits if not f.fits]
+        if not fits:
+            self.roll_status.setText("-")
+            self.roll_status.setStyleSheet("")
+        elif bad:
+            names = ", ".join(sorted({f.row for f in bad}))
+            self.roll_status.setText(
+                f"▲ {len(bad)} piece(s) of row {names} LARGER THAN THE {roll:.0f} mm roll"
+            )
+            self.roll_status.setStyleSheet(text_style("stale"))
+        else:
+            widest = max(f.across for f in fits) * 1000
+            self.roll_status.setText(
+                f"✓ every piece fits the {roll:.0f} mm roll (widest page {widest:.0f} mm)"
+            )
+            self.roll_status.setStyleSheet("")
+        self.roll_advice_text.hide()
+
+    def suggest_roll_fit(self) -> None:
+        """Show what makes every panel fit the print roll
+        (:func:`envelopelab.project.roll_advice.roll_advice`); nothing is changed."""
+        from envelopelab.project.roll_advice import roll_advice
+
+        session = self.controller.session
+        if session is None or session.design.gores is None:
+            return
+        try:
+            advice = roll_advice(
+                session.design, session.patterns, self.controller.prefs.print_roll_width
+            )
+        except ValueError as exc:
+            self.roll_advice_text.setText(f"Cannot check the rows: {exc}")
+        else:
+            self.roll_advice_text.setText(advice.summary())
+        self.roll_advice_text.show()
 
     def _inlay_selection(self) -> str:
         """What the 3D inlay highlights: the first control point selected on the profile,
@@ -1698,8 +1802,19 @@ class GoreEditor(QWidget):
                     self.rows_table.setItem(
                         i, col, _item(f"{bow * 1e3:.2f}", editable=not computed)
                     )
+                half = QTableWidgetItem()
+                half.setFlags(
+                    Qt.ItemFlag.ItemIsEnabled
+                    | Qt.ItemFlag.ItemIsSelectable
+                    | Qt.ItemFlag.ItemIsUserCheckable
+                )
+                half.setCheckState(
+                    Qt.CheckState.Checked if row.half_gore else Qt.CheckState.Unchecked
+                )
+                self.rows_table.setItem(i, 5, half)
             self.rows_table.setColumnHidden(3, not flat)
             self.rows_table.setColumnHidden(4, not flat)
+            self._show_roll_status()
             self.construction.setCurrentIndex(self.construction.findData(design.gores.construction))
             self.interpolation.setCurrentIndex(
                 self.interpolation.findData(design.gores.profile_interpolation)
@@ -2546,6 +2661,11 @@ class GoreEditor(QWidget):
         if self._updating or design is None or design.gores is None:
             return
         letter = design.gores.panel_rows[item.row()].letter
+        if item.column() == 5:
+            on = item.checkState() == Qt.CheckState.Checked
+            if self.controller.edit("set_half_gores", [letter], on) is None:
+                self.refresh()
+            return
         if item.column() == 0:
             if self.controller.edit("rename_row", letter, item.text()) is None:
                 self.refresh()

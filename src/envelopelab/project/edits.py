@@ -1248,6 +1248,54 @@ def _next_letter(letters: Sequence[str]) -> str:
     raise ValueError("no free row letter")
 
 
+def set_half_gores(session: ProjectSession, letters: Sequence[str] | None, on: bool) -> bool:
+    """Cut panel rows as half gores (two halves sewn down the gore centreline) or whole.
+
+    The sewn envelope does not change (:func:`envelopelab.geometry.gore.half_panel`): the
+    patterns, build pack and mass estimate do; the rest mesh and simulations stay current.
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit.
+    letters : sequence of str or None
+        Rows to set; None: every row.
+    on : bool
+        Half gores (True) or whole panels (False).
+
+    Returns
+    -------
+    bool
+        Whether the design changed.
+
+    Raises
+    ------
+    KeyError
+        For a letter that is not a row of the design.
+    """
+    assert session.design.gores is not None
+    rows = session.design.gores.panel_rows
+    known = [r.letter for r in rows]
+    chosen = list(known) if letters is None else list(letters)
+    unknown = [x for x in chosen if x not in known]
+    if unknown:
+        raise KeyError(f"no panel row {', '.join(unknown)}")
+    if all(r.half_gore == on for r in rows if r.letter in chosen):
+        return False
+
+    def mutate(design: dict[str, Any], _patterns: dict[str, Any]) -> None:
+        for row in _gores(design)["panel_rows"]:
+            if row["letter"] in chosen:
+                row["half_gore"] = bool(on)
+
+    what = (
+        "every row"
+        if letters is None or len(chosen) == len(known)
+        else ("row " + ", ".join(chosen))
+    )
+    return session.edit(f"{'Half gores' if on else 'Whole panels'}: {what}", mutate)
+
+
 def split_row(session: ProjectSession, index: int) -> bool:
     """Split a panel row into two rows of half its height (a new letter for the upper)."""
     assert session.design.gores is not None
@@ -1266,6 +1314,8 @@ def split_row(session: ProjectSession, index: int) -> bool:
             "finished_height": h - row["finished_height"],
             "zone": row.get("zone"),
         }
+        if row.get("half_gore"):
+            upper["half_gore"] = True  # cut as the row was
         if row.get("bow_top") is not None:
             # Measured bows: the new seam inside the row is straight on both sides.
             upper["bow_bottom"], upper["bow_top"] = 0.0, row["bow_top"]

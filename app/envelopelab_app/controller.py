@@ -460,34 +460,54 @@ class WorkspaceController(QObject):
             self._roll_cache[name] = hit
         return list(result.design.checks) + list(hit[1])
 
-    def envelope_roll_findings(self) -> list[DesignFinding]:
-        """A warning per envelope panel row whose 1:1 page is wider than the print roll
-        however it is turned (:func:`envelopelab.export.templates.roll_fit`)."""
+    def envelope_piece_fits(self) -> list[Any]:
+        """Every envelope row piece (whole panels, or the halves of rows cut as half
+        gores) on the print roll (:class:`envelopelab.project.roll_advice.PieceFit`);
+        empty when the rows cannot be made."""
+        from envelopelab.project.gore_design import row_pieces
+        from envelopelab.project.roll_advice import PieceFit
+
+        session = self.session
         try:
-            rows = self.rows()
+            rows = self.rows() if session is not None else None
         except ValueError:
+            rows = None
+        if session is None or rows is None:
+            self._row_roll = (None, [], [])
             return []
         roll = self.prefs.print_roll_width
-        # The rows are rebuilt on every change; their cut outlines decide the result.
-        key = (roll, tuple((r.label, r.cut_outline.tobytes()) for r in rows))
+        pieces = row_pieces(session.design, session.patterns, rows)
+        # The rows are rebuilt on every change; their pieces' cut outlines decide.
+        key = (roll, tuple((p.name, p.cut.tobytes()) for p in pieces))
         if self._row_roll[0] == key:
-            return list(self._row_roll[1])
-        out = []
-        for row in rows:
-            fit = roll_fit(row.cut_outline, roll)
-            if fit.oversize:
-                out.append(
-                    DesignFinding(
-                        "roll width",
-                        "warning",
-                        f"row {row.label}: panel is {fit.across * 1000:.0f} mm across the "
-                        f"roll at its narrowest ({fit.describe()}), LARGER THAN THE "
-                        f"{roll * 1000:.0f} mm print roll; join paper or add a panel row",
-                        f"row:{row.label}",
-                    )
-                )
-        self._row_roll = (key, out, None)
-        return list(out)
+            return list(self._row_roll[2])
+        fits = []
+        for p in pieces:
+            fit = roll_fit(p.cut, roll)
+            fits.append(
+                PieceFit(p.name, p.row.label, fit.across, fit.along, fit.fits, fit.describe())
+            )
+        out = [
+            DesignFinding(
+                "roll width",
+                "warning",
+                f"{f.name}: panel is {f.across * 1000:.0f} mm across the roll at its "
+                f"narrowest ({f.turn}), LARGER THAN THE {roll * 1000:.0f} mm print roll; "
+                "use more gores or half gores, add a panel row, or join paper (Shape mode, "
+                "Panels and print roll)",
+                f"row:{f.row}",
+            )
+            for f in fits
+            if not f.fits
+        ]
+        self._row_roll = (key, out, fits)
+        return list(fits)
+
+    def envelope_roll_findings(self) -> list[DesignFinding]:
+        """A warning per envelope row piece whose 1:1 page is wider than the print roll
+        however it is turned (:func:`envelopelab.export.templates.roll_fit`)."""
+        self.envelope_piece_fits()
+        return list(self._row_roll[1])
 
     def shape_findings(self) -> list[DesignFinding]:
         """Findings of the special shapes: placement errors, pattern checks, simulations."""

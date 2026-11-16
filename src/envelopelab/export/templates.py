@@ -129,8 +129,10 @@ def template_files(name: str, sheets: Sequence[Sheet]) -> list[TemplateFile]:
     sheets : sequence of Sheet
         Every sheet of the pack (envelope rows, marking sheets, parachute, skin pieces).
     """
+    from envelopelab.export.build_pack import row_pieces_of, row_sheets
+
     stem = slug(name)
-    rows = [s for s in sheets if s.kind == "envelope panel"]
+    rows = row_sheets(sheets)
     markings: dict[str, list[Sheet]] = {}
     for s in sheets:
         if s.kind == "marking":
@@ -145,19 +147,32 @@ def template_files(name: str, sheets: Sequence[Sheet]) -> list[TemplateFile]:
 
     for row in rows:
         letter = _letter(row)
-        files.append(
-            TemplateFile(
-                f"{stem}-panel-{letter}.pdf",
-                f"panel {letter}, cut {row.cut_count}",
-                [TemplatePage(row, f"PANEL {letter}")],
+        pieces = row_pieces_of(sheets, row)
+        halved = pieces != [row]
+        if not halved:
+            files.append(
+                TemplateFile(
+                    f"{stem}-panel-{letter}.pdf",
+                    f"panel {letter}, cut {row.cut_count}",
+                    [TemplatePage(row, f"PANEL {letter}")],
+                )
             )
-        )
+        for half in pieces if halved else []:
+            side = half.name.rsplit("-", 2)[-2]  # envelope-row-C-left-half
+            files.append(
+                TemplateFile(
+                    f"{stem}-panel-{letter}-{side}-half.pdf",
+                    f"panel {letter} {side} half (half gore), cut {half.cut_count}",
+                    [TemplatePage(half, f"PANEL {letter} - {side.upper()} HALF")],
+                )
+            )
         for gore in sorted(g for (r, g) in by_panel if r == letter):
             marks = by_panel[(letter, gore)]
             shapes = sorted({m.name.split("-mark-")[0] for m in marks})
             notes = [
                 f"MARK ONLY: one of the {row.cut_count} panels {letter} - the one for gore "
                 f"{gore}; mark it before the envelope is assembled"
+                + ("; sew its two halves together first" if halved else "")
             ]
             for m in marks:
                 notes += [n for n in m.notes if n not in notes]

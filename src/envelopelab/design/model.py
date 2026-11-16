@@ -26,7 +26,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 9
 
 SourceTagName = Literal["datasheet", "measured", "assumed"]
 
@@ -95,6 +95,10 @@ class PanelRow(BaseModel):
         Flat-chord gores only: measured outward bow of the bottom and top seam lines at
         the centreline, m (a parabola through the corners). Given for every row or for
         none; none means the crest loft (or straight seams) sets them.
+    half_gore : bool
+        Cut each panel of the row as two halves, left and right of the gore centreline,
+        sewn together along a centre seam (half gores, e.g. so the pieces fit a narrower
+        print roll or fabric). The sewn panel is the same; default False (one piece).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -104,6 +108,7 @@ class PanelRow(BaseModel):
     zone: str | None = None
     bow_bottom: float | None = Field(default=None, allow_inf_nan=False)
     bow_top: float | None = Field(default=None, allow_inf_nan=False)
+    half_gore: bool = False
 
 
 class LoftPoint(BaseModel):
@@ -896,6 +901,14 @@ def _upgrade_v7_to_v8(raw: dict[str, Any]) -> dict[str, Any]:
     return upgraded
 
 
+def _upgrade_v8_to_v9(raw: dict[str, Any]) -> dict[str, Any]:
+    """Version 9 lets a panel row be cut as two half gores (``panel_rows[].half_gore``);
+    version-8 rows are cut whole (the default)."""
+    upgraded = dict(raw)
+    upgraded["schema_version"] = 9
+    return upgraded
+
+
 def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
     """Upgrade raw design data to :data:`CURRENT_SCHEMA_VERSION`, one version at a time."""
     version = int(raw.get("schema_version", 0))
@@ -917,6 +930,8 @@ def migrate_document(raw: dict[str, Any]) -> dict[str, Any]:
             upgraded = _upgrade_v6_to_v7(upgraded)
         elif version == 7:
             upgraded = _upgrade_v7_to_v8(upgraded)
+        elif version == 8:
+            upgraded = _upgrade_v8_to_v9(upgraded)
         else:
             raise ValueError(f"unsupported schema version: {version}")
         version += 1

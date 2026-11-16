@@ -216,7 +216,7 @@ clean exit, and offered for recovery at the next start otherwise.
           "type": "array"
         },
         "schema_version": {
-          "default": 8,
+          "default": 9,
           "title": "Schema Version",
           "type": "integer"
         },
@@ -1269,7 +1269,7 @@ clean exit, and offered for recovery at the next start otherwise.
     },
     "PanelRow": {
       "additionalProperties": false,
-      "description": "One horizontal panel row of every gore.\n\nAttributes\n----------\nletter : str\n    Row letter (mouth first).\nfinished_height : float\n    Finished height along the tape, m.\nzone : str, optional\n    Material zone (key of ``zones``), e.g. ``mouth`` for a Nomex row; a pattern\n    annotation of the row overrides it; default the first zone.\nbow_bottom, bow_top : float, optional\n    Flat-chord gores only: measured outward bow of the bottom and top seam lines at\n    the centreline, m (a parabola through the corners). Given for every row or for\n    none; none means the crest loft (or straight seams) sets them.",
+      "description": "One horizontal panel row of every gore.\n\nAttributes\n----------\nletter : str\n    Row letter (mouth first).\nfinished_height : float\n    Finished height along the tape, m.\nzone : str, optional\n    Material zone (key of ``zones``), e.g. ``mouth`` for a Nomex row; a pattern\n    annotation of the row overrides it; default the first zone.\nbow_bottom, bow_top : float, optional\n    Flat-chord gores only: measured outward bow of the bottom and top seam lines at\n    the centreline, m (a parabola through the corners). Given for every row or for\n    none; none means the crest loft (or straight seams) sets them.\nhalf_gore : bool\n    Cut each panel of the row as two halves, left and right of the gore centreline,\n    sewn together along a centre seam (half gores, e.g. so the pieces fit a narrower\n    print roll or fabric). The sewn panel is the same; default False (one piece).",
       "properties": {
         "bow_bottom": {
           "anyOf": [
@@ -1299,6 +1299,11 @@ clean exit, and offered for recovery at the next start otherwise.
           "exclusiveMinimum": 0,
           "title": "Finished Height",
           "type": "number"
+        },
+        "half_gore": {
+          "default": false,
+          "title": "Half Gore",
+          "type": "boolean"
         },
         "letter": {
           "maxLength": 8,

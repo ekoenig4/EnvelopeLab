@@ -11,7 +11,8 @@ depends on a set of *input groups* (slices of the design state, e.g. ``geometry`
 
     geometry ──► profile
     geometry, seam_allowance, manual_outlines, labels, grain, row_zones,
-      tape_paths, feature_locations, parachute, scoop ──► patterns ──► nesting ──► export
+      tape_paths, feature_locations, parachute, scoop, piece_split ──► patterns
+      ──► nesting ──► export
     geometry, manual_outlines, tape_paths, feature_locations, tapes,
       vent_openings ──► assembly
     assembly, grain, row_zones ──► rest_mesh ──► simulation
@@ -52,6 +53,7 @@ INPUT_GROUPS: tuple[str, ...] = (
     "geometry",
     "seam_allowance",
     "seam_construction",
+    "piece_split",
     "manual_outlines",
     "labels",
     "grain",
@@ -74,6 +76,10 @@ INPUT_GROUPS: tuple[str, ...] = (
 
 #: Input groups supplied from outside the project file (see module docstring).
 EXTERNAL_GROUPS: tuple[str, ...] = ("fabric_properties",)
+
+#: Input groups left out of the fingerprints while empty, so designs that do not use them
+#: keep the fingerprints they had before the group existed (no stale artifacts on open).
+OPTIONAL_GROUPS: tuple[str, ...] = ("piece_split",)
 
 
 @dataclass(frozen=True)
@@ -115,6 +121,7 @@ ARTIFACTS: tuple[ArtifactSpec, ...] = (
             "feature_locations",
             "parachute",
             "scoop",
+            "piece_split",
         ),
     ),
     ArtifactSpec(
@@ -203,9 +210,11 @@ def input_groups(
             "envelope_type": design.get("envelope_type"),
             "count": gores.get("count"),
             "points": gores.get("meridian_profile_control_points"),
-            # A row's zone is a material choice (row_zones), not geometry.
+            # A row's zone is a material choice (row_zones), and cutting it as half
+            # gores (piece_split) does not change the sewn panel: neither is geometry.
             "rows": [
-                {k: v for k, v in r.items() if k != "zone"} for r in gores.get("panel_rows") or []
+                {k: v for k, v in r.items() if k not in ("zone", "half_gore")}
+                for r in gores.get("panel_rows") or []
             ]
             if gores.get("panel_rows") is not None
             else None,
@@ -233,6 +242,8 @@ def input_groups(
             "rows": per_row("seam_allowance"),
         },
         "seam_construction": [{k: v for k, v in s.items() if k != "allowance"} for s in seam_types],
+        # Rows cut as two half gores (the patterns and the mass; not the sewn shape).
+        "piece_split": [r["letter"] for r in gores.get("panel_rows") or [] if r.get("half_gore")],
         "manual_outlines": per_row("manual_outline"),
         "labels": {"text": per_row("label_text"), "notches": per_row("notches")},
         "grain": per_row("grain_angle_deg"),
@@ -274,8 +285,12 @@ def input_groups(
 
 
 def group_hashes(groups: Mapping[str, Any]) -> dict[str, str]:
-    """Hash of every input group."""
-    return {name: canonical_hash(value) for name, value in groups.items()}
+    """Hash of every input group (an empty :data:`OPTIONAL_GROUPS` group has none)."""
+    return {
+        name: canonical_hash(value)
+        for name, value in groups.items()
+        if not (name in OPTIONAL_GROUPS and not value)
+    }
 
 
 def fingerprints(hashes: Mapping[str, str]) -> dict[str, str]:
@@ -296,7 +311,9 @@ def fingerprints(hashes: Mapping[str, str]) -> dict[str, str]:
     for spec in ARTIFACTS:
         parts = {
             "inputs": {
-                g: hashes[g] for g in spec.inputs if g in hashes or g not in EXTERNAL_GROUPS
+                g: hashes[g]
+                for g in spec.inputs
+                if g in hashes or g not in (*EXTERNAL_GROUPS, *OPTIONAL_GROUPS)
             },
             "upstream": {u: out[u] for u in spec.upstream},
         }

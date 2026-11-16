@@ -117,6 +117,9 @@ class Sheet:
         Directions placed on the sheet: position (m) and text.
     notes : list of str
         More lines under the header.
+    whole : Sheet, optional
+        For half of a row panel cut as half gores: the whole row panel's sheet (drawn by
+        the documents that show the envelope row by row, :func:`row_sheets`).
     """
 
     name: str
@@ -135,6 +138,12 @@ class Sheet:
     ticks: list[FloatArray] = field(default_factory=list)
     texts: list[tuple[float, float, str]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    whole: Sheet | None = field(default=None, repr=False)
+
+    @property
+    def letter(self) -> str:
+        """Row letter of an envelope panel sheet (or of the row its half belongs to)."""
+        return (self.whole or self).piece.removeprefix("row ").strip()
 
     @property
     def finished_size(self) -> tuple[float, float]:
@@ -203,27 +212,76 @@ def envelope_sheets(design: DesignDocument, patterns: PatternSet | None = None) 
     list of Sheet
         One per row, mouth first.
     """
-    from envelopelab.project.gore_design import panel_rows, row_zone
+    from envelopelab.geometry.gore import half_panel
+    from envelopelab.project.gore_design import (
+        half_gore_rows,
+        panel_rows,
+        row_allowance,
+        row_zone,
+    )
     from envelopelab.project.model import PatternSet
 
     assert design.gores is not None
     patterns = patterns or PatternSet()
+    halves = half_gore_rows(design)
     out = []
     for row in panel_rows(design, patterns):
         zone = row_zone(design, patterns, row.label)
-        out.append(
-            Sheet(
-                name=f"envelope-row-{row.label}",
-                piece=f"row {row.label}",
-                kind="envelope panel",
-                cut_count=design.gores.count,
-                fabric=design.zones.get(zone, zone),
-                finished=row.finished_outline,
-                cut=row.cut_outline,
-                edges=_panel_edges(row.right_edge),
-            )
+        whole = Sheet(
+            name=f"envelope-row-{row.label}",
+            piece=f"row {row.label}",
+            kind="envelope panel",
+            cut_count=design.gores.count,
+            fabric=design.zones.get(zone, zone),
+            finished=row.finished_outline,
+            cut=row.cut_outline,
+            edges=_panel_edges(row.right_edge),
         )
+        if row.label not in halves:
+            out.append(whole)
+            continue
+        # Half gores: each panel cut as two halves, sewn together down the centre first.
+        for half in half_panel(row, row_allowance(design, patterns, row.label)):
+            e = half.edges
+            other = "right" if half.side == "left" else "left"
+            out.append(
+                Sheet(
+                    name=f"envelope-row-{row.label}-{half.side}-half",
+                    piece=f"row {row.label} {half.side} half",
+                    kind="envelope panel",
+                    cut_count=design.gores.count,
+                    fabric=whole.fabric,
+                    finished=half.finished,
+                    cut=half.cut,
+                    edges={
+                        half.side: e["side"],
+                        "centre": e["centre"],
+                        "bottom": e["bottom"],
+                        "top": e["top"],
+                    },
+                    note=f"half gore: sew to the {other} half along the centre seam first",
+                    whole=whole,
+                )
+            )
     return out
+
+
+def row_sheets(sheets: Sequence[Sheet]) -> list[Sheet]:
+    """One sheet per envelope panel row, mouth first: the row's own sheet, or the whole
+    panel of a row cut as half gores (for documents that show the envelope row by row)."""
+    out: list[Sheet] = []
+    for s in sheets:
+        if s.kind != "envelope panel":
+            continue
+        row = s.whole or s
+        if not out or out[-1] is not row:
+            out.append(row)
+    return out
+
+
+def row_pieces_of(sheets: Sequence[Sheet], row: Sheet) -> list[Sheet]:
+    """The sheets cut for envelope row ``row`` (itself, or its two halves)."""
+    return [s for s in sheets if s.kind == "envelope panel" and (s.whole or s) is row]
 
 
 def _panel_edges(right: FloatArray) -> dict[str, FloatArray]:
@@ -675,13 +733,24 @@ def _length(points: FloatArray) -> float:
 
 
 def envelope_seam_pairs(sheets: Sequence[Sheet]) -> list[SeamPair]:
-    """Edges of the envelope rows sewn together (gore sides, row seams)."""
-    rows = [s for s in sheets if s.kind == "envelope panel"]
-    pairs = [SeamPair(((s.name, "left"),), ((s.name, "right"),)) for s in rows]
-    pairs += [
-        SeamPair(((a.name, "top"),), ((b.name, "bottom"),))
-        for a, b in zip(rows[:-1], rows[1:], strict=True)
-    ]
+    """Edges of the envelope rows sewn together: the centre seams of rows cut as half
+    gores, the gore sides (a panel's left side to the next gore's right side) and the row
+    seams (a row's top to the next row's bottom, both halves together)."""
+    rows = row_sheets(sheets)
+    pieces = [row_pieces_of(sheets, r) for r in rows]
+    pairs: list[SeamPair] = []
+    for parts in pieces:
+        if len(parts) == 2:
+            left, right = parts
+            pairs.append(SeamPair(((left.name, "centre"),), ((right.name, "centre"),)))
+    for parts in pieces:
+        left = next(p for p in parts if "left" in p.edges)
+        right = next(p for p in parts if "right" in p.edges)
+        pairs.append(SeamPair(((left.name, "left"),), ((right.name, "right"),)))
+    for low, high in zip(pieces[:-1], pieces[1:], strict=True):
+        pairs.append(
+            SeamPair(tuple((p.name, "top") for p in low), tuple((p.name, "bottom") for p in high))
+        )
     return pairs
 
 
@@ -930,7 +999,8 @@ def export_build_pack(
     sheets = envelope_sheets(design, patterns)
     row_notes = shape_row_notes(primitives)
     for sheet in sheets:
-        sheet.notes += row_notes.get(sheet.piece.removeprefix("row "), [])
+        if sheet.kind == "envelope panel":
+            sheet.notes += row_notes.get(sheet.letter, [])
     pairs = envelope_seam_pairs(sheets)
     chute = parachute_sheets(design)
     sheets += chute

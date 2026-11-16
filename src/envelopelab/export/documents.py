@@ -333,6 +333,8 @@ def _stage(pair: SeamPair, by_name: dict[str, Sheet]) -> tuple[int, str]:
     first = by_name.get(pair.a[0][0])
     kind = first.kind if first is not None else ""
     edges = {e for _n, e in pair.a}
+    if kind == "envelope panel" and edges == {"centre"}:
+        return 0, "Half gores: centre seams"
     if kind == "envelope panel" and edges == {"left"}:
         return 1, "Gore seams (load tapes)"
     if kind == "envelope panel":

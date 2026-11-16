@@ -1228,6 +1228,112 @@ def bowed_cut_outline(
     return _as_array(np.vstack(parts))
 
 
+@dataclass(frozen=True)
+class HalfPanel:
+    """One half of a row panel cut as half gores (:func:`half_panel`), m.
+
+    Attributes
+    ----------
+    side : {"left", "right"}
+        Which half, seen from outside the envelope (the panel's x axis to the right).
+    finished, cut : ndarray, shape (n, 2)
+        Finished and cut outlines, counter-clockwise, in the row panel's coordinates.
+    edges : dict of str to ndarray
+        Finished edges sewn to others: ``bottom`` and ``top`` (row seams), ``side`` (the
+        gore seam, sewn to the next gore) and ``centre`` (sewn to the other half), each
+        from bottom to top or from the centreline outward.
+    """
+
+    side: Literal["left", "right"]
+    finished: FloatArray = field(repr=False)
+    cut: FloatArray = field(repr=False)
+    edges: dict[str, FloatArray] = field(repr=False)
+
+    @property
+    def finished_area(self) -> float:
+        """Finished area, m^2."""
+        return polygon_area(self.finished)
+
+    @property
+    def cut_area(self) -> float:
+        """Cut area including allowances, m^2."""
+        return polygon_area(self.cut)
+
+
+def half_panel(row: PanelRow, allowance: float) -> tuple[HalfPanel, HalfPanel]:
+    r"""The two halves of a row panel cut down the gore centreline (half gores).
+
+    The finished panel is cut along :math:`x = 0`. Each half is bounded by its part of the
+    bottom seam (bowed or straight, from the centreline to the corner), the gore side, its
+    part of the top seam and the centre seam; every edge is offset outward by the seam
+    allowance :math:`a` and neighbouring offset edges meet at mitred corners, as in
+    :func:`bowed_cut_outline`. Sewn together along the centre seam the halves make the
+    finished panel exactly (the sum of their finished areas is the panel's), so the
+    sewn envelope does not change; the cloth used grows by about :math:`2 a h_c` per
+    panel (:math:`h_c` the centreline height).
+
+    Parameters
+    ----------
+    row : PanelRow
+        The row panel (symmetric about :math:`x = 0`).
+    allowance : float
+        Seam allowance on every edge of a half, m (the centre seam takes the row's).
+
+    Returns
+    -------
+    (HalfPanel, HalfPanel)
+        Left and right halves, m. The left half is the mirror image of the right one.
+
+    Notes
+    -----
+    Valid for any row :func:`split_rows` or :func:`flat_chord_rows` makes (mirror
+    symmetric, the centreline inside the panel).
+    """
+    if allowance < 0.0:
+        raise ValueError("the seam allowance must be non-negative")
+    right_edge = row.right_edge
+    w0, y0 = float(right_edge[0, 0]), float(right_edge[0, 1])
+    w1, y1 = float(right_edge[-1, 0]), float(right_edge[-1, 1])
+    # Each seam from the centreline outward (odd point counts put x = 0 on the curve).
+    bottom = bowed_seam(w0, -row.bottom_bow)[::-1] + [0.0, y0]
+    bottom = bottom[bottom[:, 0] >= -1e-12]
+    top = bowed_seam(w1, row.top_bow)[::-1] + [0.0, y1]
+    top = top[top[:, 0] >= -1e-12]
+    bottom[0, 0] = top[0, 0] = 0.0
+    centre = np.array([top[0], bottom[0]])  # down the centreline
+    edges = [
+        (bottom, allowance),
+        (right_edge, allowance),
+        (top[::-1], allowance),
+        (centre, allowance),
+    ]
+    finished = _as_array(np.vstack([bottom[:-1], right_edge[:-1], top[::-1][:-1], centre[:-1]]))
+    offset = [_offset_polyline(pts, a) if a > 0.0 else pts.copy() for pts, a in edges]
+    corners = []
+    for i in range(4):
+        a, b = offset[i], offset[(i + 1) % 4]
+        corners.append(_line_intersection(a[-1], a[-1] - a[-2], b[0], b[1] - b[0]))
+    parts = []
+    for i in range(4):
+        parts.append(corners[i - 1][None, :])
+        parts.append(offset[i][1:-1])
+    cut = _as_array(np.vstack(parts))
+    right = HalfPanel(
+        "right",
+        finished,
+        cut,
+        {"bottom": bottom, "side": right_edge, "top": top, "centre": centre[::-1]},
+    )
+    flip = np.array([-1.0, 1.0])
+    left = HalfPanel(
+        "left",
+        _as_array((finished * flip)[::-1]),
+        _as_array((cut * flip)[::-1]),
+        {k: _as_array(v * flip) for k, v in right.edges.items()},
+    )
+    return left, right
+
+
 def flat_chord_rows(
     profile: MeridianProfile,
     n_gores: int,

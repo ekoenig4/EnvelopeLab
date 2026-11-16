@@ -418,7 +418,8 @@ def _check_documents(root: Path, index: dict[str, Any], present: set[str]) -> li
             for entry in index["sheets"]:
                 if entry["kind"] != "envelope panel":
                     continue
-                letter = entry["piece"].removeprefix("row ")
+                # A half gore ("row C left half") is listed under its row.
+                letter = entry["piece"].removeprefix("row ").split(" ")[0]
                 got = listed.get(letter)
                 want = (str(entry["cut_count"]), entry["fabric"])
                 if got is None:

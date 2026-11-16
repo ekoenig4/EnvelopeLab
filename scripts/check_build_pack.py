@@ -3,7 +3,8 @@
 Exports the envelope rows of a generic standard-gore design with a dome, a leaned tube,
 a revolved bulb and a free-form mesh shape on it, with every document (cover, spec,
 cut list, rigging, sewing schedule, 3D view), to a temporary directory and runs
-:func:`envelopelab.export.qa.check_pack`. Exits non-zero when any check fails. Run by
+:func:`envelopelab.export.qa.check_pack`; then the same with three rows (one carrying the
+dome) cut as half gores. Exits non-zero when any check fails. Run by
 ``scripts/verify.py``.
 """
 
@@ -46,6 +47,22 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as out:
         export_build_pack(design, shapes, out, extras=PackExtras(frozenset(DOCUMENTS)))
         findings = check_pack(out)
+    assert design.gores is not None
+    halved = design.model_copy(
+        update={
+            "gores": design.gores.model_copy(
+                update={
+                    "panel_rows": [
+                        r.model_copy(update={"half_gore": i in (2, 3, 4)})
+                        for i, r in enumerate(design.gores.panel_rows)
+                    ]
+                }
+            )
+        }
+    )
+    with tempfile.TemporaryDirectory() as out:
+        export_build_pack(halved, shapes, out, extras=PackExtras(frozenset(DOCUMENTS)))
+        findings += check_pack(out)
     for f in findings:
         print(f"FAIL {f.file}: {f.check}: {f.message}")
     print(f"build-pack QA: {len(findings)} finding(s)")

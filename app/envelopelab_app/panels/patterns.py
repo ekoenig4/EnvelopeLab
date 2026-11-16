@@ -65,11 +65,12 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab.export.templates import roll_fit, turn_points
-from envelopelab.geometry.gore import PanelRow
+from envelopelab.geometry.gore import PanelRow, half_panel
 from envelopelab.project.deviation import PanelDeviation
 from envelopelab.project.gore_design import (
     default_allowance,
     editable_outline,
+    half_gore_rows,
     row_allowance,
     row_zone,
 )
@@ -304,6 +305,15 @@ class PatternPanel(QWidget):
         )
         form.addRow("Row", self.row_label)
         form.addRow("Page on print roll", self.roll_label)
+        self.half_gore = QCheckBox("Cut as two half gores (sewn down the centre)")
+        self.half_gore.setObjectName("rowHalfGore")
+        self.half_gore.setToolTip(
+            "Cut each panel of this row as a left and a right half, sewn together along "
+            "the gore centreline: about half as wide on the print roll. The sewn envelope "
+            "is the same; the build pack gets both halves and the centre seam."
+        )
+        self.half_gore.toggled.connect(self._half_gore_toggled)
+        form.addRow("Half gores", self.half_gore)
         form.addRow("Label", self.label_text)
         form.addRow("Grain direction", self.grain)
         form.addRow("Fabric zone", self.zone)
@@ -572,7 +582,7 @@ class PatternPanel(QWidget):
         if pieces:
             y = max(y, max(float(p.stacked_y + p.outline[:, 1].max()) for p in pieces) + GAP)
         if self.layout_mode.currentData() == "roll":
-            self._draw_on_roll(pieces)
+            self._draw_on_roll(self._half_pieces(pieces))
         else:
             for piece, origin in zip(pieces, self._origins(pieces), strict=True):
                 piece.draw(origin)
@@ -584,10 +594,12 @@ class PatternPanel(QWidget):
     def _mark_oversize(self, piece: _Piece, origin: QPointF) -> None:
         """Label a piece whose 1:1 page is wider than the print roll at any turn."""
         roll = self.controller.prefs.print_roll_width
-        fit = roll_fit(piece.outline, roll)
+        cuts = self._cut_pieces(piece)
+        fit = max((roll_fit(c, roll) for _n, c, _f in cuts), key=lambda f: f.across)
         if not fit.oversize:
             return
-        flag = QGraphicsSimpleTextItem(f"▲ larger than the {roll * 1000:.0f} mm roll")
+        halves = " (each half)" if len(cuts) > 1 else ""
+        flag = QGraphicsSimpleTextItem(f"▲ larger than the {roll * 1000:.0f} mm roll{halves}")
         flag.setBrush(QBrush(QColor(OVERSIZE_TEXT)))
         flag.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
         top = float(piece.outline[:, 1].max())
@@ -599,6 +611,67 @@ class PatternPanel(QWidget):
             f"({fit.describe()}); join paper, or add a row to split it"
         )
         self.view.scene().addItem(flag)
+
+    def _cut_pieces(self, piece: _Piece) -> list[tuple[str, np.ndarray, np.ndarray]]:
+        """What is cut for ``piece``: (name, cut outline, finished outline), m; the two
+        halves of a row cut as half gores, else the piece itself."""
+        session = self.controller.session
+        letter = piece.name.removeprefix("row ") if piece.name.startswith("row ") else None
+        if session is None or letter is None or letter not in half_gore_rows(session.design):
+            return [(piece.name, piece.outline, piece.outline)]
+        row = self.rows_by_letter().get(letter)
+        if row is None:
+            return [(piece.name, piece.outline, piece.outline)]
+        allowance = row_allowance(session.design, session.patterns, letter)
+        return [
+            (f"{piece.name} {h.side} half", h.cut, h.finished) for h in half_panel(row, allowance)
+        ]
+
+    def _half_pieces(self, pieces: list[_Piece]) -> list[_Piece]:
+        """``pieces`` with every row cut as half gores replaced by its two halves (for the
+        print-roll layout: each half is a page of its own)."""
+        out: list[_Piece] = []
+        session = self.controller.session
+        for piece in pieces:
+            cuts = self._cut_pieces(piece)
+            if len(cuts) == 1 or session is None:
+                out.append(piece)
+                continue
+            zone = row_zone(session.design, session.patterns, piece.name.removeprefix("row "))
+            for name, cut, finished in cuts:
+
+                def draw(
+                    origin: QPointF,
+                    cut: np.ndarray = cut,
+                    finished: np.ndarray = finished,
+                    name: str = name,
+                    zone: str = zone,
+                ) -> None:
+                    scene = self.view.scene()
+                    edge = QGraphicsPolygonItem(_polygon(cut, origin.x()))
+                    edge.setPos(0.0, origin.y())
+                    pen = QPen(QColor("#333333"), 0, Qt.PenStyle.DashLine)
+                    edge.setPen(pen)
+                    scene.addItem(edge)
+                    body = QGraphicsPolygonItem(_polygon(finished, origin.x()))
+                    body.setPos(0.0, origin.y())
+                    body.setBrush(QBrush(self._zone_color(zone)))
+                    line = QPen(QColor("#1f3b57"), 1.5)
+                    line.setCosmetic(True)
+                    body.setPen(line)
+                    body.setToolTip(f"{name} (half gore)")
+                    scene.addItem(body)
+                    label = QGraphicsSimpleTextItem(name.removeprefix("row ").upper())
+                    small = label.font()
+                    small.setPointSizeF(7.5)
+                    label.setFont(small)
+                    label.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+                    mid = finished.mean(axis=0)
+                    label.setPos(origin.x() + float(mid[0]) - 0.2, origin.y() - float(mid[1]))
+                    scene.addItem(label)
+
+                out.append(_Piece(cut, piece.stacked_y, draw, name))
+        return out
 
     def _draw_on_roll(self, pieces: list[_Piece]) -> None:
         """Every piece as its 1:1 page is printed (:func:`roll_fit`): turned, its page
@@ -751,19 +824,20 @@ class PatternPanel(QWidget):
 
     def roll_text(self, letter: str) -> str:
         """How row ``letter``'s 1:1 page goes on the print roll, in words."""
-        row = self.rows_by_letter().get(letter)
-        if row is None:
+        fits = [f for f in self.controller.envelope_piece_fits() if f.row == letter]
+        if not fits:
             return "-"
         roll = self.controller.prefs.print_roll_width
-        fit = roll_fit(row.cut_outline, roll)
-        if fit.oversize:
+        fit = max(fits, key=lambda f: f.across)
+        each = "each half: " if len(fits) > 1 else ""
+        if not fit.fits:
             return (
-                f"LARGER THAN THE {roll * 1000:.0f} mm ROLL ({fit.across * 1000:.0f} mm "
+                f"LARGER THAN THE {roll * 1000:.0f} mm ROLL ({each}{fit.across * 1000:.0f} mm "
                 "across at its narrowest)"
             )
         return (
-            f"{fit.across * 1000:.0f} mm across the {roll * 1000:.0f} mm roll, "
-            f"{fit.along * 1000:.0f} mm along it; {fit.describe()}"
+            f"{each}{fit.across * 1000:.0f} mm across the {roll * 1000:.0f} mm roll, "
+            f"{fit.along * 1000:.0f} mm along it; {fit.turn}"
         )
 
     def _origins(self, pieces: list[_Piece]) -> list[QPointF]:
@@ -824,6 +898,19 @@ class PatternPanel(QWidget):
         scene.addItem(finished)
         text = ann.label_text or f"PANEL {row.label} x{n}"
         allowance = row_allowance(session.design, session.patterns, row.label)
+        if row.label in half_gore_rows(session.design):
+            # Half gores: the centre seam the two halves are sewn along.
+            centre = half_panel(row, allowance)[1].edges["centre"]
+            seam = QPen(QColor(ROLL_EDGE), 2, Qt.PenStyle.DashDotLine)
+            seam.setCosmetic(True)
+            scene.addLine(
+                dx + float(centre[0, 0]),
+                -float(centre[0, 1]),
+                dx + float(centre[-1, 0]),
+                -float(centre[-1, 1]),
+                seam,
+            ).setToolTip(f"row {row.label}: cut as two half gores, sewn along this line")
+            text += " (2 half gores)"
         label = QGraphicsSimpleTextItem(text)
         font = label.font()
         font.setPointSizeF(7.5)
@@ -1022,6 +1109,13 @@ class PatternPanel(QWidget):
 
     # -- form ---------------------------------------------------------------------------
 
+    def _half_gore_toggled(self, on: bool) -> None:
+        letter = self.selected_letter()
+        if self._updating or letter is None:
+            return
+        if self.controller.edit("set_half_gores", [letter], on) is None:
+            self.refresh()
+
     def _fill_form(self) -> None:
         session = self.controller.session
         letter = self.selected_letter()
@@ -1032,6 +1126,7 @@ class PatternPanel(QWidget):
             self.zone,
             self.row_allowance,
             self.default_allowance,
+            self.half_gore,
         ):
             w.setEnabled(enabled)
         if not enabled or session is None or letter is None:
@@ -1040,6 +1135,7 @@ class PatternPanel(QWidget):
         design = session.design
         ann = session.patterns.row(letter)
         self.row_label.setText(letter)
+        self.half_gore.setChecked(letter in half_gore_rows(design))
         text = self.roll_text(letter)
         self.roll_label.setText(text)
         self.roll_label.setStyleSheet(

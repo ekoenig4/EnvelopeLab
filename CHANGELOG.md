@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: half gores (ADR-0048, design schema version 9). Any panel row can be cut as two
+  halves sewn down the gore centre, about half as wide on the print roll: Shape mode's
+  new **Panels and print roll** box (all rows, the rows too wide, none), the rows table
+  and Patterns. The build pack cuts and sews the halves (centre seams first); the mass
+  estimate adds their extra allowance and thread (+2·a·h per panel, e.g. +0.12 m² per
+  panel of the 8-gore fixture's rows at 25 mm). The sewn shape and simulations are
+  unchanged; designs without half gores give the same results and fingerprints as before.
+- Added: the gore count sits at the top of the Shape mode (Panels and print roll), with
+  the print-roll fit status and **Suggest…**: the fewest gores at which every panel fits
+  the roll, the rows half gores would fix, or the rows to split.
 - Added: the Shape, Patterns and Rigging modes show the balloon in 3D beside their
   editor, with the selected panel row, control point or rigging component highlighted
   and faced (as the Special shapes' On the balloon tab); click a rigging card to select

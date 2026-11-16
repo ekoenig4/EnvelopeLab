@@ -166,8 +166,15 @@ class PackContext:
 
     @property
     def rows(self) -> list[Sheet]:
-        """Envelope row sheets, mouth first."""
-        return [s for s in self.sheets if s.kind == "envelope panel"]
+        """Envelope row sheets, mouth first (the whole panel of a row cut as half gores,
+        :func:`~envelopelab.export.build_pack.row_sheets`)."""
+        from envelopelab.export.build_pack import row_sheets
+
+        return row_sheets(self.sheets)
+
+    def is_halved(self, row: Sheet) -> bool:
+        """Whether envelope row ``row`` is cut as two half gores."""
+        return any(s.whole is row for s in self.sheets)
 
     @property
     def gores(self) -> int:
@@ -335,7 +342,11 @@ def build_order(ctx: PackContext) -> list[tuple[str, str]]:
             "directions.",
         )
     )
-    counts = ", ".join(f"{s.cut_count} x {s.piece.removeprefix('row ')}" for s in rows)
+    counts = ", ".join(
+        f"{s.cut_count} x {s.piece.removeprefix('row ')}"
+        + (" (as left and right half gores)" if ctx.is_halved(s) else "")
+        for s in rows
+    )
     steps.append(
         (
             "CUT PANELS",
@@ -844,7 +855,8 @@ def build_log_sheets(ctx: PackContext) -> list[tuple[str, str, list[tuple[str, s
         dims = s.finished_size
         items.append(
             (
-                f"Panel {s.piece.removeprefix('row ')} x{s.cut_count}",
+                f"Panel {s.piece.removeprefix('row ')} x{s.cut_count}"
+                + (" (2 half gores each)" if ctx.is_halved(s) else ""),
                 f"{s.fabric} - finished {dims[0] * 1000:.0f} x {dims[1] * 1000:.0f} mm",
             )
         )
