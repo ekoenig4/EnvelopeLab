@@ -262,8 +262,9 @@ class PiecePreview(QWidget):
 
     A piece whose 1:1 page is wider than the print roll however it is turned
     (``oversize``) is filled in the warning colour and labelled so. With ``on_roll`` the
-    pieces are drawn as they are printed: one after another along a strip of the print
-    roll (its edges drawn, the roll running left to right), each turned as on its page
+    pieces are drawn as they are printed: one after another down a strip of the print
+    roll (its edges drawn, the page width across it, as the Patterns view and the 1:1
+    PDF pages lay it), each turned as on its page
     (:func:`envelopelab.export.templates.roll_fit`), so how every piece lies across the
     roll can be seen. The mouse wheel zooms about the pointer, dragging pans and a double
     click fits every piece again.
@@ -316,19 +317,20 @@ class PiecePreview(QWidget):
                 rim = piece.rim if piece.rim is not None else np.zeros((0, 2))
                 out.append((piece, [piece.finished + off, piece.cut + off, rim + off]))
             return out, width, height
-        # On the roll: the page frame (x across, y along) turned so the roll runs left to
-        # right, its first edge at y = 0 and the other at y = roll width.
-        x = 0.0
-        for piece in self.pieces:
-            fit = roll_fit(piece.cut, self.roll_width)
+        # On the roll, as the 1:1 PDF pages and the Patterns view lay it: each page's width
+        # across the roll (x in [0, roll width]), the pages one after the other down it.
+        fits = [roll_fit(piece.cut, self.roll_width) for piece in self.pieces]
+        total = sum(f.along for f in fits)
+        top = total
+        for piece, fit in zip(self.pieces, fits, strict=True):
             rim = piece.rim if piece.rim is not None else np.zeros((0, 2))
-            turned = [turn_points(a, fit.angle - 90.0) for a in (piece.finished, piece.cut, rim)]
+            turned = [turn_points(a, fit.angle) for a in (piece.finished, piece.cut, rim)]
             lo, hi = turned[1].min(axis=0), turned[1].max(axis=0)
-            shift = np.array([x + MARGIN - lo[0], MARGIN - lo[1]])
+            shift = np.array([MARGIN - lo[0], top - MARGIN - hi[1]])
             out.append((piece, [a + shift for a in turned]))
-            x += float(hi[0] - lo[0]) + 2 * MARGIN
-        tallest = max((float(np.ptp(o[1][:, 1])) + 2 * MARGIN for _, o in out), default=0.0)
-        return out, x, max(self.roll_width, tallest)
+            top -= fit.along
+        widest = max((f.across for f in fits), default=0.0)
+        return out, max(self.roll_width, widest), total
 
     def reset_view(self) -> None:
         """Fit every piece in the widget."""
@@ -442,15 +444,15 @@ class PiecePreview(QWidget):
         if self.on_roll:
             # The roll: a strip of its width, its edges in blue, labelled.
             roll = self.roll_width
-            strip = np.array([[0.0, 0.0], [width, 0.0], [width, roll], [0.0, roll]])
+            strip = np.array([[0.0, 0.0], [roll, 0.0], [roll, height], [0.0, height]])
             painter.fillPath(_path(polygon(strip)), QBrush(QColor("#f4f7fb")))
             painter.setPen(QPen(QColor("#1565c0"), 2.0))
-            for y in (0.0, roll):
-                painter.drawPolyline(polygon(np.array([[0.0, y], [width, y]])))
-            top = polygon(np.array([[0.0, roll]])).at(0)
+            for x in (0.0, roll):
+                painter.drawPolyline(polygon(np.array([[x, 0.0], [x, height]])))
+            top = polygon(np.array([[0.0, height]])).at(0)
             painter.drawText(
-                QPointF(top.x() + 4.0, top.y() - 4.0),
-                f"Print roll {roll * 1000:.0f} mm wide (edges in blue) → runs along, any length",
+                QPointF(top.x() + 4.0, top.y() + 14.0),
+                f"Print roll {roll * 1000:.0f} mm wide (edges in blue), running down",
             )
 
         for piece, (finished, cut, rim) in drawn:

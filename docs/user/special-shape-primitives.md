@@ -118,8 +118,10 @@ in the editor next to them, and you can move the selected shape on either:
    narrowest. The table's **Page on print roll** column says how much of the roll's width
    the page takes and how the piece is turned (*1324 mm across, upright (its width across
    the roll)*; hover for the length along the roll). Tick **Show as printed on the roll**
-   above the drawing to see the pieces one after another along a strip of the roll, its
-   edges in blue, each turned as it is printed. A piece wider than the roll at any turn
+   above the drawing to see the pieces one page after another down a strip of the roll
+   (the roll's width across the view, its edges in blue, the roll running down), each
+   turned as it is printed. The base envelope's panels have the same view in **Patterns**
+   (Layout ▸ *On the print roll*). A piece wider than the roll at any turn
    says **LARGER THAN … ROLL**, is filled amber and labelled *▲ larger than roll*, gets a
    **roll width** warning in **Checks** and is listed in **Validation / Warnings**.
    Envelope panel rows larger than the roll are listed there too. Split the piece (more

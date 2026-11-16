@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: the Patterns mode shows the base envelope's pieces on the print roll (Layout ▸
+  *On the print roll*): each 1:1 page turned as printed, one after another down a strip
+  of the roll, as the special shapes' roll view does; *Selected row* says how the row's
+  page goes on the roll, and pieces larger than the roll are labelled in every layout.
+  The special shapes' roll view now runs down the view the same way.
 - Changed: symmetry axes are placed on the On the balloon tab instead of in a dialog: the
   axis follows the pointer on the gore map and the 3D view (snapped to gore centres and
   seams), a click puts it there, and the mirror images it would make are drawn dashed

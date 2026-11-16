@@ -388,6 +388,20 @@ and its circular centre panel. **Layout** in the toolbar chooses how they are ar
   full-size one.
 * *Assembled gore*: stacked up one gore as they are sewn, the scoop at the bottom and the
   parachute's centre panel on top, so you can see how the rows meet.
+* *On the print roll*: every piece as its 1:1 page is printed, one page after another
+  down a strip of the print roll (**Print roll width** in **Preferences**): the roll's
+  width runs across the view between two blue edges, its length runs down. Each piece is
+  turned as it is printed (a quarter turn if its height fits across the roll, else
+  upright, else turned to its narrowest), and the note beside its page says how much of
+  the roll's width it takes and how it is turned. A piece wider than the roll at any turn
+  is noted **▲ LARGER THAN THE … ROLL** (with its narrowest width); in the other layouts
+  it is labelled *▲ larger than the … roll*. Split the row (more panel rows) or join
+  paper to print it. The special shapes' pieces have the same view
+  ([special shapes](special-shape-primitives.md)).
+
+**Page on print roll** under *Selected row* says the same for the selected row: e.g.
+*2508 mm across the 3700 mm roll, 2085 mm along it; turned 90° (its height across the
+roll)*, or **LARGER THAN THE 1524 mm ROLL** in bold amber.
 
 The pattern view shows only the base envelope. The envelope panels a special shape is
 sewn on (its footprint line, match marks and feed holes) are shown with that shape, in the

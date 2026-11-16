@@ -10,6 +10,7 @@ from typing import Any
 import numpy as np
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QGraphicsPolygonItem, QGraphicsRectItem
 from pytestqt.qtbot import QtBot
 
 from envelopelab.export.qa import check_pack
@@ -752,14 +753,15 @@ def test_cut_pieces_show_how_they_lie_on_the_print_roll(gore_window: MainWindow)
     side_by_side, _w, _h = preview.drawn()
     panel.on_roll_check.setChecked(True)
     assert preview.on_roll
-    on_roll, length, height = preview.drawn()
+    on_roll, width, length = preview.drawn()
     roll = gore_window.prefs.print_roll_width
-    assert height == pytest.approx(roll)
-    # Laid one after another along the roll, every page within the roll's width.
-    xs = [cut[:, 0].min() for _p, (_f, cut, _r) in on_roll]
-    assert xs == sorted(xs) and max(cut[:, 0].max() for _p, (_f, cut, _r) in on_roll) <= length
+    assert width == pytest.approx(roll)
+    # One page after the other down the roll (as the PDF pages and the Patterns view),
+    # every page within the roll's width.
+    tops = [cut[:, 1].max() for _p, (_f, cut, _r) in on_roll]
+    assert tops == sorted(tops, reverse=True) and max(tops) <= length
     for _piece, (_f, cut, _r) in on_roll:
-        assert cut[:, 1].min() >= 0.0 and cut[:, 1].max() <= roll
+        assert cut[:, 0].min() >= 0.0 and cut[:, 0].max() <= roll
     preview.grab()  # paints without error
     panel.on_roll_check.setChecked(False)
     assert len(side_by_side) == len(on_roll)
@@ -1091,3 +1093,44 @@ def test_the_3d_view_places_an_axis_too(gore_window: MainWindow) -> None:
     assert line is not None and (line * 2) == pytest.approx(round(line * 2))  # snapped
     assert sketch.preview is not None and sketch.preview.lines3d
     sketch.grab()
+
+
+def test_patterns_show_the_print_roll_like_the_special_shapes(gore_window: MainWindow) -> None:
+    from dataclasses import replace
+
+    gore_window.show_panel("patterns")
+    patterns = gore_window.patterns
+    patterns.regenerate()
+    letter = patterns.selected_letter()
+    assert letter is not None
+    text = patterns.roll_label.text()
+    # The fixture's rows are taller and wider than a 60 in roll.
+    assert text.startswith("LARGER THAN THE 1524 mm ROLL")
+    gore_window.apply_preferences(replace(gore_window.prefs, print_roll_width=3.7))
+    patterns.refresh()
+    assert "mm across the 3700 mm roll" in patterns.roll_label.text()
+    assert "turned 90°" in patterns.roll_label.text()
+    patterns.layout_mode.setCurrentIndex(patterns.layout_mode.findData("roll"))
+    patterns._layout_changed(0)
+    texts = [i.text() for i in patterns.view.scene().items() if hasattr(i, "text")]
+    assert any(t.startswith("Print roll 3700 mm wide") for t in texts)
+    assert sum(t.startswith("row ") and "mm across" in t for t in texts) == len(
+        patterns.rows_by_letter()
+    )
+    # Every page lies within the roll's width.
+    rect = patterns.view.content_rect
+    assert rect.left() >= -1e-6
+    # The pieces themselves are drawn on their pages, turned, inside the roll's edges.
+    pieces = [
+        i
+        for i in patterns.view.scene().items()
+        # The piece containers (turned); parentItem() is not called: in PySide 6.11 a
+        # temporary wrapper it was called on deletes its item when dropped.
+        if isinstance(i, QGraphicsRectItem) and i.rotation() != 0.0
+    ]
+    assert len(pieces) == len(patterns.rows_by_letter())
+    for piece in pieces:
+        for cut in piece.childItems():
+            if isinstance(cut, QGraphicsPolygonItem):
+                drawn = cut.sceneBoundingRect()
+                assert drawn.left() > -0.01 and drawn.right() < 3.7 + 0.01

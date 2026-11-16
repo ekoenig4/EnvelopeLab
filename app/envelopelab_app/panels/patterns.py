@@ -33,6 +33,7 @@ from PySide6.QtGui import (
     QPen,
     QPolygonF,
     QResizeEvent,
+    QTransform,
 )
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -63,6 +64,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from envelopelab.export.templates import roll_fit, turn_points
 from envelopelab.geometry.gore import PanelRow
 from envelopelab.project.deviation import PanelDeviation
 from envelopelab.project.gore_design import (
@@ -123,14 +125,23 @@ class FeatureMarker(QGraphicsEllipseItem):
         QTimer.singleShot(0, lambda: self.view.commit_feature(self))
 
 
+#: Print-roll layout: page margin (as the 1:1 PDF, m), roll fill and edge colours, and the
+#: colour of a piece larger than the roll.
+ROLL_MARGIN = 0.02
+ROLL_FILL = "#f4f7fb"
+ROLL_EDGE = "#1565c0"
+OVERSIZE_TEXT = "#8a6d3b"
+
+
 @dataclass(frozen=True)
 class _Piece:
     """A piece to draw: its cut outline (local, m), its height in the assembled stack
-    (m) and how to draw it at a scene origin."""
+    (m), how to draw it at a scene origin, and its name (for the print-roll note)."""
 
     outline: np.ndarray
     stacked_y: float
     draw: Callable[[QPointF], None]
+    name: str = ""
 
 
 class PatternView(QGraphicsView):
@@ -228,10 +239,13 @@ class PatternPanel(QWidget):
         self.layout_mode.setObjectName("patternLayout")
         self.layout_mode.addItem("Side by side", "shelves")
         self.layout_mode.addItem("Assembled gore", "assembled")
+        self.layout_mode.addItem("On the print roll", "roll")
         self.layout_mode.setToolTip(
             "Side by side: the pieces in order on shelves that fill the view. Assembled "
-            "gore: the rows stacked as they are sewn, the parachute on top. Display only; "
-            "the cut files are not affected."
+            "gore: the rows stacked as they are sewn, the parachute on top. On the print "
+            "roll: every piece as its 1:1 page is printed, the page width across the roll "
+            "(Preferences ▸ Print roll width) and the roll running down. Display only; the "
+            "cut files are not affected."
         )
         self.layout_mode.activated.connect(self._layout_changed)
         self._layout_aspect = 1.6
@@ -250,7 +264,7 @@ class PatternPanel(QWidget):
             "(blue) the design there: of the gores cut from a row, the one that deviates "
             "most at each point. Needs a current, converged run."
         )
-        self.overlay.activated.connect(lambda _i: self._draw())
+        self.overlay.activated.connect(lambda _i: self.refresh())
         toolbar.addWidget(self.overlay)
         #: Deviation per row (and what it was made for), for the overlay.
         self._heat: tuple[tuple[object, ...], dict[str, PanelDeviation], str] | None = None
@@ -280,7 +294,15 @@ class PatternPanel(QWidget):
         self.row_allowance.setSuffix(" mm")
         self.row_allowance.setDecimals(1)
         self.row_allowance.editingFinished.connect(self._row_allowance_edited)
+        self.roll_label = QLabel("-")
+        self.roll_label.setObjectName("rowOnRoll")
+        self.roll_label.setWordWrap(True)
+        self.roll_label.setToolTip(
+            "How this panel's 1:1 page goes on the print roll (Preferences ▸ Print roll "
+            "width): the page width runs across the roll"
+        )
         form.addRow("Row", self.row_label)
+        form.addRow("Page on print roll", self.roll_label)
         form.addRow("Label", self.label_text)
         form.addRow("Grain direction", self.grain)
         form.addRow("Fabric zone", self.zone)
@@ -497,7 +519,12 @@ class PatternPanel(QWidget):
                 )
 
             pieces.append(
-                _Piece(scoop.panel.cut_outline, -(scoop.panel.finished_height + GAP), draw_scoop)
+                _Piece(
+                    scoop.panel.cut_outline,
+                    -(scoop.panel.finished_height + GAP),
+                    draw_scoop,
+                    "scoop",
+                )
             )
         heat = self._overlay(stale)
         for row in self.rows_by_letter().values():
@@ -524,16 +551,103 @@ class PatternPanel(QWidget):
                 if heat is not None and row.label in heat[0]:
                     self._draw_heat(container, heat[0][row.label], heat[1])
 
-            pieces.append(_Piece(row.cut_outline, y, draw_row))
+            pieces.append(_Piece(row.cut_outline, y, draw_row, f"row {row.label}"))
             y += row.finished_height + GAP
         pieces += self._parachute_pieces(y, stale)
         if pieces:
             y = max(y, max(float(p.stacked_y + p.outline[:, 1].max()) for p in pieces) + GAP)
-        for piece, origin in zip(pieces, self._origins(pieces), strict=True):
-            piece.draw(origin)
-            self._grow(piece.outline, origin)
+        if self.layout_mode.currentData() == "roll":
+            self._draw_on_roll(pieces)
+        else:
+            for piece, origin in zip(pieces, self._origins(pieces), strict=True):
+                piece.draw(origin)
+                self._grow(piece.outline, origin)
+                self._mark_oversize(piece, origin)
         if first:
             QTimer.singleShot(0, self.fit)
+
+    def _mark_oversize(self, piece: _Piece, origin: QPointF) -> None:
+        """Label a piece whose 1:1 page is wider than the print roll at any turn."""
+        roll = self.controller.prefs.print_roll_width
+        fit = roll_fit(piece.outline, roll)
+        if not fit.oversize:
+            return
+        flag = QGraphicsSimpleTextItem(f"▲ larger than the {roll * 1000:.0f} mm roll")
+        flag.setBrush(QBrush(QColor(OVERSIZE_TEXT)))
+        flag.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        top = float(piece.outline[:, 1].max())
+        flag.setPos(origin + QPointF(float(piece.outline[:, 0].min()), -top))
+        # Above the piece whatever the zoom: lift it by its own height, in pixels.
+        flag.setTransform(QTransform.fromTranslate(0.0, -flag.boundingRect().height() - 2))
+        flag.setToolTip(
+            f"{piece.name}: {fit.across * 1000:.0f} mm across the roll at its narrowest "
+            f"({fit.describe()}); join paper, or add a row to split it"
+        )
+        self.view.scene().addItem(flag)
+
+    def _draw_on_roll(self, pieces: list[_Piece]) -> None:
+        """Every piece as its 1:1 page is printed (:func:`roll_fit`): turned, its page
+        width across a strip of the print roll, one page after the other down the roll."""
+        scene = self.view.scene()
+        roll = self.controller.prefs.print_roll_width
+        y = 0.0  # scene y of the next page's top, m (y grows down the roll)
+        placed = []
+        for piece in pieces:
+            fit = roll_fit(piece.outline, roll)
+            container = self._in_container(
+                QPointF(0.0, 0.0), partial(piece.draw, QPointF(0.0, 0.0))
+            )
+            turned = turn_points(piece.outline, fit.angle)
+            lo, hi = turned.min(axis=0), turned.max(axis=0)
+            # Panel coordinates are drawn with y negated: turn the other way on the scene,
+            # and place the turned cut outline MARGIN inside its page.
+            pos = QPointF(ROLL_MARGIN - float(lo[0]), y + ROLL_MARGIN + float(hi[1]))
+            container.setRotation(-fit.angle)
+            container.setPos(pos)
+            box = QRectF(0.0, y, fit.across, fit.along)
+            placed.append((piece, fit, box))
+            self.view.content_rect = self.view.content_rect.united(box)
+            y += fit.along
+        if not placed:
+            return
+        strip = QRectF(0.0, 0.0, roll, y)
+        back = scene.addRect(strip, QPen(Qt.PenStyle.NoPen), QBrush(QColor(ROLL_FILL)))
+        back.setZValue(-10)
+        edge = QPen(QColor(ROLL_EDGE), 2)
+        edge.setCosmetic(True)
+        for x in (0.0, roll):
+            scene.addLine(x, 0.0, x, y, edge)
+        title = QGraphicsSimpleTextItem(
+            f"Print roll {roll * 1000:.0f} mm wide (edges in blue), running down; each page "
+            "as printed"
+        )
+        title.setBrush(QBrush(QColor(ROLL_EDGE)))
+        title.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+        title.setPos(0.0, 0.0)
+        # Room for it when the view is fitted (a fraction of the roll drawn, m).
+        self.view.content_rect = self.view.content_rect.united(
+            QRectF(0.0, -max(0.3, 0.05 * y), roll, 0.1)
+        )
+        # Above the roll's top whatever the zoom: lift it by its own height, in pixels.
+        title.setTransform(QTransform.fromTranslate(0.0, -title.boundingRect().height() - 4))
+        scene.addItem(title)
+        page = QPen(QColor("#9aa3ad"), 1, Qt.PenStyle.DotLine)
+        page.setCosmetic(True)
+        for piece, fit, box in placed:
+            scene.addRect(box, page)
+            note = QGraphicsSimpleTextItem(
+                f"{piece.name}: {fit.across * 1000:.0f} mm across, {fit.describe()}"
+                if fit.fits
+                else f"▲ {piece.name}: LARGER THAN THE {roll * 1000:.0f} mm ROLL "
+                f"({fit.across * 1000:.0f} mm at its narrowest)"
+            )
+            note.setBrush(QBrush(QColor("#333333" if fit.fits else OVERSIZE_TEXT)))
+            note.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations, True)
+            note.setPos(max(box.right(), roll) + 0.05, box.top() + 0.02)
+            scene.addItem(note)
+            self.view.content_rect = self.view.content_rect.united(
+                QRectF(box.right(), box.top(), 1.5, 0.1)
+            )
 
     def _overlay(self, stale: bool) -> tuple[dict[str, PanelDeviation], float] | None:
         """The deviation overlay's values per row and its colour limit (m), or None (with
@@ -619,6 +733,23 @@ class PatternPanel(QWidget):
                 f"({'outside' if value > 0 else 'inside'} the design), worst of the gores "
                 f"here: gore {', '.join(map(str, gores))}"
             )
+
+    def roll_text(self, letter: str) -> str:
+        """How row ``letter``'s 1:1 page goes on the print roll, in words."""
+        row = self.rows_by_letter().get(letter)
+        if row is None:
+            return "-"
+        roll = self.controller.prefs.print_roll_width
+        fit = roll_fit(row.cut_outline, roll)
+        if fit.oversize:
+            return (
+                f"LARGER THAN THE {roll * 1000:.0f} mm ROLL ({fit.across * 1000:.0f} mm "
+                "across at its narrowest)"
+            )
+        return (
+            f"{fit.across * 1000:.0f} mm across the {roll * 1000:.0f} mm roll, "
+            f"{fit.along * 1000:.0f} mm along it; {fit.describe()}"
+        )
 
     def _origins(self, pieces: list[_Piece]) -> list[QPointF]:
         """Scene origin of every piece: stacked as the assembled gore, or side by side on
@@ -803,7 +934,7 @@ class PatternPanel(QWidget):
                 "each side seam's bottom end",
             )
 
-        pieces = [_Piece(radial.cut_outline, y, draw_radial)]
+        pieces = [_Piece(radial.cut_outline, y, draw_radial, "parachute gore")]
         if centre is not None:
             radius = 0.5 * centre.diameter + centre.allowance
             above = float(radial.cut_outline[:, 1].max()) + GAP + radius
@@ -819,7 +950,7 @@ class PatternPanel(QWidget):
                     f"{pr.panel_count} radial panels",
                 )
 
-            pieces.append(_Piece(centre.cut_outline, y + above, draw_centre))
+            pieces.append(_Piece(centre.cut_outline, y + above, draw_centre, "parachute centre"))
         return pieces
 
     def _piece(
@@ -894,6 +1025,11 @@ class PatternPanel(QWidget):
         design = session.design
         ann = session.patterns.row(letter)
         self.row_label.setText(letter)
+        text = self.roll_text(letter)
+        self.roll_label.setText(text)
+        self.roll_label.setStyleSheet(
+            f"color: {OVERSIZE_TEXT}; font-weight: bold;" if text.startswith("LARGER") else ""
+        )
         self.label_text.setText(ann.label_text or "")
         self.grain.setValue(ann.grain_angle_deg)
         self.zone.clear()
