@@ -27,10 +27,11 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QBrush, QColor, QDoubleValidator, QFont
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QBrush, QColor, QDoubleValidator, QFont, QMouseEvent
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QFormLayout,
     QFrame,
     QGridLayout,
@@ -40,6 +41,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QScrollArea,
+    QSplitter,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -56,6 +58,7 @@ from envelopelab.rigging import (
     turning_vent_pair,
 )
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.placement_view import EnvelopeInlay
 from envelopelab_app.refresh import Refresher
 from envelopelab_app.theme import STATUS_STYLES, StatusBanner, StatusChip, worst
 
@@ -328,6 +331,13 @@ class LineTable(QTableWidget):
 class ComponentCard(QFrame):
     """One rigging component: title, status chip, Add/Remove, values and lines."""
 
+    #: The card was clicked (its component key).
+    clicked = Signal(str)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        self.clicked.emit(self.key)
+        super().mousePressEvent(event)
+
     def __init__(
         self,
         key: str,
@@ -421,7 +431,7 @@ class ComponentCard(QFrame):
 class RiggingPanel(QWidget):
     """See module docstring."""
 
-    def __init__(self, controller: WorkspaceController) -> None:
+    def __init__(self, controller: WorkspaceController, gpu: bool = False) -> None:
         super().__init__()
         self.controller = controller
         self._updating = False
@@ -447,6 +457,7 @@ class RiggingPanel(QWidget):
             self.buttons[add_key] = card.add_button
             self.buttons[remove_key] = card.remove_button
             self.cards[key] = card
+            card.clicked.connect(self.select_component)
         # The parachute's own settings, in its card.
         self.settings: dict[str, QLineEdit] = {}
         self.parachute_box = QWidget()
@@ -521,7 +532,20 @@ class RiggingPanel(QWidget):
         layout.setSpacing(0)
         layout.addWidget(top)
         layout.addWidget(self.banner)
-        layout.addWidget(scroll, 1)
+        # The balloon in 3D beside the cards: every rigging line grey, the selected
+        # component's highlighted (click a card, or edit one of its values).
+        self.inlay = EnvelopeInlay("riggingInlay", controller, gpu, rigging_context=True)
+        split = QSplitter(Qt.Orientation.Horizontal)
+        split.setObjectName("riggingSplitter")
+        split.setChildrenCollapsible(False)
+        split.addWidget(scroll)
+        split.addWidget(self.inlay)
+        split.setStretchFactor(0, 3)
+        split.setStretchFactor(1, 2)
+        layout.addWidget(split, 1)
+        app = QApplication.instance()
+        if isinstance(app, QApplication):
+            app.focusChanged.connect(self._focus_changed)
         self._summaries: dict[str, str] = {}
         self.refresher = Refresher(
             self,
@@ -654,6 +678,21 @@ class RiggingPanel(QWidget):
             "turning_vents": bool(design.turning_vents),
             "scoop": design.scoop is not None,
         }
+
+    def select_component(self, key: str) -> None:
+        """Select a rigging component (``parachute``, ``flying_wires``, ...): the 3D
+        inlay highlights it."""
+        if self.controller.selection != key:
+            self.controller.select(key)
+
+    def _focus_changed(self, _old: QWidget | None, new: QWidget | None) -> None:
+        """Editing a card's value selects its component."""
+        if new is None or not self.isVisible():
+            return
+        for key, card in self.cards.items():
+            if card.isAncestorOf(new):
+                self.select_component(key)
+                return
 
     def refresh(self) -> None:
         """Show the current rigging outputs."""

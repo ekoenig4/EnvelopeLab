@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: the Shape, Patterns and Rigging modes show the balloon in 3D beside their
+  editor, with the selected panel row, control point or rigging component highlighted
+  and faced (as the Special shapes' On the balloon tab); click a rigging card to select
+  its component (ADR-0047).
+- Added: the 3D / Simulation mode highlights and faces the selection, nudges a selected
+  special shape with the same arrows and steps as On the balloon, and opens the live
+  symmetry-axis placement (**Symmetry axis…**); pressing a shape with Drag selects it.
+  Selecting a shape there no longer switches to the Special shapes mode.
 - Added: the Patterns mode shows the base envelope's pieces on the print roll (Layout ▸
   *On the print roll*): each 1:1 page turned as printed, one after another down a strip
   of the roll, as the special shapes' roll view does; *Selected row* says how the row's

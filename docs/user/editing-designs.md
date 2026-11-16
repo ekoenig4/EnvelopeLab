@@ -403,6 +403,11 @@ and its circular centre panel. **Layout** in the toolbar chooses how they are ar
 *2508 mm across the 3700 mm roll, 2085 mm along it; turned 90° (its height across the
 roll)*, or **LARGER THAN THE 1524 mm ROLL** in bold amber.
 
+Under the drawing, the *Selected row* form sits beside the balloon in 3D with that row
+highlighted: its band round the envelope and one of its panels outlined
+([the balloon in every mode](main-window.md#the-balloon-in-every-mode)). The Shape
+mode's editor has the same view under the profile.
+
 The pattern view shows only the base envelope. The envelope panels a special shape is
 sewn on (its footprint line, match marks and feed holes) are shown with that shape, in the
 **Special shapes** mode under *Envelope panels* (see

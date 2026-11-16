@@ -77,6 +77,7 @@ from envelopelab.project.model import RowPattern
 from envelopelab.rigging.parachute import CentrePanel
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.pattern_layout import shelf_layout
+from envelopelab_app.placement_view import EnvelopeInlay
 from envelopelab_app.refresh import Refresher
 from envelopelab_app.result_view import diverging_rgb
 from envelopelab_app.theme import StatusBanner
@@ -221,7 +222,7 @@ REGENERATE = "Regenerate patterns"
 class PatternPanel(QWidget):
     """2D pattern editor panel."""
 
-    def __init__(self, controller: WorkspaceController) -> None:
+    def __init__(self, controller: WorkspaceController, gpu: bool = False) -> None:
         super().__init__()
         self.controller = controller
         self._updating = False
@@ -368,11 +369,20 @@ class PatternPanel(QWidget):
         scroll.setWidget(form_holder)
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # The selected row's form beside the balloon in 3D, that row highlighted on it.
+        self.inlay = EnvelopeInlay("patternsInlay", controller, gpu, self._inlay_selection)
+        bottom = QSplitter(Qt.Orientation.Horizontal)
+        bottom.setObjectName("patternBottomSplitter")
+        bottom.setChildrenCollapsible(False)
+        bottom.addWidget(scroll)
+        bottom.addWidget(self.inlay)
+        bottom.setStretchFactor(0, 3)
+        bottom.setStretchFactor(1, 2)
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.setObjectName("patternPanelSplitter")
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(self.view)
-        splitter.addWidget(scroll)
+        splitter.addWidget(bottom)
         # A tall drawing for the vertical stack of pieces; the row form below it.
         splitter.setStretchFactor(0, 4)
         splitter.setStretchFactor(1, 1)
@@ -419,6 +429,11 @@ class PatternPanel(QWidget):
         if design is not None and design.gores is not None and design.gores.panel_rows:
             return design.gores.panel_rows[0].letter
         return None
+
+    def _inlay_selection(self) -> str:
+        """What the 3D inlay highlights: the selected row (the first row by default)."""
+        letter = self.selected_letter()
+        return f"row:{letter}" if letter is not None else self.controller.selection
 
     def regenerate(self) -> None:
         """Generate the patterns from the current design."""

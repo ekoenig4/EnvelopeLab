@@ -98,9 +98,9 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("EnvelopeLab")
         self.resize(1500, 950)
 
-        self.gore_editor = GoreEditor(self.controller)
-        self.gore_editor.solved_shape.attach_simulation(self.simulation)
         use_3d = self.prefs.enable_3d if enable_3d is None else enable_3d
+        self.gore_editor = GoreEditor(self.controller, gpu=use_3d)
+        self.gore_editor.solved_shape.attach_simulation(self.simulation)
         self.design_tree = DesignTreePanel(self.controller)
         self.properties = PropertiesPanel(self.controller)
         self.validation = ValidationPanel(self.controller)
@@ -110,10 +110,12 @@ class MainWindow(QMainWindow):
             self.controller, enable_renderer=use_3d, defer_renderer=interactive
         )
         self.view3d.settings = settings  # saved 3D viewpoints, per project
-        self.patterns = PatternPanel(self.controller)
+        self.patterns = PatternPanel(self.controller, gpu=use_3d)
         self.history = HistoryPanel(self.controller)
-        self.rigging = RiggingPanel(self.controller)
+        self.rigging = RiggingPanel(self.controller, gpu=use_3d)
         self.shapes = ShapesPanel(self.controller, enable_3d=use_3d)
+        # The 3D inlays of the design modes draw what the placement views draw.
+        self.controller.placement_provider = self.shapes.placement_data
         pattern_scope = artifact_inputs("patterns")
         self.panels: dict[str, Panel] = {
             "tree": Panel("Design Tree", self.controller, self.design_tree),
@@ -180,6 +182,8 @@ class MainWindow(QMainWindow):
         self.simulation.calculixChanged.connect(self._update_ccx_label)
         self.simulation.idle.connect(self._update_actions)
         self.view3d.rerunRequested.connect(self._run_requested)
+        self.view3d.nudged.connect(self._nudge_from_3d)
+        self.view3d.axisRequested.connect(self.place_axis)
 
         self.autosave_timer = QTimer(self)
         self.autosave_timer.timeout.connect(self.autosave)
@@ -448,9 +452,24 @@ class MainWindow(QMainWindow):
         )
 
     def _selection_mode(self, target: str) -> None:
-        """Show the Special shapes mode when a shape is selected (tree, warnings)."""
+        """Show the Special shapes mode when a shape is selected (tree, warnings), unless
+        the 3D / Simulation mode is showing it already (it highlights and faces it)."""
+        if MODE_KEYS[self.mode_tabs.currentIndex()] == "simulate":
+            return
         if target == "shapes" or target.startswith("shape:"):
             self.show_panel("shapes")
+
+    def _nudge_from_3d(self, d_hoop: float, d_tape: float) -> None:
+        """The 3D view's nudge arrows: move the selected special shape."""
+        self.shapes.placement_data()  # the gore map the nudge is measured on
+        self.shapes.nudge(d_hoop, d_tape)
+
+    def place_axis(self) -> None:
+        """Place a symmetry axis with its live preview, in the Special shapes mode's On
+        the balloon tab."""
+        self.show_panel("shapes")
+        self.shapes.result_tabs.setCurrentWidget(self.shapes.placement)
+        self.shapes.begin_add_axis()
 
     def _mode_changed(self, index: int) -> None:
         self.mode_stack.setCurrentIndex(index)

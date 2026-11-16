@@ -89,6 +89,7 @@ from envelopelab.project.references import (
 from envelopelab.project.session import ProjectSession
 from envelopelab.solvers.axisymmetric import AxisymmetricLoad, MembraneCheck, membrane_check
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.placement_view import EnvelopeInlay
 from envelopelab_app.refresh import Refresher
 from envelopelab_app.result_view import design_banner
 from envelopelab_app.simulation import PREVIEW, SimulationManager
@@ -1291,7 +1292,7 @@ def _item(text: str, editable: bool = True) -> QTableWidgetItem:
 class GoreEditor(QWidget):
     """Central editor of standard-gore designs (see module docstring)."""
 
-    def __init__(self, controller: WorkspaceController) -> None:
+    def __init__(self, controller: WorkspaceController, gpu: bool = False) -> None:
         super().__init__()
         self.controller = controller
         self._updating = False
@@ -1562,10 +1563,20 @@ class GoreEditor(QWidget):
         side_scroll.setWidget(side)
         side_scroll.setWidgetResizable(True)
         side_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # The balloon in 3D under the profile, the selected point or row highlighted.
+        self.inlay = EnvelopeInlay("shapeInlay", controller, gpu, self._inlay_selection)
+        self.canvas.pointsSelected.connect(self.inlay.changed)
+        left = QSplitter(Qt.Orientation.Vertical)
+        left.setObjectName("goreEditorLeftSplitter")
+        left.setChildrenCollapsible(False)
+        left.addWidget(self.canvas)
+        left.addWidget(self.inlay)
+        left.setStretchFactor(0, 3)
+        left.setStretchFactor(1, 2)
         splitter = QSplitter()
         splitter.setObjectName("goreEditorSplitter")
         splitter.setChildrenCollapsible(False)
-        splitter.addWidget(self.canvas)
+        splitter.addWidget(left)
         splitter.addWidget(side_scroll)
         splitter.setStretchFactor(0, 3)
         splitter.setStretchFactor(1, 2)
@@ -1606,6 +1617,12 @@ class GoreEditor(QWidget):
         self.refresh()
 
     # -- refresh ------------------------------------------------------------------------
+
+    def _inlay_selection(self) -> str:
+        """What the 3D inlay highlights: the first control point selected on the profile,
+        else the workspace selection (a panel row, ...)."""
+        selected = self.canvas.selected_indices()
+        return f"point:{min(selected)}" if selected else self.controller.selection
 
     def _update_header(self) -> None:
         session = self.controller.session

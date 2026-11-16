@@ -11,7 +11,9 @@ The models behind the numbers are described in [theory](../theory/rigging.md).
 ## The Rigging panel
 
 The **Rigging** mode (**View ▸ Rigging**, Ctrl+3) shows one card per element, in the same
-look as the other windows:
+look as the other windows, beside the balloon in 3D (*On the balloon*): every rigging
+line grey, and the component whose card you click (or whose value you edit) in magenta,
+the view turned to it ([the balloon in every mode](main-window.md#the-balloon-in-every-mode)):
 
 * The **toolbar** keeps the key figures in view: the rigging mass, the **lowest factor of
   safety** of the assessed lines against the requirement, and the limit load factor (with

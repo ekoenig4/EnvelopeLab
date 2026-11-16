@@ -430,3 +430,37 @@ def test_axis_preview_on_the_graphics_card(qtbot: QtBot, settings: QSettings) ->
     assert not gpu.axis_mode
     assert "axis-preview" not in gpu.plotter.actors
     w.close()
+
+
+def test_design_mode_inlays_and_the_3d_mode_highlight_on_the_graphics_card(
+    qtbot: QtBot, settings: QSettings
+) -> None:
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.resize(1600, 1000)
+    w.show()
+    w.open_project(GORE_PROJECT)
+    w.mode_tabs.setCurrentIndex(0)  # Shape
+    inlay = w.gore_editor.inlay
+    qtbot.waitUntil(lambda: inlay.gpu_view is not None, timeout=10_000)
+    gpu = inlay.gpu_view
+    assert gpu is not None
+    w.controller.select("row:B")
+    inlay.refresh()
+    assert {"envelope", "seams", "highlight"} <= set(gpu.plotter.actors)
+    # It faces the highlighted panel.
+    focus = inlay.data.highlight.focus
+    cam = gpu.plotter.camera
+    look = np.asarray(cam.position) - np.asarray(cam.focal_point)
+    to_focus = focus - np.asarray(cam.focal_point)
+    cos = float(look @ to_focus / (np.linalg.norm(look) * np.linalg.norm(to_focus)))
+    assert cos > 0.999
+    # The 3D / Simulation mode draws the same selection.
+    w.show_panel("view3d")
+    w.controller.select("row:C")
+    assert "selection-highlight" in w.view3d.plotter.actors
+    w.view3d.redraw()  # kept when the scene is rebuilt
+    assert "selection-highlight" in w.view3d.plotter.actors
+    w.controller.select("operating")
+    assert "selection-highlight" not in w.view3d.plotter.actors
+    w.close()

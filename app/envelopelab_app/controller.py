@@ -126,6 +126,9 @@ class WorkspaceController(QObject):
         #: Hidden panels wait until they are shown before refreshing. On in the
         #: interactive application; off for scripted windows that read hidden panels.
         self.defer_hidden = False
+        #: What the placement views draw (envelope sketch, shapes, axes), shared by the
+        #: 3D inlays of the design modes; set by the main window (None: nothing).
+        self.placement_provider: Callable[[], Any] | None = None
         self._derived: dict[str, tuple[int, Any]] = {}
         self.shapes = ShapeService()
         self.shapes.updated.connect(self._shapes_updated)

@@ -70,6 +70,8 @@ AXIS = "#00a087"
 AXIS_PREVIEW = "#00c853"
 GHOST = "#d6008f"
 SEAM = "#4d4d4d"
+#: Lines drawn for context only (e.g. the rigging not selected).
+CONTEXT = "#6b7785"
 GORE_FILL = ("#eef2f8", "#e3e9f2")
 ENVELOPE = (0.86, 0.89, 0.94)
 #: How long the 3D sketch waits after the last change before it draws its shaded
@@ -174,6 +176,11 @@ class PlacementData:
     place_at : callable, optional
         ``place_at(name, point)``: the placement of shape ``name`` with its base point at
         the envelope point nearest ``point`` (3D, m); for dragging in 3D.
+    highlight : Highlight or None
+        The selected design element (:mod:`envelopelab.project.highlight`), drawn in the
+        highlight colour and faced when no shape is selected.
+    context : list of ndarray
+        Lines drawn thin and grey for context (e.g. every rigging line), m.
     """
 
     gore_map: Any = None
@@ -182,6 +189,25 @@ class PlacementData:
     shapes: list[PlacedShape] = field(default_factory=list)
     selected: str | None = None
     place_at: Callable[[str, np.ndarray], Any] | None = None
+    highlight: Any = None
+    context: list[np.ndarray] = field(default_factory=list)
+
+    @property
+    def facing_key(self) -> str | None:
+        """What the 3D view faces: the selected shape, else the highlighted element."""
+        if self.selected is not None:
+            return f"shape:{self.selected}"
+        return None if self.highlight is None else str(self.highlight.key)
+
+    def facing_point(self) -> np.ndarray | None:
+        """The point to face (m): the selected shape's base point, else the highlight's
+        focus."""
+        shape = next((s for s in self.shapes if s.name == self.selected), None)
+        if shape is not None:
+            return shape.base3d
+        if self.highlight is not None and self.highlight.focus is not None:
+            return np.asarray(self.highlight.focus, float)
+        return None
 
 
 def _path(parts: list[np.ndarray], closed: bool = False) -> QPainterPath:
@@ -585,17 +611,18 @@ class BalloonSketch(QWidget):
         self.data = data
         self._picture = None
         self._settle.start()
-        if data.selected != self._faced:
-            self._faced = data.selected
+        if data.facing_key != self._faced:
+            self._faced = data.facing_key
             self.face_selected()
         self.update()
 
     def face_selected(self) -> None:
-        """Turn to look straight at the selected shape's base point."""
-        shape = next((s for s in self.data.shapes if s.name == self.data.selected), None)
-        if shape is None or self.data.sketch is None:
+        """Turn to look straight at the selected shape's base point (or, with no shape
+        selected, at the highlighted element)."""
+        point = self.data.facing_point()
+        if point is None or self.data.sketch is None:
             return
-        self.azimuth, self.elevation = _facing(_centre(self.data.sketch), shape.base3d)
+        self.azimuth, self.elevation = _facing(_centre(self.data.sketch), point)
         self.update()
 
     def _frame(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -878,6 +905,12 @@ class BalloonSketch(QWidget):
                 ((x, y),) = screen(polyline[-8:-7])
                 painter.setPen(QPen(QColor(AXIS)))
                 painter.drawText(QPointF(float(x) + 4, float(y)), name)
+        if axes:
+            for polyline in self.data.context:
+                stroke(polyline, QPen(QColor(CONTEXT), 1.0), None)
+            highlight = self.data.highlight
+            for polyline in [] if highlight is None else highlight.lines:
+                stroke(polyline, QPen(QColor(SELECTED), 3.0), _pen(SELECTED, 1.0, dashed=True))
         if light:
             for shape in self.data.shapes:
                 if (shape.base3d - centre) @ view <= 0.0:
@@ -927,6 +960,10 @@ class BalloonGpuView(QWidget):
         self._shown: dict[str, tuple[np.ndarray, str]] = {}
         #: The axis lines and names drawn.
         self._axes_shown: tuple[list[np.ndarray] | None, list[str]] = (None, [])
+        #: The context and highlight lines drawn.
+        self._lines_shown: dict[str, list[np.ndarray]] = {}
+        #: Fit the whole balloon in view after turning to the selection (the inlays).
+        self.fit_on_face = False
         self._drag: tuple[str, np.ndarray | None] | None = None
         style = self.plotter.iren.interactor.GetInteractorStyle()
         for event, handler in (
@@ -946,6 +983,7 @@ class BalloonGpuView(QWidget):
             p.clear()
             self._sketch = None
             self._shown, self._shape_keys, self._axes_shown = {}, set(), (None, [])
+            self._lines_shown = {}
             p.render()
             return
         if sketch is not self._sketch:
@@ -1023,24 +1061,47 @@ class BalloonGpuView(QWidget):
             p.remove_actor("axes")
             p.remove_actor("axis-labels")
         self._axes_shown = (lines, names)
-        if data.selected != self._faced:
-            self._faced = data.selected
+        highlight = [] if data.highlight is None else list(data.highlight.lines)
+        for key, polylines, colour, width in (
+            ("context", data.context, CONTEXT, 1),
+            ("highlight", highlight, SELECTED, 5),
+        ):
+            if _same(self._lines_shown.get(key), polylines):
+                continue
+            self._lines_shown[key] = polylines
+            if polylines:
+                p.add_mesh(
+                    _lines(polylines),
+                    color=colour,
+                    line_width=width,
+                    name=key,
+                    pickable=False,
+                    reset_camera=False,
+                )
+            else:
+                p.remove_actor(key)
+        if data.facing_key != self._faced:
+            self._faced = data.facing_key
             self.face_selected()
         p.render()
 
     def face_selected(self) -> None:
-        """Look straight at the selected shape's base point."""
-        shape = next((s for s in self.data.shapes if s.name == self.data.selected), None)
-        if shape is None or self.data.sketch is None:
+        """Look straight at the selected shape's base point (or, with no shape selected,
+        at the highlighted element)."""
+        point = self.data.facing_point()
+        if point is None or self.data.sketch is None:
             return
         centre = _centre(self.data.sketch)
         cam = self.plotter.camera
         distance = float(np.linalg.norm(np.asarray(cam.position) - np.asarray(cam.focal_point)))
-        direction = shape.base3d - centre
+        direction = point - centre
         direction /= max(float(np.linalg.norm(direction)), 1e-9)
         cam.focal_point = tuple(centre)
         cam.position = tuple(centre + distance * direction)
-        cam.up = (0.0, 0.0, 1.0)
+        # Mouth down; looking along the envelope axis, any up across it.
+        cam.up = (0.0, 1.0, 0.0) if abs(direction[2]) > 0.999 else (0.0, 0.0, 1.0)
+        if self.fit_on_face:
+            self.plotter.reset_camera()  # the whole balloon, seen from there
         self.plotter.render()
 
     def _pick(self, keys: list[str]) -> tuple[str, np.ndarray] | None:
@@ -1431,3 +1492,150 @@ class PlacementView(QWidget):
                 self.nudge(*d, factor=5.0 if shift else 1.0)
                 return True
         return super().eventFilter(watched, event)
+
+
+# -- the 3D inlay of the design modes ----------------------------------------------------
+
+
+class EnvelopeInlay(QWidget):
+    """The balloon in 3D beside a design mode's editor (Shape, Patterns, Rigging;
+    ADR-0047): the envelope, the special shapes and symmetry axes, and the selected
+    element (:func:`envelopelab.project.highlight.selection_highlight`) drawn in the
+    highlight colour, the view turned to face it.
+
+    Same drawing as the Special shapes' **On the balloon** tab (:class:`BalloonSketch`,
+    or :class:`BalloonGpuView` on the graphics card when ``gpu`` and PyVista are
+    available, started the first time the inlay is shown). Turn, zoom and double click
+    (face the selection) work the same; shapes are not moved here.
+
+    Parameters
+    ----------
+    name : str
+        Object name.
+    controller : WorkspaceController
+        The workspace; its ``placement_provider`` gives the envelope, shapes and axes.
+    gpu : bool
+        Draw with the graphics card when shown.
+    selection : callable, optional
+        The selection to highlight (default: the controller's).
+    rigging_context : bool
+        Draw every rigging line thin and grey.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        controller: Any,
+        gpu: bool = False,
+        selection: Callable[[], str] | None = None,
+        rigging_context: bool = False,
+    ) -> None:
+        from envelopelab_app.refresh import Refresher
+
+        super().__init__()
+        self.setObjectName(name)
+        self.controller = controller
+        self.selection = selection or (lambda: str(controller.selection))
+        self.rigging_context = rigging_context
+        self.sketch = BalloonSketch()
+        self.sketch.setToolTip("Drag: turn; wheel: zoom; double click: face the selection")
+        self.gpu_view: BalloonGpuView | None = None
+        self._want_gpu = gpu
+        self.data = PlacementData()
+        self.caption = QLabel()
+        self.caption.setObjectName("inlayCaption")
+        self.caption.setWordWrap(True)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+        layout.addWidget(self.caption)
+        layout.addWidget(self.sketch, 1)
+        self.setMinimumSize(200, 180)
+        self.refresher = Refresher(
+            self,
+            self.refresh,
+            lambda: controller.revision,
+            (
+                controller.stateChanged,
+                controller.sessionChanged,
+                controller.selectionChanged,
+                controller.shapesChanged,
+                controller.artifactsChanged,
+            ),
+            defer_hidden=lambda: controller.defer_hidden,
+        )
+
+    @property
+    def view3d(self) -> QWidget:
+        """The 3D view shown (on the graphics card, or the sketch)."""
+        return self.gpu_view if self.gpu_view is not None else self.sketch
+
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 (Qt API)
+        super().showEvent(event)
+        if self._want_gpu and self.gpu_view is None:
+            self._want_gpu = False
+            self.start_gpu()
+
+    def start_gpu(self) -> bool:
+        """Draw with the graphics card (True when PyVista is available)."""
+        from envelopelab_app.panels.view3d import pyvista_available
+
+        if self.gpu_view is not None:
+            return True
+        if not pyvista_available():
+            return False
+        view = BalloonGpuView()
+        view.fit_on_face = True
+        view.setToolTip(self.sketch.toolTip())
+        layout = self.layout()
+        assert layout is not None
+        layout.replaceWidget(self.sketch, view)
+        self.sketch.hide()
+        self.gpu_view = view
+        view.set_data(self.data)
+        return True
+
+    def changed(self) -> None:
+        """The host's own selection changed (not the controller's): redraw."""
+        self.refresher.dirty = True
+        self.refresher.request()
+
+    def refresh(self) -> None:
+        """Redraw from the controller: the placement views' envelope, shapes and axes,
+        with the selection highlighted."""
+        from envelopelab.project.highlight import selection_highlight
+
+        c = self.controller
+        provider = getattr(c, "placement_provider", None)
+        data = provider() if provider is not None else PlacementData()
+        selection = self.selection()
+        if not selection.startswith("shape:"):
+            data.selected = None
+        design = c.design
+        rigging: dict[str, list[np.ndarray]] = {}
+        highlight = None
+        if design is not None and design.gores is not None and data.sketch is not None:
+            rigging = c.rigging_polylines()
+            try:
+                rows = c.rows()
+            except ValueError:
+                rows = []
+            highlight = selection_highlight(design, selection, rows=rows, rigging=rigging)
+        data.highlight = highlight
+        if self.rigging_context:
+            data.context = [line for lines in rigging.values() for line in lines]
+        self.set_data(data)
+
+    def set_data(self, data: PlacementData) -> None:
+        """Draw ``data`` (its shapes are shown, not movable here)."""
+        data.place_at = None
+        self.data = data
+        highlight = data.highlight
+        if data.sketch is None:
+            what = "no standard-gore envelope to show"
+        elif highlight is not None:
+            what = f"<span style='color:{SELECTED}'>{highlight.label}</span>"
+        else:
+            what = "select a row, point or component to see it here"
+        self.caption.setText(f"<b>On the balloon</b>: {what}")
+        self.view3d.set_data(data)  # type: ignore[attr-defined]
