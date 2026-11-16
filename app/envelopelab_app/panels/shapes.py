@@ -86,6 +86,7 @@ from envelopelab.project.shapes import (
     default_shape,
     mesh_shape,
     piece_count,
+    placement_at,
     pointed,
     shape_fabrics,
 )
@@ -468,13 +469,17 @@ class ShapesPanel(QWidget):
     #: The Export build pack… button: the main window opens its export dialog.
     exportRequested = Signal()  # noqa: N815 (Qt naming)
 
-    def __init__(self, controller: WorkspaceController) -> None:
+    def __init__(self, controller: WorkspaceController, enable_3d: bool = False) -> None:
         super().__init__()
         self.controller = controller
         self.selected: str | None = None
         self.mesh_mm = DEFAULT_MESH_MM
         self._form_key: tuple[str, str, int] | None = None
         self._placement_key: str | None = None
+        self._placement_shown: tuple[int, str | None] | None = None
+        #: Each placed shape's drawing: (placed design, gore map, 3D points, triangles,
+        #: footprint on the map, base point), rebuilt when the shape is placed again.
+        self._drawn: dict[str, tuple[Any, ...]] = {}
         self._placement_cache: tuple[Any, Any] = (None, None)
         self.fields: dict[tuple[str, ...], QSpinBox | QDoubleSpinBox] = {}
 
@@ -780,12 +785,17 @@ class ShapesPanel(QWidget):
         pieces_split.setStretchFactor(1, 1)
         self.result_tabs.addTab(pieces_split, "Cut pieces")
         # Where the shapes sit on the balloon: the 3D sketch over the gore map.
-        self.placement = PlacementView()
+        # Where the shapes sit on the balloon: the first tab, shown by default.
+        self.placement = PlacementView(gpu=enable_3d)
         self.placement.map.shapeClicked.connect(self.select)
-        self.placement.map.shapeMoved.connect(
+        self.placement.shapeMoved.connect(
             lambda name, placement: self.controller.place_shape(name, placement)
         )
-        self.result_tabs.addTab(self.placement, "On the balloon")
+        self.placement.nudged.connect(self.nudge)
+        self.result_tabs.insertTab(0, self.placement, "On the balloon")
+        self.result_tabs.setCurrentIndex(0)
+        self._results_stale = False
+        self.result_tabs.currentChanged.connect(self._result_tab_shown)
         # The envelope panels the shape is sewn on (its marking sheets); the Patterns
         # view shows only the base envelope.
         self.markings = MarkingView()
@@ -1130,9 +1140,16 @@ class ShapesPanel(QWidget):
             self.selected = str(item.data(Qt.ItemDataRole.UserRole))
             self._show_selected()
 
+    def _result_tab_shown(self, _index: int) -> None:
+        if self._results_stale and self.result_tabs.currentWidget() is not self.placement:
+            self._show_result(self.spec())
+
     def _show_selected(self) -> None:
         spec = self.spec()
-        self.placement.set_data(self.placement_data())
+        key = (self.controller.revision, self.selected)
+        if key != self._placement_shown:
+            self._placement_shown = key
+            self.placement.set_data(self.placement_data())
         self._update_form(spec)
         self._show_result(spec)
         self._show_simulation(spec)
@@ -1433,7 +1450,7 @@ class ShapesPanel(QWidget):
         if session is None or surface is None or session.design.gores is None:
             return PlacementData()
         design = session.design
-        key = session.content_hash()
+        key = self.controller.shape_host_hash()  # the envelope inputs only
         if self._placement_key != key:
             self._placement_cache = (pm.gore_map(surface), pm.envelope_sketch(design))
             self._placement_key = key
@@ -1453,11 +1470,20 @@ class ShapesPanel(QWidget):
             result = self.controller.shapes.result(spec.name)
             placed = None if result is None else result.design
             if placed is not None:
-                shown = designed_display(placed, rows=14, per_piece=3)
-                shift = display_offset(design, placed)
-                points, triangles = shown.points + shift, shown.triangles
-                footprint = pm.footprint_lines(gore_map, placed)
-                base3d = placed.base_point + shift
+                cached = self._drawn.get(spec.name)
+                if cached is None or cached[0] is not placed or cached[1] is not gore_map:
+                    shown = designed_display(placed, rows=14, per_piece=3)
+                    shift = display_offset(design, placed)
+                    cached = (
+                        placed,
+                        gore_map,
+                        shown.points + shift,
+                        shown.triangles,
+                        pm.footprint_lines(gore_map, placed),
+                        placed.base_point + shift,
+                    )
+                    self._drawn[spec.name] = cached
+                _p, _m, points, triangles, footprint, base3d = cached
             else:
                 theta = surface.theta_at(spec.placement.gore, spec.placement.across)
                 base3d = display_points(design, np.array([s]), np.array([theta]))[0]
@@ -1475,7 +1501,26 @@ class ShapesPanel(QWidget):
                     spec.placement,
                 )
             )
-        return PlacementData(gore_map, sketch, axes, shapes, self.selected)
+        specs = {s.name: s for s in session.state.shapes}
+
+        def place_at(name: str, point: np.ndarray) -> Any:
+            return placement_at(surface, point, specs[name].placement)
+
+        return PlacementData(gore_map, sketch, axes, shapes, self.selected, place_at)
+
+    def nudge(self, d_hoop: float, d_tape: float) -> bool:
+        """Move the selected shape ``d_hoop`` m round the envelope (towards higher gores)
+        and ``d_tape`` m up the tape (:func:`envelopelab.project.placement_map.nudged`);
+        one undo step. True when it moved."""
+        from envelopelab.project.placement_map import nudged
+
+        spec = self.spec()
+        gore_map = self._placement_cache[0]
+        if spec is None or gore_map is None:
+            return False
+        return self.controller.place_shape(
+            spec.name, nudged(gore_map, spec.placement, d_hoop, d_tape)
+        )
 
     # -- symmetry axes and mirror twins ----------------------------------------------
 
@@ -1913,6 +1958,11 @@ class ShapesPanel(QWidget):
                 f"{design.footprint_length:.3f} m, designed height {design.designed_height:.3f} m"
             )
             self.status.setStyleSheet(f"color: {OK_COLOR};")
+        if self.controller.defer_hidden and self.result_tabs.currentWidget() is self.placement:
+            # The other result tabs are hidden: fill them when one is shown.
+            self._results_stale = True
+            return
+        self._results_stale = False
         for check in checks:
             item = QTreeWidgetItem(
                 [

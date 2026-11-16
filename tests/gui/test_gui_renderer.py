@@ -371,3 +371,39 @@ def test_solved_preview_is_drawn_with_its_factor_of_safety_scale(
     image = tmp_path / "fos.png"
     assert view.save_screenshot(str(image)) and image.stat().st_size > 1000
     w.close()
+
+
+def test_on_the_balloon_tab_draws_on_the_graphics_card(
+    qtbot: QtBot, settings: QSettings, tmp_path: Path
+) -> None:
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.resize(1600, 1000)
+    w.show()
+    w.open_project(GORE_PROJECT)
+    w.show_panel("shapes")
+    panel = w.shapes
+    panel.add_shape("dome")
+    assert w.controller.shapes.wait(120_000)
+    panel.add_axis("Face centre", 5.5)
+    qtbot.waitUntil(lambda: panel.placement.gpu_view is not None, timeout=10_000)
+    gpu = panel.placement.gpu_view
+    assert gpu is not None and panel.placement.view3d is gpu
+    assert not panel.placement.sketch.isVisible()
+    assert {"envelope", "seams", "shape:Dome", "axes"} <= set(gpu.plotter.actors)
+    # It faces the selected shape.
+    cam = gpu.plotter.camera
+    shape = gpu.data.shapes[0]
+    look = np.asarray(cam.position) - np.asarray(cam.focal_point)
+    to_shape = shape.base3d - np.asarray(cam.focal_point)
+    cos = float(look @ to_shape / (np.linalg.norm(look) * np.linalg.norm(to_shape)))
+    assert cos > 0.999
+    image = tmp_path / "balloon.png"
+    gpu.plotter.screenshot(str(image))
+    assert image.stat().st_size > 1000
+    # Nudging updates the shape's actor.
+    tape = w.controller.session.state.shapes[0].placement.tape_position  # type: ignore[union-attr]
+    panel.placement.nudge_buttons["up"].click()
+    assert w.controller.shapes.wait(120_000)
+    qtbot.waitUntil(lambda: gpu.data.shapes[0].placement.tape_position > tape, timeout=10_000)
+    w.close()

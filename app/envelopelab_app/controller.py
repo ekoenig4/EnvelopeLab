@@ -116,6 +116,13 @@ class WorkspaceController(QObject):
         #: Change number: bumped once per burst of signals, so a panel connected to
         #: several of them refreshes once per change (``envelopelab_app.refresh``).
         self.revision = 0
+        #: Roll-width checks of each placed shape: (placed design id, roll), checks, and
+        #: the placed design (kept so its id is not reused while cached).
+        self._roll_cache: dict[str, tuple[tuple[int, float], list[Any], Any]] = {}
+        #: The shapes' envelope surface and the envelope-inputs hash it was built for.
+        self._surface: tuple[str | None, EnvelopeSurface | None] = (None, None)
+        #: The envelope rows' roll findings: ((roll, rows' cut outlines), findings, unused).
+        self._row_roll: tuple[Any, list[Any], Any] = (None, [], None)
         #: Hidden panels wait until they are shown before refreshing. On in the
         #: interactive application; off for scripted windows that read hidden panels.
         self.defer_hidden = False
@@ -209,6 +216,8 @@ class WorkspaceController(QObject):
         self.session = session
         self.patterns_cache = None
         self.model_cache = None
+        self._surface = (None, None)
+        self._roll_cache = {}
         self.shapes.reset()
         if session is not None:
             session.set_fabric_lookup(self.fabric_lookup)
@@ -337,18 +346,19 @@ class WorkspaceController(QObject):
 
     def envelope_surface(self) -> EnvelopeSurface | None:
         """Surface the special shapes are placed on (None: no gore design or not buildable),
-        built once per change."""
+        built again only when the envelope inputs the shapes read change
+        (:meth:`shape_host_hash`), not on every edit of a shape."""
         s = self.session
         if s is None or s.design.gores is None:
             return None
-
-        def build() -> EnvelopeSurface | None:
+        key = self.shape_host_hash()
+        if self._surface[0] != key:
             try:
-                return envelope_surface(s.design, s.patterns)
+                surface: EnvelopeSurface | None = envelope_surface(s.design, s.patterns)
             except ValueError:  # includes PrimitiveError
-                return None
-
-        return self._cached("envelope_surface", build)
+                surface = None
+            self._surface = (key, surface)
+        return self._surface[1]
 
     def sync_shapes(self) -> None:
         """Start placing the shapes whose specification or envelope changed (worker)."""
@@ -439,8 +449,13 @@ class WorkspaceController(QObject):
         result = self.shapes.result(name)
         if result is None or result.design is None:
             return []
-        pieces = [(p.label, p.cut) for p in result.design.pieces]
-        return list(result.design.checks) + roll_checks(pieces, self.prefs.print_roll_width)
+        key = (id(result.design), self.prefs.print_roll_width)
+        hit = self._roll_cache.get(name)
+        if hit is None or hit[0] != key:
+            pieces = [(p.label, p.cut) for p in result.design.pieces]
+            hit = (key, roll_checks(pieces, self.prefs.print_roll_width), result.design)
+            self._roll_cache[name] = hit
+        return list(result.design.checks) + list(hit[1])
 
     def envelope_roll_findings(self) -> list[DesignFinding]:
         """A warning per envelope panel row whose 1:1 page is wider than the print roll
@@ -450,6 +465,10 @@ class WorkspaceController(QObject):
         except ValueError:
             return []
         roll = self.prefs.print_roll_width
+        # The rows are rebuilt on every change; their cut outlines decide the result.
+        key = (roll, tuple((r.label, r.cut_outline.tobytes()) for r in rows))
+        if self._row_roll[0] == key:
+            return list(self._row_roll[1])
         out = []
         for row in rows:
             fit = roll_fit(row.cut_outline, roll)
@@ -464,7 +483,8 @@ class WorkspaceController(QObject):
                         f"row:{row.label}",
                     )
                 )
-        return out
+        self._row_roll = (key, out, None)
+        return list(out)
 
     def shape_findings(self) -> list[DesignFinding]:
         """Findings of the special shapes: placement errors, pattern checks, simulations."""

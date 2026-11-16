@@ -170,6 +170,28 @@ def map_to_placement(m: GoreMap, x: float, y: float, current: ShapePlacement) ->
     )
 
 
+def nudged(m: GoreMap, placement: ShapePlacement, d_hoop: float, d_tape: float) -> ShapePlacement:
+    r"""``placement`` moved ``d_hoop`` m round the envelope (positive towards higher
+    gores) and ``d_tape`` m up the tape, as on the flat gore: the base point moves
+    :math:`\Delta g = \Delta_{hoop} / (2 w(s))` gore widths (:math:`w` the flat half
+    width at its tape position), into the next gore when it passes a seam, and stays 1 mm
+    inside the ends of the tape. The lean is kept."""
+    from envelopelab.project.shapes import DRAG_MARGIN
+
+    s = float(placement.tape_position)
+    w = max(float(m.half_width(np.array([s]))[0]), 1e-9)
+    g = (gore_position(placement) + d_hoop / (2.0 * w)) % m.gores
+    cell = min(int(math.floor(g)), m.gores - 1)
+    s = min(max(s + d_tape, DRAG_MARGIN), m.length - DRAG_MARGIN)
+    return placement.model_copy(
+        update={
+            "gore": cell + 1,
+            "tape_position": round(s, 4),
+            "across": round(min(max(g - cell - 0.5, -0.5), 0.5), 4),
+        }
+    )
+
+
 @dataclass
 class Sketch:
     """A coarse 3D envelope for the panel's sketch, m (envelope frame, z up).

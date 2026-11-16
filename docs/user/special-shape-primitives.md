@@ -34,18 +34,25 @@ both come back when you change mode. The screen has three columns:
   and the exports;
 * in the middle, the selected shape's editor in tabs: **Placement & size**, **Profile**
   (revolved shapes only), **Feed holes & cap**, **Panel layout** and **Simulation**;
-* on the right, in tabs: **Cut pieces** (a drawing and a table), **On the balloon**
-  (where the shapes sit, below), **Envelope panels** (where it is sewn on the
-  envelope), **Checks** and **Attachment**.
+* on the right, in tabs: **On the balloon** (where the shapes sit, below; the tab that
+  opens), **Cut pieces** (a drawing and a table), **Envelope panels** (where it is sewn
+  on the envelope), **Checks** and **Attachment**.
 
-**On the balloon.** This tab shows a 3D sketch over a gore map (drag the bar between
-them to share the height): every shape, its footprint and feed holes, and the symmetry
-axes, the selected shape in magenta and the axes in green. They follow every number you
-type in the editor next to them:
+**On the balloon.** This tab shows a 3D view over a gore map (drag the bar between them
+to share the height): every shape, its footprint and feed holes, and the symmetry axes,
+the selected shape in magenta and the axes in green. They follow every number you type
+in the editor next to them, and you can move the selected shape on either:
 
-* **3D**: the envelope with its gore and row seams and the shapes as designed. It turns to
-  face a shape when you select it; drag to turn it, use the wheel to zoom, double click
-  to face the selected shape again. An axis is dashed where it runs behind the envelope.
+* **Nudge**: the ◀ ▶ buttons move the selected shape round the envelope, ▲ ▼ up and down
+  the tape, by the step chosen next to them (10 to 250 mm, measured on the flat gore;
+  hold a button to repeat). With the 3D view or the gore map clicked, the arrow keys do
+  the same, and Shift+arrow takes five steps. Every nudge is one undo step; a grouped
+  shape takes its group, a mirror twin its original.
+* **3D**: the envelope with its gore and row seams and the shapes as designed. With the
+  3D View on (Preferences) it is drawn by the graphics card, like the 3D View; otherwise
+  a lighter drawing that needs no OpenGL stands in. Drag the background to turn it, use
+  the wheel to zoom; **drag a shape** over the envelope to move it there. It turns to
+  face a shape when you select it, and a double click faces the selected shape again.
 * **Gore map**: the gores side by side as they are cut, at their true flat width, gore
   numbers along the top and row letters down the side; hover for the gore, row and tape
   position under the pointer. **Click** a shape to select it; **drag** it to move it

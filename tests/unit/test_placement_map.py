@@ -100,3 +100,20 @@ def test_sketch_is_the_envelope_with_its_seams() -> None:
     assert len(sketch.seams) == n + rows - 1
     r = np.hypot(sketch.points[:, 0], sketch.points[:, 1])
     assert r.max() > 1.0
+
+
+def test_a_nudge_moves_the_base_point_by_the_step_on_the_flat_gore() -> None:
+    from envelopelab.project.placement_map import nudged
+
+    p = ShapePlacement(gore=4, tape_position=5.0, across=0.0, lean_deg=7.0)
+    up = nudged(MAP, p, 0.0, 0.05)
+    assert (up.gore, up.across, up.tape_position, up.lean_deg) == (4, 0.0, 5.05, 7.0)
+    w = float(MAP.half_width(np.array([5.0]))[0])
+    side = nudged(MAP, p, 0.1, 0.0)
+    (x0, _), (x1, _) = MAP.points(np.array([3.5, gore_position(side)]), np.array([5.0, 5.0]))
+    assert x1 - x0 == pytest.approx(0.1, abs=1e-4)  # 0.1 m across the flat gore
+    assert side.across == pytest.approx(0.1 / (2 * w), abs=1e-4)
+    # Past the seam into the next gore, and kept inside the tape.
+    far = nudged(MAP, p, 1.2 * w, 0.0)
+    assert far.gore == 5
+    assert nudged(MAP, p, 0.0, 100.0).tape_position < MAP.length

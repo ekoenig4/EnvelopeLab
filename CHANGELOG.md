@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: **On the balloon** is the first tab of the Special shapes mode and opens by
+  default. Nudge the selected shape with ◀ ▶ ▲ ▼ (10-250 mm steps) or the arrow keys in
+  either view, or drag it in the 3D view as well as on the gore map. The 3D view is drawn
+  by the graphics card when the 3D View is on.
+- Fixed: the Special shapes mode was slow to respond: an edit took about 3 s (the roll
+  check's narrowest-turn search ran in Python per hull edge, and was repeated on every
+  refresh), the placement views redrew point by point, and hidden result tabs were
+  refilled on every change. An edit now takes well under 0.1 s on the GUI thread and
+  views redraw in 2-5 ms (software drawing); results are unchanged.
 - Added: the Special shapes mode shows where the shapes sit on the balloon, in an
   **On the balloon** tab of its right column: a 3D sketch (turn, zoom; faces the selected shape) and a gore map (the gores
   side by side as cut) with every footprint, feed hole and symmetry axis. Click a shape

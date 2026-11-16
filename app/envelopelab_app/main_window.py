@@ -113,7 +113,7 @@ class MainWindow(QMainWindow):
         self.patterns = PatternPanel(self.controller)
         self.history = HistoryPanel(self.controller)
         self.rigging = RiggingPanel(self.controller)
-        self.shapes = ShapesPanel(self.controller)
+        self.shapes = ShapesPanel(self.controller, enable_3d=use_3d)
         pattern_scope = artifact_inputs("patterns")
         self.panels: dict[str, Panel] = {
             "tree": Panel("Design Tree", self.controller, self.design_tree),

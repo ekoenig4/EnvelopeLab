@@ -458,8 +458,8 @@ def test_editor_and_results_are_in_tabs(gore_window: MainWindow) -> None:
         "Simulation",
     ]
     assert [results.tabText(i) for i in range(results.count())] == [
-        "Cut pieces",
         "On the balloon",
+        "Cut pieces",
         "Envelope panels",
         "Checks",
         "Attachment",
@@ -820,8 +820,8 @@ def test_placement_views_show_and_move_the_shapes(gore_window: MainWindow) -> No
     _placed(gore_window)
     panel.add_axis("Face centre", 5.5)
     view = panel.placement
-    assert panel.result_tabs.indexOf(view) == 1  # the On the balloon tab
-    panel.result_tabs.setCurrentWidget(view)
+    assert panel.result_tabs.indexOf(view) == 0  # the On the balloon tab, the default
+    assert panel.result_tabs.currentWidget() is view
     data = view.map.data
     assert [s.name for s in data.shapes] == ["Dome", "Tube"]
     assert [a[0] for a in data.axes] == ["Face centre"]
@@ -829,7 +829,9 @@ def test_placement_views_show_and_move_the_shapes(gore_window: MainWindow) -> No
     assert all(len(s.triangles) and s.footprint for s in data.shapes)
     # The 3D sketch faces the selected shape.
     tube = data.shapes[1]
-    rel = tube.base3d - view.sketch._centre()
+    from envelopelab_app.placement_view import _centre
+
+    rel = tube.base3d - _centre(data.sketch)
     assert view.sketch.azimuth == pytest.approx(np.degrees(np.arctan2(rel[1], rel[0])))
     view.sketch.grab()
     view.map.grab()
@@ -855,3 +857,87 @@ def test_placement_views_show_and_move_the_shapes(gore_window: MainWindow) -> No
     assert after.gore == before.gore % 12 + 1
     assert after.tape_position == pytest.approx(before.tape_position, abs=0.05)
     assert len(session.stack.history()) == history + 1
+
+
+def test_nudge_and_drag_the_shape_in_either_view(gore_window: MainWindow) -> None:
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    session = gore_window.controller.session
+    assert session is not None
+    panel.add_shape("dome")
+    _placed(gore_window)
+    view = panel.placement
+    assert view.step.currentData() == pytest.approx(0.05)
+
+    def where() -> tuple[float, float]:
+        p = session.state.shapes[0].placement
+        return p.gore - 0.5 + p.across, p.tape_position
+
+    g0, s0 = where()
+    view.nudge_buttons["up"].click()
+    assert where()[1] == pytest.approx(s0 + 0.05)
+    view.nudge_buttons["right"].click()
+    assert where()[0] > g0
+    # Arrow keys in the gore map or the 3D view; Shift takes five steps; one undo each.
+    history = len(session.stack.history())
+    _g1, s1 = where()
+    QTest.keyClick(view.map, Qt.Key.Key_Down)
+    assert where()[1] == pytest.approx(s1 - 0.05)
+    QTest.keyClick(view.view3d, Qt.Key.Key_Down, Qt.KeyboardModifier.ShiftModifier)
+    assert where()[1] == pytest.approx(s1 - 0.30)
+    assert len(session.stack.history()) == history + 2
+    gore_window.undo()
+    assert where()[1] == pytest.approx(s1 - 0.05)
+
+    # Drag the shape in the 3D sketch: press on its base point, release over the envelope.
+    _placed(gore_window)
+    sketch = view.sketch
+    gore_window.resize(1600, 1000)
+    QApplication.processEvents()  # the splitter sizes the view
+    data = sketch.data
+    shape = data.shapes[0]
+    ((x, y),) = sketch._projector()(shape.base3d[None])
+    start = QPoint(int(x), int(y))
+    before = where()
+    QTest.mousePress(sketch, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+    QTest.mouseMove(sketch, QPoint(start.x() + 40, start.y() - 30))
+    QTest.mouseRelease(
+        sketch,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(start.x() + 40, start.y() - 30),
+    )
+    assert where() != pytest.approx(before)  # moved over the envelope ...
+    gore_window.undo()
+    assert where() == pytest.approx(before)  # ... in one undo step
+    # Dragging the background turns the view instead.
+    az = sketch.azimuth
+    QTest.mousePress(
+        sketch, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(5, 5)
+    )
+    QTest.mouseMove(sketch, QPoint(60, 5))
+    QTest.mouseRelease(
+        sketch, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(60, 5)
+    )
+    assert sketch.azimuth != az
+
+
+def test_hidden_result_tabs_are_filled_when_shown(gore_window: MainWindow) -> None:
+    """In the interactive application the result tabs behind On the balloon are filled
+    when one is opened, not on every change."""
+    gore_window.controller.defer_hidden = True
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("dome")
+    _placed(gore_window)
+    panel.refresh()
+    assert panel.result_tabs.currentWidget() is panel.placement
+    assert "placed" in panel.status.text()  # the status is always current
+    assert panel.pieces.topLevelItemCount() == 0
+    panel.result_tabs.setCurrentIndex(1)  # Cut pieces
+    assert panel.pieces.topLevelItemCount() == 16 + 1
+    assert panel.checks.topLevelItemCount() >= 1
