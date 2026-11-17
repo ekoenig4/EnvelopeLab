@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: where a special shape's panels meet at the crown (ADR-0049, project format 5).
+  **Panels at the crown** (Panel layout) gives the crown its own seam turn and widths;
+  the seams turn smoothly from the rim to the crown angles. **Move the cap** shifts a
+  dome's or revolved shape's cap off the tip, still covering it. The pieces, cap, checks,
+  simulation skin and build pack follow; shapes without a crown layout are unchanged
+  (bit-identical results). Turned seams and moved caps distort the pieces a little more,
+  as the area distortion check reports (e.g. 3.2 % to 6.3 % for an 8-gore dome with its
+  rim's unequal widths made equal at the crown).
 - Fixed: the gore map of the Special shapes mode (On the balloon) could only be panned
   with the right mouse button and had no visible way back to the whole map. Every 2D view
   of the mode (gore map, envelope panels, cut pieces) now pans with a drag on empty space

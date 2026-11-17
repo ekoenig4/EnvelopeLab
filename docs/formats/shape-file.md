@@ -275,6 +275,12 @@ The other keys are those of the project's shape specification, in its units:
   shape's axis, degrees), `panel_widths` (relative width of every gore or panel, one per
   piece) and `splits` (horizontal splits as fractions of the profile from the base
   circle; not for `mesh`), for example `panel_widths: [2, 1, 1, 1]`, `splits: [0.4]`;
+* where the pieces meet at the crown (not for `mesh`, ADR-0049): `crown_seam_offset_deg`
+  (the seam turn at the cap or tip, degrees; omit for the rim's), `crown_panel_widths`
+  (relative widths there; omit for the rim's), and for a dome or revolved shape with a
+  cap, `cap_shift` (how far the cap is moved off the tip, a length with a unit, e.g.
+  `cap_shift: 50 mm`) and `cap_direction_deg` (towards which direction round the axis,
+  degrees);
 * `group` names the object a shape belongs to (shapes with the same group are moved,
   mirrored and exported together).
 

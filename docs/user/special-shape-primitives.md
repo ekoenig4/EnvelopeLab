@@ -98,6 +98,19 @@ in the editor next to them, and you can move the selected shape on either:
      leaning shape's footprint climbs up one side); the shape says so if it does not.
      Splitting a large piece is the way to make it fit the print roll. Mesh shapes take
      the seam turn and widths but cannot be split across.
+   * **Panels at the crown** sets where the pieces meet at the top. Tick **Own crown
+     layout** to give the crown its own **Crown seam turn** and **Crown widths**
+     (**Equal at crown**, or **As at the rim**): the seams leave the rim where the seam
+     turn and widths above put them and turn smoothly, above the footprint, to the crown
+     angles, so you can, for example, keep the rim's wide face panel and still meet the
+     cap with equal panels, or turn the seams off a marking near the top. Untick it to
+     go back to the rim's layout. **Move the cap** shifts a dome's or revolved shape's
+     cap off the tip by a distance (mm, along the skin) towards a direction round the
+     axis (as the seam turn: 0° up the tape, 90° towards the next gore). The cap stays a
+     flat disc square to the skin there, the same depth as before; the gores on that side
+     end lower on a slant and those opposite reach higher. The cap must still cover the
+     tip, so it moves by less than its radius; the shape says so if it does not. Turned
+     seams and a moved cap distort the pieces more (see **Checks**); more gores reduce it.
 
    Every 1:1 sheet says what each edge is sewn to (for an upper tier, *BOTTOM: sew to
    G3A (its top)*), and the shape's assembly instructions sew each tier into a ring, then

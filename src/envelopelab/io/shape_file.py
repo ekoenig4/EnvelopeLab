@@ -737,7 +737,15 @@ class ShapeFile:
 
 #: Lengths of a special shape (written with a unit, converted to m).
 SHAPE_LENGTHS = frozenset(
-    {"base_radius", "height", "tip_radius", "length", "feed_hole_radius", "seam_allowance"}
+    {
+        "base_radius",
+        "height",
+        "tip_radius",
+        "length",
+        "feed_hole_radius",
+        "seam_allowance",
+        "cap_shift",
+    }
 )
 SHAPE_KEYS = frozenset(
     {
@@ -762,6 +770,10 @@ SHAPE_KEYS = frozenset(
         "seam_offset_deg",
         "panel_widths",
         "splits",
+        "crown_seam_offset_deg",
+        "crown_panel_widths",
+        "cap_shift",
+        "cap_direction_deg",
         "group",
     }
 )

@@ -45,9 +45,15 @@ KEYS: tuple[tuple[str, str], ...] = (
         "(relative width of every gore or panel; empty: equal) and `splits` (horizontal "
         "splits as fractions of the profile from the base circle; not for mesh shapes) "
         "`group` (optional name of the object the shape belongs to, ADR-0041) and "
-        "`mirror` (a mirror twin's source shape `of` and symmetry `axis`, ADR-0043). "
+        "`mirror` (a mirror twin's source shape `of` and symmetry `axis`, ADR-0043), and "
+        "from version 5 where the panels meet at the crown (ADR-0049): "
+        "`crown_seam_offset_deg` (the seam turn at the cap or tip, degrees; null: as at the "
+        "rim), `crown_panel_widths` (relative widths there; empty: as at the rim), "
+        "`cap_shift` (m the cap is moved off the tip) and `cap_direction_deg` (towards "
+        "which direction round the axis). "
         "Version 1 files read as having no shapes; versions 1 to 3 as having equal, "
-        "unturned and unsplit pieces.",
+        "unturned and unsplit pieces; versions 1 to 4 with the seams meeting the crown as "
+        "they leave the rim and the cap centred.",
     ),
     (
         "`state.symmetry_axes`",

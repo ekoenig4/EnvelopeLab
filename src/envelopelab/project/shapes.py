@@ -11,7 +11,7 @@ the dependency graph.
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -128,6 +128,18 @@ class _ShapeBase(BaseModel):
         profile's length from the base circle to the tip, increasing in (0, 1). The tiers
         are sewn edge to edge; their pieces are labelled ``A`` (at the rim), ``B``, ...
         Not for mesh shapes.
+    crown_seam_offset_deg : float or None
+        Where the seams meet the cap (or the tip) round the axis: the seam turn there, deg,
+        as ``seam_offset_deg`` at the rim (None: the same as at the rim). The seams turn
+        smoothly from the rim to the crown (ADR-0049). Not for mesh shapes.
+    crown_panel_widths : list of float
+        Relative widths of the gores or panels at the crown (empty: as at the rim).
+    cap_shift : float
+        Move the cap off the tip: its centre this far down the skin from the tip, m (0:
+        centred). It must still cover the tip. Domes and revolved shapes with a cap.
+    cap_direction_deg : float
+        Direction round the axis the cap moves towards, deg (0 up the tape, 90 towards
+        the next gore, as the seam turn).
     group : str or None
         Name of the object the shape belongs to (several shapes with the same group are
         moved, mirrored and exported together, :mod:`envelopelab.project.shape_groups`;
@@ -151,6 +163,10 @@ class _ShapeBase(BaseModel):
     seam_offset_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
     panel_widths: list[float] = Field(default_factory=list)
     splits: list[float] = Field(default_factory=list, max_length=MAX_SPLITS)
+    crown_seam_offset_deg: float | None = Field(default=None, ge=-180.0, le=180.0)
+    crown_panel_widths: list[float] = Field(default_factory=list)
+    cap_shift: float = Field(default=0.0, ge=0.0)
+    cap_direction_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
     group: str | None = Field(
         default=None, min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_\- ]+$"
     )
@@ -171,6 +187,19 @@ class _ShapeBase(BaseModel):
             raise ValueError("splits: fractions must increase within (0, 1)")
         if self.splits and getattr(self, "kind", None) == "mesh":
             raise ValueError("splits: a mesh shape's panels cannot be split across")
+        if self.crown_panel_widths and len(self.crown_panel_widths) != count:
+            raise ValueError(
+                f"crown_panel_widths: {len(self.crown_panel_widths)} widths for {count} gores "
+                "or panels"
+            )
+        if any(not w > 0.0 for w in self.crown_panel_widths):
+            raise ValueError("crown_panel_widths: every width must be positive")
+        if getattr(self, "kind", None) == "mesh" and (
+            self.crown_seam_offset_deg is not None or self.crown_panel_widths or self.cap_shift
+        ):
+            raise ValueError("a mesh shape's seams and cap cannot be moved at the crown")
+        if self.cap_shift and getattr(self, "kind", None) == "tube":
+            raise ValueError("cap_shift: a tube's tip disc cannot be moved off its axis")
         return self
 
 
@@ -240,6 +269,17 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
         "seam_offset": math.radians(spec.seam_offset_deg),
         "panel_widths": tuple(float(w) for w in spec.panel_widths),
     }
+    # Where the panels meet at the crown (not for mesh shapes, ADR-0049).
+    crown: dict[str, object] = {
+        "crown_offset": None
+        if spec.crown_seam_offset_deg is None
+        else math.radians(spec.crown_seam_offset_deg),
+        "crown_widths": tuple(float(w) for w in spec.crown_panel_widths),
+    }
+    cap: dict[str, Any] = {
+        "cap_shift": float(spec.cap_shift),
+        "cap_direction": math.radians(spec.cap_direction_deg),
+    }
     splits = tuple(float(f) for f in spec.splits)
     if isinstance(spec, DomeShape):
         return Dome(
@@ -252,6 +292,8 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
             rc,
             splits=splits,
             **layout,  # type: ignore[arg-type]
+            **crown,  # type: ignore[arg-type]
+            **cap,
         )
     if isinstance(spec, TubeShape):
         if rc > 0.0:  # a pointed tube cut off where it is as wide as the cap
@@ -266,6 +308,7 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
                 marks,
                 splits=splits,
                 **layout,  # type: ignore[arg-type]
+                **crown,  # type: ignore[arg-type]
             )
         return Tube(
             spec.name,
@@ -277,6 +320,7 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
             marks,
             splits=splits,
             **layout,  # type: ignore[arg-type]
+            **crown,  # type: ignore[arg-type]
         )
     if isinstance(spec, RevolvedShape):
         return Revolved(
@@ -289,6 +333,8 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
             rc,
             splits=splits,
             **layout,  # type: ignore[arg-type]
+            **crown,  # type: ignore[arg-type]
+            **cap,
         )
     mesh = ReferenceMesh(
         np.asarray(spec.vertices, dtype=np.float64),

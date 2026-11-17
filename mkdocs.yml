@@ -99,6 +99,7 @@ nav:
       - ADR-0046: adr/ADR-0046-placing-axes-in-the-views.md
       - ADR-0047: adr/ADR-0047-the-balloon-in-every-mode.md
       - ADR-0048: adr/ADR-0048-half-gores.md
+      - ADR-0049: adr/ADR-0049-crown-layout.md
 theme:
   name: material
 markdown_extensions:

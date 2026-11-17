@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -77,6 +78,7 @@ from envelopelab.project.placement_map import snap
 from envelopelab.project.shape_groups import group_names
 from envelopelab.project.shapes import (
     CAP_PANEL_TOP_WIDTH,
+    DomeShape,
     MeshShape,
     RevolvedShape,
     ShapeKind,
@@ -613,6 +615,7 @@ class ShapesPanel(QWidget):
         self.layout_note.setWordWrap(True)
         layout_form = QFormLayout(self.layout_box)
         layout_form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
+        self._crown_filling = False
         layout_form.addRow("Seam turn", self.seam_turn)
         widths = QVBoxLayout()
         widths.addWidget(self.widths_table)
@@ -626,6 +629,7 @@ class ShapesPanel(QWidget):
         splits.addLayout(split_buttons)
         layout_form.addRow("Horizontal splits", splits)
         layout_form.addRow(self.layout_note)
+        layout_form.addRow(self._crown_box())
 
         # -- results ---------------------------------------------------------------------
         self.checks = QTreeWidget()
@@ -995,11 +999,13 @@ class ShapesPanel(QWidget):
             # Selected under its new name before the edit refreshes the panel.
             self.selected = str(value)
         values = _values(path, value)
-        if spec is not None and path in (("gores",), ("panels",)) and spec.panel_widths:
+        if spec is not None and path in (("gores",), ("panels",)):
             # Keep the widths given and make the new pieces as wide as the last one.
             count = int(value)
-            widths = list(spec.panel_widths)[:count]
-            values["panel_widths"] = widths + [widths[-1]] * (count - len(widths))
+            for key in ("panel_widths", "crown_panel_widths"):
+                widths = list(getattr(spec, key))[:count]
+                if widths:
+                    values[key] = widths + [widths[-1]] * (count - len(widths))
         ok = bool(self.controller.edit("update_shape", old, values))
         if not ok:
             self.selected = old
@@ -1305,6 +1311,7 @@ class ShapesPanel(QWidget):
         self.cap_diameter.setEnabled(capped and spec.cap_diameter is not None)
         self.cap_diameter.blockSignals(False)
         self._fill_layout(spec)
+        self._fill_crown(spec)
         self.fabric_combo.blockSignals(True)
         index = self.fabric_combo.findData(spec.fabric or "")
         self.fabric_combo.setCurrentIndex(max(index, 0))
@@ -1949,6 +1956,186 @@ class ShapesPanel(QWidget):
         if mesh:
             text += "; a mesh shape's panels cannot be split across"
         self.layout_note.setText(text + ".")
+
+    def _crown_box(self) -> QGroupBox:
+        """Where the panels meet at the crown: the seams' angles there and the cap's
+        position (ADR-0049)."""
+        box = QGroupBox("Panels at the crown")
+        box.setObjectName("shapeCrownBox")
+        box.setToolTip(
+            "Where the gores or panels meet at the top. The seams leave the rim where the "
+            "seam turn and widths above put them and turn smoothly to the angles set here; "
+            "the cap can be moved off the tip."
+        )
+        form = QFormLayout(box)
+        self.crown_own = QCheckBox("Own crown layout (otherwise as at the rim)")
+        self.crown_own.setObjectName("shapeCrownOwn")
+        self.crown_own.toggled.connect(self._crown_own_toggled)
+        form.addRow(self.crown_own)
+        self.crown_turn = QDoubleSpinBox()
+        self.crown_turn.setObjectName("shapeCrownTurn")
+        self.crown_turn.setRange(-180.0, 180.0)
+        self.crown_turn.setDecimals(1)
+        self.crown_turn.setSuffix(" °")
+        self.crown_turn.setKeyboardTracking(False)
+        self.crown_turn.setToolTip(
+            "Seam turn at the crown: where piece 1 is centred round the axis at the top"
+        )
+        self.crown_turn.valueChanged.connect(
+            lambda v: self.set_value(("crown_seam_offset_deg",), round(float(v), 1))
+        )
+        form.addRow("Crown seam turn", self.crown_turn)
+        self.crown_widths_table = QTableWidget(0, 2)
+        self.crown_widths_table.setObjectName("shapeCrownWidths")
+        self.crown_widths_table.setHorizontalHeaderLabels(
+            ["Relative width at the crown", "Spans round the axis"]
+        )
+        self.crown_widths_table.horizontalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.Stretch
+        )
+        self.crown_widths_table.setMinimumHeight(120)
+        self.crown_widths_table.itemChanged.connect(self._crown_width_edited)
+        equal = QPushButton("Equal at crown")
+        equal.setObjectName("shapeCrownEqual")
+        equal.setToolTip("Every piece the same width where they meet at the top")
+        equal.clicked.connect(lambda: self.set_crown_widths(None))
+        same = QPushButton("As at the rim")
+        same.setObjectName("shapeCrownAsRim")
+        same.clicked.connect(lambda: self.set_value(("crown_panel_widths",), []))
+        widths = QVBoxLayout()
+        widths.addWidget(self.crown_widths_table)
+        buttons = QHBoxLayout()
+        buttons.addWidget(equal)
+        buttons.addWidget(same)
+        widths.addLayout(buttons)
+        form.addRow("Crown widths", widths)
+        self.cap_shift = QDoubleSpinBox()
+        self.cap_shift.setObjectName("shapeCapShift")
+        self.cap_shift.setRange(0.0, 5000.0)
+        self.cap_shift.setDecimals(0)
+        self.cap_shift.setSuffix(" mm")
+        self.cap_shift.setKeyboardTracking(False)
+        self.cap_shift.setToolTip(
+            "Move the cap off the tip: its centre this far down the skin from the tip (it "
+            "must still cover the tip). Needs a cap (Feed holes & cap)."
+        )
+        self.cap_shift.valueChanged.connect(
+            lambda v: self.set_value(("cap_shift",), round(float(v) / 1000.0, 4))
+        )
+        self.cap_direction = QDoubleSpinBox()
+        self.cap_direction.setObjectName("shapeCapDirection")
+        self.cap_direction.setRange(-180.0, 180.0)
+        self.cap_direction.setDecimals(1)
+        self.cap_direction.setSuffix(" °")
+        self.cap_direction.setKeyboardTracking(False)
+        self.cap_direction.setToolTip(
+            "Towards where round the axis the cap moves: 0° up the tape, 90° towards the "
+            "next gore (as the seam turn)"
+        )
+        self.cap_direction.valueChanged.connect(
+            lambda v: self.set_value(("cap_direction_deg",), round(float(v), 1))
+        )
+        cap = QHBoxLayout()
+        cap.addWidget(self.cap_shift)
+        cap.addWidget(QLabel("towards"))
+        cap.addWidget(self.cap_direction)
+        form.addRow("Move the cap", cap)
+        self.crown_note = QLabel()
+        self.crown_note.setObjectName("shapeCrownNote")
+        self.crown_note.setWordWrap(True)
+        form.addRow(self.crown_note)
+        return box
+
+    def _crown_own_toggled(self, on: bool) -> None:
+        spec = self.spec()
+        if spec is None or self._crown_filling:
+            return
+        if on:
+            self.set_value(("crown_seam_offset_deg",), float(spec.seam_offset_deg))
+        else:
+            values: dict[str, Any] = {"crown_seam_offset_deg": None, "crown_panel_widths": []}
+            if self.selected is not None:
+                self.controller.edit("update_shape", self.selected, values)
+
+    def set_crown_widths(self, widths: list[float] | None) -> bool:
+        """Set the relative widths of the pieces at the crown (None: all equal there)."""
+        spec = self.spec()
+        if spec is None:
+            return False
+        values = [1.0] * piece_count(spec) if widths is None else [float(w) for w in widths]
+        return self.set_value(("crown_panel_widths",), values)
+
+    def _crown_width_edited(self, item: QTableWidgetItem) -> None:
+        spec = self.spec()
+        if spec is None or item.column() != 0:
+            return
+        count = piece_count(spec)
+        widths = list(spec.crown_panel_widths or spec.panel_widths or [1.0] * count)
+        try:
+            widths[item.row()] = float(item.text())
+        except ValueError:
+            self._fill_crown(spec)
+            return
+        if not self.set_crown_widths(widths):
+            self._fill_crown(spec)
+
+    def _fill_crown(self, spec: ShapeSpec) -> None:
+        """Show where ``spec``'s panels meet at the crown."""
+        self._crown_filling = True
+        try:
+            mesh = isinstance(spec, MeshShape)
+            own = spec.crown_seam_offset_deg is not None or bool(spec.crown_panel_widths)
+            self.crown_own.setChecked(own)
+            self.crown_own.setEnabled(not mesh)
+            count = piece_count(spec)
+            widths = spec.crown_panel_widths or spec.panel_widths or [1.0] * count
+            total = sum(widths)
+            self.crown_turn.blockSignals(True)
+            self.crown_turn.setValue(
+                spec.seam_offset_deg
+                if spec.crown_seam_offset_deg is None
+                else spec.crown_seam_offset_deg
+            )
+            self.crown_turn.blockSignals(False)
+            self.crown_widths_table.blockSignals(True)
+            self.crown_widths_table.setRowCount(count)
+            self.crown_widths_table.setVerticalHeaderLabels([str(k + 1) for k in range(count)])
+            for k, w in enumerate(widths):
+                self.crown_widths_table.setItem(k, 0, QTableWidgetItem(f"{w:g}"))
+                span = QTableWidgetItem(f"{360.0 * w / total:.1f}°")
+                span.setFlags(span.flags() & ~Qt.ItemFlag.ItemIsEditable)
+                self.crown_widths_table.setItem(k, 1, span)
+            self.crown_widths_table.blockSignals(False)
+            for widget in (self.crown_turn, self.crown_widths_table):
+                widget.setEnabled(own and not mesh)
+            capped = (
+                isinstance(spec, DomeShape | RevolvedShape)
+                and pointed(spec)
+                and cap_diameter(spec) > 0.0
+            )
+            for widget, value in (
+                (self.cap_shift, spec.cap_shift * 1000.0),
+                (self.cap_direction, spec.cap_direction_deg),
+            ):
+                widget.blockSignals(True)
+                widget.setValue(value)
+                widget.blockSignals(False)
+                widget.setEnabled(capped)
+            notes = []
+            if mesh:
+                notes.append("A mesh shape's seams and cap stay as they are at the crown.")
+            elif own:
+                notes.append(
+                    "The seams turn smoothly from the rim to these angles above the "
+                    "footprint; the Checks tab says how much the pieces are distorted."
+                )
+            if not capped and not mesh:
+                notes.append(
+                    "Moving the cap needs a dome or revolved shape with a cap (Feed holes & cap)."
+                )
+            self.crown_note.setText(" ".join(notes))
+        finally:
+            self._crown_filling = False
 
     def set_panel_widths(self, widths: list[float]) -> bool:
         """Set the relative widths of the gores or panels (empty: all equal)."""

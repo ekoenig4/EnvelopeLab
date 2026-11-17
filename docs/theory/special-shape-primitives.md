@@ -126,6 +126,73 @@ its width squared, see below); the narrowest piece sets the automatic cap diamet
 Mesh shapes take the seam turn and panel widths (the cut half-planes move with them) but
 no horizontal splits: their panels must stay discs from the footprint to the pole.
 
+### Crown layout: seam angles at the crown and a moved cap
+
+Where the pieces meet at the top is set separately from where they leave the rim
+(`crown_seam_angles`, `twisted`, `cap_moved`; ADR-0049).
+
+**Seam angles at the crown.** The crown has its own seam turn and widths, which give crown
+angles \( \phi^c_j \) by the formula above (each defaulting to the rim's; on the branch
+with \( \phi^c_0 - \phi_0 \in (-\pi, \pi] \)). Piece edges keep a *seam coordinate*
+\( \psi \), equal to the rim angle, and the skin point of \( (u, \psi) \) lies at the angle
+
+\[
+\phi(u, \psi) = \psi + \delta(\psi)\,g(u), \qquad
+\delta(\psi_j) = \phi^c_j - \phi_j, \qquad
+g = f^2 (3 - 2f), \quad f = \operatorname{clip}\!\left(\frac{u - u_s}{u_e - u_s}, 0, 1\right),
+\]
+
+with \( \delta \) linear between the seams, \( u_s \) the highest footprint point and
+\( u_e \) the lowest top of the skin. So the rim, the footprint, the marks and the
+attachment lines are exactly those of the plain shape (\( g = 0 \) below \( u_s \)), every
+seam turns smoothly to its crown angle and runs straight up from \( u_e \).
+\( \partial\phi/\partial\psi = (1-g) + g\,\Delta^c_k/\Delta_k > 0 \): the pieces never fold.
+At least 10 % of the profile must lie between \( u_s \) and \( u_e \) (assumed), or the
+shape is refused. A frustum with turned seams is no longer developed exactly (its seams
+are helices); it is laid out as a classic gore like the others.
+
+**A moved cap.** A cap can be moved off the tip by \( e \) (`cap_shift`) along the meridian
+\( \phi_P \) (`cap_direction`). Its centre is \( \mathbf{P} = \mathbf{S}(\ell_{full} - e,
+\phi_P) \) on the whole, pointed skin (\( \ell_{full} \) the meridian's length to the
+apex), and its plane is square to the skin's normal \( \mathbf{n} \) there, a depth
+\( d \) below it:
+
+\[
+(\mathbf{x} - \mathbf{P})\cdot\mathbf{n} = -d,
+\]
+
+with \( d \) the centred cap's depth (from the apex to its plane along the axis), so a cap
+moved round a sphere keeps its size. On every meridian the top of the skin \( u_T(\phi) \)
+is the plane's crossing nearest the tip (bisection to `ROOT_TOLERANCE`), and the last tier
+runs from its lower edge to \( u_T \). The cap is the plane's section of the skin: exactly
+flat, cut as drawn. The cap must still cover the apex (its edge must go round the axis),
+it must stay clear of the footprint, and the highest split must lie below its edge (with
+the 2 % gap); otherwise the shape is refused.
+
+The gores of the top tier then end on a slanted edge. Laying their rows straight across,
+as below, would misplace the cloth near the cap, so each of those gores is developed on
+the parallels up to the highest point of its cap edge and the edge is drawn on it where it
+lies. The seam equalisation then fits three lengths, both seams up to the cap and the cap
+edge itself:
+
+\[
+x' = x\,(1 + \beta\,(y/Y)^2) + \kappa\,y, \qquad y' = (1 + \alpha + \gamma\,x/X)\,y,
+\]
+
+(\(X, Y\) the developed half width and height; Gauss-Newton with least-norm steps), so
+the gores' tops are as long as the flat cap's edge (check *cap seam match*, within
+0.02 mm in the tests). The term in \( \gamma \) lengthens one side more than the other: it
+is also used for any gore whose two seams do not close in on each other (a band below a
+split whose seams turn towards the crown), where the shear alone lengthens both alike.
+
+On the generic 8-gore fixture envelope, an 8-gore dome of radius 0.8 m and height 0.9 m
+with a 0.3 m cap has 3.2 % area distortion as designed. With its seams turned 20° at the
+crown it has 1.6 %; with unequal rim widths (2, 1, ..., 1) made equal at the crown, 6.3 %;
+with the cap moved 80 mm, 3.2 %; with a 15° crown turn, the cap moved 80 mm and a split at
+40 %, 9.4 %. Every seam, split and cap edge matches within the 3 mm tolerance, and the
+*area distortion* warning reports the worst piece; more gores reduce it and the
+simulation shows the shape that follows.
+
 ### Tube panels: exact developments
 
 This applies to tubes and to revolved profiles of a single straight segment.

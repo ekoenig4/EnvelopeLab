@@ -39,9 +39,9 @@ from envelopelab.project.shapes import ShapeSpec
 from envelopelab.project.symmetry import SymmetryAxis
 
 PROJECT_FORMAT: Literal["envelopelab.project"] = "envelopelab.project"
-PROJECT_FORMAT_VERSION: Literal[4] = 4
+PROJECT_FORMAT_VERSION: Literal[5] = 5
 #: Older versions :func:`load_project_text` still reads (see :func:`migrate_project_data`).
-READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3, 4)
+READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3, 4, 5)
 PROJECT_SUFFIX = ".elproj"
 
 NotchEdge = Literal["left", "right", "bottom", "top"]
@@ -515,7 +515,7 @@ class Project(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     format: Literal["envelopelab.project"] = PROJECT_FORMAT
-    format_version: Literal[4] = PROJECT_FORMAT_VERSION
+    format_version: Literal[5] = PROJECT_FORMAT_VERSION
     state: DesignState
     locks: ConstraintLocks = Field(default_factory=ConstraintLocks)
     profile_target: ProfileTarget | None = None
@@ -557,7 +557,10 @@ def migrate_project_data(raw: dict[str, Any]) -> dict[str, Any]:
     Versions 1 and 2 have no ``shape_runs``; they read as projects without saved shape
     simulations. Versions 1 to 3 have no shape panel layouts (``seam_offset_deg``,
     ``panel_widths``, ``splits``); their shapes read with equal, unturned, unsplit pieces
-    (ADR-0040), and no symmetry axes or mirror twins (ADR-0043).
+    (ADR-0040), and no symmetry axes or mirror twins (ADR-0043). Versions 1 to 4 have no
+    crown layouts (``crown_seam_offset_deg``, ``crown_panel_widths``, ``cap_shift``,
+    ``cap_direction_deg``); their seams meet the crown as they leave the rim and their
+    caps are centred (ADR-0049).
 
     Raises
     ------

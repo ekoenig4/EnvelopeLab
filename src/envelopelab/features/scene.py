@@ -87,7 +87,7 @@ def designed_object(design: PrimitiveDesign, rows: int = 60, per_piece: int = 16
     pts = skin.at(tt.ravel(), pp.ravel())
     tri = _grid(pts, rows, cols, True)
     if design.primitive.closed_tip:
-        centre = design.base_point + design.primitive.tip_height * design.axis
+        centre = _cap_centre(design)
         c = len(pts)
         pts = np.vstack([pts, centre])
         top = (rows - 1) * cols
@@ -175,6 +175,15 @@ def _piece_of(
     return out
 
 
+def _cap_centre(design: PrimitiveDesign) -> FloatArray:
+    """Centre of a shape's cap (moved off the tip or not), m."""
+    if getattr(design._skin, "_cap", None) is not None:
+        origin: FloatArray = design._skin.cap_frame()[0]
+        return origin
+    out: FloatArray = design.base_point + design.primitive.tip_height * design.axis
+    return out
+
+
 def designed_display(design: PrimitiveDesign, rows: int = 60, per_piece: int = 16) -> ShapeDisplay:
     """The designed skin of a placed shape with its pieces and seams, m.
 
@@ -233,7 +242,7 @@ def designed_display(design: PrimitiveDesign, rows: int = 60, per_piece: int = 1
     around = seams_phi[0] + np.linspace(0.0, 2.0 * math.pi, cols + 1)
     seams += [skin.at_u(np.full(len(around), u), around) for u in split_heights(prim, skin.total)]
     if prim.closed_tip:
-        centre = design.base_point + prim.tip_height * design.axis
+        centre = _cap_centre(design)
         c = len(pts)
         pts = np.vstack([pts, centre])
         top = (rows - 1) * cols
@@ -313,6 +322,10 @@ def simulated_display(
         tip = np.all(rho <= rc * (1.0 + 1e-6) + 1e-9, axis=1) & np.all(
             height >= floor - 0.25 * rc, axis=1
         )
+        if getattr(design._skin, "_cap", None) is not None:
+            # A moved cap: the triangles on or above its plane.
+            origin, _e1, _e2, normal = design._skin.cap_frame()
+            tip = np.all((start[tri] - origin) @ normal >= -0.25 * rc, axis=1)
     piece = _piece_of(design, cen, tip)
     pts = to_envelope_frame(design, result.positions)
     name = prim.name

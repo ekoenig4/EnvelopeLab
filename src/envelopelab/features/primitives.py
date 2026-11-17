@@ -109,6 +109,7 @@ References
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -457,6 +458,19 @@ class Dome:
     splits : tuple of float
         Horizontal splits, fractions of the meridian's arc length from the base circle
         (:func:`split_heights`; empty: one tier).
+    crown_offset : float or None
+        Seam turn at the crown, rad: where the seams meet the cap (or the tip) round the
+        axis, as ``seam_offset`` at the rim (None: the same as at the rim). The seams
+        turn smoothly from their rim angle to their crown angle (:func:`crown_seam_angles`).
+    crown_widths : tuple of float
+        Relative widths of the pieces at the crown (empty: as at the rim).
+    cap_shift : float
+        Move the cap off the tip, m: its centre lies this far down the skin from the
+        tip, on the meridian ``cap_direction`` (0: centred on the axis). The cap stays a
+        flat disc, square to the skin there and as deep as the centred cap; it must still
+        cover the tip (needs ``cap_radius`` > 0).
+    cap_direction : float
+        Angle round the axis towards which the cap moves, rad (as the seam angles).
     """
 
     name: str
@@ -469,6 +483,10 @@ class Dome:
     seam_offset: float = 0.0
     panel_widths: tuple[float, ...] = ()
     splits: tuple[float, ...] = ()
+    crown_offset: float | None = None
+    crown_widths: tuple[float, ...] = ()
+    cap_shift: float = 0.0
+    cap_direction: float = 0.0
 
     kind: PrimitiveKind = field(default="dome", init=False)
 
@@ -539,6 +557,12 @@ class Tube:
     splits : tuple of float
         Horizontal splits, fractions of the slant length from the base circle
         (:func:`split_heights`; empty: one tier).
+    crown_offset : float or None
+        Seam turn at the crown, rad: where the seams meet the cap (or the tip) round the
+        axis, as ``seam_offset`` at the rim (None: the same as at the rim). The seams
+        turn smoothly from their rim angle to their crown angle (:func:`crown_seam_angles`).
+    crown_widths : tuple of float
+        Relative widths of the pieces at the crown (empty: as at the rim).
     """
 
     name: str
@@ -551,6 +575,8 @@ class Tube:
     seam_offset: float = 0.0
     panel_widths: tuple[float, ...] = ()
     splits: tuple[float, ...] = ()
+    crown_offset: float | None = None
+    crown_widths: tuple[float, ...] = ()
 
     kind: PrimitiveKind = field(default="tube", init=False)
 
@@ -621,6 +647,19 @@ class Revolved:
     splits : tuple of float
         Horizontal splits, fractions of the meridian's arc length from the base circle
         (:func:`split_heights`; empty: one tier).
+    crown_offset : float or None
+        Seam turn at the crown, rad: where the seams meet the cap (or the tip) round the
+        axis, as ``seam_offset`` at the rim (None: the same as at the rim). The seams
+        turn smoothly from their rim angle to their crown angle (:func:`crown_seam_angles`).
+    crown_widths : tuple of float
+        Relative widths of the pieces at the crown (empty: as at the rim).
+    cap_shift : float
+        Move the cap off the tip, m: its centre lies this far down the skin from the
+        tip, on the meridian ``cap_direction`` (0: centred on the axis). The cap stays a
+        flat disc, square to the skin there and as deep as the centred cap; it must still
+        cover the tip (needs ``cap_radius`` > 0).
+    cap_direction : float
+        Angle round the axis towards which the cap moves, rad (as the seam angles).
     """
 
     name: str
@@ -633,6 +672,10 @@ class Revolved:
     seam_offset: float = 0.0
     panel_widths: tuple[float, ...] = ()
     splits: tuple[float, ...] = ()
+    crown_offset: float | None = None
+    crown_widths: tuple[float, ...] = ()
+    cap_shift: float = 0.0
+    cap_direction: float = 0.0
 
     kind: PrimitiveKind = field(default="revolved", init=False)
 
@@ -824,6 +867,27 @@ def _check_layout(primitive: Primitive) -> None:
             raise PrimitiveError(f"{name}: a panel is narrower than one degree round the axis")
     if not math.isfinite(primitive.seam_offset):
         raise PrimitiveError(f"{name}: the seam turn must be a number")
+    crown = getattr(primitive, "crown_widths", ())
+    if crown:
+        if len(crown) != m:
+            raise PrimitiveError(
+                f"{name}: {len(crown)} crown widths given for {m} pieces round the axis"
+            )
+        c = np.asarray(crown, dtype=np.float64)
+        if not np.all(np.isfinite(c)) or np.any(c <= 0.0):
+            raise PrimitiveError(f"{name}: crown widths must be positive")
+        if float(c.min() / c.sum()) < MIN_PANEL_FRACTION:
+            raise PrimitiveError(f"{name}: a panel is narrower than one degree at the crown")
+    offset = getattr(primitive, "crown_offset", None)
+    if offset is not None and not math.isfinite(offset):
+        raise PrimitiveError(f"{name}: the crown seam turn must be a number")
+    shift = float(getattr(primitive, "cap_shift", 0.0))
+    if not math.isfinite(shift) or shift < 0.0:
+        raise PrimitiveError(f"{name}: the cap shift must be a distance of 0 or more")
+    if shift > 0.0 and not primitive.closed_tip:
+        raise PrimitiveError(f"{name}: only a cap can be moved off the tip (set a cap first)")
+    if not math.isfinite(float(getattr(primitive, "cap_direction", 0.0))):
+        raise PrimitiveError(f"{name}: the cap direction must be a number")
     if primitive.splits:
         if len(primitive.splits) >= len(TIER_LETTERS):
             raise PrimitiveError(f"{name}: at most {len(TIER_LETTERS) - 1} horizontal splits")
@@ -835,7 +899,7 @@ def _check_layout(primitive: Primitive) -> None:
             )
 
 
-def seam_angles(primitive: Primitive) -> FloatArray:
+def seam_angles(primitive: Primitive | _CrownLayout) -> FloatArray:
     r"""Angles of the seams round the axis, rad: ``pieces + 1`` values, the last one a
     turn after the first.
 
@@ -855,6 +919,50 @@ def seam_angles(primitive: Primitive) -> FloatArray:
     turn[-1] = 2.0 * math.pi
     out = offset - 0.5 * turn[1] + turn
     return out
+
+
+def crown_seam_angles(primitive: Primitive) -> FloatArray:
+    r"""Angles where the seams meet the crown (the cap or the tip), rad: ``pieces + 1``
+    values, as :func:`seam_angles` for the crown's turn and widths (``crown_offset``,
+    ``crown_widths``; each as at the rim when unset), and on the branch nearest the rim's
+    angles: :math:`\phi^c_0 - \phi_0 \in (-\pi, \pi]`.
+    """
+    offset = getattr(primitive, "crown_offset", None)
+    widths = getattr(primitive, "crown_widths", ())
+    rim = seam_angles(primitive)
+    if offset is None and not widths:
+        return rim
+    crown = seam_angles(
+        _CrownLayout(
+            primitive.pieces,
+            primitive.seam_offset if offset is None else float(offset),
+            tuple(widths) or tuple(primitive.panel_widths),
+        )
+    )
+    shift = float(rim[0] - crown[0])
+    crown = crown + 2.0 * math.pi * round(shift / (2.0 * math.pi))
+    return crown
+
+
+@dataclass(frozen=True)
+class _CrownLayout:
+    """The crown's pieces, turn and widths, for :func:`seam_angles`."""
+
+    pieces: int
+    seam_offset: float
+    panel_widths: tuple[float, ...]
+
+
+def twisted(primitive: Primitive) -> bool:
+    """True when the seams meet the crown at other angles than they leave the rim."""
+    if isinstance(primitive, FreeformShape):
+        return False
+    return bool(np.any(np.abs(crown_seam_angles(primitive) - seam_angles(primitive)) > 1e-12))
+
+
+def cap_moved(primitive: Primitive) -> bool:
+    """True when the cap is moved off the tip (``cap_shift`` > 0)."""
+    return float(getattr(primitive, "cap_shift", 0.0)) > 0.0
 
 
 def split_heights(primitive: Primitive, total: float) -> FloatArray:
@@ -1237,17 +1345,200 @@ class _Skin:
         self.primitive = primitive
         self.surface = surface
         self.base, self.axis, self.b1, self.b2 = base, axis, b1, b2
-        rho, zeta = primitive.meridian()
+        moved = cap_moved(primitive)
+        # A moved cap trims the whole (pointed) skin with its plane: the meridian runs on
+        # to the tip; ``total`` stays the centred cap's ring (the splits' 100 %).
+        source = (
+            dataclasses.replace(primitive, cap_radius=0.0)  # type: ignore[arg-type]
+            if moved
+            else primitive
+        )
+        rho, zeta = source.meridian()
         sigma = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(rho), np.diff(zeta)))])
         self.rho_m, self.zeta_m, self.sigma = rho, zeta, sigma
         self.total = float(sigma[-1])
+        self.total_full = self.total
+        if moved:
+            r_c, z_c = primitive.meridian()
+            self.total = float(np.sum(np.hypot(np.diff(r_c), np.diff(z_c))))
         tangent = np.array([rho[1] - rho[0], zeta[1] - zeta[0]])
         tangent /= np.linalg.norm(tangent)
         # A profile flaring outward at its base would run into the axis if continued
         # backwards; its wall drops straight down the axis instead.
         self.base_tangent = tangent if tangent[0] <= 0.0 else np.array([0.0, 1.0])
         self.phi = np.linspace(0.0, 2.0 * math.pi, samples, endpoint=False)
+        #: Seam turn from the rim to the crown (module docstring, *Crown*), set below.
+        self._twist: tuple[FloatArray, FloatArray, float, float] | None = None
+        #: The moved cap: its plane (point, normal) and the top of the skin on every
+        #: meridian (physical angles ``phi``, path positions), set below.
+        self._cap: tuple[FloatArray, FloatArray, FloatArray] | None = None
         self.u0 = self._footprint(self.phi)
+        if moved:
+            self._cap = self._cap_section(primitive)
+        if twisted(primitive):
+            rim = seam_angles(primitive)
+            delta = crown_seam_angles(primitive) - rim
+            u_start = float(self.u0.max())
+            u_end = self.top_min()
+            if u_end - u_start < 0.1 * self.total:
+                raise PrimitiveError(
+                    f"{primitive.name}: too little skin above the footprint to turn the seams "
+                    "to the crown angles; keep the crown seams as at the rim, or raise the shape"
+                )
+            self._twist = (rim[:-1], delta[:-1], u_start, u_end)
+
+    # -- crown: seam turn and moved cap -------------------------------------------------
+
+    def _ramp(self, u: FloatArray) -> FloatArray:
+        r"""How far the seams have turned at path position ``u``: :math:`g = f^2(3 - 2f)`,
+        :math:`f` the position between the highest footprint point (0) and the lowest
+        top of the skin (1); 0 below, 1 above."""
+        assert self._twist is not None
+        _, _, lo, hi = self._twist
+        f = np.clip((np.asarray(u, float) - lo) / (hi - lo), 0.0, 1.0)
+        out: FloatArray = f * f * (3.0 - 2.0 * f)
+        return out
+
+    def phys(self, u: FloatArray, psi: FloatArray) -> FloatArray:
+        r"""Angle round the axis (rad) of seam coordinate ``psi`` at path position ``u``:
+        :math:`\phi = \psi + \delta(\psi)\,g(u)`, with :math:`\delta` the crown angle minus
+        the rim angle, linear between the seams (so the seams of the pieces are the
+        lines :math:`\psi` = const, each turning from its rim to its crown angle)."""
+        psi = np.asarray(psi, float)
+        if self._twist is None:
+            return psi
+        rim, delta, _, _ = self._twist
+        d = np.interp(psi, rim, delta, period=2.0 * math.pi)
+        out: FloatArray = psi + d * self._ramp(u)
+        return out
+
+    def crown_phys(self, psi: FloatArray) -> FloatArray:
+        """Angle round the axis (rad) where seam coordinate ``psi`` meets the top."""
+        psi = np.asarray(psi, float)
+        if self._twist is None:
+            return psi
+        rim, delta, _, _ = self._twist
+        out: FloatArray = psi + np.interp(psi, rim, delta, period=2.0 * math.pi)
+        return out
+
+    def top_at(self, psi: FloatArray) -> FloatArray:
+        """Path position of the top of the skin (the cap's edge or the tip) on seam
+        coordinate ``psi``, m."""
+        psi = np.asarray(psi, float)
+        if self._cap is None:
+            return np.full(np.shape(psi), self.total)
+        _, _, top = self._cap
+        out: FloatArray = np.interp(
+            np.mod(self.crown_phys(psi), 2.0 * math.pi), self.phi, top, period=2.0 * math.pi
+        )
+        return out
+
+    def top_min(self) -> float:
+        """Lowest path position of the top of the skin, m."""
+        return self.total if self._cap is None else float(self._cap[2].min())
+
+    def _normal(self, u: float, phi: float) -> FloatArray:
+        h = 1e-6 * max(self.total_full, 1e-3)
+        du = (
+            self.at_u(np.array([u + h]), np.array([phi]))[0]
+            - self.at_u(np.array([u - h]), np.array([phi]))[0]
+        )
+        dp = (
+            self.at_u(np.array([u]), np.array([phi + 1e-6]))[0]
+            - self.at_u(np.array([u]), np.array([phi - 1e-6]))[0]
+        )
+        n = np.cross(dp, du)
+        out: FloatArray = n / np.linalg.norm(n)
+        return out
+
+    def _cap_section(
+        self, primitive: RevolvedPrimitive
+    ) -> tuple[FloatArray, FloatArray, FloatArray]:
+        r"""The moved cap's plane and where it cuts every meridian.
+
+        The cap's centre :math:`\mathbf{P}` is the skin point ``cap_shift`` down the
+        meridian ``cap_direction`` from the tip; its plane is square to the skin's normal
+        :math:`\mathbf{n}` there, a depth :math:`d` (the centred cap's, from the tip to its
+        plane along the axis) below it: :math:`(\mathbf{x} - \mathbf{P})\cdot\mathbf{n} = -d`.
+        On every meridian the top of the skin is the plane's crossing nearest the tip.
+        """
+        name = primitive.name
+        shift = float(getattr(primitive, "cap_shift", 0.0))
+        if shift >= self.total_full:
+            raise PrimitiveError(f"{name}: the cap is moved further than the skin is long")
+        u_p = self.total_full - shift
+        phi_p = float(getattr(primitive, "cap_direction", 0.0))
+        point = self.at_u(np.array([u_p]), np.array([phi_p]))[0]
+        normal = self._normal(u_p, phi_p)
+        if float(normal @ self.axis) <= 0.0:
+            normal = -normal
+        depth = float(self.zeta_m[-1] - np.interp(self.total, self.sigma, self.zeta_m))
+        origin = point - depth * normal
+        u = np.linspace(float(self.u0.max()), self.total_full, 801)
+        uu, pp = np.meshgrid(u, self.phi)
+        f = ((self.at_u(uu, pp) - origin) @ normal).reshape(uu.shape)
+        if np.any(f[:, -1] <= 0.0):
+            raise PrimitiveError(
+                f"{name}: the moved cap no longer covers the tip; move it less or make it "
+                "larger (the panels must meet round it)"
+            )
+        if np.any(f[:, 0] >= 0.0):
+            raise PrimitiveError(f"{name}: the moved cap reaches the footprint; move it less")
+        below = f < 0.0
+        last = below.shape[1] - 1 - np.argmax(below[:, ::-1], axis=1)
+        lo, hi = u[last], u[last + 1]
+        while float(np.max(hi - lo)) > ROOT_TOLERANCE:
+            mid = 0.5 * (lo + hi)
+            out = ((self.at_u(mid, self.phi) - origin) @ normal) >= 0.0
+            hi = np.where(out, mid, hi)
+            lo = np.where(out, lo, mid)
+        return origin, normal, 0.5 * (lo + hi)
+
+    def cap_frame(self) -> tuple[FloatArray, FloatArray, FloatArray, FloatArray]:
+        """The cap's plane: its centre, two directions in it and its normal (outward), m.
+        A centred cap lies square to the axis, its directions ``b1``, ``b2``."""
+        if self._cap is None:
+            origin = self.base + float(np.interp(self.total, self.sigma, self.zeta_m)) * self.axis
+            return origin, self.b1, self.b2, self.axis
+        origin, normal, _ = self._cap
+        e1 = self.b1 - (self.b1 @ normal) * normal
+        e1 = e1 / np.linalg.norm(e1)
+        return origin, e1, np.cross(normal, e1), normal
+
+    def cap_xy(self, points: FloatArray) -> FloatArray:
+        """Points on the cap's plane in its own coordinates, m (the flat cap piece)."""
+        origin, e1, e2, _ = self.cap_frame()
+        rel = np.asarray(points, float) - origin
+        return np.column_stack([rel @ e1, rel @ e2])
+
+    def cap_rise(self, xy: FloatArray) -> FloatArray:
+        """Height of the whole (pointed) skin above the moved cap's plane at plane points
+        ``xy`` inside the cap, m: where a node of the cap starts before the solve."""
+        origin, e1, e2, n = self.cap_frame()
+        q = origin + np.outer(xy[:, 0], e1) + np.outer(xy[:, 1], e2)
+        # The top of the meridian, from the cap ring on (zeta increasing to the tip).
+        start = int(np.searchsorted(self.sigma, self.top_min() * 0.98))
+        z_top, r_top = self.zeta_m[start:], self.rho_m[start:]
+        order = np.argsort(z_top)
+
+        def inside(h: FloatArray) -> FloatArray:
+            p = q + h[:, None] * n
+            rel = p - self.base
+            z = rel @ self.axis
+            r = np.linalg.norm(rel - np.outer(z, self.axis), axis=1)
+            surf = np.interp(z, z_top[order], r_top[order], right=0.0)
+            out: FloatArray = surf - r
+            return out
+
+        lo = np.zeros(len(q))
+        hi = np.full(len(q), self.total_full)
+        for _ in range(60):
+            mid = 0.5 * (lo + hi)
+            ok = inside(mid) > 0.0
+            lo = np.where(ok, mid, lo)
+            hi = np.where(ok, hi, mid)
+        out: FloatArray = 0.5 * (lo + hi)
+        return out
 
     # Path along one skin meridian: u < 0 on the continuation below the base circle.
     def _rz(self, u: FloatArray) -> tuple[FloatArray, FloatArray]:
@@ -1261,10 +1552,11 @@ class _Skin:
         return rho, zeta
 
     def at_u(self, u: FloatArray, phi: FloatArray) -> FloatArray:
-        """3D points at path positions ``u`` (m) on meridians ``phi`` (rad)."""
+        """3D points at path positions ``u`` (m) on seam coordinates ``phi`` (rad; the
+        angle round the axis, turned towards the crown when the seams turn)."""
         u, phi = np.broadcast_arrays(np.asarray(u, float), np.asarray(phi, float))
         rho, zeta = self._rz(u.ravel())
-        ph = phi.ravel()
+        ph = phi.ravel() if self._twist is None else self.phys(u.ravel(), phi.ravel())
         radial = np.cos(ph)[:, None] * self.b1 + np.sin(ph)[:, None] * self.b2
         out: FloatArray = self.base + rho[:, None] * radial + zeta[:, None] * self.axis
         return out
@@ -1312,7 +1604,8 @@ class _Skin:
     def u_of(self, t: FloatArray, phi: FloatArray) -> FloatArray:
         """Path position of skin parameter ``t`` in [0, 1] on meridians ``phi``, m."""
         u0 = self.u0_at(phi)
-        out: FloatArray = u0 + np.asarray(t, float) * (self.total - u0)
+        top = self.total if self._cap is None else self.top_at(phi)
+        out: FloatArray = u0 + np.asarray(t, float) * (top - u0)
         return out
 
     def at(self, t: FloatArray, phi: FloatArray) -> FloatArray:
@@ -1342,6 +1635,8 @@ class _Band:
     def __init__(self, skin: _Skin, u_lo: float | None, u_hi: float, tier: int) -> None:
         self.skin = skin
         self.u_lo, self.u_hi, self.tier = u_lo, u_hi, tier
+        #: The top band of a skin with a moved cap ends on the cap's edge, not a circle.
+        self.to_top = skin._cap is not None and u_hi >= skin.total
 
     def u0_at(self, phi: FloatArray) -> FloatArray:
         """Path position of the lower edge on meridians ``phi`` (rad), m."""
@@ -1350,16 +1645,20 @@ class _Band:
         out: FloatArray = np.full(np.shape(phi), self.u_lo)
         return out
 
+    def hi_at(self, phi: FloatArray) -> FloatArray | float:
+        """Path position of the upper edge on meridians ``phi``, m."""
+        return self.skin.top_at(phi) if self.to_top else self.u_hi
+
     def u_of(self, t: FloatArray, phi: FloatArray) -> FloatArray:
         """Path position of band parameter ``t`` in [0, 1] on meridians ``phi``, m."""
         u0 = self.u0_at(phi)
-        out: FloatArray = u0 + np.asarray(t, float) * (self.u_hi - u0)
+        out: FloatArray = u0 + np.asarray(t, float) * (self.hi_at(phi) - u0)
         return out
 
     def t_of(self, u: FloatArray, phi: FloatArray) -> FloatArray:
         """Band parameter of path positions ``u`` (m) on meridians ``phi``."""
         u0 = self.u0_at(phi)
-        out: FloatArray = (np.asarray(u, float) - u0) / (self.u_hi - u0)
+        out: FloatArray = (np.asarray(u, float) - u0) / (self.hi_at(phi) - u0)
         return out
 
     def at(self, t: FloatArray, phi: FloatArray) -> FloatArray:
@@ -1392,6 +1691,15 @@ class _Piece:
 
     def inverse(self, xy: FloatArray) -> tuple[FloatArray, FloatArray]:
         raise NotImplementedError
+
+
+def _newton_step(jac: FloatArray, f: FloatArray) -> FloatArray:
+    """Newton step for ``jac @ step = f`` (least squares when the Jacobian is singular)."""
+    try:
+        out: FloatArray = np.linalg.solve(jac, f)
+    except np.linalg.LinAlgError:
+        out = np.linalg.lstsq(jac, f, rcond=None)[0]
+    return out
 
 
 class _GorePiece(_Piece):
@@ -1439,7 +1747,11 @@ class _GorePiece(_Piece):
         :math:`x' = x + \kappa y,\ y' = (1 + \alpha) y`: the shear lengthens one edge and
         shortens the other (area unchanged), the stretch changes both. The rim stays on
         :math:`y = 0` and the apex stays one point. :math:`\alpha, \kappa` are found by
-        Newton iteration on the two edge lengths.
+        Newton iteration on the two edge lengths. Where the seams do not close in on
+        each other (a band of a gore whose seams turn towards the crown, ADR-0049) the
+        shear lengthens both alike; one side is then stretched more than the other,
+        :math:`y' = (1 + \alpha + \gamma x / X)\,y` (:math:`X` the half width), solved
+        with :math:`\kappa` by least-norm Gauss-Newton steps.
         """
         x, y = self.classic[..., 0], self.classic[..., 1]
 
@@ -1461,9 +1773,38 @@ class _GorePiece(_Piece):
                     for h in (np.array([1e-7, 0.0]), np.array([0.0, 1e-7]))
                 ]
             )
-            c = c - np.linalg.solve(jac, f)
-        self.stretch = (float(c[0]), float(c[1]))
-        self._set(warp(c))
+            c = c - _newton_step(jac, f)
+        if float(np.abs(lengths(c)).max()) <= 1e-6:
+            self.stretch = (float(c[0]), float(c[1]))
+            self._set(warp(c))
+            return
+        # Seams that do not close in on each other (a band of a gore whose seams turn
+        # towards the crown) are not told apart by the shear: one side is then lengthened
+        # more than the other, y' = y (1 + alpha + gamma x / X).
+        width = max(float(np.abs(x).max()), 1e-9)
+
+        def keystone(c: FloatArray) -> FloatArray:
+            return np.stack([x + c[1] * y, y * (1.0 + c[0] + c[2] * x / width)], axis=2)
+
+        def lengths3(c: FloatArray) -> FloatArray:
+            w = keystone(c)
+            return np.array([_length(w[:, 0]), _length(w[:, -1])]) - (left, right)
+
+        c3 = np.zeros(3)
+        for _ in range(40):
+            f = lengths3(c3)
+            if float(np.abs(f).max()) < 1e-10:
+                break
+            jac = np.column_stack([(lengths3(c3 + h) - f) / 1e-7 for h in np.eye(3) * 1e-7])
+            c3 = c3 - np.linalg.lstsq(jac, f, rcond=None)[0]
+        if float(np.abs(lengths3(c3)).max()) > 1e-6:
+            raise PrimitiveError(
+                "a gore cannot be laid flat with its true seam lengths; the seams turn too "
+                "sharply towards the crown (keep the crown layout closer to the rim's, or "
+                "add gores)"
+            )
+        self.stretch = (float(c3[0]), float(c3[1]))
+        self._set(keystone(c3))
 
     def flat(self, t: FloatArray, phi: FloatArray) -> FloatArray:
         t, phi = np.broadcast_arrays(np.asarray(t, float), np.asarray(phi, float))
@@ -1478,6 +1819,101 @@ class _GorePiece(_Piece):
         if bad.any():
             val[bad] = NearestNDInterpolator(self._pts, self._params)(xy[bad])
         return val[:, 0], val[:, 1]
+
+
+class _ClippedGore(_Piece):
+    """A gore of the top tier under a moved cap: developed as a classic gore (rows on the
+    skin's parallels) up to the highest point of its cap edge, and cut along that edge.
+
+    The cap's edge crosses the gore on a slant; laying the band's own rows (which end on
+    that slanted edge) straight across, as :class:`_GorePiece` does, would misplace the
+    cloth near the cap, so the rows are the parallels :math:`u` = const instead and the
+    cap's edge is drawn on the developed gore where it lies.
+    """
+
+    def __init__(self, band: _Band, phi_a: float, phi_b: float) -> None:
+        super().__init__(band, phi_a, phi_b)
+        ph = np.linspace(phi_a, phi_b, 97)
+        u_max = float(np.max(band.skin.top_at(ph)))
+        self.inner_band = _Band(band.skin, band.u_lo, u_max, band.tier)
+        self.inner_band.to_top = False
+        self.inner = _GorePiece(self.inner_band, phi_a, phi_b)
+        # Both sides of every skin seam laid at the seam's true 3D length, to the cap.
+        t = np.linspace(0.0, 1.0, 241)
+        self.seam_3d = tuple(_length(band.at(t, np.full(len(t), p))) for p in (phi_a, phi_b))
+        self.stretch = self.inner.stretch
+
+    def _inner_t(self, t: FloatArray, phi: FloatArray) -> FloatArray:
+        u = self.skin.u_of(t, phi)
+        out: FloatArray = self.inner_band.t_of(u, phi)
+        return out
+
+    def equalise(self, left: float, right: float) -> None:
+        r"""Shear, stretch and widen the developed gore so that its seam edges, up to the
+        cap's edge, and that edge itself have their true 3D lengths (m).
+
+        :math:`x' = x\,(1 + \beta (y/Y)^2) + \kappa y,\ y' = (1 + \alpha + \gamma x/X)\,y`
+        (:math:`X, Y` the gore's developed half width and height): :math:`\alpha, \kappa,
+        \gamma` as in :meth:`_GorePiece.equalise`; :math:`\beta` widens the gore towards the
+        cap, where the slanted cap edge runs across it, so that edge is as long as the
+        flat cap's edge it is sewn to. Gauss-Newton iteration (least-norm steps) on the
+        three lengths.
+        """
+        inner = self.inner
+        x, y = inner.classic[..., 0], inner.classic[..., 1]
+        height = max(float(y.max()), 1e-9)
+        n = 241
+        t = np.linspace(0.0, 1.0, n)
+        ph = np.linspace(self.phi_a, self.phi_b, n)
+        top_3d = _length(self.skin.at(np.ones(n), ph))
+        target = np.array([left, right, top_3d])
+
+        width = max(float(np.abs(x).max()), 1e-9)
+
+        def warp(c: FloatArray) -> FloatArray:
+            return np.stack(
+                [
+                    x * (1.0 + c[2] * (y / height) ** 2) + c[1] * y,
+                    y * (1.0 + c[0] + c[3] * x / width),
+                ],
+                axis=2,
+            )
+
+        def lengths(c: FloatArray) -> FloatArray:
+            inner._set(warp(c))
+            got = [
+                _length(self.flat(t, np.full(n, self.phi_a))),
+                _length(self.flat(t, np.full(n, self.phi_b))),
+                _length(self.flat(np.ones(n), ph)),
+            ]
+            out: FloatArray = np.array(got) - target
+            return out
+
+        c = np.zeros(4)
+        for _ in range(40):
+            f = lengths(c)
+            if float(np.abs(f).max()) < 1e-9:
+                break
+            jac = np.column_stack([(lengths(c + h) - f) / 1e-7 for h in np.eye(4) * 1e-7])
+            c = c - np.linalg.lstsq(jac, f, rcond=None)[0]
+        if float(np.abs(lengths(c)).max()) > 1e-6:
+            raise PrimitiveError(
+                "a gore under the moved cap cannot be laid flat with its true seam and cap "
+                "edge lengths; move the cap less"
+            )
+        inner._set(warp(c))
+        inner.stretch = (float(c[0]), float(c[1]))
+        self.stretch = inner.stretch
+        self.widening = float(c[2])
+
+    def flat(self, t: FloatArray, phi: FloatArray) -> FloatArray:
+        t, phi = np.broadcast_arrays(np.asarray(t, float), np.asarray(phi, float))
+        return self.inner.flat(self._inner_t(t.ravel(), phi.ravel()), phi.ravel())
+
+    def inverse(self, xy: FloatArray) -> tuple[FloatArray, FloatArray]:
+        ti, phi = self.inner.inverse(xy)
+        u = self.inner_band.u_of(ti, phi)
+        return np.clip(self.skin.t_of(u, phi), 0.0, 1.0), phi
 
 
 class _ConePiece(_Piece):
@@ -1545,7 +1981,10 @@ def _seams(primitive: Primitive) -> FloatArray:
 
 
 def _developable(primitive: Primitive) -> bool:
-    """True for a straight frustum (a tube, or a revolved profile of one segment)."""
+    """True for a straight frustum (a tube, or a revolved profile of one segment) whose
+    seams run straight up it (not turned towards other crown angles)."""
+    if twisted(primitive) or cap_moved(primitive):
+        return False
     if isinstance(primitive, Tube):
         return True
     if isinstance(primitive, Revolved) and len(primitive.profile) == 2:
@@ -1564,7 +2003,12 @@ def _pieces(skin: _Skin, primitive: RevolvedPrimitive) -> list[_Piece]:
         if _developable(primitive):
             tier = [_ConePiece(band, float(a), float(b)) for a, b in pairs]
         else:
-            gores = [_GorePiece(band, float(a), float(b)) for a, b in pairs]
+            gores: list[_GorePiece | _ClippedGore] = [
+                _ClippedGore(band, float(a), float(b))
+                if band.to_top
+                else _GorePiece(band, float(a), float(b))
+                for a, b in pairs
+            ]
             # Both sides of every skin seam are laid at the seam's true 3D length.
             for g in gores:
                 g.equalise(*g.seam_3d)
@@ -2038,7 +2482,27 @@ def design_primitive(
                 index=piece.index,
             )
         )
-    if primitive.closed_tip:
+    if primitive.closed_tip and (twisted(primitive) or cap_moved(primitive)):
+        # The cap's edge where the pieces end, laid flat in its plane (the cap is flat).
+        seams = _seams(primitive)
+        top = pieces[-1].skin
+        ang = seams[0] + np.linspace(0.0, 2.0 * math.pi, 384, endpoint=False)
+        disc = skin.cap_xy(top.at(np.ones(len(ang)), ang))
+        ends = skin.cap_xy(top.at(np.ones(len(seams) - 1), seams[:-1]))
+        cut.append(
+            CutPiece(
+                label=f"{primitive.name}-TIP",
+                finished=disc,
+                cut=offset_polygon(disc, seam_allowance) if seam_allowance > 0 else disc,
+                rim=None,
+                edges={"top": np.vstack([disc, disc[:1]])},
+                surface_area=polygon_area(disc),
+                seam_points=tuple((float(x), float(y)) for x, y in ends),
+                role="tip",
+                tier=len(pieces) // primitive.pieces - 1,
+            )
+        )
+    elif primitive.closed_tip:
         ang = np.linspace(0.0, 2.0 * math.pi, 192, endpoint=False)
         disc = primitive.tip_radius * np.column_stack([np.cos(ang), np.sin(ang)])
         cut.append(
@@ -2155,7 +2619,13 @@ def _check_splits(primitive: RevolvedPrimitive, skin: _Skin) -> None:
     footprint all round (it would cut the rim)."""
     if not primitive.splits:
         return
-    lowest = float(split_heights(primitive, skin.total)[0])
+    heights = split_heights(primitive, skin.total)
+    if float(heights[-1]) >= skin.top_min() - MIN_SPLIT_GAP * skin.total:
+        raise PrimitiveError(
+            f"{primitive.name}: the highest horizontal split reaches the moved cap; lower it "
+            "or move the cap less"
+        )
+    lowest = float(heights[0])
     top = float(np.max(skin.u0))
     if lowest <= top + MIN_SPLIT_GAP * skin.total:
         need = (top / skin.total + MIN_SPLIT_GAP) if skin.total > 0 else 1.0
@@ -2250,10 +2720,11 @@ def _checks(design: PrimitiveDesign, pieces: list[_Piece], tol: float) -> list[D
         if m == 1:  # a single tube panel is sewn to itself along one seam
             c = design.pieces[i]
             worst_pair = max(worst_pair, abs(_length(c.edges["right"]) - _length(c.edges["left"])))
-    if p.closed_tip and isinstance(p, FreeformShape):
+    if p.closed_tip and (isinstance(p, FreeformShape) or twisted(p) or cap_moved(p)):
         # The panel tops are sewn round the cap's edge.
-        tops = sum(_length(c.edges["top"]) for c in design.pieces[:m])
-        edge = _length(design.pieces[m].edges["top"])
+        skin_pieces = [c for c in design.pieces if c.role != "tip"]
+        tops = sum(_length(c.edges["top"]) for c in skin_pieces[-m:])
+        edge = _length(next(c for c in design.pieces if c.role == "tip").edges["top"])
         check(
             "cap seam match",
             abs(tops - edge),
@@ -2762,21 +3233,40 @@ class _SkinFactory:
             ids = np.array([keys[("split", i, q)] for q in range(len(phi_s))], dtype=np.int64)
             seam_edges[f"{prim.name}:split {i + 1}"] = np.column_stack([ids, np.roll(ids, -1)])
         if closed:
-            disc = prim.tip_radius * np.column_stack([np.cos(tip_phi), np.sin(tip_phi)])
+            crown = twisted(prim) or cap_moved(prim)
+            if crown:
+                # The cap's edge where the pieces end, in the cap's flat plane.
+                disc = skin.cap_xy(bands[-1].at(np.ones(len(tip_phi)), tip_phi))
+            else:
+                disc = prim.tip_radius * np.column_stack([np.cos(tip_phi), np.sin(tip_phi)])
             xy, tri = _mesh_disc(disc, size)
             _, hit = cKDTree(xy).query(disc)
             local = np.full(len(xy), -1, dtype=np.int64)
             for q, h in enumerate(hit):
                 local[h] = node(("tip", q), bands[-1], 1.0, float(tip_phi[q]))
             free = np.flatnonzero(local < 0)
-            centre = design.base_point + prim.tip_height * design.axis
             local[free] = len(positions) + np.arange(len(free))
-            positions.extend(
-                centre
-                + np.outer(xy[free, 0], design.b1)
-                + np.outer(xy[free, 1], design.b2)
-                + np.outer(_cap_rise(prim, np.hypot(xy[free, 0], xy[free, 1])), design.axis)
-            )
+            if crown:
+                origin, e1, e2, normal = skin.cap_frame()
+                rise = (
+                    skin.cap_rise(xy[free])
+                    if cap_moved(prim)
+                    else _cap_rise(prim, np.hypot(xy[free, 0], xy[free, 1]))
+                )
+                positions.extend(
+                    origin
+                    + np.outer(xy[free, 0], e1)
+                    + np.outer(xy[free, 1], e2)
+                    + np.outer(rise, normal)
+                )
+            else:
+                centre = design.base_point + prim.tip_height * design.axis
+                positions.extend(
+                    centre
+                    + np.outer(xy[free, 0], design.b1)
+                    + np.outer(xy[free, 1], design.b2)
+                    + np.outer(_cap_rise(prim, np.hypot(xy[free, 0], xy[free, 1])), design.axis)
+                )
             tris.append(local[tri])
             rests.append(xy[tri])
             grains.append(np.tile([1.0, 0.0], (len(tri), 1)))
