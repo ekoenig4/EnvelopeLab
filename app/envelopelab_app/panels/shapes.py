@@ -101,6 +101,7 @@ from envelopelab_app.placement_view import (
     PlacementView,
 )
 from envelopelab_app.refresh import Refresher
+from envelopelab_app.view_tools import FitButton
 
 FAIL_COLOR = "#b00020"
 WARN_COLOR = "#8a6d3b"
@@ -284,7 +285,10 @@ class PiecePreview(QWidget):
         self.pan = QPointF(0.0, 0.0)
         self._drag: QPointF | None = None
         self.setMinimumHeight(160)
-        self.setToolTip("Mouse wheel: zoom; drag: pan; double click: fit all pieces")
+        self.setToolTip(
+            "Mouse wheel: zoom; drag (any button): pan; double click or Fit: all pieces"
+        )
+        self.fit_button = FitButton(self, self.reset_view, "Show every piece again")
 
     def set_pieces(
         self,
@@ -359,7 +363,11 @@ class PiecePreview(QWidget):
         event.accept()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
-        if event.button() == Qt.MouseButton.LeftButton:
+        if event.button() in (
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.MiddleButton,
+            Qt.MouseButton.RightButton,
+        ):
             self._drag = event.position()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)

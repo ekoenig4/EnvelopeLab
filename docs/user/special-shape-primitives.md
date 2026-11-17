@@ -57,7 +57,8 @@ in the editor next to them, and you can move the selected shape on either:
   numbers along the top and row letters down the side; hover for the gore, row and tape
   position under the pointer. **Click** a shape to select it; **drag** it to move it
   (one undo step: a grouped shape takes its group, a mirror twin its original). The
-  wheel zooms, the right button pans, a double click fits the map.
+  wheel zooms; **drag empty space** (or drag with the middle or right button) to pan;
+  **Fit** in the corner, or a double click, shows the whole map again.
 
 1. **Add shape** ▸ **Dome**, **Tube** or **Revolved profile** adds a shape sized from your
    envelope on gore 1, about halfway up the tape. **Import mesh (OBJ/STL/PLY)…** adds a
@@ -106,7 +107,8 @@ in the editor next to them, and you can move the selected shape on either:
    **being placed…** until it is done (usually under a second). The right-hand column then
    shows the **Cut pieces**: a drawing of every piece, named under it (finished line
    solid, cut line dashed, the rim sewn to the envelope in red; the mouse wheel zooms,
-   dragging pans, a double click fits them all again), and a table of their sizes and
+   dragging with any button pans, **Fit** or a double click shows them all again), and a
+   table of their sizes and
    areas; the **Envelope panels** the shape is sewn on; the **Checks** of the pattern;
    and the **Attachment** lines on each envelope panel.
 
@@ -132,8 +134,9 @@ in the editor next to them, and you can move the selected shape on either:
    marking sheets: the footprint line the shape's rim is sewn on, with short ticks on the
    shape's side; the numbered match marks, each naming the skin piece with the same
    number; and every feed hole, cut (dashed) and finished (solid), with its sizes. It opens
-   zoomed on the marked area; a double click switches to the whole panels and back, and
-   the mouse wheel zooms. Below it, each row says which of its gores are marked. Hover a
+   zoomed on the marked area; the mouse wheel zooms, dragging with any button pans at any
+   zoom, **Fit** goes back to the marked area, and a double click switches to the whole
+   panels and back. Below it, each row says which of its gores are marked. Hover a
    panel for the full sewing directions. While the patterns are STALE the panels are
    greyed and the tab says so. The **Patterns** view shows only the base envelope. The **3D View** shows the shape on the
    envelope as it is sewn: each gore or panel in the colour of the skin fabric (every

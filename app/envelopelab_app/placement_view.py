@@ -63,6 +63,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from envelopelab_app.view_tools import FitButton
+
 SELECTED = "#d6008f"
 OTHER = "#e98fc2"
 AXIS = "#00a087"
@@ -280,6 +282,11 @@ class GoreMapView(QWidget):
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setMinimumSize(220, 160)
         self.setObjectName("shapeGoreMap")
+        self.setToolTip(
+            "Click a shape: select it; drag it: move it. Drag empty space (or with the "
+            "middle or right button): pan; wheel: zoom; double click or Fit: whole map"
+        )
+        self.fit_button = FitButton(self, self.fit, "Show the whole gore map again")
 
     # The drawing's frame: metres to pixels.
     def scale(self) -> float:
@@ -410,7 +417,7 @@ class GoreMapView(QWidget):
         self.update()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
-        if event.button() == Qt.MouseButton.RightButton:
+        if event.button() in (Qt.MouseButton.RightButton, Qt.MouseButton.MiddleButton):
             self._pan_from = event.position()
             return
         if event.button() != Qt.MouseButton.LeftButton:
@@ -431,6 +438,7 @@ class GoreMapView(QWidget):
             return
         name = self.shape_at(event.position())
         if name is None:
+            self._pan_from = event.position()  # empty space: pan
             return
         if name != self.data.selected:
             self.shapeClicked.emit(name)
@@ -441,6 +449,7 @@ class GoreMapView(QWidget):
             self.pan += event.position() - self._pan_from
             self._pan_from = event.position()
             self.update()
+            return
         if self.axis_mode or self._axis_drag:
             g = self.gore_at(event.position())
             if g is not None:
@@ -458,7 +467,7 @@ class GoreMapView(QWidget):
                 self.setToolTip(f"gore {k + 1}, row {row}, {y:.2f} m up the tape from the mouth")
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
-        if event.button() == Qt.MouseButton.RightButton:
+        if self._pan_from is not None:
             self._pan_from = None
             return
         if event.button() == Qt.MouseButton.LeftButton and self._axis_drag:
@@ -1271,7 +1280,8 @@ class PlacementView(QWidget):
         caption = QLabel(
             "<b>3D</b> (drag: turn; drag a shape: move it; wheel: zoom; double click: face "
             "the selected shape) over the <b>gore map</b>, the gores side by side as cut "
-            "(click: select; drag: move; wheel: zoom; right drag: pan; double click: fit). "
+            "(click: select; drag: move; drag empty space: pan; wheel: zoom; double click or "
+            "Fit: whole map). "
             f"Selected shape <span style='color:{SELECTED}'>magenta</span>, symmetry axes "
             f"<span style='color:{AXIS}'>green</span>."
         )

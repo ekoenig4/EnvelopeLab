@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: the gore map of the Special shapes mode (On the balloon) could only be panned
+  with the right mouse button and had no visible way back to the whole map. Every 2D view
+  of the mode (gore map, envelope panels, cut pieces) now pans with a drag on empty space
+  or with the middle or right button, and has a **Fit** button (as well as the double
+  click); the envelope panels pan at any zoom.
 - Added: **Panel rows** and **Space equally** (Shape mode, Panels and print roll): divide
   every gore into any number of panel rows of equal length along the tape, in one
   undoable edit. Zones, half gores, row settings, turning vents and appliques follow the
