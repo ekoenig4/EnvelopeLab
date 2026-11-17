@@ -10,7 +10,9 @@ page narrower, and :func:`roll_advice` says which would work for the current des
   piece does not grow with :math:`N`; checked, not assumed: the result is re-checked);
 * **half gores**: each panel of the rows that do not fit is cut in two down the gore
   centreline (:func:`envelopelab.geometry.gore.half_panel`), about halving its width;
-* **more rows**: a panel that is still too wide must be split into shorter rows.
+* **more rows**: shorter panels can be turned so that their height lies across the roll;
+  the smallest number of equal rows at which every piece fits (with the gore count and
+  half gores as they are) is found by bisection, as for the gores.
 
 The advice is computed, never applied: the builder chooses (the gore count changes the
 balloon's look and every row's panels; half gores add a centre seam).
@@ -18,6 +20,8 @@ balloon's look and every row's panels; half gores add a centre seam).
 
 from __future__ import annotations
 
+import itertools
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -30,6 +34,8 @@ if TYPE_CHECKING:
 
 #: Largest gore count :func:`roll_advice` tries.
 MAX_GORES = 200
+#: Most equal panel rows :func:`roll_advice` tries.
+MAX_ROWS = 52
 
 
 @dataclass(frozen=True)
@@ -80,6 +86,11 @@ class RollAdvice:
     too_wide_halved : list of str
         Rows whose halves are still wider than the roll at the current gore count: they
         need more gores or splitting into shorter rows.
+    rows_needed : int or None
+        Smallest number of equal panel rows (up to :data:`MAX_ROWS`) at which every piece
+        fits, the gore count and half gores as they are; None when none does.
+    rows : int
+        The design's number of panel rows.
     """
 
     roll: float
@@ -88,6 +99,8 @@ class RollAdvice:
     gores_needed: int | None = None
     half_gores_rows: list[str] = field(default_factory=list)
     too_wide_halved: list[str] = field(default_factory=list)
+    rows_needed: int | None = None
+    rows: int = 0
 
     @property
     def oversize(self) -> list[PieceFit]:
@@ -119,7 +132,12 @@ class RollAdvice:
                 f"• Half gores for row {', '.join(self.half_gores_rows)}: each panel cut in "
                 "two down the centre."
             )
-        if self.too_wide_halved:
+        if self.rows_needed is not None:
+            lines.append(
+                f"• {self.rows_needed} equal panel rows or more (now {self.rows}): shorter "
+                "panels, turned across the roll."
+            )
+        if self.too_wide_halved and self.rows_needed is None:
             lines.append(
                 f"• Split row {', '.join(self.too_wide_halved)} into shorter rows (even its "
                 "halves are wider than the roll)."
@@ -161,6 +179,35 @@ def _with(
             for r in gores.panel_rows
         ]
     return design.model_copy(update={"gores": gores.model_copy(update=update)})
+
+
+def equal_rows(design: DesignDocument, count: int) -> DesignDocument:
+    """``design`` with its tape divided into ``count`` rows of equal length, lettered A, B,
+    ... (each takes the zone and half-gore cut of the old row at its middle; see
+    :func:`envelopelab.project.edits.set_row_count`, which also carries the annotations)."""
+    from envelopelab.design.model import PanelRow as RowSpec
+    from envelopelab.project.gore_design import design_profile
+
+    assert design.gores is not None
+    old = design.gores.panel_rows
+    length = float(design_profile(design).meridian_length)
+    step = math.floor(length / count * 1e4) / 1e4
+    heights = [step] * (count - 1) + [length - step * (count - 1)]
+    old_tops = list(itertools.accumulate(r.finished_height for r in old))
+    letters = [chr(ord("A") + i) for i in range(26)]
+    letters += [a + b for a in letters[:26] for b in letters[:26]]
+    rows = []
+    start = 0.0
+    for i, h in enumerate(heights):
+        mid = start + h / 2
+        parent = next((r for r, top in zip(old, old_tops, strict=True) if mid < top), old[-1])
+        rows.append(
+            RowSpec(
+                letter=letters[i], finished_height=h, zone=parent.zone, half_gore=parent.half_gore
+            )
+        )
+        start += h
+    return design.model_copy(update={"gores": design.gores.model_copy(update={"panel_rows": rows})})
 
 
 def _all_fit(design: DesignDocument, patterns: PatternSet, roll: float) -> bool:
@@ -211,6 +258,18 @@ def roll_advice(design: DesignDocument, patterns: PatternSet, roll: float) -> Ro
             else:
                 lo = mid
         needed = hi
+    rows_needed: int | None = None
+    if not any(r.bow_bottom is not None for r in design.gores.panel_rows) and _all_fit(
+        equal_rows(design, MAX_ROWS), patterns, roll
+    ):
+        lo, hi = 0, MAX_ROWS  # hi fits; 0 rows does not exist
+        while hi - lo > 1:
+            mid = (lo + hi) // 2
+            if _all_fit(equal_rows(design, mid), patterns, roll):
+                hi = mid
+            else:
+                lo = mid
+        rows_needed = hi
     oversize_rows = {p.row for p in advice.oversize}
     halved = _with(design, halves=oversize_rows)
     halved_fits = piece_fits(halved, patterns, roll)
@@ -224,4 +283,6 @@ def roll_advice(design: DesignDocument, patterns: PatternSet, roll: float) -> Ro
         if still
         else sorted(oversize_rows - {r.letter for r in design.gores.panel_rows if r.half_gore}),
         still,
+        rows_needed,
+        len(design.gores.panel_rows),
     )

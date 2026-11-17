@@ -1248,6 +1248,144 @@ def _next_letter(letters: Sequence[str]) -> str:
     raise ValueError("no free row letter")
 
 
+#: Most panel rows :func:`set_row_count` makes.
+MAX_ROWS = 52
+#: Row-level pattern settings a new row takes from the old row at its middle; the marks
+#: placed on a row (notches, tape paths, features, a manual outline) are not kept.
+ROW_SETTINGS = ("label_text", "grain_angle_deg", "zone", "seam_allowance")
+
+
+def row_letters(count: int) -> list[str]:
+    """Row letters from the mouth: A..Z, then AA, AB, ..."""
+    alphabet = [chr(ord("A") + i) for i in range(26)]
+    letters = [*alphabet, *(a + b for a in alphabet for b in alphabet)]
+    return letters[:count]
+
+
+def set_row_count(session: ProjectSession, count: int) -> bool:
+    r"""Divide every gore into ``count`` panel rows of equal length along the load tape.
+
+    Row :math:`k` (from 0, mouth first) runs from :math:`s = kL/n` to :math:`(k+1)L/n` on a
+    tape of length :math:`L` (heights stored to 0.1 mm, the top row taking the rounding).
+    The rows are lettered A, B, C ... from the mouth. What belonged to the old rows
+    follows by position along the tape:
+
+    * a new row takes the material zone, half-gore cut and row settings (label, grain,
+      seam allowance) of the old row at its middle;
+    * a turning vent covers the new rows over the old rows' stretch of seam, and a panel
+      zone (applique) the new rows over its old row (one zone per new row);
+    * crest-loft taper stations anchored to a row seam stay where they are, free;
+    * the marks placed on the old rows (notches, tape paths, feature marks, manual
+      outlines) are removed: their positions belong to the old panels. Undo restores them.
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit.
+    count : int
+        Number of panel rows, 1 to :data:`MAX_ROWS`.
+
+    Returns
+    -------
+    bool
+        Whether the design changed (False when it already has ``count`` equal rows).
+
+    Raises
+    ------
+    ValueError
+        For a count out of range, or a flat-chord design with measured seam bows (they
+        belong to the old seams: use the crest loft or straight seams first).
+    """
+    design = session.design
+    gores = design.gores
+    assert gores is not None
+    if not 1 <= int(count) <= MAX_ROWS:
+        raise ValueError(f"the number of panel rows must be between 1 and {MAX_ROWS}")
+    count = int(count)
+    if any(r.bow_bottom is not None for r in gores.panel_rows):
+        raise ValueError(
+            "the rows have measured seam bows, which belong to the old seams: use the crest "
+            "loft or straight seams first (Seam bows), then set the number of rows"
+        )
+    length = float(design_profile(design).meridian_length)
+    step = math.floor(length / count * 1e4) / 1e4
+    heights = [step] * (count - 1) + [length - step * (count - 1)]
+    old = gores.panel_rows
+    old_h = [r.finished_height for r in old]
+    old_h[-1] = length - sum(old_h[:-1])
+    old_edges = [0.0, *np.cumsum(old_h).tolist()]
+    new_edges = [0.0, *np.cumsum(heights).tolist()]
+    letters = row_letters(count)
+    if [r.letter for r in old] == letters and all(
+        abs(a - b) < 1e-4 for a, b in zip(old_h, heights, strict=True)
+    ):
+        return False
+
+    def old_at(s: float) -> int:
+        """Index of the old row over tape position ``s`` (m)."""
+        for j in range(len(old)):
+            if s < old_edges[j + 1]:
+                return j
+        return len(old) - 1
+
+    def new_over(lo: float, hi: float) -> list[str]:
+        """Letters of the new rows overlapping the stretch ``lo``..``hi`` of tape (m)."""
+        eps = 1e-6
+        return [
+            letters[i]
+            for i in range(count)
+            if new_edges[i] < hi - eps and new_edges[i + 1] > lo + eps
+        ]
+
+    source = [old_at(0.5 * (new_edges[i] + new_edges[i + 1])) for i in range(count)]
+    span = {r.letter: (old_edges[j], old_edges[j + 1]) for j, r in enumerate(old)}
+
+    def mutate(data: dict[str, Any], patterns: dict[str, Any]) -> None:
+        g = _gores(data)
+        old_rows = g["panel_rows"]
+        rows = []
+        for i, h in enumerate(heights):
+            parent = old_rows[source[i]]
+            row: dict[str, Any] = {"letter": letters[i], "finished_height": h}
+            if parent.get("zone") is not None:
+                row["zone"] = parent["zone"]
+            if parent.get("half_gore"):
+                row["half_gore"] = True
+            rows.append(row)
+        g["panel_rows"] = rows
+        old_patterns = patterns.get("rows", {})
+        new_patterns: dict[str, Any] = {}
+        for i, letter in enumerate(letters):
+            ann = old_patterns.get(old[source[i]].letter) or {}
+            kept = {k: ann[k] for k in ROW_SETTINGS if k in ann}
+            if kept:
+                new_patterns[letter] = kept
+        patterns["rows"] = new_patterns
+        for point in (g.get("crest_loft") or {}).get("taper") or []:
+            point["at_row"] = None  # stays at its station, free
+        zones = []
+        names = {z["name"] for z in g.get("panel_zones") or []}
+        for zone in g.get("panel_zones") or []:
+            targets = new_over(*span.get(zone["row"], (0.0, 0.0))) or [letters[0]]
+            for k, letter in enumerate(targets):
+                copy = dict(zone, row=letter)
+                if k:
+                    name = f"{zone['name']} {letter}"
+                    while name in names:
+                        name += "'"
+                    names.add(name)
+                    copy["name"] = name
+                zones.append(copy)
+        if g.get("panel_zones") is not None:
+            g["panel_zones"] = zones
+        for vent in data.get("turning_vents") or []:
+            stretch = [span[r] for r in vent.get("rows", []) if r in span]
+            if stretch:
+                vent["rows"] = new_over(min(a for a, _ in stretch), max(b for _, b in stretch))
+
+    return session.edit(f"Divide the gores into {count} equal panel rows", mutate)
+
+
 def set_half_gores(session: ProjectSession, letters: Sequence[str] | None, on: bool) -> bool:
     """Cut panel rows as half gores (two halves sewn down the gore centreline) or whole.
 

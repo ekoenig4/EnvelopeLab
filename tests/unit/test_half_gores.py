@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -228,4 +229,52 @@ def test_roll_advice_finds_the_fewest_gores_and_the_half_gores_that_fit() -> Non
     assert wide.fits and "fits" in wide.summary()
     # On a very narrow roll even the halves are too wide: shorter rows are advised.
     narrow = roll_advice(s.design, s.patterns, 0.9)
-    assert narrow.too_wide_halved and "Split row" in narrow.summary()
+    assert narrow.too_wide_halved and narrow.rows_needed is not None
+    assert f"{narrow.rows_needed} equal panel rows or more" in narrow.summary()
+
+
+def test_equal_rows_divide_the_tape_and_carry_what_belonged_to_the_old_rows() -> None:
+    from envelopelab.project.gore_design import design_profile
+    from envelopelab.rigging.defaults import turning_vent_pair
+
+    s = _session()
+    assert s.design.gores is not None
+    vents = [v.model_dump(mode="json", by_alias=True) for v in turning_vent_pair(s.design)]
+
+    def setup(data: dict[str, Any], patterns: dict[str, Any]) -> None:
+        g = data["gores"]
+        g["panel_rows"][0]["zone"] = data_zone = next(iter(data["zones"]))
+        g["panel_rows"][3]["half_gore"] = True
+        g["panel_zones"] = [{"name": "patch", "row": "B", "gores": [2], "zone": data_zone}]
+        data["turning_vents"] = [dict(v, rows=["C", "D"]) for v in vents]
+        patterns.setdefault("rows", {})["B"] = {
+            "grain_angle_deg": 5.0,
+            "notches": [{"edge": "left", "position": 0.5}],
+        }
+
+    assert s.edit("setup", setup)
+    # 8 rows: no new row's middle falls on an old seam (each old row becomes two).
+    assert edits.set_row_count(s, 8)
+    rows = s.design.gores.panel_rows
+    length = float(design_profile(s.design).meridian_length)
+    assert [r.letter for r in rows] == list("ABCDEFGH")
+    assert sum(r.finished_height for r in rows) == pytest.approx(length, abs=1e-9)
+    assert max(r.finished_height for r in rows) - min(r.finished_height for r in rows) < 1e-3
+    # Old rows A..D (equal) -> new A, B in old A; C, D in old B; ... by their middles.
+    assert rows[0].zone is not None and rows[1].zone is not None and rows[2].zone is None
+    assert [r.half_gore for r in rows] == [False] * 6 + [True, True]
+    # Row settings follow; the marks of the old rows do not.
+    assert s.patterns.row("C").grain_angle_deg == 5.0
+    assert s.patterns.row("C").notches == []
+    assert s.patterns.row("D").grain_angle_deg == 5.0
+    # The applique on old row B (1/4..2/4 of the tape) covers new rows C and D.
+    assert sorted(z.row for z in s.design.gores.panel_zones) == ["C", "D"]
+    assert len({z.name for z in s.design.gores.panel_zones}) == 2
+    # The vents over old rows C, D (the top half) open new rows E to H.
+    assert all(v.rows == ["E", "F", "G", "H"] for v in s.design.turning_vents)
+    assert not edits.set_row_count(s, 8)
+    s.undo()
+    assert len(s.design.gores.panel_rows) == 4
+    assert s.patterns.row("B").notches
+    with pytest.raises(ValueError):
+        edits.set_row_count(s, 0)

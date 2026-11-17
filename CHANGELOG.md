@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: **Panel rows** and **Space equally** (Shape mode, Panels and print roll): divide
+  every gore into any number of panel rows of equal length along the tape, in one
+  undoable edit. Zones, half gores, row settings, turning vents and appliques follow the
+  rows by position; marks placed on the old rows are removed. **Suggest…** now also gives
+  the fewest equal rows at which every panel fits the print roll.
 - Added: half gores (ADR-0048, design schema version 9). Any panel row can be cut as two
   halves sewn down the gore centre, about half as wide on the print roll: Shape mode's
   new **Panels and print roll** box (all rows, the rows too wide, none), the rows table

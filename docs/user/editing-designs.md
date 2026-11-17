@@ -41,6 +41,16 @@ panels, at any time after the project is started (each change is one undoable ed
 * **Gores N**: the number of gores. Every panel gets narrower with more gores (special
   shapes keep their place by gore number). Tick *Fixed N* under *Constraint locks* to
   lock it.
+* **Panel rows** and **Space equally**: divide every gore into this many panel rows, all
+  the same length along the load tape, lettered A, B, C ... from the mouth. Each new row
+  keeps the material zone, half-gore cut and settings (label, grain, seam allowance) of
+  the old row at its middle; turning vents and single-panel zones (appliques) move to
+  the new rows over the same stretch of tape. Notches, tape paths, feature marks and
+  manual outlines placed on the old rows are removed, since their positions belong to
+  the old panels (*Edit ▸ Undo* brings back the old rows and their marks). Rows with
+  measured seam bows (flat-chord gores) cannot be redivided: use the crest loft or
+  straight seams first. Rows of different heights are still made with *Split row* and
+  *Merge with next* under the rows table, or by typing heights.
 * **Half gores**: cut each panel in two, a left and a right half, sewn together down
   the gore centre (the **centre seam**). Each half is about half as wide on the print
   roll. *All rows*, *Rows too wide* (only the rows with a piece larger than the roll) or
@@ -51,8 +61,8 @@ panels, at any time after the project is started (each change is one undoable ed
 * **Print roll**: whether every piece fits the roll (*Preferences ▸ Print roll width*),
   e.g. *▲ 4 piece(s) of row A, B, C, D LARGER THAN THE 1524 mm roll*. **Suggest…** works
   out what would make them fit, without changing anything: the fewest gores (*14 gores or
-  more (now 8)*), half gores for the rows that are too wide, or, when even the halves are
-  too wide, splitting those rows into shorter ones (*Split row* under the rows table).
+  more (now 8)*), half gores for the rows that are too wide, or the fewest equal panel
+  rows (*7 equal panel rows or more (now 4)*: shorter panels turned across the roll).
 
 In the build pack each half has its own template and DXF (*row C left half*, *row C right
 half*, each cut once per gore); the sewing schedule starts with the centre seams.

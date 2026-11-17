@@ -176,7 +176,17 @@ gore side of a half is cut exactly as the whole panel's side.
   `tests/unit/test_half_gores.py` for lobe and bowed flat-chord rows.
 * Each half's page is about half as wide on the print roll, which is the reason to use
   them (`envelopelab.project.roll_advice`: the smallest gore count at which every piece
-  fits, found by bisection, or the rows that half gores make fit).
+  fits, found by bisection, the rows that half gores make fit, or the smallest number of
+  equal rows).
+
+### Equal rows — `set_row_count`
+
+`envelopelab.project.edits.set_row_count` divides a tape of length \(L\) into \(n\) rows,
+row \(k\) from \(s = kL/n\) to \((k+1)L/n\) (heights stored to 0.1 mm; the top row takes the
+rounding, which `panel_rows` absorbs anyway). What a row carried follows by tape position:
+a new row takes the zone and half-gore cut of the old row containing its middle; turning
+vents and panel zones the new rows overlapping their old stretch. Shorter rows change the
+geometry (the horizontal seams move), so the rest mesh and simulations go stale.
 
 ## Vertical tape length
 

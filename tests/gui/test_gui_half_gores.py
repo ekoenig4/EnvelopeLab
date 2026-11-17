@@ -81,3 +81,21 @@ def test_patterns_cut_the_selected_row_as_half_gores(gore_window: MainWindow) ->
     assert any(t.startswith("row C left half: ") for t in texts)
     assert any(t.startswith("row C right half: ") for t in texts)
     assert not any(t.startswith("row C: ") for t in texts)
+
+
+def test_the_panels_box_spaces_the_rows_equally(gore_window: MainWindow) -> None:
+    gore_window.mode_tabs.setCurrentIndex(0)
+    editor = gore_window.gore_editor
+    assert editor.row_count.value() == 4
+    editor.row_count.setValue(7)
+    buttons = {b.objectName(): b for b in editor.panels_box.findChildren(QPushButton)}
+    buttons["rowsEqual"].click()
+    design = gore_window.controller.design
+    assert design is not None and design.gores is not None
+    heights = [r.finished_height for r in design.gores.panel_rows]
+    assert len(heights) == 7 and max(heights) - min(heights) < 1e-3
+    assert editor.rows_table.rowCount() == 7 and editor.row_count.value() == 7
+    # Seven rows of the fixture's panels fit a 60 in roll turned across it.
+    assert editor.roll_status.text().startswith("✓")
+    gore_window.undo()
+    assert editor.row_count.value() == 4

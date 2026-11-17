@@ -1638,6 +1638,24 @@ class GoreEditor(QWidget):
             "keep their place by gore number). Locked under Constraint locks if ticked."
         )
         form.addRow("Gores N", self.gore_count)
+        self.row_count = QSpinBox()
+        self.row_count.setObjectName("rowCount")
+        self.row_count.setRange(1, 52)
+        self.row_count.setToolTip(
+            "Number of panel rows up each gore. Space equally divides the load tape into "
+            "this many rows of equal length (A, B, C ... from the mouth); each new row "
+            "keeps the zone, half-gore cut and settings of the old row at its middle. "
+            "Notches, tape paths, feature marks and manual outlines of the old rows are "
+            "removed. One undoable edit."
+        )
+        equal = QPushButton("Space equally")
+        equal.setObjectName("rowsEqual")
+        equal.setToolTip(self.row_count.toolTip())
+        equal.clicked.connect(self.space_rows_equally)
+        rows_line = QHBoxLayout()
+        rows_line.addWidget(self.row_count, 1)
+        rows_line.addWidget(equal)
+        form.addRow("Panel rows", rows_line)
         halves = QHBoxLayout()
         for key, text, tip in (
             ("all", "All rows", "Cut every row's panels as two half gores"),
@@ -1670,6 +1688,18 @@ class GoreEditor(QWidget):
         self.roll_advice_text.hide()
         form.addRow(self.roll_advice_text)
         return box
+
+    def space_rows_equally(self) -> None:
+        """Divide the gores into the number of panel rows chosen, all of equal length
+        (:func:`envelopelab.project.edits.set_row_count`)."""
+        count = self.row_count.value()
+        result = self.controller.edit("set_row_count", count)
+        if result:
+            self.controller.message.emit(
+                f"{count} equal panel rows (Edit > Undo restores the old rows and their marks)"
+            )
+        elif result is None:
+            self.refresh()  # refused: show the rows as they are
 
     def set_half_gores(self, which: str) -> None:
         """Half gores for ``which`` rows: ``all``, ``none`` or ``oversize`` (the rows with
@@ -1790,6 +1820,7 @@ class GoreEditor(QWidget):
             computed = flat and design.gores.crest_loft is not None
             bows = design_seam_bows(design) if flat else []
             self.rows_table.setRowCount(len(rows))
+            self.row_count.setValue(len(rows))
             for i, row in enumerate(rows):
                 self.rows_table.setItem(i, 0, _item(row.letter))
                 self.rows_table.setItem(i, 1, _item(f"{row.finished_height:.4f}"))
