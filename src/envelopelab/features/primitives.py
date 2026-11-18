@@ -257,7 +257,10 @@ class EnvelopeSurface:
 
     @classmethod
     def from_design(
-        cls, design: DesignDocument, patterns: PatternSet | None = None
+        cls,
+        design: DesignDocument,
+        patterns: PatternSet | None = None,
+        rows: Sequence[Any] | None = None,
     ) -> EnvelopeSurface:
         """Envelope of a standard-gore design (profile, gore count, loft and rows).
 
@@ -267,6 +270,9 @@ class EnvelopeSurface:
             Standard-gore design, m.
         patterns : PatternSet, optional
             Row annotations (allowance overrides do not move the finished rows).
+        rows : sequence of PanelRow, optional
+            The design's :func:`~envelopelab.project.gore_design.panel_rows`, when already
+            made.
 
         Returns
         -------
@@ -283,7 +289,8 @@ class EnvelopeSurface:
         if design.gores is None:
             raise PrimitiveError("primitives are placed on a standard-gore design")
         profile = design_profile(design)
-        rows = panel_rows(design, patterns or PatternSet(), profile)
+        if rows is None:
+            rows = panel_rows(design, patterns or PatternSet(), profile)
         flat = design.gores.construction == "flat_chord"
         return cls(
             profile,

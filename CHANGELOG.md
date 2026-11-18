@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: pointing at or editing any design number draws where it acts on the balloon in
+  amber, in every 3D view, and a focused number turns the views to face it (ADR-0050).
+- Added: Properties numbers change in real time with the wheel or ↑/↓ (Shift ×10,
+  Ctrl ×0.1); spin boxes and profile point drags update the views as they move, and one
+  continuous change is one undo step.
+- Changed: live edits no longer stutter (p95 frame gap 17–30 ms, was up to 117 ms):
+  edits are coalesced per frame, roll fits are memoised and shortlisted, display outlines
+  thinned, summary panels refresh after the edit stops. Numerical results are unchanged.
 - Added: where a special shape's panels meet at the crown (ADR-0049, project format 5).
   **Panels at the crown** (Panel layout) gives the crown its own seam turn and widths;
   the seams turn smoothly from the rim to the crown angles. **Move the cap** shifts a

@@ -169,6 +169,8 @@ DRAG_COLOR = "#ff00ff"
 DRAG_ACTOR = "shape-drag-outline"
 #: Colour of the selected element's highlight (as the placement views' selection).
 SELECTION_COLOR = "#d6008f"
+#: Colour of the hint: where the value pointed at or edited acts (as the placement views').
+HINT_COLOR = "#ff8f00"
 #: Line widths of polyline kinds (pixels); default 2.
 LINE_WIDTHS = {
     "red_line": 4,
@@ -741,6 +743,7 @@ class View3DPanel(QWidget):
         self._highlight: Any = None
         self._faced: str | None = None
         controller.selectionChanged.connect(lambda _t: self.show_selection())
+        controller.hintChanged.connect(self.show_hint)
         self.refresh()
 
     def load_renderer(self) -> bool:
@@ -1635,6 +1638,7 @@ class View3DPanel(QWidget):
                 interaction_event="end",
             )
         self._add_selection_actor(plotter)
+        self._add_hint_actor(plotter)
 
     # -- the selection ------------------------------------------------------------------
 
@@ -1759,6 +1763,35 @@ class View3DPanel(QWidget):
             color=SELECTION_COLOR,
             line_width=5,
             name="selection-highlight",
+            pickable=False,
+            reset_camera=False,
+        )
+
+    def show_hint(self) -> None:
+        """Draw where the value pointed at or edited acts (amber); a focused value's hint
+        also turns the view to face it."""
+        if self.plotter is None or (not self.isVisible() and self.controller.defer_hidden):
+            return
+        self._add_hint_actor(self.plotter)
+        h = self.controller.hint_highlight()
+        if self.controller.hint_focused and h is not None and h.focus is not None:
+            x, y = float(h.focus[0]), float(h.focus[1])
+            if math.hypot(x, y) > 1e-6 and h.key != self._faced:
+                self._faced = h.key
+                azimuth = math.atan2(y, x)
+                self._apply_pose(facing(tuple(self.plotter.bounds), azimuth, self._view_angle()))
+        self.plotter.render()
+
+    def _add_hint_actor(self, plotter: Any) -> None:
+        h = self.controller.hint_highlight()
+        if h is None or not h.lines:
+            plotter.remove_actor("hint-highlight")
+            return
+        plotter.add_mesh(
+            _merged_lines(h.lines),
+            color=HINT_COLOR,
+            line_width=4,
+            name="hint-highlight",
             pickable=False,
             reset_camera=False,
         )

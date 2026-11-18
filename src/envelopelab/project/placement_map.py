@@ -257,8 +257,7 @@ class Sketch:
 
 def envelope_sketch(design: Any, per_gore: int = 4, rings: int = 30) -> Sketch:
     """The display surface on a coarse grid with its seams (module docstring)."""
-    from envelopelab.project.gore_design import design_profile, display_points, panel_rows
-    from envelopelab.project.model import PatternSet
+    from envelopelab.project.gore_design import design_profile, display_points
 
     n = design.gores.count
     length = float(design_profile(design).meridian_length)
@@ -278,10 +277,10 @@ def envelope_sketch(design: Any, per_gore: int = 4, rings: int = 30) -> Sketch:
     for k in range(n):
         seams.append(display_points(design, dense, np.full(len(dense), 2.0 * math.pi * k / n)))
     around = np.linspace(0.0, 2.0 * math.pi, n * 12 + 1)
-    try:
-        tops = [r.s_top for r in panel_rows(design, PatternSet())][:-1]
-    except ValueError:
-        tops = []
+    # The row seams lie at the rows' cumulative heights up the tape (as panel_rows cuts
+    # them), the top row taking the rounding.
+    heights = [r.finished_height for r in design.gores.panel_rows]
+    tops = np.cumsum(heights)[:-1].tolist() if heights else []
     for top in tops:
         seams.append(display_points(design, np.full(len(around), top), around))
     return Sketch(np.asarray(pts, float), np.asarray(tri, dtype=np.int64), seams)

@@ -103,6 +103,25 @@ the view first). Stepping by gores keeps a seam or a gore centre in the same pla
 screen, so the gores can be checked one by one. The chosen view stays when the scene
 changes, for example when a run finishes.
 
+## Where a number acts, and changing it live
+
+Point at any field that changes the design (in Properties, the gore editor, the rigging
+cards or a special shape's layout) and the 3D views draw in amber where it acts: the
+mouth for the mouth diameter, the band below the top for the seal overlap, a row's band
+for its height, every gore seam for the gore count, the whole envelope for operating
+conditions, a shape's seams, splits or cap for its layout values. The inlay caption names
+it (for example "▶ mouth diameter: the mouth"). Click into the field and the views also
+turn to face that place.
+
+Numbers change in real time:
+
+* in Properties, turn the mouse wheel over a number or press ↑/↓ to step it by one unit
+  of its second digit (hold Shift for ×10, Ctrl for ×0.1);
+* hold or scroll a spin box;
+* drag a control point on the profile.
+
+The views follow every step, and one continuous change is one undo step.
+
 ## Resizing
 
 Every divider between areas can be dragged. A mode page or form that needs more space

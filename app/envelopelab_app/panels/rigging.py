@@ -25,6 +25,7 @@ from __future__ import annotations
 import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 from PySide6.QtCore import Qt, Signal
@@ -58,6 +59,8 @@ from envelopelab.rigging import (
     turning_vent_pair,
 )
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.hints import set_hint
+from envelopelab_app.live_number import LiveNumber
 from envelopelab_app.placement_view import EnvelopeInlay
 from envelopelab_app.refresh import Refresher
 from envelopelab_app.theme import STATUS_STYLES, StatusBanner, StatusChip, worst
@@ -458,6 +461,8 @@ class RiggingPanel(QWidget):
             self.buttons[remove_key] = card.remove_button
             self.cards[key] = card
             card.clicked.connect(self.select_component)
+            # Every value of the card acts on its component (hints module).
+            set_hint(card, key)
         # The parachute's own settings, in its card.
         self.settings: dict[str, QLineEdit] = {}
         self.parachute_box = QWidget()
@@ -484,7 +489,15 @@ class RiggingPanel(QWidget):
             edit.setToolTip(tip)
             edit.setMaximumWidth(140)
             edit.editingFinished.connect(lambda k=key: self._settings_edited(k))
+            # The wheel and the arrow keys change the value in real time.
+            LiveNumber(edit, partial(self._live_setting, key))
             self.settings[key] = edit
+            set_hint(
+                edit,
+                "field:gores.seal_overlap"
+                if key == "overlap"
+                else "field:parachute.centre_panel_diameter",
+            )
             form.addRow(text, edit)
         self.cards["parachute"].settings_slot.addWidget(self.parachute_box)
         # Toolbar: key figures, always in view.
@@ -580,6 +593,11 @@ class RiggingPanel(QWidget):
             None if diameter is None else float(diameter),
             f"Parachute centre panel {text}",
         )
+
+    def _live_setting(self, key: str, value: float) -> None:
+        """Commit a scrubbed parachute setting in real time."""
+        setter = self.set_seal_overlap if key == "overlap" else self.set_centre_panel
+        self.controller.edit_live(f"rigging:{key}", lambda: setter(value))
 
     def _settings_edited(self, key: str) -> None:
         if self._updating:

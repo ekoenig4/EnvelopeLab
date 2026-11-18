@@ -14,7 +14,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 from envelopelab.design.model import DesignDocument
 from envelopelab.export.templates import roll_checks, roll_fit
@@ -92,6 +92,8 @@ class WorkspaceController(QObject):
     snapshotsChanged = Signal()  # noqa: N815
     provenanceChanged = Signal()  # noqa: N815
     selectionChanged = Signal(str)  # noqa: N815
+    #: The hint shown (``set_hint``) changed.
+    hintChanged = Signal()  # noqa: N815
     editRejected = Signal(str)  # noqa: N815
     libraryChanged = Signal()  # noqa: N815
     shapesChanged = Signal()  # noqa: N815 (placed shapes or shape simulations changed)
@@ -126,6 +128,21 @@ class WorkspaceController(QObject):
         #: Hidden panels wait until they are shown before refreshing. On in the
         #: interactive application; off for scripted windows that read hidden panels.
         self.defer_hidden = False
+        #: The hint shown in the 3D views: where the number pointed at (or being edited)
+        #: acts on the balloon (:meth:`set_hint`), and whether it is being edited
+        #: (focused: the views turn to it) or only pointed at.
+        self.hint: str | None = None
+        self.hint_focused = False
+        #: Resolves the hints of the special shapes panel (``shape:<field>`` of the
+        #: selected shape); set by the main window.
+        self.shape_hint: Callable[[str], Any] | None = None
+        #: Live edits wait for the next turn of the event loop (:meth:`edit_live`); off for
+        #: scripted windows, which apply them at once (still one undo step per run).
+        self.live_deferred = False
+        self._live: dict[str, Callable[[], Any]] = {}
+        self._live_timer = QTimer(self)
+        self._live_timer.setSingleShot(True)
+        self._live_timer.timeout.connect(self.flush_live)
         #: What the placement views draw (envelope sketch, shapes, axes), shared by the
         #: 3D inlays of the design modes; set by the main window (None: nothing).
         self.placement_provider: Callable[[], Any] | None = None
@@ -275,8 +292,67 @@ class WorkspaceController(QObject):
 
     # -- edits --------------------------------------------------------------------------
 
+    def set_hint(self, key: str | None, focused: bool = False) -> None:
+        """Show where the number ``key`` acts (a hint key of
+        :func:`envelopelab.project.highlight.hint_highlight`, or ``shape:<field>``);
+        None: nothing."""
+        if (key, focused) == (self.hint, self.hint_focused):
+            return
+        self.hint, self.hint_focused = key, focused
+        self.hintChanged.emit()
+
+    def hint_highlight(self) -> Any:
+        """The current hint as lines on the balloon (``Highlight``; None: nothing)."""
+        from envelopelab.project.highlight import hint_highlight
+
+        key, design = self.hint, self.design
+        if key is None or design is None or design.gores is None:
+            return None
+        if key.startswith("shape:"):
+            return None if self.shape_hint is None else self.shape_hint(key)
+        try:
+            rows = self.rows()
+        except ValueError:
+            rows = []
+        try:
+            return hint_highlight(design, key, rows=rows, rigging=self.rigging_polylines())
+        except (ValueError, IndexError, KeyError):
+            return None
+
+    def edit_live(self, key: str, apply: Callable[[], Any]) -> None:
+        """Apply an edit of a value being changed continuously (a spin box held, the
+        wheel turned, a value stepped with the arrow keys), in real time.
+
+        The edit runs at the next turn of the event loop, and only the newest edit of
+        ``key`` waiting then (the others are out of date): however fast the value moves,
+        the views redraw once per turn instead of falling behind. Successive live edits of
+        ``key`` are one undo step (``ProjectSession.merge_key``).
+        """
+        self._live[key] = apply
+        if not self.live_deferred:
+            self.flush_live()
+        elif not self._live_timer.isActive():
+            self._live_timer.start(0)
+
+    def flush_live(self) -> None:
+        """Apply the live edits waiting now (see :meth:`edit_live`)."""
+        self._live_timer.stop()
+        pending, self._live = self._live, {}
+        session = self.session
+        for key, apply in pending.items():
+            if session is None:
+                break
+            session.merge_key = key
+            try:
+                apply()
+            finally:
+                session.merge_key = None
+
     def attempt(self, action: Callable[..., T], *args: Any, **kwargs: Any) -> T | None:
-        """Run an edit; a refused edit is reported (``editRejected``) and returns None."""
+        """Run an edit; a refused edit is reported (``editRejected``) and returns None.
+        A live edit still waiting is applied first, so edits keep their order."""
+        if self._live:
+            self.flush_live()
         try:
             return action(*args, **kwargs)
         except (ValueError, KeyError, IndexError) as exc:  # includes LockError, ValidationError
@@ -357,7 +433,9 @@ class WorkspaceController(QObject):
         key = self.shape_host_hash()
         if self._surface[0] != key:
             try:
-                surface: EnvelopeSurface | None = envelope_surface(s.design, s.patterns)
+                surface: EnvelopeSurface | None = envelope_surface(
+                    s.design, s.patterns, self.rows()
+                )
             except ValueError:  # includes PrimitiveError
                 surface = None
             self._surface = (key, surface)
@@ -476,11 +554,11 @@ class WorkspaceController(QObject):
             self._row_roll = (None, [], [])
             return []
         roll = self.prefs.print_roll_width
-        pieces = row_pieces(session.design, session.patterns, rows)
-        # The rows are rebuilt on every change; their pieces' cut outlines decide.
-        key = (roll, tuple((p.name, p.cut.tobytes()) for p in pieces))
+        # One fit per change of the design (and of the roll width).
+        key = (roll, self.revision)
         if self._row_roll[0] == key:
             return list(self._row_roll[2])
+        pieces = row_pieces(session.design, session.patterns, rows)
         fits = []
         for p in pieces:
             fit = roll_fit(p.cut, roll)

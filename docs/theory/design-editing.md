@@ -121,6 +121,19 @@ bottom; a difference above 3 mm (AGENTS.md default) is an error. The build pack 
 override as the sewn outline (cut outline = mitred offset by the allowance), so the seam
 audit of the [pattern import](virtual-sewing.md) sees the same mismatch.
 
+## Where a number acts
+
+`envelopelab.project.highlight.hint_highlight(design, key)` maps a hint key to lines on
+the displayed envelope (m), with a focus point the views turn to. A key is
+`field:<dotted path>` into the design data, `equator` (the ring at the widest radius,
+sampled at 2001 tape positions) or a selection key. Mouth and top values are the rings at
+tape position 0 and at the meridian length \( L \); the seal overlap is the band between
+\( L - o \) and \( L \); a row's fields are its band and one panel; a control point's
+fields are its ring; the gore count and vertical tapes are every gore seam; horizontal
+tapes the row seams; operating conditions, seam types, zones and scale variants the whole
+envelope. A value with no place on the balloon (a name, a version) has no hint. The lines
+are drawing aids only and enter no calculation.
+
 ## References
 
 * R. P. Brent, *Algorithms for Minimization without Derivatives*, Prentice-Hall (1973).

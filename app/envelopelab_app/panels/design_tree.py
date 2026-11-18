@@ -56,6 +56,8 @@ class DesignTreePanel(QWidget):
                 controller.shapesChanged,
             ),
             defer_hidden=lambda: controller.defer_hidden,
+            # A summary: redrawn once a scrubbed value rests, not at every step.
+            delay=lambda: controller.live_deferred,
         )
         self.refresh()
 

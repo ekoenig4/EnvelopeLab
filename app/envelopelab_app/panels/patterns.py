@@ -77,6 +77,8 @@ from envelopelab.project.gore_design import (
 from envelopelab.project.model import RowPattern
 from envelopelab.rigging.parachute import CentrePanel
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.display_geometry import thin
+from envelopelab_app.hints import set_hint
 from envelopelab_app.pattern_layout import shelf_layout
 from envelopelab_app.placement_view import EnvelopeInlay
 from envelopelab_app.refresh import Refresher
@@ -87,8 +89,18 @@ GAP = 0.4  # m between rows in the layout
 ZONE_FALLBACK = "#d9e7f5"
 
 
-def _polygon(points: np.ndarray, dx: float) -> QPolygonF:
-    return QPolygonF([QPointF(float(x) + dx, -float(y)) for x, y in points])
+def _polygon(points: np.ndarray, dx: float, exact: bool = False) -> QPolygonF:
+    """Panel points (m, y up) as a scene polygon (y down) shifted by ``dx`` (m), thinned
+    for drawing (:func:`~envelopelab_app.display_geometry.thin`) unless ``exact``."""
+    pts = np.asarray(points, dtype=np.float64) if exact else thin(points)
+    return QPolygonF([QPointF(float(x) + dx, -float(y)) for x, y in pts])
+
+
+def _box(points: np.ndarray, dx: float) -> QRectF:
+    """Scene bounding box of panel points (m, y up) shifted by ``dx`` (m)."""
+    pts = np.asarray(points, dtype=np.float64)
+    lo, hi = pts.min(axis=0), pts.max(axis=0)
+    return QRectF(float(lo[0]) + dx, -float(hi[1]), float(hi[0] - lo[0]), float(hi[1] - lo[1]))
 
 
 class OutlineHandle(QGraphicsEllipseItem):
@@ -273,6 +285,7 @@ class PatternPanel(QWidget):
         self._heat_limit = 1e-3  # m
 
         form_box = QGroupBox("Selected row")
+        self.form_box = form_box
         form = QFormLayout(form_box)
         self.row_label = QLabel("-")
         self.label_text = QLineEdit()
@@ -811,7 +824,7 @@ class PatternPanel(QWidget):
             else:
                 r, g, b = diverging_rgb(value / limit)
                 color = QColor.fromRgbF(r, g, b, 0.85)
-            poly = QGraphicsPolygonItem(_polygon(grid.points[tri], 0.0), container)
+            poly = QGraphicsPolygonItem(_polygon(grid.points[tri], 0.0, True), container)
             poly.setBrush(QBrush(color))
             poly.setPen(QPen(Qt.PenStyle.NoPen))
             poly.setZValue(-0.5)
@@ -845,7 +858,7 @@ class PatternPanel(QWidget):
         shelves that fill the view (:func:`~envelopelab_app.pattern_layout.shelf_layout`)."""
         if self.layout_mode.currentData() == "assembled":
             return [QPointF(0.0, -p.stacked_y) for p in pieces]
-        boxes = [_polygon(p.outline, 0.0).boundingRect() for p in pieces]
+        boxes = [_box(p.outline, 0.0) for p in pieces]
         viewport = self.view.viewport()
         aspect = viewport.width() / viewport.height() if viewport.height() > 0 else 1.6
         self._layout_aspect = aspect
@@ -1006,7 +1019,7 @@ class PatternPanel(QWidget):
         return container
 
     def _grow(self, outline: np.ndarray, origin: QPointF) -> None:
-        bounds = _polygon(outline, 0.0).boundingRect().translated(origin)
+        bounds = _box(outline, 0.0).translated(origin)
         self.view.content_rect = self.view.content_rect.united(bounds)
 
     def _parachute_pieces(self, y: float, stale: bool) -> list[_Piece]:
@@ -1135,6 +1148,10 @@ class PatternPanel(QWidget):
         design = session.design
         ann = session.patterns.row(letter)
         self.row_label.setText(letter)
+        # Every value of the form acts on this row (the 3D view draws it, hints module);
+        # the design's default seam allowance on every seam.
+        set_hint(self.form_box, f"row:{letter}")
+        set_hint(self.default_allowance, "field:seam_types.0.allowance")
         self.half_gore.setChecked(letter in half_gore_rows(design))
         text = self.roll_text(letter)
         self.roll_label.setText(text)

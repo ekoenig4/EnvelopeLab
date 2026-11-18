@@ -41,6 +41,7 @@ from envelopelab_app import layout as layout_state
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.dialogs import PreferencesDialog
 from envelopelab_app.gore_editor import GoreEditor
+from envelopelab_app.hints import HintTracker
 from envelopelab_app.layout import MODE_KEYS, MODES
 from envelopelab_app.panels.base import UNSAVED_MARK, Panel
 from envelopelab_app.panels.design_tree import DesignTreePanel
@@ -94,12 +95,16 @@ class MainWindow(QMainWindow):
         self.instance_id = uuid.uuid4().hex
         self.controller = WorkspaceController(self.prefs)
         self.controller.defer_hidden = interactive
+        # Scripted windows (tests) apply live edits at once, so a value set reads back.
+        self.controller.live_deferred = interactive
         self.simulation = SimulationManager(self.controller)
         self.setWindowTitle("EnvelopeLab")
         self.resize(1500, 950)
 
         use_3d = self.prefs.enable_3d if enable_3d is None else enable_3d
         self.gore_editor = GoreEditor(self.controller, gpu=use_3d)
+        # Profile points dragged on the canvas edit the design as they move.
+        self.gore_editor.canvas.live = interactive
         self.gore_editor.solved_shape.attach_simulation(self.simulation)
         self.design_tree = DesignTreePanel(self.controller)
         self.properties = PropertiesPanel(self.controller)
@@ -116,6 +121,10 @@ class MainWindow(QMainWindow):
         self.shapes = ShapesPanel(self.controller, enable_3d=use_3d)
         # The 3D inlays of the design modes draw what the placement views draw.
         self.controller.placement_provider = self.shapes.placement_data
+        # Pointing at or editing a number shows where on the balloon it acts.
+        self.controller.shape_hint = self.shapes.shape_hint
+        self.controller.hintChanged.connect(self.shapes.show_hint)
+        self.hints = HintTracker(self.controller)
         pattern_scope = artifact_inputs("patterns")
         self.panels: dict[str, Panel] = {
             "tree": Panel("Design Tree", self.controller, self.design_tree),

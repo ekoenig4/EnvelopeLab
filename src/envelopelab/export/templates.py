@@ -300,7 +300,27 @@ class RollFit:
         return f"turned {self.angle:.1f}°"
 
 
+#: Recent :func:`roll_fit` results by (outline bytes, roll width): the same outlines are
+#: fitted again on every refresh of the views and checks, and the fit of a dense outline
+#: costs milliseconds (a pure function, so a cached result is the same result).
+_ROLL_FITS: dict[tuple[bytes, tuple[int, ...], float], RollFit] = {}
+_ROLL_FITS_MAX = 512
+
+
 def roll_fit(cut: FloatArray, roll_width: float) -> RollFit:
+    """How the 1:1 page of a piece with cut outline ``cut`` lies on the roll (cached by
+    outline and roll width, :func:`_roll_fit`)."""
+    pts = np.ascontiguousarray(cut, dtype=np.float64)
+    key = (pts.tobytes(), pts.shape, float(roll_width))
+    hit = _ROLL_FITS.get(key)
+    if hit is None:
+        if len(_ROLL_FITS) >= _ROLL_FITS_MAX:
+            _ROLL_FITS.pop(next(iter(_ROLL_FITS)))  # the oldest
+        hit = _ROLL_FITS[key] = _roll_fit(pts, roll_width)
+    return hit
+
+
+def _roll_fit(cut: FloatArray, roll_width: float) -> RollFit:
     """How the 1:1 page of a piece with cut outline ``cut`` lies on the roll.
 
     The turns of :data:`PREFERRED_TURNS` are tried in order and the first whose page is
@@ -342,12 +362,43 @@ def roll_fit(cut: FloatArray, roll_width: float) -> RollFit:
 
     hull = pts[ConvexHull(pts).vertices]
     edges = np.roll(hull, -1, axis=0) - hull
-    # Turn each edge to run up the page (along the roll); angles in (-90, 90]. Every
-    # turn's width across the roll at once: hull x after the turn, per turn (row).
+    # Turn each edge to run up the page (along the roll); angles in (-90, 90].
     turns = np.round(90.0 - np.mod(np.degrees(np.arctan2(edges[:, 1], edges[:, 0])), 180.0), 3)
-    a = np.radians(turns)
+    # The width across each edge (exact, O(H log H)) shortlists the edges; the page width
+    # of the rounded turn is then measured on those only, so the turn chosen is the one
+    # measuring every turn's page would choose.
+    width = _edge_widths(hull, edges)
+    near = np.flatnonzero(width <= float(width.min()) + WIDTH_SHORTLIST)
+    a = np.radians(turns[near])
     across = np.ptp(np.cos(a)[:, None] * hull[:, 0] - np.sin(a)[:, None] * hull[:, 1], axis=1)
-    return page(float(turns[int(np.argmin(across))]))
+    return page(float(turns[int(near[int(np.argmin(across))])]))
+
+
+#: Edges whose exact width is within this of the least are measured at their rounded
+#: turn (:func:`_roll_fit`), m: well above the width change of rounding a turn to
+#: 0.001 deg on a piece of up to 10 m (1.7e-4 m).
+WIDTH_SHORTLIST = 1e-3
+
+
+def _edge_widths(hull: FloatArray, edges: FloatArray) -> FloatArray:
+    r"""Width of a convex polygon across each of its edges, m (rotating calipers).
+
+    For the counter-clockwise ``hull`` the outward normals' angles increase round the
+    polygon, so the vertex farthest from edge :math:`k` (the support point in the
+    direction of its inward normal) is found by a binary search on those angles; the
+    width is that vertex's distance from the edge's line.
+    """
+    length = np.hypot(edges[:, 0], edges[:, 1])
+    normal = np.column_stack([edges[:, 1], -edges[:, 0]]) / length[:, None]
+    ang = np.unwrap(np.arctan2(normal[:, 1], normal[:, 0]))
+    start = float(ang[0])
+    # Direction of the inward normal, brought into [start, start + 2 pi).
+    want = np.mod(ang + math.pi - start, 2.0 * math.pi) + start
+    # Vertex j lies between edge j - 1 and edge j: the support point of a direction
+    # between their normals.
+    j = np.searchsorted(ang, want) % len(hull)
+    out: FloatArray = np.einsum("ij,ij->i", hull - hull[j], normal)
+    return out
 
 
 @dataclass(frozen=True)

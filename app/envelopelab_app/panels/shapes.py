@@ -95,6 +95,7 @@ from envelopelab.project.shapes import (
 )
 from envelopelab.project.symmetry import axis_gore_label
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.hints import set_hint
 from envelopelab_app.marking_view import MarkingView
 from envelopelab_app.placement_view import (
     AxisPreview,
@@ -518,6 +519,8 @@ class ShapesPanel(QWidget):
         #: Each placed shape's drawing: (placed design, gore map, 3D points, triangles,
         #: footprint on the map, base point), rebuilt when the shape is placed again.
         self._drawn: dict[str, tuple[Any, ...]] = {}
+        #: The lines of each placed shape the hints draw (its seams, rim, base point).
+        self._hint_lines: dict[str, tuple[Any, ...]] = {}
         self._placement_cache: tuple[Any, Any] = (None, None)
         self.fields: dict[tuple[str, ...], QSpinBox | QDoubleSpinBox] = {}
 
@@ -581,7 +584,7 @@ class ShapesPanel(QWidget):
             "far round from the direction up the tape (0°), towards the next gore (90°)"
         )
         self.seam_turn.valueChanged.connect(
-            lambda v: self.set_value(("seam_offset_deg",), round(float(v), 1))
+            lambda v: self.set_value_live(("seam_offset_deg",), round(float(v), 1))
         )
         self.widths_table = QTableWidget(0, 2)
         self.widths_table.setObjectName("shapePanelWidths")
@@ -652,6 +655,7 @@ class ShapesPanel(QWidget):
 
         # -- simulation and export -------------------------------------------------------
         self.mesh_spin = QDoubleSpinBox()
+        self.mesh_spin.setObjectName("shapeMeshSize")
         self.mesh_spin.setRange(10.0, 500.0)
         self.mesh_spin.setDecimals(0)
         self.mesh_spin.setSuffix(" mm")
@@ -987,6 +991,21 @@ class ShapesPanel(QWidget):
             self.selected = None
             self.refresh()
 
+    def set_value_live(self, path: tuple[str, ...], value: Any) -> None:
+        """Change one value of the selected shape in real time (a spin box being spun or
+        held: :meth:`WorkspaceController.edit_live`; the newest value wins, one undo
+        step)."""
+        name = self.selected
+        if name is None:
+            return
+        self.controller.edit_live(
+            f"shape:{name}:{'.'.join(path)}", lambda: self._set_value_of(name, path, value)
+        )
+
+    def _set_value_of(self, name: str, path: tuple[str, ...], value: Any) -> None:
+        if self.selected == name:
+            self.set_value(path, value)
+
     def set_value(self, path: tuple[str, ...], value: Any) -> bool:
         """Change one value of the selected shape (undoable)."""
         if self.selected is None:
@@ -1200,7 +1219,12 @@ class ShapesPanel(QWidget):
         key = (self.controller.revision, self.selected)
         if key != self._placement_shown:
             self._placement_shown = key
-            self.placement.set_data(self.placement_data())
+            data = self.placement_data()
+            data.hint, data.hint_face = (
+                self.controller.hint_highlight(),
+                self.controller.hint_focused,
+            )
+            self.placement.set_data(data)
             if self._axis is not None:
                 self._update_axis_preview()  # the mirror images follow the new data
         self._update_form(spec)
@@ -1378,8 +1402,9 @@ class ShapesPanel(QWidget):
                 box.setSingleStep(10.0 ** (1 - field.decimals))
             box.setKeyboardTracking(False)
             box.setObjectName("shape_" + "_".join(field.path))
-            box.valueChanged.connect(lambda v, p=field.path: self.set_value(p, v))
+            box.valueChanged.connect(lambda v, p=field.path: self.set_value_live(p, v))
             self.fields[field.path] = box
+            set_hint(box, "shape:" + ".".join(field.path))
             self.form.addRow(field.label, box)
         self.feed_check = QCheckBox("Feed hole in the envelope")
         self.feed_radius = QDoubleSpinBox()
@@ -1389,7 +1414,7 @@ class ShapesPanel(QWidget):
         self.feed_radius.setKeyboardTracking(False)
         self.feed_check.toggled.connect(self._feed_toggled)
         self.feed_radius.valueChanged.connect(
-            lambda v: self.set_value(("feed_hole_radius",), float(v))
+            lambda v: self.set_value_live(("feed_hole_radius",), float(v))
         )
         feed_row = QHBoxLayout()
         feed_row.addWidget(self.feed_check)
@@ -1413,7 +1438,7 @@ class ShapesPanel(QWidget):
         self.cap_diameter.setToolTip(tip)
         self.cap_auto.toggled.connect(self._cap_toggled)
         self.cap_diameter.valueChanged.connect(
-            lambda v: self.set_value(("cap_diameter",), float(v))
+            lambda v: self.set_value_live(("cap_diameter",), float(v))
         )
         cap_row = QHBoxLayout()
         cap_row.addWidget(self.cap_auto)
@@ -1463,6 +1488,7 @@ class ShapesPanel(QWidget):
             self.smooth_check = QCheckBox("Smooth profile (spline through the points)")
             self.smooth_check.toggled.connect(lambda on: self.set_value(("smooth",), bool(on)))
             self.form.addRow("", self.smooth_check)
+        self._tag_hints()
 
     # -- shape groups ----------------------------------------------------------------
 
@@ -1569,6 +1595,65 @@ class ShapesPanel(QWidget):
             return placement_at(surface, point, specs[name].placement)
 
         return PlacementData(gore_map, sketch, axes, shapes, self.selected, place_at)
+
+    def show_hint(self) -> None:
+        """Draw the controller's hint on the On the balloon tab (amber, no redraw of the
+        rest)."""
+        if not self.isVisible() and self.controller.defer_hidden:
+            return
+        hint, face = self.controller.hint_highlight(), self.controller.hint_focused
+        self.placement.data.hint, self.placement.data.hint_face = hint, face
+        self.placement.view3d.set_hint(hint, face)  # type: ignore[attr-defined]
+
+    def shape_hint(self, key: str) -> Any:
+        """Where a value of the selected shape (``shape:<field path>``) acts, as lines on
+        the balloon (``Highlight``; None: the shape is not placed)."""
+        from envelopelab.features.scene import designed_display
+        from envelopelab.project.highlight import Highlight
+        from envelopelab.project.shapes import display_offset
+
+        field = key.removeprefix("shape:")
+        spec = self.spec()
+        result = None if spec is None else self.controller.shapes.result(spec.name)
+        placed = None if result is None else result.design
+        session = self.controller.session
+        if spec is None or placed is None or session is None:
+            return None
+        cached = self._hint_lines.get(spec.name)
+        if cached is None or cached[0] is not placed:
+            shown = designed_display(placed, rows=24, per_piece=4)
+            shift = display_offset(session.design, placed)
+            seams = [np.asarray(s, float) + shift for s in shown.seams]
+            rim = np.asarray(shown.rim, float) + shift
+            cached = (placed, seams, rim, np.asarray(placed.base_point, float) + shift)
+            self._hint_lines[spec.name] = cached
+        _p, seams, rim, base = cached
+        m = piece_count(spec)
+        gore_seams, rest = seams[:m], seams[m:]
+        splits = rest[: len(spec.splits)]
+        cap = rest[len(spec.splits) :]
+        words = field.split(".")[-1].replace("_deg", "").replace("_", " ")
+        label = f"{spec.name} {words}"
+        if field.startswith("placement"):
+            return Highlight(f"{label}: where the shape sits (its rim)", [rim], base, key)
+        if field in (
+            "seam_offset_deg",
+            "panel_widths",
+            "crown_seam_offset_deg",
+            "crown_panel_widths",
+        ):
+            return Highlight(f"{label}: its seams", gore_seams, base, key)
+        if field == "splits":
+            lines = splits or gore_seams
+            return Highlight(f"{label}: its horizontal splits", lines, base, key)
+        if field in ("cap_diameter", "cap_shift", "cap_direction_deg"):
+            lines = cap or gore_seams
+            return Highlight(f"{label}: its cap", lines, lines[0][0] if lines else base, key)
+        if field.startswith("feed_hole"):
+            return Highlight(f"{label}: the feed hole(s) inside its rim", [rim], base, key)
+        if field in ("marks_per_piece",):
+            return Highlight(f"{label}: the match marks round its rim", [rim], base, key)
+        return Highlight(f"{label}: the whole shape", [rim, *seams], base, key)
 
     def nudge(self, d_hoop: float, d_tape: float) -> bool:
         """Move the selected shape ``d_hoop`` m round the envelope (towards higher gores)
@@ -1957,6 +2042,29 @@ class ShapesPanel(QWidget):
             text += "; a mesh shape's panels cannot be split across"
         self.layout_note.setText(text + ".")
 
+    def _tag_hints(self) -> None:
+        """Say where on the balloon each value of the selected shape acts
+        (:mod:`envelopelab_app.hints`; :meth:`shape_hint` draws it)."""
+        for widget, key in (
+            (self.feed_radius, "shape:feed_hole_radius"),
+            (self.feed_check, "shape:feed_hole_radius"),
+            (self.cap_diameter, "shape:cap_diameter"),
+            (self.cap_auto, "shape:cap_diameter"),
+            (self.holes_table, "shape:feed_holes"),
+            (self.seam_turn, "shape:seam_offset_deg"),
+            (self.widths_table, "shape:panel_widths"),
+            (self.splits_table, "shape:splits"),
+            (self.add_split_button, "shape:splits"),
+            (self.remove_split_button, "shape:splits"),
+            (self.crown_turn, "shape:crown_seam_offset_deg"),
+            (self.crown_widths_table, "shape:crown_panel_widths"),
+            (self.crown_own, "shape:crown_seam_offset_deg"),
+            (self.cap_shift, "shape:cap_shift"),
+            (self.cap_direction, "shape:cap_direction_deg"),
+            (self.profile_table, "shape:profile"),
+        ):
+            set_hint(widget, key)
+
     def _crown_box(self) -> QGroupBox:
         """Where the panels meet at the crown: the seams' angles there and the cap's
         position (ADR-0049)."""
@@ -1982,7 +2090,7 @@ class ShapesPanel(QWidget):
             "Seam turn at the crown: where piece 1 is centred round the axis at the top"
         )
         self.crown_turn.valueChanged.connect(
-            lambda v: self.set_value(("crown_seam_offset_deg",), round(float(v), 1))
+            lambda v: self.set_value_live(("crown_seam_offset_deg",), round(float(v), 1))
         )
         form.addRow("Crown seam turn", self.crown_turn)
         self.crown_widths_table = QTableWidget(0, 2)
@@ -2020,7 +2128,7 @@ class ShapesPanel(QWidget):
             "must still cover the tip). Needs a cap (Feed holes & cap)."
         )
         self.cap_shift.valueChanged.connect(
-            lambda v: self.set_value(("cap_shift",), round(float(v) / 1000.0, 4))
+            lambda v: self.set_value_live(("cap_shift",), round(float(v) / 1000.0, 4))
         )
         self.cap_direction = QDoubleSpinBox()
         self.cap_direction.setObjectName("shapeCapDirection")
@@ -2033,7 +2141,7 @@ class ShapesPanel(QWidget):
             "next gore (as the seam turn)"
         )
         self.cap_direction.valueChanged.connect(
-            lambda v: self.set_value(("cap_direction_deg",), round(float(v), 1))
+            lambda v: self.set_value_live(("cap_direction_deg",), round(float(v), 1))
         )
         cap = QHBoxLayout()
         cap.addWidget(self.cap_shift)

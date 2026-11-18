@@ -19,6 +19,16 @@ gore :math:`g` (1..N) spanning azimuths :math:`2\pi(g-1)/N` to :math:`2\pi g/N`.
   them all.
 * ``scoop``: the mouth arc over the gores the scoop is sewn to.
 
+**Where a number acts** (:func:`hint_highlight`, ADR-0050): every number of the design
+that can be edited names the part of the balloon it changes, so the 3D views draw that
+part while the number is pointed at or edited. A *hint key* is a selection as above or
+``field:<path>``, the field's path in the design data (``field:gores.mouth_diameter``):
+the mouth ring for the mouth diameter, the top ring for the crown ring and the parachute
+hole, the gore seams for the gore count and the vertical tapes, the row seams for the
+horizontal tapes, a row's band for its height, the parachute's, the rigging's, a vent's
+or the scoop's lines for theirs, and the whole envelope (every seam and both openings)
+for what acts on all of it: the operating conditions, seams and materials.
+
 Display only: nothing here enters a calculation.
 """
 
@@ -204,3 +214,128 @@ def selection_highlight(
         return None
     points = np.vstack(lines)
     return Highlight(selection.replace("_", " "), lines, points.mean(axis=0), selection)
+
+
+def gore_seams(design: DesignDocument) -> list[FloatArray]:
+    """Every vertical gore seam (the load tapes), mouth to top, m."""
+    from envelopelab.project.gore_design import design_profile
+
+    assert design.gores is not None
+    n = design.gores.count
+    length = float(design_profile(design).meridian_length)
+    return [meridian(design, 2.0 * math.pi * k / n, 0.0, length) for k in range(n)]
+
+
+def row_seams(design: DesignDocument, rows: list[Any] | None) -> list[FloatArray]:
+    """Every horizontal row seam (the horizontal tapes) between the rows, m."""
+    return [ring(design, float(r.s_top)) for r in (rows or [])[:-1]]
+
+
+def _whole(design: DesignDocument, rows: list[Any] | None) -> list[FloatArray]:
+    from envelopelab.project.gore_design import design_profile
+
+    length = float(design_profile(design).meridian_length)
+    return [*gore_seams(design), *row_seams(design, rows), ring(design, 0.0), ring(design, length)]
+
+
+#: Sections of the design whose numbers act on the whole envelope, and what to say.
+WHOLE_ENVELOPE = {
+    "operating": "acts on the whole envelope (lift, pressure, temperature)",
+    "seam_types": "every seam of the envelope",
+    "zones": "the whole envelope's fabric",
+    "features": "the envelope",
+    "scale_variants": "the whole envelope",
+}
+
+
+def hint_highlight(
+    design: DesignDocument,
+    key: str,
+    rows: list[Any] | None = None,
+    rigging: dict[str, list[FloatArray]] | None = None,
+) -> Highlight | None:
+    """Where on the balloon the number (or element) ``key`` acts (module docstring).
+
+    Parameters
+    ----------
+    design : DesignDocument
+        Gore design.
+    key : str
+        Hint key: ``field:<dotted path>`` into the design data, or a selection
+        (:func:`selection_highlight`).
+    rows : list of PanelRow, optional
+        The design's panel rows (m).
+    rigging : dict of str to list of ndarray, optional
+        The rigging lines (m).
+
+    Returns
+    -------
+    Highlight or None
+        Lines in m; None when the number has no place on the balloon (a name, a version).
+    """
+    from envelopelab.project.gore_design import design_profile
+
+    if design.gores is None:
+        return None
+    if key == "equator":
+        profile = design_profile(design)
+        s = np.linspace(0.0, float(profile.meridian_length), 2001)
+        widest = float(s[int(np.argmax(np.asarray(profile.radius_at(s))))])
+        line = ring(design, widest)
+        return Highlight("the equator (widest)", [line], line[len(line) // 4], key)
+    if not key.startswith("field:"):
+        return selection_highlight(design, key, rows=rows, rigging=rigging)
+    path = key[len("field:") :].split(".")
+    section, name = path[0], path[-1]
+    length = float(design_profile(design).meridian_length)
+    words = name.replace("_", " ")
+
+    def made(label: str, lines: list[FloatArray], focus: FloatArray | None = None) -> Highlight:
+        if focus is None and lines:
+            focus = lines[0][len(lines[0]) // 4]
+        return Highlight(label, lines, focus, key)
+
+    if section == "gores":
+        if name == "count":
+            return made("gore count: every gore seam", gore_seams(design))
+        if name == "mouth_diameter":
+            return made("mouth diameter: the mouth", [ring(design, 0.0)])
+        if name in ("crown_ring", "parachute_hole_diameter"):
+            return made(f"{words}: the top opening", [ring(design, length)])
+        if name == "seal_overlap":
+            lo = max(0.0, length - float(design.gores.seal_overlap))
+            return made(
+                "seal overlap: the band below the top", [ring(design, length), ring(design, lo)]
+            )
+        if len(path) >= 3 and path[1] == "meridian_profile_control_points":
+            return selection_highlight(design, f"point:{path[2]}")
+        if path[1:] == ["panel_rows"]:
+            return made("panel rows: every row seam", row_seams(design, rows))
+        if len(path) >= 3 and path[1] == "panel_rows":
+            index = int(path[2])
+            letter = design.gores.panel_rows[index].letter
+            h = selection_highlight(design, f"row:{letter}", rows=rows)
+            return None if h is None else made(f"row {letter} {words}", h.lines, h.focus)
+        return made(f"{words}: the profile", [meridian(design, 0.0, 0.0, length)])
+    if section == "tapes":
+        kind = path[1] if len(path) > 1 else ""
+        if kind == "vertical":
+            return made(f"vertical tape {words}: every gore seam", gore_seams(design))
+        if kind == "horizontal":
+            return made(f"horizontal tape {words}: the row seams", row_seams(design, rows))
+        if kind == "rim":
+            return made(f"rim tape {words}: the mouth", [ring(design, 0.0)])
+        if kind == "hole":
+            return made(f"hole tape {words}: the top opening", [ring(design, length)])
+        return made(f"tapes {words}: every seam", _whole(design, rows))
+    if section in ("parachute", "turning_vents", "scoop"):
+        h = selection_highlight(design, section, rows=rows, rigging=rigging)
+        return None if h is None else made(f"{section.replace('_', ' ')} {words}", h.lines, h.focus)
+    if section == "rigging":
+        part = next((p for p in path[1:] if p in ("flying_wires", "red_line")), "rigging")
+        h = selection_highlight(design, part, rows=rows, rigging=rigging)
+        return None if h is None else made(f"{part.replace('_', ' ')} {words}", h.lines, h.focus)
+    if section in WHOLE_ENVELOPE:
+        lines = _whole(design, rows)
+        return made(f"{words}: {WHOLE_ENVELOPE[section]}", lines, lines[0][len(lines[0]) // 2])
+    return None

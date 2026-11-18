@@ -11,6 +11,7 @@ can be replayed to any point. Artifact staleness is decided by fingerprints
 from __future__ import annotations
 
 import copy
+import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -62,6 +63,11 @@ Mutator = Callable[[dict[str, Any], dict[str, Any]], None]
 FabricLookup = Callable[[str], Mapping[str, Any] | None]
 
 
+#: Live edits of one value (``ProjectSession.merge_key``) less than this apart are one
+#: undo step, s (a held spin box or a scrubbed value; assumed).
+LIVE_MERGE_SECONDS = 2.0
+
+
 class StateCommand(Command):
     """Replace the design state; undo restores the previous one.
 
@@ -90,6 +96,13 @@ class StateCommand(Command):
         self._after = after
         self._description = description
         self._provenance = provenance
+
+    def absorb(self, previous: Command) -> bool:
+        """Take an earlier state command in: undo then restores the state before it."""
+        if not isinstance(previous, StateCommand) or previous._session is not self._session:
+            return False
+        self._before = previous._before
+        return True
 
     @property
     def description(self) -> str:
@@ -189,6 +202,11 @@ class ProjectSession:
         # Listeners hear about a state change only after the stack is updated, so that
         # the history they read includes the command that changed the state.
         self.stack.add_listener(lambda: self._emit(EVENT_STATE))
+        #: Set while a live edit is applied (a value scrubbed or spun, ``(key, time)`` of
+        #: the last one): edits of the same key within :data:`LIVE_MERGE_SECONDS` of
+        #: each other are one undo step.
+        self.merge_key: str | None = None
+        self._last_live: tuple[str, float, Command] | None = None
 
     # -- construction -------------------------------------------------------------------
 
@@ -355,7 +373,19 @@ class ProjectSession:
         if stamp:
             after.design.meta.modified = utc_now()
         after.design.meta.content_hash = after.design.compute_content_hash()
-        self.stack.do(StateCommand(self, before, after, description, provenance))
+        key, now = self.merge_key, time.monotonic()
+        last = self._last_live
+        # Merge only into the live edit just made (not after an undo or another edit).
+        merge = (
+            key is not None
+            and last is not None
+            and last[0] == key
+            and now - last[1] < LIVE_MERGE_SECONDS
+            and self.stack.last is last[2]
+        )
+        command = StateCommand(self, before, after, description, provenance)
+        self.stack.do(command, merge=merge)
+        self._last_live = None if key is None else (key, now, command)
         return True
 
     def edit(

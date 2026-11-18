@@ -74,6 +74,8 @@ GHOST = "#d6008f"
 SEAM = "#4d4d4d"
 #: Lines drawn for context only (e.g. the rigging not selected).
 CONTEXT = "#6b7785"
+#: Where the number pointed at or being edited acts (:mod:`envelopelab_app.hints`).
+HINT = "#ff8f00"
 GORE_FILL = ("#eef2f8", "#e3e9f2")
 ENVELOPE = (0.86, 0.89, 0.94)
 #: How long the 3D sketch waits after the last change before it draws its shaded
@@ -183,6 +185,11 @@ class PlacementData:
         highlight colour and faced when no shape is selected.
     context : list of ndarray
         Lines drawn thin and grey for context (e.g. every rigging line), m.
+    hint : Highlight or None
+        Where the number pointed at or being edited acts (:mod:`envelopelab_app.hints`),
+        drawn in amber.
+    hint_face : bool
+        Turn to face the hint (its number is being edited, not only pointed at).
     """
 
     gore_map: Any = None
@@ -193,10 +200,15 @@ class PlacementData:
     place_at: Callable[[str, np.ndarray], Any] | None = None
     highlight: Any = None
     context: list[np.ndarray] = field(default_factory=list)
+    hint: Any = None
+    hint_face: bool = False
 
     @property
     def facing_key(self) -> str | None:
-        """What the 3D view faces: the selected shape, else the highlighted element."""
+        """What the 3D view faces: the hint of a number being edited, else the selected
+        shape, else the highlighted element."""
+        if self.hint is not None and self.hint_face and self.hint.focus is not None:
+            return f"hint:{self.hint.key}"
         if self.selected is not None:
             return f"shape:{self.selected}"
         return None if self.highlight is None else str(self.highlight.key)
@@ -204,6 +216,8 @@ class PlacementData:
     def facing_point(self) -> np.ndarray | None:
         """The point to face (m): the selected shape's base point, else the highlight's
         focus."""
+        if self.hint is not None and self.hint_face and self.hint.focus is not None:
+            return np.asarray(self.hint.focus, float)
         shape = next((s for s in self.shapes if s.name == self.selected), None)
         if shape is not None:
             return shape.base3d
@@ -756,6 +770,7 @@ class BalloonSketch(QWidget):
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
             self._draw_lines(painter, light=True)
             self._draw_preview(painter)
+            self._draw_hint(painter)
             return
         view_key = (self.azimuth, self.elevation, self.zoom, self.width(), self.height())
         key = (*view_key, id(self.data))
@@ -769,6 +784,7 @@ class BalloonSketch(QWidget):
             self._picture = (key, picture)
         painter.drawPixmap(0, 0, self._picture[1])
         self._draw_preview(painter)
+        self._draw_hint(painter)
         if self._drag is not None and self._drag[1] is not None:
             ((x, y),) = self._projector()(self._drag[1][None])
             painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -776,6 +792,38 @@ class BalloonSketch(QWidget):
             painter.setBrush(QBrush(QColor(SELECTED)))
             painter.drawEllipse(QPointF(float(x), float(y)), 6.0, 6.0)
             painter.drawText(QPointF(float(x) + 9, float(y) - 6), f"move {self._drag[0]}")
+
+    def set_hint(self, hint: Any, face: bool) -> None:
+        """Draw where the number pointed at acts (amber, over the picture: no redraw of
+        the envelope or the shapes); ``face``: turn to it (its number is being edited)."""
+        self.data.hint, self.data.hint_face = hint, face
+        if self.data.facing_key != self._faced:
+            self._faced = self.data.facing_key
+            if face:
+                self.face_selected()
+        self.update()
+
+    def _draw_hint(self, painter: QPainter) -> None:
+        hint = self.data.hint
+        if hint is None or self.data.sketch is None:
+            return
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        view, _r, _u = self._frame()
+        centre = _centre(self.data.sketch)
+        screen = self._projector()
+        front_pen, back_pen = QPen(QColor(HINT), 3.5), _pen(HINT, 1.2, dashed=True)
+        for polyline in hint.lines:
+            front = (polyline - centre) @ view > 0.0
+            xy = screen(polyline)
+            for visible, pen in ((True, front_pen), (False, back_pen)):
+                seg = (front[:-1] & front[1:]) if visible else ~(front[:-1] & front[1:])
+                if not seg.any():
+                    continue
+                path = QPainterPath()
+                for i in np.flatnonzero(seg):
+                    path.moveTo(*xy[i])
+                    path.lineTo(*xy[i + 1])
+                painter.strokePath(path, pen)
 
     def _draw_preview(self, painter: QPainter) -> None:
         """The axis being placed (dashed where it runs behind) and the mirror images it
@@ -920,6 +968,7 @@ class BalloonSketch(QWidget):
             highlight = self.data.highlight
             for polyline in [] if highlight is None else highlight.lines:
                 stroke(polyline, QPen(QColor(SELECTED), 3.0), _pen(SELECTED, 1.0, dashed=True))
+
         if light:
             for shape in self.data.shapes:
                 if (shape.base3d - centre) @ view <= 0.0:
@@ -1071,9 +1120,11 @@ class BalloonGpuView(QWidget):
             p.remove_actor("axis-labels")
         self._axes_shown = (lines, names)
         highlight = [] if data.highlight is None else list(data.highlight.lines)
+        hint = [] if data.hint is None else list(data.hint.lines)
         for key, polylines, colour, width in (
             ("context", data.context, CONTEXT, 1),
             ("highlight", highlight, SELECTED, 5),
+            ("hint", hint, HINT, 6),
         ):
             if _same(self._lines_shown.get(key), polylines):
                 continue
@@ -1093,6 +1144,29 @@ class BalloonGpuView(QWidget):
             self._faced = data.facing_key
             self.face_selected()
         p.render()
+
+    def set_hint(self, hint: Any, face: bool) -> None:
+        """Draw where the number pointed at acts (one actor); ``face``: turn to it."""
+        self.data.hint, self.data.hint_face = hint, face
+        lines = [] if hint is None else list(hint.lines)
+        if not _same(self._lines_shown.get("hint"), lines):
+            self._lines_shown["hint"] = lines
+            if lines:
+                self.plotter.add_mesh(
+                    _lines(lines),
+                    color=HINT,
+                    line_width=6,
+                    name="hint",
+                    pickable=False,
+                    reset_camera=False,
+                )
+            else:
+                self.plotter.remove_actor("hint")
+        if self.data.facing_key != self._faced:
+            self._faced = self.data.facing_key
+            if face:
+                self.face_selected()
+        self.plotter.render()
 
     def face_selected(self) -> None:
         """Look straight at the selected shape's base point (or, with no shape selected,
@@ -1574,6 +1648,16 @@ class EnvelopeInlay(QWidget):
             ),
             defer_hidden=lambda: controller.defer_hidden,
         )
+        controller.hintChanged.connect(self.show_hint)
+
+    def show_hint(self) -> None:
+        """Draw the controller's hint: where the number pointed at or being edited acts."""
+        if not self.isVisible() and self.controller.defer_hidden:
+            return
+        hint = self.controller.hint_highlight()
+        self.data.hint, self.data.hint_face = hint, self.controller.hint_focused
+        self.view3d.set_hint(hint, self.controller.hint_focused)  # type: ignore[attr-defined]
+        self._caption()
 
     @property
     def view3d(self) -> QWidget:
@@ -1634,18 +1718,25 @@ class EnvelopeInlay(QWidget):
         data.highlight = highlight
         if self.rigging_context:
             data.context = [line for lines in rigging.values() for line in lines]
+        data.hint, data.hint_face = c.hint_highlight(), c.hint_focused
         self.set_data(data)
 
     def set_data(self, data: PlacementData) -> None:
         """Draw ``data`` (its shapes are shown, not movable here)."""
         data.place_at = None
         self.data = data
-        highlight = data.highlight
+        self._caption()
+        self.view3d.set_data(data)  # type: ignore[attr-defined]
+
+    def _caption(self) -> None:
+        data = self.data
+        highlight, hint = data.highlight, data.hint
         if data.sketch is None:
             what = "no standard-gore envelope to show"
         elif highlight is not None:
             what = f"<span style='color:{SELECTED}'>{highlight.label}</span>"
         else:
             what = "select a row, point or component to see it here"
+        if hint is not None and data.sketch is not None:
+            what = f"<span style='color:{HINT}'>▶ {hint.label}</span>; " + what
         self.caption.setText(f"<b>On the balloon</b>: {what}")
-        self.view3d.set_data(data)  # type: ignore[attr-defined]

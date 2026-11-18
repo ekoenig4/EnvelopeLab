@@ -81,3 +81,73 @@ def test_the_profile_is_a_seam_meridian() -> None:
     (line,) = h.lines
     assert line[:, 1] == pytest.approx(0.0, abs=1e-9)  # the seam at azimuth 0
     assert line[0, 2] < line[-1, 2]
+
+
+# -- hints: where a number acts (ADR-0050) ----------------------------------------
+
+
+def _length() -> float:
+    return float(design_profile(DESIGN).meridian_length)
+
+
+def test_the_mouth_diameter_hint_is_the_mouth_ring() -> None:
+    from envelopelab.project.highlight import hint_highlight
+
+    h = hint_highlight(DESIGN, "field:gores.mouth_diameter", rows=ROWS)
+    assert h is not None and h.key == "field:gores.mouth_diameter"
+    (line,) = h.lines
+    assert line == pytest.approx(ring(DESIGN, 0.0))
+
+
+def test_the_equator_hint_is_at_the_widest_radius() -> None:
+    from envelopelab.project.highlight import hint_highlight
+
+    h = hint_highlight(DESIGN, "equator", rows=ROWS)
+    assert h is not None
+    (line,) = h.lines
+    profile = design_profile(DESIGN)
+    s = np.linspace(0.0, _length(), 4001)
+    widest = float(np.max(np.asarray(profile.radius_at(s))))
+    assert float(np.max(np.hypot(line[:, 0], line[:, 1]))) == pytest.approx(widest, rel=1e-3)
+
+
+def test_the_gore_count_hint_draws_every_gore_seam() -> None:
+    from envelopelab.project.highlight import hint_highlight
+
+    h = hint_highlight(DESIGN, "field:gores.count", rows=ROWS)
+    assert h is not None and len(h.lines) == N
+
+
+def test_a_row_field_hint_is_that_row() -> None:
+    from envelopelab.project.highlight import hint_highlight
+
+    row = DESIGN.gores.panel_rows[1]  # type: ignore[union-attr]
+    h = hint_highlight(DESIGN, "field:gores.panel_rows.1.height", rows=ROWS)
+    selected = selection_highlight(DESIGN, f"row:{row.letter}", rows=ROWS)
+    assert h is not None and selected is not None
+    assert len(h.lines) == len(selected.lines)
+    for a, b in zip(h.lines, selected.lines, strict=True):
+        assert a == pytest.approx(b)
+    assert "row" in h.label and row.letter in h.label
+
+
+def test_a_control_point_field_hint_is_that_point() -> None:
+    from envelopelab.project.highlight import hint_highlight
+
+    h = hint_highlight(DESIGN, "field:gores.meridian_profile_control_points.2.r", rows=ROWS)
+    assert h is not None and h.key == "point:2"
+
+
+def test_whole_envelope_numbers_hint_the_whole_envelope() -> None:
+    from envelopelab.project.highlight import hint_highlight
+
+    h = hint_highlight(DESIGN, "field:operating.ambient_temperature", rows=ROWS)
+    assert h is not None
+    assert len(h.lines) >= N + 2  # every gore seam, the mouth and the top
+    assert "whole envelope" in h.label
+
+
+def test_a_number_without_a_place_has_no_hint() -> None:
+    from envelopelab.project.highlight import hint_highlight
+
+    assert hint_highlight(DESIGN, "field:metadata.version", rows=ROWS) is None

@@ -18,7 +18,9 @@ applied; a refused change is reported and nothing changes.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
+from functools import partial
 from typing import Any
 
 from PySide6.QtGui import QDoubleValidator, QIntValidator
@@ -38,6 +40,8 @@ from PySide6.QtWidgets import (
 
 from envelopelab.project.field_editing import NEW_ENTRIES, FieldInfo, field_info, new_value
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.hints import set_hint
+from envelopelab_app.live_number import LiveNumber
 from envelopelab_app.refresh import Refresher
 
 FieldPath = tuple[str | int, ...]
@@ -117,6 +121,16 @@ OWNED: dict[tuple[str, ...], str] = {
 }
 
 
+def _skeleton(value: Any) -> Any:
+    """The shape of JSON data (keys, list lengths, which values are missing), not its
+    values: a form built for one is right for the other."""
+    if isinstance(value, dict):
+        return {k: _skeleton(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_skeleton(v) for v in value]
+    return None if value is None else type(value).__name__
+
+
 def owner(path: Sequence[str | int]) -> str | None:
     """Editor that owns the field at ``path`` (None: edited in the Properties panel)."""
     keys = tuple("*" if isinstance(p, int) else p for p in path)
@@ -147,7 +161,10 @@ class PropertiesPanel(QWidget):
         layout.addWidget(self.title)
         layout.addWidget(self.scroll_area)
         self.editors: dict[FieldPath, QWidget] = {}
+        self.labels: dict[FieldPath, QLabel] = {}
         self.buttons: dict[tuple[str, FieldPath], QPushButton] = {}
+        #: What the form was built for: (section, the shape of its data).
+        self._built: tuple[str, str] | None = None
         controller.selectionChanged.connect(self._selection)
         self.refresher = Refresher(
             self,
@@ -167,12 +184,54 @@ class PropertiesPanel(QWidget):
             self.refresh()
 
     def refresh(self) -> None:
+        """Show the selected section: its values updated in place while its fields are the
+        same (so the field being edited keeps focus and the form does not flicker), the
+        form rebuilt when they are not (another section, an entry added or removed)."""
+        session = self.controller.session
+        if session is not None:
+            data = session.design.model_dump(by_alias=True, mode="json")
+            key = (self.section, json.dumps(_skeleton(data.get(self.section)), sort_keys=True))
+            if key == self._built and self.editors:
+                self._update_values(data)
+                return
+            self._built = key
+        else:
+            self._built = None
+        self._rebuild()
+
+    def _update_values(self, data: dict[str, Any]) -> None:
+        """Put the current values into the editors of an unchanged form."""
+        for path, editor in self.editors.items():
+            value: Any = data
+            for part in path:
+                value = value[part] if value is not None else None
+            info = field_info(path)
+            if isinstance(editor, QLineEdit):
+                text = self._text(value, info)
+                if editor.text() != text and not (editor.hasFocus() and editor.isModified()):
+                    position = editor.cursorPosition()
+                    editor.setText(text)
+                    editor.setCursorPosition(min(position, len(text)))
+            elif isinstance(editor, QCheckBox):
+                editor.blockSignals(True)
+                editor.setChecked(bool(value))
+                editor.blockSignals(False)
+            elif isinstance(editor, QComboBox):
+                editor.blockSignals(True)
+                editor.setCurrentIndex(max(0, editor.findData(value)))
+                editor.blockSignals(False)
+            label = self.labels.get(path)
+            if label is not None:
+                label.setText(self._label_text(path, value))
+
+    def _rebuild(self) -> None:
         """Rebuild the form for the selected section."""
         # A fresh body widget each time; the scroll area deletes the previous one.
         body = QWidget()
         self.form_layout = QVBoxLayout(body)
         self.scroll_area.setWidget(body)
         self.editors = {}
+        self.labels = {}
         self.buttons = {}
         session = self.controller.session
         if session is None:
@@ -295,7 +354,6 @@ class PropertiesPanel(QWidget):
                 self._build(value, sub, layout, removable=info.optional)
 
     def _row(self, form: QFormLayout, path: FieldPath, value: Any, info: FieldInfo) -> None:
-        name = str(path[-1])
         owned = owner(path)
         editor: QWidget
         if info.kind == "bool":
@@ -321,17 +379,22 @@ class PropertiesPanel(QWidget):
                 line.setValidator(QIntValidator())
             line.editingFinished.connect(lambda p=path, e=line, i=info: self._edited(p, e, i))
             line.setReadOnly(owned is not None)
+            if info.kind in ("number", "integer") and owned is None:
+                # The wheel and the arrow keys change the number in real time.
+                LiveNumber(
+                    line,
+                    partial(self._live, path, info.kind),
+                    integer=info.kind == "integer",
+                )
             editor = line
         editor.setObjectName("prop_" + "_".join(str(p) for p in path))
+        # Where on the balloon this value acts (the 3D view draws it, hints module).
+        set_hint(editor, "field:" + ".".join(str(p) for p in path))
         if owned is not None:
             editor.setEnabled(False)
             editor.setToolTip(f"Edited in the {owned}")
-        unit = UNITS.get(name, "")
-        if name == "value" and len(path) >= 2:
-            unit = VALUE_UNITS.get(str(path[-2]), "")
-        if name.endswith("temperature") and isinstance(value, (int, float)):
-            unit = f"K ({float(value) - 273.15:.1f} °C)"
-        label = name.replace("_", " ") + (f" [{unit}]" if unit else "")
+        label = QLabel(self._label_text(path, value))
+        self.labels[path] = label
         if info.optional and value is not None and owned is None and info.kind != "choice":
             row = QWidget()
             row_layout = QHBoxLayout(row)
@@ -347,6 +410,17 @@ class PropertiesPanel(QWidget):
         else:
             form.addRow(label, editor)
         self.editors[path] = editor
+
+    @staticmethod
+    def _label_text(path: FieldPath, value: Any) -> str:
+        """Field label with its unit (a temperature also in degC)."""
+        name = str(path[-1])
+        unit = UNITS.get(name, "")
+        if name == "value" and len(path) >= 2:
+            unit = VALUE_UNITS.get(str(path[-2]), "")
+        if name.endswith("temperature") and isinstance(value, (int, float)):
+            unit = f"K ({float(value) - 273.15:.1f} °C)"
+        return name.replace("_", " ") + (f" [{unit}]" if unit else "")
 
     @staticmethod
     def _text(value: Any, info: FieldInfo) -> str:
@@ -395,6 +469,7 @@ class PropertiesPanel(QWidget):
     def _edited(self, path: FieldPath, editor: QLineEdit, info: FieldInfo) -> None:
         if editor.isReadOnly():
             return
+        editor.setModified(False)  # committed (or refused and shown again)
         try:
             value = self._parse(editor.text(), info)
         except ValueError:
@@ -402,6 +477,12 @@ class PropertiesPanel(QWidget):
             self.refresh()
             return
         self._commit(path, value)
+
+    def _live(self, path: FieldPath, kind: str, value: float) -> None:
+        """Commit a scrubbed number in real time (:meth:`WorkspaceController.edit_live`)."""
+        number: float | int = int(value) if kind == "integer" else float(value)
+        key = "prop:" + ".".join(str(x) for x in path)
+        self.controller.edit_live(key, lambda: self._commit(path, number))
 
     def _commit(self, path: FieldPath, value: Any) -> None:
         session = self.controller.session

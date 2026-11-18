@@ -391,3 +391,40 @@ def test_adding_an_unused_library_fabric_keeps_results_current() -> None:
     library.add_fabric(dataclasses.replace(template, fabric_id="new_fabric", name="New"))
     s.refresh_fabrics()
     assert s.run_status(run) == "current"
+
+
+def _set_payload(session: ProjectSession, mass: float) -> bool:
+    def mutate(design: dict[str, Any], _patterns: dict[str, Any]) -> None:
+        design["operating"]["payload_mass"] = mass
+
+    return session.edit("payload", mutate)
+
+
+def test_live_edits_of_one_value_are_one_undo_step() -> None:
+    session = fixture_session()
+    before = session.design.operating.payload_mass
+    session.merge_key = "payload"
+    for mass in (before + 1.0, before + 2.0, before + 3.0):
+        assert _set_payload(session, mass)
+    session.merge_key = None
+    assert session.stack.index == 1
+    assert session.design.operating.payload_mass == before + 3.0
+    session.undo()
+    assert session.design.operating.payload_mass == before
+    assert not session.stack.can_undo
+
+
+def test_a_live_edit_after_an_undo_or_another_key_is_a_new_step() -> None:
+    session = fixture_session()
+    before = session.design.operating.payload_mass
+    session.merge_key = "payload"
+    _set_payload(session, before + 1.0)
+    session.merge_key = "other"
+    _set_payload(session, before + 2.0)
+    assert session.stack.index == 2
+    session.undo()
+    session.merge_key = "other"
+    _set_payload(session, before + 5.0)
+    assert session.stack.index == 2  # not merged into the undone edit
+    session.undo()
+    assert session.design.operating.payload_mass == before + 1.0

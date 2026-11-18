@@ -15,6 +15,7 @@ from PySide6.QtGui import (
     QPainter,
     QPainterPath,
     QPen,
+    QShowEvent,
     QTransform,
 )
 from PySide6.QtWidgets import (
@@ -73,7 +74,6 @@ from envelopelab.project.profile_match import (
     target_profile,
 )
 from envelopelab.project.profile_physics import (
-    check_design,
     design_load,
     natural_design_shape,
 )
@@ -89,6 +89,8 @@ from envelopelab.project.references import (
 from envelopelab.project.session import ProjectSession
 from envelopelab.solvers.axisymmetric import AxisymmetricLoad, MembraneCheck, membrane_check
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.display_geometry import thin
+from envelopelab_app.hints import set_hint
 from envelopelab_app.placement_view import EnvelopeInlay
 from envelopelab_app.refresh import Refresher
 from envelopelab_app.result_view import design_banner
@@ -186,6 +188,11 @@ class ProfileCanvas(QGraphicsView):
 
     pointMoved = Signal(int, float, float)  # noqa: N815
     pointsDragged = Signal(object, float, float)  # noqa: N815
+    #: While points are dragged (``live``): the control points where the drag puts them
+    #: (radii, heights, m, the soft selection applied), and how many points moved; and
+    #: when the drag ends.
+    pointsDragging = Signal(object, object, int)  # noqa: N815
+    dragEnded = Signal()  # noqa: N815
     pointsSelected = Signal()  # noqa: N815
 
     def __init__(self) -> None:
@@ -200,6 +207,9 @@ class ProfileCanvas(QGraphicsView):
         self.falloff: Falloff = "smooth"
         self.show_comb = False
         self._drag_start: QPointF | None = None
+        #: Edit the design while points are dragged (``pointsDragging``), so every view
+        #: follows the drag; otherwise one edit when the drag ends.
+        self.live = False
         self._drag_points: tuple[np.ndarray, np.ndarray] | None = None
         self._drag_delta = (0.0, 0.0)
         self._points_extent = (1.0, 0.0, 1.0)
@@ -462,14 +472,24 @@ class ProfileCanvas(QGraphicsView):
         for handle, a, b in zip(self.handles, r, z, strict=True):
             handle.setPos(QPointF(float(a), float(-b)))
         self._draw(r, z)
+        if self.live:
+            self.pointsDragging.emit(r, z, len(selected))
+
+    @property
+    def dragging(self) -> bool:
+        """Points are being dragged."""
+        return self._drag_start is not None
 
     def end_drag(self) -> None:
         """Finish a drag: emit the move as one edit (after this event returns, because the
-        edit rebuilds the handles)."""
+        edit rebuilds the handles); a live drag has made its edits already."""
         selected = self.selected_indices()
         dr, dz = self._drag_delta
         self._drag_start, self._drag_points = None, None
         self._drag_delta = (0.0, 0.0)
+        if self.live:
+            QTimer.singleShot(0, self.dragEnded.emit)
+            return
         if not selected or (dr == 0.0 and dz == 0.0):
             return
         if len(selected) == 1 and self.soft_radius == 0.0:
@@ -511,11 +531,13 @@ class ProfileCanvas(QGraphicsView):
         except ValueError:
             return
         path, mirror = QPainterPath(), QPainterPath()
-        path.moveTo(profile.r[0], -profile.z[0])
-        mirror.moveTo(-profile.r[0], -profile.z[0])
-        for a, b in zip(profile.r[1:], profile.z[1:], strict=True):
-            path.lineTo(float(a), float(-b))
-            mirror.lineTo(float(-a), float(-b))
+        # The dense profile thinned for drawing (display only, within half a millimetre).
+        curve = thin(np.column_stack([profile.r, profile.z]))
+        path.moveTo(float(curve[0, 0]), -float(curve[0, 1]))
+        mirror.moveTo(-float(curve[0, 0]), -float(curve[0, 1]))
+        for a, b in curve[1:].tolist():
+            path.lineTo(a, -b)
+            mirror.lineTo(-a, -b)
         self._curve.setPath(path)
         self._mirror.setPath(mirror)
         axis = QPainterPath()
@@ -789,8 +811,11 @@ class ShapePhysicsPanel(QGroupBox):
             self.canvas.set_ghosts({}, "natural")
             return
         try:
-            loaded = design_load(design, session.patterns, self.controller.fabrics)
-            check = check_design(design, session.patterns, self.controller.fabrics)
+            # The live outputs of this revision carry the load (computed once per edit).
+            loaded = design_load(
+                design, session.patterns, self.controller.fabrics, self.controller.outputs
+            )
+            check = membrane_check(design_profile(design), loaded.load)
         except ValueError as exc:
             self.canvas.set_stress_load(None)
             self.status.setText(f"No check: {exc}")
@@ -1297,11 +1322,14 @@ class GoreEditor(QWidget):
         self.controller = controller
         self._updating = False
         self._syncing = False
+        self._roll_stale = False
         self.header = QLabel()
         self.header.setObjectName("goreEditorHeader")
         self.canvas = ProfileCanvas()
         self.canvas.pointMoved.connect(self._point_moved)
         self.canvas.pointsDragged.connect(self._points_dragged)
+        self.canvas.pointsDragging.connect(self._points_dragging)
+        self.canvas.dragEnded.connect(self._drag_ended)
         self.canvas.pointsSelected.connect(self._canvas_selection)
 
         self.points_table = QTableWidget(0, 2)
@@ -1608,6 +1636,7 @@ class GoreEditor(QWidget):
         layout.addWidget(self.banner)
         layout.addWidget(splitter, 1)
 
+        self._tag_hints()
         self.refresher = Refresher(
             self,
             self.refresh,
@@ -1621,6 +1650,44 @@ class GoreEditor(QWidget):
         self.refresh()
 
     # -- refresh ------------------------------------------------------------------------
+
+    def _tag_hints(self) -> None:
+        """Say where on the balloon every number of the editor acts
+        (:mod:`envelopelab_app.hints`): the 3D view under the profile draws it."""
+        profile = "field:gores.meridian_profile_control_points"
+        for widget, key in (
+            (self.gore_count, "field:gores.count"),
+            (self.row_count, "field:gores.panel_rows"),
+            (self.rows_table, "field:gores.panel_rows"),
+            (self.points_table, profile),
+            (self.loft_table, "field:gores.loft"),
+            (self.crest_table, "field:gores.crest_loft"),
+            (self.crest_fraction, "field:gores.crest_loft"),
+            (self.construction, "field:gores.construction"),
+            (self.interpolation, "field:gores.profile_interpolation"),
+            (self.soft_radius, profile),
+            (self.falloff, profile),
+            (self.scale_r, profile),
+            (self.scale_z, profile),
+            (self.rotate_deg, profile),
+            (self.simplify_tolerance, profile),
+            (self.refs_table, profile),
+            (self.shape_physics, profile),
+            (self.solved_shape, profile),
+            (self.panels_box, "field:gores.panel_rows"),
+        ):
+            set_hint(widget, key)
+        set_hint(self.gore_count, "field:gores.count")
+        for name, key in (
+            ("height", profile),
+            ("volume", "field:operating.volume"),
+            ("max_diameter", "equator"),
+            ("mouth_diameter", "field:gores.mouth_diameter"),
+            ("top_diameter", "field:gores.parachute_hole_diameter"),
+            ("gore_count", "field:gores.count"),
+        ):
+            set_hint(self.lock_values[name], key)
+            set_hint(self.locks[name], key)
 
     def _build_panels_box(self) -> QGroupBox:
         """Gore count, half gores and how the panels fit the print roll, at the top."""
@@ -1713,7 +1780,17 @@ class GoreEditor(QWidget):
         else:
             self.controller.edit("set_half_gores", None, which == "all")
 
+    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 (Qt API)
+        super().showEvent(event)
+        if self._roll_stale:
+            self._show_roll_status()
+
     def _show_roll_status(self) -> None:
+        # Hidden (another mode in front): wait until shown rather than fit every piece
+        # to the roll on every change elsewhere.
+        self._roll_stale = self.controller.defer_hidden and not self.isVisible()
+        if self._roll_stale:
+            return
         fits = self.controller.envelope_piece_fits()
         roll = self.controller.prefs.print_roll_width * 1000
         bad = [f for f in fits if not f.fits]
@@ -1810,7 +1887,8 @@ class GoreEditor(QWidget):
             if locks is not None and locks.top_diameter is not None:
                 self.canvas.locked_radii[len(r) - 1] = 0.5 * locks.top_diameter
             self._set_canvas_references()
-            self.canvas.set_points(r, z, layout, corners)
+            if not self.canvas.dragging:  # a live drag places its own handles
+                self.canvas.set_points(r, z, layout, corners)
             self._show_points(r, z, layout)
             self._show_references()
             session = self.controller.session
@@ -2624,6 +2702,19 @@ class GoreEditor(QWidget):
 
     def _soft(self) -> tuple[float, Falloff]:
         return float(self.soft_radius.value()), self.falloff.currentData()
+
+    def _points_dragging(self, r: np.ndarray, z: np.ndarray, moved: int) -> None:
+        """A live drag: the design follows the points (one undo step for the drag)."""
+        points = [(float(a), float(b)) for a, b in zip(r, z, strict=True)]
+        text = f"Move {moved} point(s)"
+        self.controller.edit_live(
+            "profile drag", lambda: self.controller.edit("set_control_points", points, text)
+        )
+
+    def _drag_ended(self) -> None:
+        """The live drag ended: apply its last position, show the design's points."""
+        self.controller.flush_live()
+        self.refresh()
 
     def _points_dragged(self, selected: list[int], dr: float, dz: float) -> None:
         if not self.controller.edit("move_points", selected, dr, dz, *self._soft()):

@@ -491,11 +491,14 @@ def clear_feed_holes(
     return spec.model_copy(update={"feed_holes": holes}), notes
 
 
-def envelope_surface(design: DesignDocument, patterns: PatternSet) -> EnvelopeSurface:
-    """The envelope shapes are placed on (the design's load-tape surface)."""
+def envelope_surface(
+    design: DesignDocument, patterns: PatternSet, rows: list[Any] | None = None
+) -> EnvelopeSurface:
+    """The envelope shapes are placed on (the design's load-tape surface); ``rows``: its
+    panel rows when already made."""
     from envelopelab.features.primitives import EnvelopeSurface
 
-    return EnvelopeSurface.from_design(design, patterns)
+    return EnvelopeSurface.from_design(design, patterns, rows)
 
 
 def default_shape(kind: ShapeKind, design: DesignDocument, name: str) -> ShapeSpec:
