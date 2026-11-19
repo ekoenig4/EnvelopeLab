@@ -464,3 +464,28 @@ def test_design_mode_inlays_and_the_3d_mode_highlight_on_the_graphics_card(
     w.controller.select("operating")
     assert "selection-highlight" not in w.view3d.plotter.actors
     w.close()
+
+
+def test_placement_view_draws_a_shape_by_its_panels(qtbot: QtBot, settings: QSettings) -> None:
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    assert w.open_project(GORE_PROJECT) is not None
+    w.show_panel("shapes")
+    w.shapes.add_shape("dome")
+    assert w.controller.shapes.wait(120_000)
+    w.shapes.refresh()
+    view = w.shapes.placement.view3d
+    plotter = view.plotter  # type: ignore[attr-defined]
+    assert plotter is not None
+    actor = plotter.actors["shape:Dome"]
+    colours = np.asarray(actor.mapper.dataset.cell_data["panel"])
+    assert len({tuple(c) for c in colours.tolist()}) >= 2  # neighbouring panels differ
+    assert "shape:Dome:seams" in plotter.actors
+    # Clearing the selection recolours the shape.
+    data = w.shapes.placement.data
+    data.selected = None
+    view.set_data(data)  # type: ignore[attr-defined]
+    after = np.asarray(plotter.actors["shape:Dome"].mapper.dataset.cell_data["panel"])
+    assert not np.array_equal(colours, after)
+    w.close()

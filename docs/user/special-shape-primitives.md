@@ -39,8 +39,11 @@ both come back when you change mode. The screen has three columns:
   on the envelope), **Checks** and **Attachment**.
 
 **On the balloon.** This tab shows a 3D view over a gore map (drag the bar between them
-to share the height): every shape, its footprint and feed holes, and the symmetry axes,
-the selected shape in magenta and the axes in green. They follow every number you type
+to share the height): every shape, its footprint and feed holes, and the symmetry axes.
+Each shape is drawn by its cut panels: neighbouring gores or panels in alternating fabric
+shades, a flat tip disc in its own shade, and its seams and horizontal splits drawn over
+them, so the panel layout can be judged on the balloon. The selected shape's panels are
+tinted magenta with magenta seams; the axes are green. They follow every number you type
 in the editor next to them, and you can move the selected shape on either:
 
 * **Nudge**: the ◀ ▶ buttons move the selected shape round the envelope, ▲ ▼ up and down

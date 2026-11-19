@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: special shapes on the balloon (Special shapes mode and the 3D inlays of the
+  other modes) are drawn by their cut panels, in alternating fabric shades with their
+  seams, splits and cap, instead of as solid pink objects; the selected shape is tinted
+  magenta. Drawing only; no results change.
 - Added: pointing at or editing any design number draws where it acts on the balloon in
   amber, in every 3D view, and a focused number turns the views to face it (ADR-0050).
 - Added: Properties numbers change in real time with the wheel or ↑/↓ (Shift ×10,

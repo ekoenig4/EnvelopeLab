@@ -3,8 +3,9 @@
 The *On the balloon* tab of the Special shapes mode (ADR-0044, ADR-0045), so positions
 typed as numbers can be seen, and changed by hand, at once:
 
-* **3D**: the envelope (gore and row seams), every shape as designed (the selected one in
-  magenta), the symmetry axes in green. With the 3D View on it is drawn by the graphics
+* **3D**: the envelope (gore and row seams), every shape as designed, drawn by its cut panels
+  (alternating fabric shades, its seams drawn; the selected one tinted magenta with
+  magenta seams), the symmetry axes in green. With the 3D View on it is drawn by the graphics
   card (:class:`BalloonGpuView`, PyVista); otherwise by :class:`BalloonSketch`, which
   needs no OpenGL. Drag the background to turn it, wheel to zoom; drag a shape over the
   envelope to move it. It turns to face a shape when that shape is selected; a double
@@ -77,6 +78,23 @@ CONTEXT = "#6b7785"
 #: Where the number pointed at or being edited acts (:mod:`envelopelab_app.hints`).
 HINT = "#ff8f00"
 GORE_FILL = ("#eef2f8", "#e3e9f2")
+#: Fabric shades of a special shape's cut pieces (RGB 0-1): alternate pieces, the last of
+#: an odd count, and a flat tip disc, so every piece stands out from its neighbours. The
+#: selected shape's pieces are tinted magenta.
+PANEL_FILL = (
+    (0.97, 0.93, 0.85),
+    (0.87, 0.80, 0.68),
+    (0.93, 0.87, 0.77),
+    (0.80, 0.74, 0.64),
+)
+PANEL_FILL_SELECTED = (
+    (0.99, 0.87, 0.94),
+    (0.92, 0.66, 0.82),
+    (0.96, 0.77, 0.88),
+    (0.86, 0.56, 0.74),
+)
+#: A special shape's own seams (the selected shape's in :data:`SELECTED`).
+SHAPE_SEAM = "#5a4a3a"
 ENVELOPE = (0.86, 0.89, 0.94)
 #: How long the 3D sketch waits after the last change before it draws its shaded
 #: picture, ms (until then it draws its seams, axes and shape markers).
@@ -128,6 +146,35 @@ class PlacedShape:
     placement: Any
     footprint_gs: tuple[np.ndarray, np.ndarray] | None = None
     footprint3d: np.ndarray | None = None
+    piece: np.ndarray | None = None
+    pieces: int = 0
+    seams: list[np.ndarray] = field(default_factory=list)
+
+
+def piece_colours(piece: np.ndarray | None, pieces: int, count: int, selected: bool) -> np.ndarray:
+    """RGB (0-1) of every triangle of a shape by its cut piece (:data:`PANEL_FILL`).
+
+    Parameters
+    ----------
+    piece : ndarray of int or None
+        Cut piece of every triangle (0 .. ``pieces`` - 1; ``pieces``: a flat tip disc);
+        None: not known, every triangle the first shade.
+    pieces : int
+        Number of gores or panels round the shape.
+    count : int
+        Number of triangles.
+    selected : bool
+        The shape is selected (magenta tints).
+    """
+    fill = np.asarray(PANEL_FILL_SELECTED if selected else PANEL_FILL)
+    if piece is None or len(piece) != count:
+        return np.repeat(fill[:1], count, axis=0)
+    piece = np.asarray(piece)
+    shade = piece % 2
+    if pieces > 1 and pieces % 2:
+        shade[piece == pieces - 1] = 2  # an odd count: the last piece meets the first
+    shade[piece >= pieces] = 3
+    return np.asarray(fill[shade])
 
 
 @dataclass
@@ -884,9 +931,35 @@ class BalloonSketch(QWidget):
         for shape in self.data.shapes:
             if not len(shape.triangles) or (shape.base3d - centre) @ view <= 0.0:
                 continue
-            colour = (0.84, 0.0, 0.56) if shape.name == self.data.selected else (0.91, 0.56, 0.76)
+            selected = shape.name == self.data.selected
+            colour = piece_colours(shape.piece, shape.pieces, len(shape.triangles), selected)
             parts.append((shape.points, shape.triangles, colour, shape.points.mean(axis=0)))
         self._draw_faces(painter, parts)
+        self._draw_shape_seams(painter)
+
+    def _draw_shape_seams(self, painter: QPainter) -> None:
+        """Each visible shape's seams, on the side of the shape facing the viewer."""
+        view, _r, _u = self._frame()
+        centre = _centre(self.data.sketch)
+        screen = self._projector()
+        for shape in self.data.shapes:
+            if not shape.seams or (shape.base3d - centre) @ view <= 0.0:
+                continue
+            inside = shape.points.mean(axis=0) if len(shape.points) else shape.base3d
+            selected = shape.name == self.data.selected
+            pen = QPen(QColor(SELECTED if selected else SHAPE_SEAM), 1.6 if selected else 1.1)
+            path = QPainterPath()
+            for seam in shape.seams:
+                if len(seam) < 2:
+                    continue
+                mid = 0.5 * (seam[:-1] + seam[1:])
+                # Facing the viewer: the segment is on the near side of the shape.
+                front = (mid - inside) @ view > -1e-9
+                xy = screen(seam)
+                for i in np.flatnonzero(front):
+                    path.moveTo(*xy[i])
+                    path.lineTo(*xy[i + 1])
+            painter.strokePath(path, pen)
 
     def _draw_faces(
         self, painter: QPainter, parts: list[tuple[np.ndarray, np.ndarray, Any, np.ndarray]]
@@ -911,7 +984,9 @@ class BalloonSketch(QWidget):
             shade = np.round((0.5 + 0.5 * np.abs(n[keep] @ light)) * 24) / 24
             depth.append(cen[keep] @ view)
             polys.append(screen(p[keep]))
-            colours.append(np.minimum(1.0, np.asarray(colour)[None] * shade[:, None]))
+            base = np.asarray(colour, dtype=float)
+            base = base[keep] if base.ndim == 2 else base[None]  # per triangle or one
+            colours.append(np.minimum(1.0, base * shade[:, None]))
         if not depth:
             return
         order = np.argsort(np.concatenate(depth))
@@ -1014,8 +1089,8 @@ class BalloonGpuView(QWidget):
         self._sketch: Any = None
         self._faced: str | None = None
         self._shape_keys: set[str] = set()
-        #: What each shape actor shows: (its points array, its colour).
-        self._shown: dict[str, tuple[np.ndarray, str]] = {}
+        #: What each shape actor shows: (its points array, whether it is selected).
+        self._shown: dict[str, tuple[np.ndarray, bool]] = {}
         #: The axis lines and names drawn.
         self._axes_shown: tuple[list[np.ndarray] | None, list[str]] = (None, [])
         #: The context and highlight lines drawn.
@@ -1030,6 +1105,28 @@ class BalloonGpuView(QWidget):
             ("LeftButtonReleaseEvent", self._release),
         ):
             style.AddObserver(event, handler)
+
+    @staticmethod
+    def _panel_rgb(shape: PlacedShape, selected: bool) -> np.ndarray:
+        """Colours of the shape's triangles by cut piece, as 8-bit RGB."""
+        rgb = piece_colours(shape.piece, shape.pieces, len(shape.triangles), selected)
+        return np.asarray(np.round(rgb * 255.0), dtype=np.uint8)
+
+    @staticmethod
+    def _add_shape_seams(p: Any, key: str, shape: PlacedShape, selected: bool) -> None:
+        """The shape's seams over its pieces (magenta when it is selected)."""
+        seams = [s for s in shape.seams if len(s) >= 2]
+        if not seams:
+            p.remove_actor(f"{key}:seams")
+            return
+        p.add_mesh(
+            _lines(seams),
+            color=SELECTED if selected else SHAPE_SEAM,
+            line_width=2 if selected else 1,
+            name=f"{key}:seams",
+            pickable=False,
+            reset_camera=False,
+        )
 
     def set_data(self, data: PlacementData) -> None:
         import pyvista as pv
@@ -1068,28 +1165,36 @@ class BalloonGpuView(QWidget):
         for shape in data.shapes:
             key = f"shape:{shape.name}"
             keys.add(key)
-            colour = SELECTED if shape.name == data.selected else OTHER
+            selected = shape.name == data.selected
             if not len(shape.triangles):
                 p.remove_actor(key)
+                p.remove_actor(f"{key}:seams")
                 self._shown.pop(key, None)
                 continue
             shown = self._shown.get(key)
-            if shown is not None and shown[0] is shape.points and key in p.actors:
-                if shown[1] != colour:  # only the colour changed: no new mesh
-                    p.actors[key].prop.color = colour
-                    self._shown[key] = (shape.points, colour)
-                continue
+            if (
+                shown is not None
+                and shown[0] is shape.points
+                and shown[1] == selected
+                and key in p.actors
+            ):
+                continue  # drawn already (a selection change redraws: small meshes)
             faces = np.hstack([np.full((len(shape.triangles), 1), 3), shape.triangles])
+            mesh = pv.PolyData(shape.points, faces.ravel())
+            mesh.cell_data["panel"] = self._panel_rgb(shape, selected)
             p.add_mesh(
-                pv.PolyData(shape.points, faces.ravel()),
-                color=colour,
+                mesh,
+                scalars="panel",
+                rgb=True,
                 smooth_shading=True,
                 name=key,
                 reset_camera=False,
             )
-            self._shown[key] = (shape.points, colour)
+            self._add_shape_seams(p, key, shape, selected)
+            self._shown[key] = (shape.points, selected)
         for key in self._shape_keys - keys:
             p.remove_actor(key)
+            p.remove_actor(f"{key}:seams")
             self._shown.pop(key, None)
         self._shape_keys = keys
         lines = [line for _n, _m, lines3d in data.axes for line in lines3d]
@@ -1356,7 +1461,8 @@ class PlacementView(QWidget):
             "the selected shape) over the <b>gore map</b>, the gores side by side as cut "
             "(click: select; drag: move; drag empty space: pan; wheel: zoom; double click or "
             "Fit: whole map). "
-            f"Selected shape <span style='color:{SELECTED}'>magenta</span>, symmetry axes "
+            "Shapes are drawn by their panels; the selected shape "
+            f"<span style='color:{SELECTED}'>magenta</span>, symmetry axes "
             f"<span style='color:{AXIS}'>green</span>."
         )
         caption.setWordWrap(True)
