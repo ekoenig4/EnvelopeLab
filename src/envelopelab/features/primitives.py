@@ -129,6 +129,7 @@ from envelopelab.features.builder import (
     RimTapeSpec,
     _mesh_disc,
 )
+from envelopelab.features.crown import CrownOutline, CrownOutlineError, CrownShape
 from envelopelab.geometry.gore import (
     GoreWidthModel,
     MeridianProfile,
@@ -478,6 +479,11 @@ class Dome:
         cover the tip (needs ``cap_radius`` > 0).
     cap_direction : float
         Angle round the axis towards which the cap moves, rad (as the seam angles).
+    crown : CrownShape or None
+        Shape of the cap seen from above, round the point where the panels meet
+        (:mod:`envelopelab.features.crown`, ADR-0054; None: a circle of ``cap_radius``).
+        The cap is the skin inside the outline's prism along the axis, cut off and
+        flattened; needs ``cap_radius`` > 0.
     """
 
     name: str
@@ -494,6 +500,7 @@ class Dome:
     crown_widths: tuple[float, ...] = ()
     cap_shift: float = 0.0
     cap_direction: float = 0.0
+    crown: CrownShape | None = None
 
     kind: PrimitiveKind = field(default="dome", init=False)
 
@@ -667,6 +674,11 @@ class Revolved:
         cover the tip (needs ``cap_radius`` > 0).
     cap_direction : float
         Angle round the axis towards which the cap moves, rad (as the seam angles).
+    crown : CrownShape or None
+        Shape of the cap seen from above, round the point where the panels meet
+        (:mod:`envelopelab.features.crown`, ADR-0054; None: a circle of ``cap_radius``).
+        The cap is the skin inside the outline's prism along the axis, cut off and
+        flattened; needs ``cap_radius`` > 0.
     """
 
     name: str
@@ -683,6 +695,7 @@ class Revolved:
     crown_widths: tuple[float, ...] = ()
     cap_shift: float = 0.0
     cap_direction: float = 0.0
+    crown: CrownShape | None = None
 
     kind: PrimitiveKind = field(default="revolved", init=False)
 
@@ -799,6 +812,9 @@ class FreeformShape:
         the shape's frame, m (:math:`x` up the tape, :math:`y` across the gores; 0, 0:
         on the axis). The seams are cut along half-planes about the line through it
         parallel to the axis, and meet where that line leaves the mesh (ADR-0052).
+    crown : CrownShape or None
+        Shape of the cap seen from above round where the panels meet (ADR-0054; None: a
+        circle of ``cap_radius``); needs ``cap_radius`` > 0.
     """
 
     name: str
@@ -810,6 +826,7 @@ class FreeformShape:
     seam_offset: float = 0.0
     panel_widths: tuple[float, ...] = ()
     seam_centre: tuple[float, float] = (0.0, 0.0)
+    crown: CrownShape | None = None
 
     kind: PrimitiveKind = field(default="mesh", init=False)
 
@@ -876,6 +893,8 @@ TIER_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
 def _check_layout(primitive: Primitive) -> None:
     """Raise :class:`PrimitiveError` for a panel layout that cannot be cut."""
     name, m = primitive.name, primitive.pieces
+    if getattr(primitive, "crown", None) is not None and not primitive.closed_tip:
+        raise PrimitiveError(f"{name}: a shaped crown needs a cap (set a cap diameter)")
     widths = primitive.panel_widths
     if widths:
         if len(widths) != m:
@@ -980,6 +999,11 @@ def twisted(primitive: Primitive) -> bool:
     if isinstance(primitive, FreeformShape):
         return False
     return bool(np.any(np.abs(crown_seam_angles(primitive) - seam_angles(primitive)) > 1e-12))
+
+
+def shaped_crown(primitive: Primitive) -> bool:
+    """True when the cap has a crown outline other than a circle (ADR-0054)."""
+    return getattr(primitive, "crown", None) is not None and primitive.closed_tip
 
 
 def cap_moved(primitive: Primitive) -> bool:
@@ -1442,6 +1466,33 @@ class PrimitiveDesign:
 # --------------------------------------------------------------------------------------
 
 
+#: Points round a shaped cap's edge and rings from its edge to the tip (source: assumed).
+CROWN_RING = 96
+CROWN_RINGS = 12
+
+
+@dataclass
+class _ShapedCap:
+    """A shaped crown cut from the skin (:meth:`_Skin._crown_section`).
+
+    Attributes
+    ----------
+    outline : CrownOutline
+        The cap's outline round the meeting point, plan m.
+    centre : ndarray, shape (2,)
+        Plan position of the meeting point from the axis (across, up), m.
+    top : ndarray
+        Path position of the cap's edge on the skin's meridians ``phi``, m.
+    point : ndarray, shape (3,)
+        The meeting point on the skin, m.
+    """
+
+    outline: CrownOutline
+    centre: FloatArray
+    top: FloatArray
+    point: FloatArray
+
+
 class _Skin:
     """Skin surface :math:`\\mathbf{S}(t, \\phi)` from the footprint (t=0) to the tip (t=1)."""
 
@@ -1458,8 +1509,9 @@ class _Skin:
         self.primitive = primitive
         self.surface = surface
         self.base, self.axis, self.b1, self.b2 = base, axis, b1, b2
-        moved = cap_moved(primitive)
-        # A moved cap trims the whole (pointed) skin with its plane: the meridian runs on
+        shaped = shaped_crown(primitive)
+        moved = cap_moved(primitive) or shaped
+        # A moved or shaped cap trims the whole (pointed) skin with its plane: the meridian runs on
         # to the tip; ``total`` stays the centred cap's ring (the splits' 100 %).
         source = (
             dataclasses.replace(primitive, cap_radius=0.0)  # type: ignore[arg-type]
@@ -1485,8 +1537,15 @@ class _Skin:
         #: The moved cap: its plane (point, normal) and the top of the skin on every
         #: meridian (physical angles ``phi``, path positions), set below.
         self._cap: tuple[FloatArray, FloatArray, FloatArray] | None = None
+        #: A shaped crown (ADR-0054): its outline, meeting point and the top of the skin
+        #: on every meridian; set below.
+        self._crown: _ShapedCap | None = None
+        self._crown_mesh: tuple[FloatArray, IntArray, list[int], FloatArray] | None = None
+        self._crown_flat: Any = None
         self.u0 = self._footprint(self.phi)
-        if moved:
+        if shaped:
+            self._crown = self._crown_section(primitive)
+        elif moved:
             self._cap = self._cap_section(primitive)
         if twisted(primitive):
             rim = seam_angles(primitive)
@@ -1538,17 +1597,26 @@ class _Skin:
         """Path position of the top of the skin (the cap's edge or the tip) on seam
         coordinate ``psi``, m."""
         psi = np.asarray(psi, float)
-        if self._cap is None:
+        top = self._top
+        if top is None:
             return np.full(np.shape(psi), self.total)
-        _, _, top = self._cap
         out: FloatArray = np.interp(
             np.mod(self.crown_phys(psi), 2.0 * math.pi), self.phi, top, period=2.0 * math.pi
         )
         return out
 
+    @property
+    def _top(self) -> FloatArray | None:
+        """Path position of the cap's edge on the meridians ``phi`` (a moved or shaped
+        cap), m; None for a circle round the tip (or no cap)."""
+        if self._crown is not None:
+            return self._crown.top
+        return None if self._cap is None else self._cap[2]
+
     def top_min(self) -> float:
         """Lowest path position of the top of the skin, m."""
-        return self.total if self._cap is None else float(self._cap[2].min())
+        top = self._top
+        return self.total if top is None else float(top.min())
 
     def _normal(self, u: float, phi: float) -> FloatArray:
         h = 1e-6 * max(self.total_full, 1e-3)
@@ -1563,6 +1631,155 @@ class _Skin:
         n = np.cross(dp, du)
         out: FloatArray = n / np.linalg.norm(n)
         return out
+
+    # -- shaped crown (ADR-0054) -------------------------------------------------------
+
+    def _point(self, u: FloatArray, phi: FloatArray) -> FloatArray:
+        """Points of the pointed skin at path positions ``u`` on physical meridians
+        ``phi`` (no seam turn), m."""
+        u, phi = np.broadcast_arrays(np.asarray(u, float), np.asarray(phi, float))
+        rho, zeta = self._rz(u.ravel())
+        radial = np.cos(phi.ravel())[:, None] * self.b1 + np.sin(phi.ravel())[:, None] * self.b2
+        out: FloatArray = self.base + rho[:, None] * radial + zeta[:, None] * self.axis
+        return out
+
+    def plan(self, points: FloatArray) -> FloatArray:
+        """Plan coordinates (across towards the next gore, up the tape) of 3D points seen
+        from above the shape, from its axis, m."""
+        rel = np.asarray(points, float).reshape(-1, 3) - self.base
+        return np.column_stack([-(rel @ self.b2), rel @ self.b1])
+
+    def _crown_section(self, primitive: RevolvedPrimitive) -> _ShapedCap:
+        r"""Where the shaped cap's prism cuts every meridian (module docstring of
+        :mod:`envelopelab.features.crown`): the crossing nearest the tip of
+        :math:`r(\theta) - |\mathbf{q}|`, bisected to :data:`ROOT_TOLERANCE`."""
+        name = primitive.name
+        shape = getattr(primitive, "crown", None)
+        assert shape is not None
+        shift = float(getattr(primitive, "cap_shift", 0.0))
+        if shift >= self.total_full:
+            raise PrimitiveError(f"{name}: the meeting point is further down than the skin")
+        point = self._point(
+            np.array([self.total_full - shift]),
+            np.array([float(getattr(primitive, "cap_direction", 0.0))]),
+        )[0]
+        centre = self.plan(point[None])[0]
+        footprint = self.plan(self._point(self.u0, self.phi))
+        try:
+            outline = shape.outline(footprint)
+        except CrownOutlineError as exc:
+            raise PrimitiveError(f"{name}: {exc}") from exc
+
+        def inside(u: FloatArray, phi: FloatArray) -> FloatArray:
+            q = self.plan(self._point(u, phi)) - centre
+            out: FloatArray = outline.inside(q[:, 0], q[:, 1]).reshape(np.shape(u))
+            return out
+
+        u = np.linspace(float(self.u0.max()), self.total_full, 801)
+        uu, pp = np.meshgrid(u, self.phi)
+        f = inside(uu, pp)
+        if np.any(f[:, -1] <= 0.0):
+            raise PrimitiveError(
+                f"{name}: the crown outline does not cover the tip; make it larger or move "
+                "where the panels meet towards the tip"
+            )
+        if np.any(f[:, 0] >= 0.0):
+            raise PrimitiveError(
+                f"{name}: the crown outline reaches the footprint; make it smaller"
+            )
+        outside = f <= 0.0
+        last = outside.shape[1] - 1 - np.argmax(outside[:, ::-1], axis=1)
+        lo, hi = u[last], u[last + 1]
+        while float(np.max(hi - lo)) > ROOT_TOLERANCE:
+            mid = 0.5 * (lo + hi)
+            out = inside(mid, self.phi) <= 0.0
+            lo = np.where(out, mid, lo)
+            hi = np.where(out, hi, mid)
+        return _ShapedCap(outline, centre, 0.5 * (lo + hi), point)
+
+    def crown_mesh(self) -> tuple[FloatArray, IntArray, list[int], FloatArray]:
+        """The shaped cap cut from the skin, m: vertices, triangles, its edge loop
+        (increasing angle round the axis, starting at the top of seam 1) and the angle of
+        every edge vertex round the axis (physical, rad). The edge holds every seam's top.
+        """
+        if self._crown_mesh is not None:
+            return self._crown_mesh
+        assert self._crown is not None
+        prim = self.primitive
+        crown_seams = np.mod(crown_seam_angles(prim)[:-1], 2.0 * math.pi)
+        start = float(crown_seams[0])
+        # The outline's corners lie on the meridians through them (seen from the axis):
+        # the edge is sampled there too, so it keeps them (and its length).
+        corners = self._crown.centre + self._crown.outline.points
+        corner_phi = np.arctan2(-corners[:, 0], corners[:, 1])
+        ang = np.mod(
+            np.concatenate(
+                [
+                    start + np.linspace(0.0, 2.0 * math.pi, CROWN_RING, endpoint=False),
+                    crown_seams,
+                    corner_phi,
+                ]
+            )
+            - start,
+            2.0 * math.pi,
+        )
+        ang = start + np.unique(np.round(ang, 12))
+        top = np.interp(np.mod(ang, 2.0 * math.pi), self.phi, self._crown.top, period=2.0 * math.pi)
+        n = len(ang)
+        rings = []
+        for j in range(1, CROWN_RINGS + 1):
+            s = j / CROWN_RINGS
+            rings.append(self._point(self.total_full - s * (self.total_full - top), ang))
+        x = np.vstack([self._point(np.array([self.total_full]), np.array([0.0])), *rings])
+        tri = [[0, 1 + k, 1 + (k + 1) % n] for k in range(n)]
+        for j in range(CROWN_RINGS - 1):
+            a0, b0 = 1 + j * n, 1 + (j + 1) * n
+            for k in range(n):
+                k1 = (k + 1) % n
+                tri += [[a0 + k, b0 + k, b0 + k1], [a0 + k, b0 + k1, a0 + k1]]
+        loop = list(range(1 + (CROWN_RINGS - 1) * n, 1 + CROWN_RINGS * n))
+        self._crown_mesh = (x, np.asarray(tri, dtype=np.int64), loop, ang)
+        return self._crown_mesh
+
+    def crown_flat(self) -> Any:
+        """The shaped cap flattened (:class:`envelopelab.features.freeform._Panel`: its
+        3D mesh, flat coordinates and edge loop ``top``), centred, the top of seam 1 on
+        +x; its edge keeps every 3D edge length."""
+        if self._crown_flat is not None:
+            return self._crown_flat
+        from envelopelab.features.builder import FeatureBuildError
+        from envelopelab.features.freeform import _flatten, _Panel
+
+        x, tri, loop, _ang = self.crown_mesh()
+        try:
+            flat = _flatten(
+                self.primitive.name,
+                "the cap",
+                x,
+                tri,
+                loop,
+                (loop + loop[:1],),
+                (loop[0], loop[len(loop) // 2]),
+            )
+        except FeatureBuildError as exc:
+            raise PrimitiveError(str(exc)) from exc
+        flat -= flat[loop].mean(axis=0)
+        c, s = flat[loop[0]] / np.linalg.norm(flat[loop[0]])
+        flat = flat @ np.array([[c, s], [-s, c]]).T
+        self._crown_flat = _Panel(x, tri, flat, [], [], [], 0.0, 2 * math.pi, top=loop)
+        return self._crown_flat
+
+    def crown_flat_at(self, points: FloatArray) -> FloatArray:
+        """Flat positions on the cap's edge of 3D edge points (by angle round the axis), m."""
+        x, _tri, loop, ang = self.crown_mesh()
+        cap = self.crown_flat()
+        rel = np.asarray(points, float).reshape(-1, 3) - self.base
+        a = np.arctan2(rel @ self.b2, rel @ self.b1)
+        a = ang[0] + np.mod(a - ang[0], 2.0 * math.pi)
+        edge = cap.flat[loop]
+        return np.column_stack(
+            [np.interp(a, ang, edge[:, k], period=2.0 * math.pi) for k in range(2)]
+        )
 
     def _cap_section(
         self, primitive: RevolvedPrimitive
@@ -1717,7 +1934,7 @@ class _Skin:
     def u_of(self, t: FloatArray, phi: FloatArray) -> FloatArray:
         """Path position of skin parameter ``t`` in [0, 1] on meridians ``phi``, m."""
         u0 = self.u0_at(phi)
-        top = self.total if self._cap is None else self.top_at(phi)
+        top = self.total if self._top is None else self.top_at(phi)
         out: FloatArray = u0 + np.asarray(t, float) * (top - u0)
         return out
 
@@ -1749,7 +1966,7 @@ class _Band:
         self.skin = skin
         self.u_lo, self.u_hi, self.tier = u_lo, u_hi, tier
         #: The top band of a skin with a moved cap ends on the cap's edge, not a circle.
-        self.to_top = skin._cap is not None and u_hi >= skin.total
+        self.to_top = skin._top is not None and u_hi >= skin.total
 
     def u0_at(self, phi: FloatArray) -> FloatArray:
         """Path position of the lower edge on meridians ``phi`` (rad), m."""
@@ -2096,7 +2313,7 @@ def _seams(primitive: Primitive) -> FloatArray:
 def _developable(primitive: Primitive) -> bool:
     """True for a straight frustum (a tube, or a revolved profile of one segment) whose
     seams run straight up it (not turned towards other crown angles)."""
-    if twisted(primitive) or cap_moved(primitive):
+    if twisted(primitive) or cap_moved(primitive) or shaped_crown(primitive):
         return False
     if isinstance(primitive, Tube):
         return True
@@ -2595,7 +2812,30 @@ def design_primitive(
                 index=piece.index,
             )
         )
-    if primitive.closed_tip and (twisted(primitive) or cap_moved(primitive)):
+    if shaped_crown(primitive):
+        # The cap cut from the skin inside the crown outline, flattened (ADR-0054).
+        cap = skin.crown_flat()
+        disc = cap.flat[cap.top]
+        seams = _seams(primitive)
+        ends = skin.crown_flat_at(pieces[-1].skin.at(np.ones(len(seams) - 1), seams[:-1]))
+        e3 = cap.x[cap.tri]
+        area = 0.5 * float(
+            np.linalg.norm(np.cross(e3[:, 1] - e3[:, 0], e3[:, 2] - e3[:, 0]), axis=1).sum()
+        )
+        cut.append(
+            CutPiece(
+                label=f"{primitive.name}-TIP",
+                finished=disc,
+                cut=offset_polygon(disc, seam_allowance) if seam_allowance > 0 else disc,
+                rim=None,
+                edges={"top": np.vstack([disc, disc[:1]])},
+                surface_area=area,
+                seam_points=tuple((float(x), float(y)) for x, y in ends),
+                role="tip",
+                tier=len(pieces) // primitive.pieces - 1,
+            )
+        )
+    elif primitive.closed_tip and (twisted(primitive) or cap_moved(primitive)):
         # The cap's edge where the pieces end, laid flat in its plane (the cap is flat).
         seams = _seams(primitive)
         top = pieces[-1].skin
@@ -2905,7 +3145,9 @@ def _checks(design: PrimitiveDesign, pieces: list[_Piece], tol: float) -> list[D
         if m == 1:  # a single tube panel is sewn to itself along one seam
             c = design.pieces[i]
             worst_pair = max(worst_pair, abs(_length(c.edges["right"]) - _length(c.edges["left"])))
-    if p.closed_tip and (isinstance(p, FreeformShape) or twisted(p) or cap_moved(p)):
+    if p.closed_tip and (
+        isinstance(p, FreeformShape) or twisted(p) or cap_moved(p) or shaped_crown(p)
+    ):
         # The panel tops are sewn round the cap's edge.
         skin_pieces = [c for c in design.pieces if c.role != "tip"]
         tops = sum(_length(c.edges["top"]) for c in skin_pieces[-m:])
@@ -3417,7 +3659,28 @@ class _SkinFactory:
         for i, (_per, phi_s, _u) in enumerate(splits):
             ids = np.array([keys[("split", i, q)] for q in range(len(phi_s))], dtype=np.int64)
             seam_edges[f"{prim.name}:split {i + 1}"] = np.column_stack([ids, np.roll(ids, -1)])
-        if closed:
+        shaped = shaped_crown(prim)
+        if closed and shaped:
+            # The shaped cap as cut and flattened (ADR-0054): its edge nodes are the top
+            # nodes of the pieces; inside, every node starts on the skin where it was cut.
+            cap = skin.crown_flat()
+            edge = bands[-1].at(np.ones(len(tip_phi)), tip_phi)
+            disc = skin.crown_flat_at(edge)
+            xy, tri = _mesh_disc(disc, size)
+            _, hit = cKDTree(xy).query(disc)
+            local = np.full(len(xy), -1, dtype=np.int64)
+            for q, h in enumerate(hit):
+                local[h] = node(("tip", q), bands[-1], 1.0, float(tip_phi[q]))
+            free = np.flatnonzero(local < 0)
+            local[free] = len(positions) + np.arange(len(free))
+            if len(free):
+                positions.extend(cap.to_world(xy[free]))
+            tris.append(local[tri])
+            rests.append(xy[tri])
+            grains.append(np.tile([1.0, 0.0], (len(tri), 1)))
+            ids = local[hit]
+            seam_edges[f"{prim.name}:tip seam"] = np.column_stack([ids, np.roll(ids, -1)])
+        elif closed:
             crown = twisted(prim) or cap_moved(prim)
             if crown:
                 # The cap's edge where the pieces end, in the cap's flat plane.

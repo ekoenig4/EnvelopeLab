@@ -174,6 +174,10 @@ def mirrored(spec: ShapeSpec, line: float, gores: int) -> dict[str, Any]:
         data["cap_direction_deg"] = _angle(-float(data["cap_direction_deg"]))
     if data.get("cap_across"):  # across the gores flips, up the tape stays (ADR-0052)
         data["cap_across"] = -float(data["cap_across"])
+    crown = data.get("crown_shape")
+    if crown:  # the crown outline mirrored across the gores too (ADR-0054)
+        crown["turn_deg"] = _angle(-float(crown.get("turn_deg", 0.0)))
+        crown["points"] = [[-float(a), float(b)] for a, b in crown.get("points", [])]
     if data["kind"] == "mesh":
         data["vertices"] = [[x, -y, z] for x, y, z in data["vertices"]]
         data["triangles"] = [[a, c, b] for a, b, c in data["triangles"]]

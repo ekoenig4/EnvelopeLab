@@ -183,6 +183,10 @@ def _piece_of(
 
 def _cap_centre(design: PrimitiveDesign) -> FloatArray:
     """Centre of a shape's cap (moved off the tip or not), m."""
+    shaped = getattr(design._skin, "_crown", None)
+    if shaped is not None:  # where the panels meet, on the skin (ADR-0054)
+        point: FloatArray = shaped.point
+        return point
     if getattr(design._skin, "_cap", None) is not None:
         origin: FloatArray = design._skin.cap_frame()[0]
         return origin
@@ -247,7 +251,16 @@ def designed_display(design: PrimitiveDesign, rows: int = 60, per_piece: int = 1
     # Horizontal splits: circles round the skin at their meridian arc lengths.
     around = seams_phi[0] + np.linspace(0.0, 2.0 * math.pi, cols + 1)
     seams += [skin.at_u(np.full(len(around), u), around) for u in split_heights(prim, skin.total)]
-    if prim.closed_tip:
+    if prim.closed_tip and getattr(skin, "_crown", None) is not None:
+        # A shaped cap (ADR-0054): the skin it is cut from, as is.
+        cx, ctri, _loop, _ang = skin.crown_mesh()
+        c = len(pts)
+        pts = np.vstack([pts, cx])
+        tri = np.vstack([tri, ctri + c])
+        piece = np.concatenate([piece, np.full(len(ctri), m, dtype=np.int64)])
+        ring = seams_phi[0] + np.linspace(0.0, 2.0 * math.pi, cols + 1)
+        seams.append(skin.at(np.ones(len(ring)), ring))
+    elif prim.closed_tip:
         centre = _cap_centre(design)
         c = len(pts)
         pts = np.vstack([pts, centre])

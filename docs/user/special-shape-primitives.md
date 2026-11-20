@@ -141,6 +141,26 @@ in the editor next to them, and you can move the selected shape on either:
      opposite reach higher. The cap must still cover the tip, so the point moves by less
      than the cap's radius; the shape says so if it does not.
 
+     **Cap shape** sets the cap's outline seen from above, round where the panels meet
+     (it needs a cap: set a cap diameter under **Feed holes & cap**):
+
+     * **Circle (cap diameter)**: the round cap as before;
+     * **Footprint, scaled to the cap diameter**: the shape's own footprint, small at the
+       top (its widest width is the cap diameter), with a **Turn**;
+     * **Ellipse**: its **width** across the gores and **length** up the tape, turned;
+     * **Polygon by points**: corner points in mm from where the panels meet (across, up),
+       with **Add point**, **Remove point** and **Smooth edges**; every direction from the
+       point must cross the outline once;
+     * **Imported outline (DXF or SVG)**: **Import outline…** reads the largest closed
+       outline of a drawing, centres it, scales its widest width to the cap diameter and
+       keeps it in the project (turn it with **Turn**).
+
+     The circle beside **Where the panels meet** draws the cap. The cap is cut from the
+     skin inside the outline and flattened, and the gores end on its edge; the balloon,
+     the cut pieces (TIP) and the build pack show it. A large cap on a strongly curved
+     top cannot lie quite flat: **Checks** reports the area distortion. An outline that
+     reaches the footprint or does not cover the tip is refused with the reason.
+
      Tick **Own crown
      layout** to give the crown its own **Crown seam turn** and **Crown widths**
      (**Equal at crown**, or **As at the rim**): the seams leave the rim where the seam

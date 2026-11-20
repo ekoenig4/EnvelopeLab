@@ -371,6 +371,30 @@ the designed surface.
 
 ## Caps
 
+**Shaped caps (ADR-0054).** A cap may have another outline than a circle, seen from above
+round the point where the panels meet (`envelopelab.features.crown`): the footprint or an
+imported outline (centred on its area centroid, widest width the cap diameter), an
+ellipse or a polygon. As one closed star-shaped polygon \( \mathbf{v}_i \) its radius in
+plan direction \( \theta \) is the exact ray-edge intersection
+
+\[
+r(\theta) = \frac{\mathbf{v}_i \times (\mathbf{v}_{i+1} - \mathbf{v}_i)}
+{\mathbf{d}(\theta) \times (\mathbf{v}_{i+1} - \mathbf{v}_i)}, \qquad
+\mathbf{d} = (\cos\theta, \sin\theta),
+\]
+
+and a point is inside the cap when \( |\mathbf{q}| < r(\theta) \), \( \mathbf{q} \) its
+plan position from the meeting point. The cap is the skin inside that prism along the
+axis: each meridian of a dome or revolved shape ends where it leaves it (the crossing
+nearest the tip, bisected to `ROOT_TOLERANCE`; within 10 µm of the outline,
+`tests/unit/test_crown_cap.py`), and the patch above is meshed (96 edge points plus every
+seam's top and every corner of the outline, 12 rings) and flattened like a mesh cap, so
+its edge keeps the gores' top lengths. A mesh shape's cap is cut by the prism instead of
+the cylinder below. The designed skin is unchanged; only where the cap is cut changes.
+A doubly curved cap cannot lie flat: with its edge at true length its flat area is less
+than its designed area (about \( 7\,\% \) for a spherical cap of half-angle
+\( 30^\circ \)), which the area distortion check reports.
+
 Pieces that meet in a point are hard to sew: \(M\) seams and \(M\) seam allowances pile
 up in one spot. Balloon practice sews their tops round a circle of measurable diameter
 instead, closed by a round *cap*. A shape that would otherwise come to a point (a dome, a

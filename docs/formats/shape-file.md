@@ -284,6 +284,12 @@ The other keys are those of the project's shape specification, in its units:
   fractions of the shape's widest radius across the gores and up the tape, for example
   `cap_across: 0.2`; ADR-0052; `cap_across` and `cap_up` also apply to `mesh` shapes,
   ADR-0053);
+* the cap's outline seen from above (ADR-0054): `crown_shape` with `kind` `footprint`,
+  `ellipse` (`width`, `length`, lengths with a unit), `polygon` (`points: [[across, up],
+  ...]` with a `unit`, `smooth: true` for a curve through them) or `outline` (`file:` a
+  DXF or SVG beside the shape file), and `turn_deg`; for example
+  `crown_shape: {kind: ellipse, width: 400 mm, length: 250 mm, turn_deg: 15}`. Not for
+  tubes;
 * `group` names the object a shape belongs to (shapes with the same group are moved,
   mirrored and exported together).
 

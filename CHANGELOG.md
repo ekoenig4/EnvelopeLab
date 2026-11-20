@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: shape a special shape's crown cap (ADR-0054, project format 7). **Cap shape**
+  (Panel layout, under Where the panels meet) offers the footprint scaled to the cap
+  diameter, an ellipse, a polygon by points (straight or smooth) or an outline imported
+  from a DXF or SVG file. The cap is cut from the skin inside the outline and flattened,
+  the gores end on its edge; the balloon, cut pieces, simulation and build pack follow.
+  Round caps are unchanged (bit-identical results).
 - Added: **Split panel in two** in a special shape's Panel layout cuts the picked gore
   or panel into two of half its width, keeping every other seam in place (one undo
   step). The picked gore or panel (a row of the widths tables) is highlighted in amber

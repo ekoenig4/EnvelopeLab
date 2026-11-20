@@ -150,6 +150,9 @@ class _ShapeBase(BaseModel):
         A dome or revolved shape needs a cap (the panels meet round its edge); a mesh
         shape's seams are cut about the line through the point instead (with or without
         a cap). Not for tubes.
+    crown_shape : CrownShapeSpec or None
+        Shape of the cap seen from above round where the panels meet (ADR-0054; None: a
+        circle of ``cap_diameter``). Domes, revolved and mesh shapes with a cap.
     group : str or None
         Name of the object the shape belongs to (several shapes with the same group are
         moved, mirrored and exported together, :mod:`envelopelab.project.shape_groups`;
@@ -179,6 +182,7 @@ class _ShapeBase(BaseModel):
     cap_direction_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
     cap_across: float = Field(default=0.0, ge=-1.0, le=1.0)
     cap_up: float = Field(default=0.0, ge=-1.0, le=1.0)
+    crown_shape: CrownShapeSpec | None = None
     group: str | None = Field(
         default=None, min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_\- ]+$"
     )
@@ -212,6 +216,8 @@ class _ShapeBase(BaseModel):
             raise ValueError("a mesh shape's seams and cap cannot be moved at the crown")
         if self.cap_shift and getattr(self, "kind", None) == "tube":
             raise ValueError("cap_shift: a tube's tip disc cannot be moved off its axis")
+        if self.crown_shape is not None and getattr(self, "kind", None) == "tube":
+            raise ValueError("crown_shape: a tube's tip disc stays round")
         relative = bool(self.cap_across or self.cap_up)
         if relative:
             if getattr(self, "kind", None) == "tube":
@@ -226,6 +232,48 @@ class _ShapeBase(BaseModel):
                     "cap_across, cap_up: the meeting point must lie inside the shape seen "
                     "from above (across² + up² at most 1)"
                 )
+        return self
+
+
+class CrownShapeSpec(BaseModel):
+    """Shape of a special shape's crown cap seen from above, round where its panels meet
+    (:mod:`envelopelab.features.crown`, ADR-0054). Lengths in m, angles in deg.
+
+    Attributes
+    ----------
+    kind : {"footprint", "ellipse", "polygon", "outline"}
+        The shape's footprint scaled to the cap's size; an ellipse; a polygon through
+        corner points; or an outline imported from a DXF or SVG file (its points kept here).
+    width, length : float
+        An ellipse's width across the gores and length up the tape, m.
+    turn_deg : float
+        Turn of an ellipse, footprint or imported outline, deg (from across towards up).
+    points : list of (float, float)
+        A polygon's corners, m (across towards the next gore, up the tape, from where the
+        panels meet); an imported outline's points in the drawing's units (scaled to the
+        cap's diameter, its widest width).
+    smooth : bool
+        A polygon's edges are a smooth curve through its corners.
+    source : str
+        The file an imported outline was read from (for information).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["footprint", "ellipse", "polygon", "outline"]
+    width: float = Field(default=0.0, ge=0.0)
+    length: float = Field(default=0.0, ge=0.0)
+    turn_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
+    points: list[tuple[float, float]] = Field(default_factory=list)
+    smooth: bool = False
+    source: str = ""
+
+    @model_validator(mode="after")
+    def _complete(self) -> CrownShapeSpec:
+        if self.kind == "ellipse" and not (self.width > 0.0 and self.length > 0.0):
+            raise ValueError("crown_shape: an ellipse needs a positive width and length")
+        if self.kind in ("polygon", "outline") and len(self.points) < 3:
+            raise ValueError(f"crown_shape: a {self.kind} needs at least three points")
         return self
 
 
@@ -276,12 +324,70 @@ ShapeSpec = Annotated[
 ]
 
 
+def crown_view(spec: ShapeSpec, placed: Any = None) -> FloatArray | None:
+    """The cap's outline seen from above round where the panels meet, as fractions of the
+    shape's widest radius (the units of ``cap_across``/``cap_up``): an (n, 2) array of
+    (across, up) from the meeting point, for drawing (None: no cap, or not known yet).
+
+    A footprint outline needs the placed design (``placed``); the others are known from
+    ``spec`` alone. Without a crown shape the cap is its circle.
+    """
+    from envelopelab.features.crown import CrownOutlineError
+
+    prim: Any = to_primitive(spec)
+    if not prim.closed_tip or isinstance(spec, TubeShape):
+        return None
+    if isinstance(spec, MeshShape):
+        widest = float(prim.widest_radius)
+    else:
+        widest = float(np.max(dataclasses.replace(prim, cap_radius=0.0).meridian()[0]))
+    if widest <= 0.0:
+        return None
+    if spec.crown_shape is None:
+        t = np.linspace(0.0, 2.0 * math.pi, 72, endpoint=False)
+        circle: FloatArray = prim.cap_radius * np.column_stack([np.cos(t), np.sin(t)]) / widest
+        return circle
+    skin = None if placed is None else getattr(placed, "_skin", None)
+    if skin is not None and getattr(skin, "_crown", None) is not None:
+        outline = skin._crown.outline
+    elif skin is not None and getattr(skin, "crown_outline", None) is not None:
+        outline = skin.crown_outline
+    else:
+        try:
+            outline = crown_of(spec).outline()
+        except CrownOutlineError:
+            return None
+    out: FloatArray = np.asarray(outline.points, dtype=np.float64) / widest
+    return out
+
+
+def crown_of(spec: ShapeSpec) -> Any:
+    """The :class:`~envelopelab.features.crown.CrownShape` of ``spec``'s crown cap (None:
+    a circle); a footprint or imported outline is scaled to the cap's diameter."""
+    from envelopelab.features.crown import CrownShape
+
+    c = spec.crown_shape
+    if c is None:
+        return None
+    return CrownShape(
+        c.kind,
+        size=cap_diameter(spec),
+        width=c.width,
+        length=c.length,
+        turn_deg=c.turn_deg,
+        points=tuple((float(a), float(b)) for a, b in c.points),
+        smooth=c.smooth,
+    )
+
+
 def _meeting_point(spec: ShapeSpec, prim: Any) -> Primitive:
     """``prim`` with its cap moved where ``spec``'s relative meeting point says
     (``cap_across``, ``cap_up``; :func:`~envelopelab.features.primitives.
     meeting_point_shift` on the pointed meridian); unchanged without one."""
     from envelopelab.features.primitives import meeting_point_shift
 
+    if spec.crown_shape is not None:
+        prim = dataclasses.replace(prim, crown=crown_of(spec))
     if not (spec.cap_across or spec.cap_up):
         out: Primitive = prim
         return out
@@ -409,6 +515,8 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
         spec.source,
     )
     shape = FreeformShape(spec.name, placement, mesh, spec.panels, marks, rc, **layout)  # type: ignore[arg-type]
+    if spec.crown_shape is not None:
+        shape = dataclasses.replace(shape, crown=crown_of(spec))
     if spec.cap_across or spec.cap_up:
         # Where the panels meet, seen from above: the seam line through it (ADR-0052).
         widest = shape.widest_radius

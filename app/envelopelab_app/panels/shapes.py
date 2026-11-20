@@ -86,6 +86,7 @@ from envelopelab.project.shapes import (
     ShapeKind,
     ShapePlacement,
     ShapeSpec,
+    TubeShape,
     auto_cap_diameter,
     cap_diameter,
     default_shape,
@@ -292,6 +293,8 @@ class MeetingPointPad(QWidget):
         self.seams: list[float] = []
         #: Gore or panel being edited (0-based), filled amber; None: none.
         self.edited: int | None = None
+        #: The cap's outline round the point (fractions of the widest radius; None: none).
+        self.cap: np.ndarray | None = None
         self.setMinimumSize(230, 190)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.CrossCursor)
@@ -311,6 +314,11 @@ class MeetingPointPad(QWidget):
         towards the previous gore) meets the outline in the pad, as (across, up)
         fractions. Seen from outside the balloon the previous gore is to the left."""
         return -math.sin(phi), math.cos(phi)
+
+    def set_cap(self, outline: np.ndarray | None) -> None:
+        """Draw the cap's outline round the point (fractions of the widest radius)."""
+        self.cap = None if outline is None else np.asarray(outline, dtype=float)
+        self.update()
 
     def set_edited(self, piece: int | None) -> None:
         """Fill gore or panel ``piece`` (0-based) amber; None: none."""
@@ -367,6 +375,13 @@ class MeetingPointPad(QWidget):
         painter.setPen(QPen(QColor("#6b7785")))
         painter.drawText(QPointF(centre.x() - 14, centre.y() - radius - 5), "up ↑")
         painter.drawText(QPointF(centre.x() + radius + 5, centre.y() + 4), "across →")
+        if self.cap is not None and len(self.cap) >= 3:
+            # The cap the panels meet round, seen from above.
+            ring = [self._to_screen(self.across + a, self.up + u) for a, u in self.cap.tolist()]
+            painter.setPen(QPen(QColor("#8a5a2b" if enabled else "#c4c4c4"), 1.6))
+            painter.setBrush(QBrush(QColor(233, 220, 197, 200)))
+            painter.drawPolygon(QPolygonF(ring))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
         colour = QColor("#d6008f" if enabled else "#c4c4c4")
         painter.setPen(QPen(colour, 2.0))
         painter.setBrush(QBrush(colour))
@@ -1818,7 +1833,14 @@ class ShapesPanel(QWidget):
         if field == "splits":
             lines = splits or gore_seams
             return Highlight(f"{label}: its horizontal splits", lines, base, key)
-        if field in ("cap_diameter", "cap_shift", "cap_direction_deg", "cap_across", "cap_up"):
+        if field in (
+            "cap_diameter",
+            "cap_shift",
+            "cap_direction_deg",
+            "cap_across",
+            "cap_up",
+            "crown_shape",
+        ):
             lines = cap or gore_seams
             return Highlight(f"{label}: its cap", lines, lines[0][0] if lines else base, key)
         if field.startswith("feed_hole"):
@@ -2241,6 +2263,12 @@ class ShapesPanel(QWidget):
             (self.cap_across, "shape:cap_across"),
             (self.cap_up, "shape:cap_up"),
             (self.meeting_centre, "shape:cap_across"),
+            (self.cap_kind, "shape:crown_shape"),
+            (self.cap_turn, "shape:crown_shape"),
+            (self.cap_width, "shape:crown_shape"),
+            (self.cap_length, "shape:crown_shape"),
+            (self.cap_points, "shape:crown_shape"),
+            (self.cap_import, "shape:crown_shape"),
             (self.profile_table, "shape:profile"),
         ):
             set_hint(widget, key)
@@ -2337,11 +2365,302 @@ class ShapesPanel(QWidget):
         meeting.addWidget(self.meeting_pad)
         meeting.addLayout(numbers, 1)
         form.insertRow(0, "Where the panels meet", meeting)
+        form.insertRow(1, "Cap shape", self._cap_shape_box())
         self.crown_note = QLabel()
         self.crown_note.setObjectName("shapeCrownNote")
         self.crown_note.setWordWrap(True)
         form.addRow(self.crown_note)
         return box
+
+    # -- the cap's shape (ADR-0054) -----------------------------------------------------
+
+    #: Cap shapes offered (label, kind; None: a circle).
+    CAP_KINDS = (
+        ("Circle (cap diameter)", None),
+        ("Footprint, scaled to the cap diameter", "footprint"),
+        ("Ellipse", "ellipse"),
+        ("Polygon by points", "polygon"),
+        ("Imported outline (DXF or SVG)", "outline"),
+    )
+
+    def _cap_shape_box(self) -> QWidget:
+        """Kind of cap outline and its values: an ellipse's width and length, a polygon's
+        corners, an imported file, and the turn."""
+        box = QWidget()
+        box.setObjectName("shapeCapShape")
+        layout = QFormLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.cap_kind = QComboBox()
+        self.cap_kind.setObjectName("shapeCapKind")
+        for label, kind in self.CAP_KINDS:
+            self.cap_kind.addItem(label, kind)
+        self.cap_kind.setToolTip(
+            "The cap's outline seen from above, round where the panels meet: the panels end "
+            "on its edge and it is cut from the skin inside it"
+        )
+        self.cap_kind.activated.connect(lambda _i: self._cap_kind_chosen())
+        layout.addRow(self.cap_kind)
+        self.cap_turn = QDoubleSpinBox()
+        self.cap_turn.setObjectName("shapeCapTurn")
+        self.cap_turn.setRange(-180.0, 180.0)
+        self.cap_turn.setDecimals(1)
+        self.cap_turn.setSuffix(" °")
+        self.cap_turn.setKeyboardTracking(False)
+        self.cap_turn.setToolTip("Turn of the outline, from across towards up")
+        self.cap_turn.valueChanged.connect(lambda v: self._cap_value("turn_deg", float(v)))
+        turn = QHBoxLayout()
+        turn.setContentsMargins(0, 0, 0, 0)
+        turn.addWidget(QLabel("Turn"))
+        turn.addWidget(self.cap_turn, 1)
+        self.cap_turn_row = QWidget()
+        self.cap_turn_row.setLayout(turn)
+        layout.addRow(self.cap_turn_row)
+        self.cap_width = QDoubleSpinBox()
+        self.cap_width.setObjectName("shapeCapWidth")
+        self.cap_length = QDoubleSpinBox()
+        self.cap_length.setObjectName("shapeCapLength")
+        for spin, key, tip in (
+            (self.cap_width, "width", "across the gores"),
+            (self.cap_length, "length", "up the tape"),
+        ):
+            spin.setRange(1.0, 20000.0)
+            spin.setDecimals(0)
+            spin.setSuffix(" mm")
+            spin.setKeyboardTracking(False)
+            spin.setToolTip(f"The ellipse's size {tip}")
+            spin.valueChanged.connect(
+                lambda v, k=key: self._cap_value(k, round(float(v) / 1000.0, 4))
+            )
+        size = QHBoxLayout()
+        size.addWidget(QLabel("width"))
+        size.addWidget(self.cap_width)
+        size.addWidget(QLabel("length"))
+        size.addWidget(self.cap_length)
+        self.cap_size_row = QWidget()
+        self.cap_size_row.setLayout(size)
+        layout.addRow(self.cap_size_row)
+        self.cap_points = QTableWidget(0, 2)
+        self.cap_points.setObjectName("shapeCapPoints")
+        self.cap_points.setHorizontalHeaderLabels(["Across (mm)", "Up (mm)"])
+        self.cap_points.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.cap_points.setMinimumHeight(120)
+        self.cap_points.setToolTip(
+            "The polygon's corners from where the panels meet: across towards the next gore, "
+            "up the tape. Every direction from the point must cross the outline once."
+        )
+        self.cap_points.itemChanged.connect(lambda _item: self._cap_points_edited())
+        self.cap_smooth = QCheckBox("Smooth edges")
+        self.cap_smooth.setObjectName("shapeCapSmooth")
+        self.cap_smooth.toggled.connect(lambda on: self._cap_value("smooth", bool(on), live=False))
+        add_point = QPushButton("Add point")
+        add_point.setObjectName("shapeCapAddPoint")
+        add_point.clicked.connect(self.add_cap_point)
+        remove_point = QPushButton("Remove point")
+        remove_point.setObjectName("shapeCapRemovePoint")
+        remove_point.clicked.connect(self.remove_cap_point)
+        points = QVBoxLayout()
+        points.addWidget(self.cap_points)
+        buttons = QHBoxLayout()
+        buttons.addWidget(add_point)
+        buttons.addWidget(remove_point)
+        buttons.addWidget(self.cap_smooth)
+        points.addLayout(buttons)
+        self.cap_points_row = QWidget()
+        self.cap_points_row.setLayout(points)
+        layout.addRow(self.cap_points_row)
+        self.cap_import = QPushButton("Import outline…")
+        self.cap_import.setObjectName("shapeCapImport")
+        self.cap_import.setToolTip(
+            "Read the largest closed outline of a DXF or SVG drawing; it is scaled to the cap "
+            "diameter (its widest width) and centred where the panels meet"
+        )
+        self.cap_import.clicked.connect(self._choose_cap_outline)
+        self.cap_source = QLabel()
+        self.cap_source.setObjectName("shapeCapSource")
+        imported = QHBoxLayout()
+        imported.addWidget(self.cap_import)
+        imported.addWidget(self.cap_source, 1)
+        self.cap_import_row = QWidget()
+        self.cap_import_row.setLayout(imported)
+        layout.addRow(self.cap_import_row)
+        self.cap_shape_note = QLabel()
+        self.cap_shape_note.setObjectName("shapeCapNote")
+        self.cap_shape_note.setWordWrap(True)
+        layout.addRow(self.cap_shape_note)
+        return box
+
+    def _fill_cap_shape(self, spec: ShapeSpec, capped: bool) -> None:
+        """Show ``spec``'s cap shape in the controls."""
+        c = spec.crown_shape
+        kind = None if c is None else c.kind
+        tube = isinstance(spec, TubeShape)
+        widgets = (
+            self.cap_kind,
+            self.cap_turn,
+            self.cap_width,
+            self.cap_length,
+            self.cap_points,
+            self.cap_smooth,
+            self.cap_import,
+        )
+        for widget in widgets:
+            widget.blockSignals(True)
+        try:
+            self.cap_kind.setCurrentIndex(max(0, self.cap_kind.findData(kind)))
+            self.cap_turn.setValue(0.0 if c is None else c.turn_deg)
+            self.cap_width.setValue(1000.0 * (c.width if c is not None and c.width else 0.0))
+            self.cap_length.setValue(1000.0 * (c.length if c is not None and c.length else 0.0))
+            self.cap_smooth.setChecked(c is not None and c.smooth)
+            corners = list(c.points) if c is not None and kind == "polygon" else []
+            self.cap_points.setRowCount(len(corners))
+            for i, (a, u) in enumerate(corners):
+                self.cap_points.setItem(i, 0, QTableWidgetItem(f"{a * 1000.0:.1f}"))
+                self.cap_points.setItem(i, 1, QTableWidgetItem(f"{u * 1000.0:.1f}"))
+        finally:
+            for widget in widgets:
+                widget.blockSignals(False)
+        self.cap_source.setText(c.source if c is not None and kind == "outline" else "")
+        self.cap_turn_row.setVisible(kind in ("footprint", "ellipse", "outline"))
+        self.cap_size_row.setVisible(kind == "ellipse")
+        self.cap_points_row.setVisible(kind == "polygon")
+        self.cap_import_row.setVisible(kind == "outline")
+        enabled = capped and not tube
+        for widget in widgets:
+            widget.setEnabled(enabled)
+        if tube:
+            self.cap_shape_note.setText("A tube's tip disc stays round.")
+        elif not capped:
+            self.cap_shape_note.setText(
+                "Shaping the cap needs a cap: set a cap diameter (Feed holes & cap)."
+            )
+        elif kind in ("footprint", "outline"):
+            self.cap_shape_note.setText(
+                "Scaled so its widest width is the cap diameter (Feed holes & cap)."
+            )
+        elif kind is not None:
+            self.cap_shape_note.setText(
+                "The cap is cut from the skin inside this outline and flattened; a large cap "
+                "on a strongly curved top cannot lie quite flat (see area distortion)."
+            )
+        else:
+            self.cap_shape_note.setText("")
+
+    def set_crown_shape(self, data: dict[str, Any] | None, live: bool = False) -> bool:
+        """Give the selected shape's cap the outline ``data`` (``CrownShapeSpec`` fields;
+        None: a circle); one undo step for a held value (``live``)."""
+        name, spec = self.selected, self.spec()
+        if name is None or spec is None:
+            return False
+        current = None if spec.crown_shape is None else spec.crown_shape.model_dump(mode="json")
+        if data == current:
+            return False
+        values = {"crown_shape": data}
+        if live:
+            self.controller.edit_live(
+                f"shape:{name}:crown_shape",
+                lambda: self.controller.edit("update_shape", name, values),
+            )
+            return True
+        ok = bool(self.controller.edit("update_shape", name, values))
+        if not ok:
+            self.refresh()
+        return ok
+
+    def _cap_data(self) -> dict[str, Any] | None:
+        spec = self.spec()
+        if spec is None or spec.crown_shape is None:
+            return None
+        data: dict[str, Any] = spec.crown_shape.model_dump(mode="json")
+        return data
+
+    def _cap_value(self, key: str, value: Any, live: bool = True) -> None:
+        data = self._cap_data()
+        if data is None:
+            return
+        data[key] = value
+        self.set_crown_shape(data, live=live)
+
+    def _cap_kind_chosen(self) -> None:
+        spec = self.spec()
+        kind = self.cap_kind.currentData()
+        if spec is None:
+            return
+        if kind == "outline":
+            if not self._choose_cap_outline():
+                self.refresh()
+            return
+        d = cap_diameter(spec)
+        if kind is None:
+            self.set_crown_shape(None)
+        elif kind == "footprint":
+            self.set_crown_shape({"kind": "footprint"})
+        elif kind == "ellipse":
+            self.set_crown_shape({"kind": "ellipse", "width": d, "length": d})
+        else:  # a square the cap's size to start from
+            r = round(d / 2.0, 4)
+            self.set_crown_shape(
+                {"kind": "polygon", "points": [[r, r], [-r, r], [-r, -r], [r, -r]]}
+            )
+
+    def _choose_cap_outline(self) -> bool:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Import a cap outline", "", "Outlines (*.dxf *.svg)"
+        )
+        return bool(path) and self.import_cap_outline(path)
+
+    def import_cap_outline(self, path: str | Path) -> bool:
+        """Shape the selected shape's cap like the largest closed outline of a DXF or SVG
+        file (:func:`envelopelab.io.outline_file.read_outline`)."""
+        from envelopelab.io.outline_file import OutlineFileError, read_outline
+
+        try:
+            points = read_outline(path)
+        except OutlineFileError as exc:
+            QMessageBox.warning(self, "Import a cap outline", str(exc))
+            return False
+        data = {
+            "kind": "outline",
+            "points": [[float(a), float(b)] for a, b in points],
+            "source": Path(path).name,
+        }
+        return self.set_crown_shape(data)
+
+    def _cap_points_edited(self) -> None:
+        points = []
+        for i in range(self.cap_points.rowCount()):
+            cells = (self.cap_points.item(i, 0), self.cap_points.item(i, 1))
+            try:
+                a, u = (float(c.text()) / 1000.0 if c is not None else math.nan for c in cells)
+                if not (math.isfinite(a) and math.isfinite(u)):
+                    raise ValueError
+            except ValueError:
+                spec = self.spec()
+                if spec is not None:
+                    self._fill_cap_shape(spec, True)
+                return
+            points.append([round(a, 5), round(u, 5)])
+        self._cap_value("points", points, live=False)
+
+    def add_cap_point(self) -> bool:
+        """Add a corner to the polygon cap halfway along its last edge."""
+        data = self._cap_data()
+        if data is None or data.get("kind") != "polygon":
+            return False
+        pts = data["points"]
+        a, b = pts[-1], pts[0]
+        data["points"] = [*pts, [round(0.5 * (a[0] + b[0]), 5), round(0.5 * (a[1] + b[1]), 5)]]
+        return self.set_crown_shape(data)
+
+    def remove_cap_point(self) -> bool:
+        """Remove the selected corner of the polygon cap (or its last one)."""
+        data = self._cap_data()
+        if data is None or data.get("kind") != "polygon" or len(data["points"]) <= 3:
+            return False
+        row = self.cap_points.currentRow()
+        pts = list(data["points"])
+        pts.pop(row if 0 <= row < len(pts) else -1)
+        data["points"] = pts
+        return self.set_crown_shape(data)
 
     def _fill_meeting(self, spec: ShapeSpec, capped: bool, mesh: bool = False) -> None:
         """Show where ``spec``'s panels meet (pad, numbers and the distance it means)."""
@@ -2360,6 +2679,7 @@ class ShapesPanel(QWidget):
             box.setValue(value)
             box.blockSignals(False)
         self.meeting_pad.set_state(across, up, seams)
+        self.meeting_pad.set_cap(self._cap_view(spec))
         for widget in (self.meeting_pad, self.cap_across, self.cap_up, self.meeting_centre):
             widget.setEnabled(capped)
         if not capped:
@@ -2377,6 +2697,16 @@ class ShapesPanel(QWidget):
             )
         else:
             self.meeting_info.setText("At the tip.")
+
+    def _cap_view(self, spec: ShapeSpec) -> np.ndarray | None:
+        from envelopelab.project.shapes import crown_view
+
+        shown = self.controller.shapes.shown(spec.name)
+        try:
+            out: np.ndarray | None = crown_view(spec, None if shown is None else shown.design)
+        except (PrimitiveError, ValueError):
+            return None
+        return out
 
     def _meeting_dragged(self, across: float, up: float) -> None:
         for box, value in ((self.cap_across, across), (self.cap_up, up)):
@@ -2483,6 +2813,7 @@ class ShapesPanel(QWidget):
                 and cap_diameter(spec) > 0.0
             )
             self._fill_meeting(spec, capped or mesh, mesh)
+            self._fill_cap_shape(spec, capped or (mesh and cap_diameter(spec) > 0.0))
             notes = []
             if mesh:
                 notes.append(

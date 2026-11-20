@@ -58,6 +58,7 @@ References
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -496,6 +497,8 @@ class _MeshSkin:
     pole: FloatArray = field(default_factory=lambda: np.zeros(3))
     cap: _Panel | None = None
     cap_mask: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=bool))
+    #: The crown outline the cap was cut with (ADR-0054; None: a circle).
+    crown_outline: Any = None
     cap_floor: float = 0.0
 
     @property
@@ -625,7 +628,28 @@ def build_mesh_skin(
     rc = float(shape.cap_radius)
     cap_tri = np.zeros(len(tri), dtype=bool)
     if rc > 0.0:
-        x, tri, cap_tri = _cut_cap(name, x, tri, pole_index, rim0, centre, axis, rc, tol)
+        inside = None
+        if shape.crown is not None:
+            # A shaped crown (ADR-0054): the prism of its outline round the meeting point.
+            from envelopelab.features.crown import CrownOutlineError
+
+            def plan(p: FloatArray) -> FloatArray:
+                rel = np.asarray(p, float).reshape(-1, 3) - centre
+                return np.column_stack([-(rel @ b2), rel @ b1])
+
+            try:
+                outline = shape.crown.outline(plan(x[loops[0]]))
+            except CrownOutlineError as exc:
+                raise FeatureBuildError(f"{name}: {exc}") from exc
+
+            def inside(p: FloatArray) -> FloatArray:
+                q = plan(p)
+                out: FloatArray = outline.inside(q[:, 0], q[:, 1])
+                return out
+
+        x, tri, cap_tri = _cut_cap(
+            name, x, tri, pole_index, rim0, centre, axis, rc, tol, inside=inside
+        )
 
     # Cut along the seam half-planes (each ends at the pole, which lies on every plane).
     m = shape.panels
@@ -658,6 +682,8 @@ def build_mesh_skin(
         rim = rim[::-1]
     skin = _MeshSkin(shape, surface, centre, axis, b1, b2, x, tri, rim, phi[rim])
     skin.cap_mask = cap_tri
+    if rc > 0.0 and shape.crown is not None:
+        skin.crown_outline = outline
     # The panels end on the cap circle, or at the pole without a cap.
     on_top = np.zeros(len(x), dtype=bool)
     if rc > 0.0:
@@ -780,9 +806,11 @@ def _cut_cap(
     axis: FloatArray,
     radius: float,
     tol: float,
+    inside: Callable[[FloatArray], FloatArray] | None = None,
 ) -> tuple[FloatArray, IntArray, np.ndarray]:
     r"""Cut the cap off the top of a mesh skin: the part round the pole inside the cylinder
-    :math:`\rho = r_c` about the axis.
+    :math:`\rho = r_c` about the axis, or inside the prism of a crown outline (``inside``:
+    positive inside, m; ADR-0054).
 
     Only the region joined to the pole is cut (a narrow neck lower down stays whole).
     Crossings are placed on the cylinder by bisection along each edge (:math:`\rho` is
@@ -798,8 +826,14 @@ def _cut_cap(
         rel = np.asarray(p).reshape(-1, 3) - base
         return np.asarray(np.linalg.norm(rel - np.outer(rel @ axis, axis), axis=1))
 
-    r = rho(x)
-    inside = r < radius
+    def outside(p: FloatArray) -> FloatArray:
+        """Negative inside the cap, positive outside, m."""
+        if inside is None:
+            return rho(p) - radius
+        return -inside(p)
+
+    r = outside(x)
+    within = r < 0.0
     nbr: dict[int, set[int]] = {}
     for a, b in np.concatenate([tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [2, 0]]]):
         nbr.setdefault(int(a), set()).add(int(b))
@@ -809,7 +843,7 @@ def _cut_cap(
     while stack:
         v = stack.pop()
         for w in nbr.get(v, ()):
-            if w not in comp and inside[w]:
+            if w not in comp and within[w]:
                 comp.add(w)
                 stack.append(w)
     if comp & rim:
@@ -818,14 +852,14 @@ def _cut_cap(
         )
     in_comp = np.zeros(len(x), dtype=bool)
     in_comp[list(comp)] = True
-    f = np.where(in_comp, r - radius, np.abs(r - radius))
+    f = np.where(in_comp, r, np.abs(r))
 
     def point(a: FloatArray, b: FloatArray, _s: FloatArray) -> FloatArray:
         lo, hi = np.zeros(len(a)), np.ones(len(a))
-        a_in = rho(a) < radius
+        a_in = outside(a) < 0.0
         for _ in range(60):
             mid = 0.5 * (lo + hi)
-            same = (rho(a + mid[:, None] * (b - a)) < radius) == a_in
+            same = (outside(a + mid[:, None] * (b - a)) < 0.0) == a_in
             lo = np.where(same, mid, lo)
             hi = np.where(same, hi, mid)
         out: FloatArray = a + (0.5 * (lo + hi))[:, None] * (b - a)

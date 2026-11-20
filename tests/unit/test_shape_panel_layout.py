@@ -284,4 +284,4 @@ def test_old_project_shapes_read_with_the_default_layout() -> None:
     back = load_project_text(json.dumps(data))
     shape = back.state.shapes[0]
     assert (shape.seam_offset_deg, shape.panel_widths, shape.splits) == (0.0, [], [])
-    assert back.format_version == 6
+    assert back.format_version == 7
