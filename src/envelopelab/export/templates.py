@@ -8,7 +8,8 @@ Every piece to cut gets its own PDF, as a builder cuts them (ADR-0038):
   lines, side ticks, numbered match marks and feed holes drawn on (every shape's marks
   on that panel), to mark one cut panel before assembly;
 * ``<slug>-parachute-panel.pdf``, ``<slug>-parachute-centre.pdf``: the parachute pieces;
-* ``<slug>-<shape>-<piece>.pdf``: every skin piece of every special shape.
+* ``<slug>-<shape>-<piece>.pdf``: every skin piece of every special shape;
+* ``<slug>-<overlay>-overlay.pdf``: every overlay (appliqué, ADR-0056), cut once.
 
 The page is exactly the piece at 1:1 plus a 20 mm margin, so the **whole piece is always
 on one page**, never split. Pages are drawn in the print roll's frame (pack format 4,
@@ -218,6 +219,15 @@ def template_files(name: str, sheets: Sequence[Sheet]) -> list[TemplateFile]:
                 TemplateFile(
                     f"{stem}-{piece_name(s.name)}.pdf",
                     f"{s.piece}, cut {s.cut_count}",
+                    [TemplatePage(s, s.piece.upper())],
+                )
+            )
+    for s in sheets:
+        if s.kind == "overlay":
+            files.append(
+                TemplateFile(
+                    f"{stem}-{piece_name(s.name)}.pdf",
+                    f"{s.piece} (appliqué), cut {s.cut_count}",
                     [TemplatePage(s, s.piece.upper())],
                 )
             )
@@ -648,7 +658,7 @@ def _draw_page(
         canvas.text(tx - 1.3 * u * len(text), ty - 1.5 * u, text, size=3 * u)
     # Finished dimensions in blue, from the drawn edges.
     lo, hi = sheet.finished.min(axis=0), sheet.finished.max(axis=0)
-    for name, value in dimensions(sheet) if sheet.kind != "skin piece" else []:
+    for name, value in dimensions(sheet) if sheet.kind not in ("skin piece", "overlay") else []:
         if name in sheet.edges:
             e = sheet.edges[name]
             a, b = e[0], e[-1]

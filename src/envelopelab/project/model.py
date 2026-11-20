@@ -18,7 +18,9 @@ JSON file that wraps one design document (unchanged, in the design schema) with
   :mod:`envelopelab.project.shapes`), part of the design state since version 2, with
   their panel layouts (seam turn, panel widths, horizontal splits) since version 4;
 * the **panel colours** (a visual layer: the display colour of envelope panels and
-  special-shape pieces, :mod:`envelopelab.project.colours`) since version 8.
+  special-shape pieces, :mod:`envelopelab.project.colours`) and the **overlays**
+  (appliqué patches sewn on top of the envelope, :mod:`envelopelab.project.overlays`)
+  since version 8.
 
 Version 1 files (no shapes) are read as version 2 files with no shapes (ADR-0020).
 
@@ -38,6 +40,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from envelopelab.design.model import DesignDocument, load_design_document
 from envelopelab.project.colours import PanelColours
+from envelopelab.project.overlays import OverlaySpec
 from envelopelab.project.shapes import ShapeSpec
 from envelopelab.project.symmetry import SymmetryAxis
 
@@ -234,7 +237,8 @@ class ProfileTarget(BaseModel):
 
 class DesignState(BaseModel):
     """Everything that is edited: the design document, its pattern annotations, the
-    special shapes placed on it, the symmetry axes and the panel colours."""
+    special shapes placed on it, the symmetry axes, the panel colours and the overlays
+    (appliqués sewn on the envelope)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -243,12 +247,16 @@ class DesignState(BaseModel):
     shapes: list[ShapeSpec] = Field(default_factory=list)
     symmetry_axes: list[SymmetryAxis] = Field(default_factory=list)
     colours: PanelColours = Field(default_factory=PanelColours)
+    overlays: list[OverlaySpec] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _unique_shape_names(self) -> DesignState:
         names = [s.name for s in self.shapes]
         if len(set(names)) != len(names):
             raise ValueError("special shape names must be unique")
+        every = names + [o.name for o in self.overlays]
+        if len(set(every)) != len(every):
+            raise ValueError("special shape and overlay names must be unique")
         axes = [a.name for a in self.symmetry_axes]
         if len(set(axes)) != len(axes):
             raise ValueError("symmetry axis names must be unique")
@@ -542,6 +550,8 @@ def state_to_data(state: DesignState) -> dict[str, Any]:
     }
     if not state.colours.is_empty():
         data["colours"] = state.colours.to_data()
+    if state.overlays:
+        data["overlays"] = [o.model_dump(mode="json") for o in state.overlays]
     return data
 
 
@@ -555,6 +565,7 @@ def state_from_data(data: dict[str, Any]) -> DesignState:
             "shapes": data.get("shapes", []),
             "symmetry_axes": data.get("symmetry_axes", []),
             "colours": data.get("colours") or {},
+            "overlays": data.get("overlays") or [],
         }
     )
 
@@ -573,7 +584,7 @@ def migrate_project_data(raw: dict[str, Any]) -> dict[str, Any]:
     (``cap_across``, ``cap_up``); their caps are placed by ``cap_shift`` as before
     (ADR-0052). Versions 1 to 6 have no crown outlines (``crown_shape``); their caps are
     circles (ADR-0054). Versions 1 to 7 have no panel colours (``colours``); their panels
-    read as uncoloured (ADR-0055).
+    read as uncoloured (ADR-0055), and no overlays (ADR-0056).
 
     Raises
     ------

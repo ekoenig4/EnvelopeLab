@@ -77,6 +77,16 @@ KEYS: tuple[tuple[str, str], ...] = (
         "half's own colour, over the panel's. Written only when some panel is "
         "coloured; older files read as uncoloured.",
     ),
+    (
+        "`state.overlays`",
+        "Overlays: appliqués sewn on top of the envelope (version 8, ADR-0056): unique "
+        "`name`, `placement` (gore from 1, tape position m, fraction across the gore), "
+        "`outline` (`circle`, `ellipse`, `rectangle`, `polygon` or `outline`), `width` and "
+        "`height` (m), `turn_deg`, `points` (polygon corners in m about the centre, or an "
+        "imported outline in its own units), `smooth`, `source` (imported file name), "
+        "`hem` (m turned under) and `fabric` (null: as the panel under its centre). Written "
+        "only when there are any; older files read as having none.",
+    ),
     ("`snapshots`", "Named copies of `state` with their design content hash."),
     ("`versions`", "Committed design versions (`version_id`, `parent_id`, message, state)."),
     ("`provenance`", "Append-only log of flagged edits (manual overrides and their undo)."),

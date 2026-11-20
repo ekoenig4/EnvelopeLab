@@ -6,7 +6,7 @@ Written with the planning documents when the design has panel colours (ADR-0055)
   stacked mouth to crown, :func:`envelopelab.export.planning.gore_outline`), each panel
   filled with its colour (a half-gore panel each half in its own), and every special
   shape as a grid of its pieces (one column per gore or panel round the axis, one band
-  per tier, its cap on top;
+  per tier, its cap on top; the overlays (appliqués) are drawn over the gores;
   :class:`envelopelab.project.colours.ShapeGrid`); page 2 lists the cloth per colour;
 * ``<slug>-colour-cloth.csv``: the same table, for ordering cloth.
 
@@ -29,6 +29,7 @@ import numpy as np
 from envelopelab.export.documents import pdf_text
 from envelopelab.geometry.polygon import signed_area
 from envelopelab.project.colours import HALVES, PanelRef
+from envelopelab.project.overlays import gore_pieces
 
 if TYPE_CHECKING:
     from envelopelab.export.build_pack import Sheet
@@ -166,6 +167,18 @@ def write_colour_plan(ctx: PackContext, out: Path) -> list[tuple[Path, str]]:
         for letter, outline, y in stack:
             mid = bottom + (y + 0.5 * float(np.ptp(outline[:, 1]))) * sc
             canvas.text(margin - 14, mid, letter, 8)
+        # Overlays (appliqués) over the panels, in their colours, one part per gore. The
+        # panel half width at a height is read off the stacked outlines (display only).
+        edge = np.vstack([np.column_stack([o[:, 1] + y, np.abs(o[:, 0])]) for _l, o, y in stack])
+        edge = edge[np.argsort(edge[:, 0])]
+        for layout in ctx.overlays:
+            for gore, part in gore_pieces(layout, n):
+                half = np.interp(part[:, 1], edge[:, 0], edge[:, 1])
+                ox = margin + (gore - 0.5) * widest * 1.1 * sc
+                x = (2.0 * (part[:, 0] - (gore - 1)) - 1.0) * half
+                pts = [(ox + a * sc, bottom + b * sc) for a, b in zip(x, part[:, 1], strict=True)]
+                colour = colours.colour_of(PanelRef(layout.spec.name, "A", 1))
+                canvas.polygon(pts, fill=_rgb(colour), stroke=(0.45, 0.2, 0.0), width=0.6)
         x0 = margin + n * widest * 1.1 * sc + 30
     else:
         x0 = margin

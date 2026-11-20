@@ -783,6 +783,11 @@ class WorkspaceController(QObject):
             if rows:
                 out += seam_mismatches(rows, s.patterns)
                 out += self.envelope_roll_findings()
+            surface = self.envelope_surface()
+            if s.state.overlays and surface is not None:
+                from envelopelab.project.overlays import overlay_findings
+
+                out += overlay_findings(s.state.overlays, surface)
             try:
                 for text in check_locks(s.design, s.project.locks):
                     out.append(DesignFinding("lock", "error", f"lock not met: {text}", "locks"))

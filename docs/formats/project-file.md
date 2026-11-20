@@ -18,6 +18,7 @@ around it:
 | `state.shapes` | Special shapes placed on the envelope (version 2): `kind` (`dome`, `tube`, `revolved` or `mesh`), unique `name`, `placement` (gore from 1, tape position m, fraction across the gore, lean and lean direction in degrees), the shape's sizes (m) or revolved profile (m) or mesh vertices (m) and triangles, panel or gore count, match marks per piece, feed-hole radius (m, optional), seam allowance (m) and skin fabric id (optional), and from version 4 the panel layout: `seam_offset_deg` (turn of the seams round the axis, degrees), `panel_widths` (relative width of every gore or panel; empty: equal) and `splits` (horizontal splits as fractions of the profile from the base circle; not for mesh shapes) `group` (optional name of the object the shape belongs to, ADR-0041) and `mirror` (a mirror twin's source shape `of` and symmetry `axis`, ADR-0043), and from version 5 where the panels meet at the crown (ADR-0049): `crown_seam_offset_deg` (the seam turn at the cap or tip, degrees; null: as at the rim), `crown_panel_widths` (relative widths there; empty: as at the rim), `cap_shift` (m the cap is moved off the tip) and `cap_direction_deg` (towards which direction round the axis), and from version 6 `cap_across` and `cap_up` (where the panels meet seen from above, fractions of the shape's widest radius across the gores and up the tape; 0, 0: the tip; ADR-0052), and from version 7 `crown_shape` (the cap's outline seen from above: `kind` footprint, ellipse, polygon or outline, with `width`, `length`, `turn_deg`, `points`, `smooth` and `source`; null: a circle; ADR-0054). Version 1 files read as having no shapes; versions 1 to 3 as having equal, unturned and unsplit pieces; versions 1 to 4 with the seams meeting the crown as they leave the rim and the cap centred; versions 1 to 5 without relative meeting points; versions 1 to 6 with round caps. |
 | `state.symmetry_axes` | Named symmetry axes (version 4, ADR-0043): `name` and `line`, the gore position of the meridian plane (gore widths from the first seam; gore n's centreline is n - 0.5). Mirror twins are mirrored across them. Older files read as having none. |
 | `state.colours` | Panel colours (version 8, ADR-0055; a visual layer that no result reads): `envelope` maps a row letter to gore numbers (from 1) to sRGB `#rrggbb` colours, `shapes` maps a special shape's name to its tier letter (`A` at the rim) or `cap` to piece numbers (from 1) to colours, and `halves` maps a row cut as half gores to gore numbers to `left` (towards the previous gore) or `right` to a half's own colour, over the panel's. Written only when some panel is coloured; older files read as uncoloured. |
+| `state.overlays` | Overlays: appliqués sewn on top of the envelope (version 8, ADR-0056): unique `name`, `placement` (gore from 1, tape position m, fraction across the gore), `outline` (`circle`, `ellipse`, `rectangle`, `polygon` or `outline`), `width` and `height` (m), `turn_deg`, `points` (polygon corners in m about the centre, or an imported outline in its own units), `smooth`, `source` (imported file name), `hem` (m turned under) and `fabric` (null: as the panel under its centre). Written only when there are any; older files read as having none. |
 | `snapshots` | Named copies of `state` with their design content hash. |
 | `versions` | Committed design versions (`version_id`, `parent_id`, message, state). |
 | `provenance` | Append-only log of flagged edits (manual overrides and their undo). |
@@ -404,13 +405,20 @@ clean exit, and offered for recovery at the next start otherwise.
     },
     "DesignState": {
       "additionalProperties": false,
-      "description": "Everything that is edited: the design document, its pattern annotations, the\nspecial shapes placed on it, the symmetry axes and the panel colours.",
+      "description": "Everything that is edited: the design document, its pattern annotations, the\nspecial shapes placed on it, the symmetry axes, the panel colours and the overlays\n(appliqu\u00e9s sewn on the envelope).",
       "properties": {
         "colours": {
           "$ref": "#/$defs/PanelColours"
         },
         "design": {
           "$ref": "#/$defs/DesignDocument"
+        },
+        "overlays": {
+          "items": {
+            "$ref": "#/$defs/OverlaySpec"
+          },
+          "title": "Overlays",
+          "type": "array"
         },
         "patterns": {
           "$ref": "#/$defs/PatternSet"
@@ -1454,6 +1462,104 @@ clean exit, and offered for recovery at the next start otherwise.
         "payload_mass"
       ],
       "title": "OperatingConditions",
+      "type": "object"
+    },
+    "OverlaySpec": {
+      "additionalProperties": false,
+      "description": "One appliqu\u00e9 patch (module docstring). Lengths in m, angles in degrees.\n\nAttributes\n----------\nname : str\n    Unique among special shapes and overlays.\nplacement : ShapePlacement\n    Where its centre lies: gore (from 1), tape position (m) and fraction across the\n    gore (``lean`` is not used).\noutline : {\"circle\", \"ellipse\", \"rectangle\", \"polygon\", \"outline\"}\n    Kind of outline.\nwidth, height : float\n    Size across and up the tape, m (a circle: ``width`` is its diameter; an imported\n    outline is scaled to fit the box, keeping its proportions).\nturn_deg : float\n    Turn of the outline, anticlockwise seen from outside, degrees.\npoints : list of (float, float)\n    Corners of a polygon (m, about its centre) or the imported outline (any units).\nsmooth : bool\n    A polygon is drawn through its corners as a smooth closed curve.\nsource : str\n    File an outline was imported from (for information).\nhem : float\n    Cloth turned under round the outline, m (the cut piece is that much larger).\nfabric : str or None\n    Fabric of the patch (None: as the panel under its centre).",
+      "properties": {
+        "fabric": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fabric"
+        },
+        "height": {
+          "default": 1.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Height",
+          "type": "number"
+        },
+        "hem": {
+          "default": 0.012,
+          "minimum": 0.0,
+          "title": "Hem",
+          "type": "number"
+        },
+        "name": {
+          "maxLength": 40,
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9_\\- ]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "outline": {
+          "default": "circle",
+          "enum": [
+            "circle",
+            "ellipse",
+            "rectangle",
+            "polygon",
+            "outline"
+          ],
+          "title": "Outline",
+          "type": "string"
+        },
+        "placement": {
+          "$ref": "#/$defs/ShapePlacement"
+        },
+        "points": {
+          "items": {
+            "maxItems": 2,
+            "minItems": 2,
+            "prefixItems": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "type": "array"
+          },
+          "title": "Points",
+          "type": "array"
+        },
+        "smooth": {
+          "default": false,
+          "title": "Smooth",
+          "type": "boolean"
+        },
+        "source": {
+          "default": "",
+          "title": "Source",
+          "type": "string"
+        },
+        "turn_deg": {
+          "default": 0.0,
+          "maximum": 180.0,
+          "minimum": -180.0,
+          "title": "Turn Deg",
+          "type": "number"
+        },
+        "width": {
+          "default": 1.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Width",
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "placement"
+      ],
+      "title": "OverlaySpec",
       "type": "object"
     },
     "PanelColours": {

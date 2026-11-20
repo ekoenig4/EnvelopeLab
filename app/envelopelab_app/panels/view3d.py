@@ -275,6 +275,8 @@ class Layer:
             return f"{self.key.removeprefix('shape-sim:')} (inflated)"
         if self.key.startswith("shape:"):
             return f"{self.key.removeprefix('shape:')} (designed)"
+        if self.key.startswith("overlay:"):
+            return f"{self.key.removeprefix('overlay:')} (overlay)"
         if self.kind == "reference" and "(" in self.label:
             return "Reference: " + self.label.split("(", 1)[1].rstrip(")")
         return self.label
@@ -857,6 +859,7 @@ class View3DPanel(QWidget):
                 )
         if session is not None:
             self._shape_layers()
+            self._overlay_layers()
         cache = self.controller.model_cache
         if session is not None and cache is not None:
             model = cache.built.model
@@ -907,6 +910,46 @@ class View3DPanel(QWidget):
         self.seam_number.setMaximum(self._gore_count())
         self._fill_saved()
         self.redraw()
+
+    def _overlay_layers(self) -> None:
+        """Every overlay (appliqué, ADR-0056) as a patch on the design surface, in its
+        panel colour (else the shape colour); one that cannot be laid is left out."""
+        from envelopelab.project.colours import PanelRef
+        from envelopelab.project.gore_design import display_points
+        from envelopelab.project.overlays import overlay_layout, overlay_mesh
+
+        session = self.controller.session
+        surface = self.controller.envelope_surface()
+        if session is None or surface is None or session.design.gores is None:
+            return
+        design = session.design
+        n = surface.gore_count
+
+        def to_3d(g: np.ndarray, s: np.ndarray) -> np.ndarray:
+            pts = np.asarray(display_points(design, s, 2.0 * math.pi * g / n), float)
+            r = np.hypot(pts[:, 0], pts[:, 1])[:, None]
+            pts[:, :2] *= (r + 0.01) / np.maximum(r, 1e-9)  # just outside the surface
+            return pts
+
+        colours = self._panel_colours()
+        for spec in session.state.overlays:
+            try:
+                layout = overlay_layout(spec, surface)
+            except ValueError:
+                continue
+            points, triangles = overlay_mesh(layout, surface, to_3d)
+            colour = None if colours is None else colours.colour_of(PanelRef(spec.name, "A", 1))
+            q = QColor(colour or LAYER_COLORS["shape"])
+            rgb = np.tile([q.red(), q.green(), q.blue()], (len(triangles), 1)).astype(np.uint8)
+            key = f"overlay:{spec.name}"
+            self.layers[key] = Layer(
+                key,
+                "shape",
+                f"Overlay {spec.name} (appliqué, as designed)",
+                points,
+                triangles,
+                face_colors=rgb,
+            )
 
     def _shape_layers(self) -> None:
         """Special shapes as sewn: the latest simulation of each shape (the skin sewn from

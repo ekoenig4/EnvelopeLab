@@ -1,0 +1,58 @@
+# Overlays (appliqués)
+
+An overlay is a flat piece of cloth sewn on top of the envelope: a circle, an ellipse, a
+rectangle, a polygon or an outline imported from a DXF or SVG file, anywhere on the
+envelope and across seams (`envelopelab.project.overlays`, ADR-0056). It is not inflated
+or simulated.
+
+## Cloth coordinates
+
+The outline is given in cloth coordinates \( (a, b) \), m: \( a \) across the cloth
+(towards the next gore), \( b \) up the load tape, about the overlay's centre, turned by
+its turn angle. The centre lies in gore \( k \) at tape position \( s_0 \), a fraction
+`across` from the centreline: gore position \( g_0 = k - \tfrac12 + \text{across} \)
+(gore \( k \) spans gore positions \( k - 1 \) to \( k \)). A point of the outline lies at
+
+\[ s = s_0 + b, \qquad g = g_0 + \frac{a}{2\,h(s)}, \]
+
+where \( h(s) \) is the flat half width of a panel at \( s \): the gore's flat half width
+\( w(s) \) on a lobe row, and on a flat-chord row the half width of the cut trapezoid,
+linear between its bottom and top. Across the panels laid side by side, a distance
+\( a \) is therefore exactly \( a \) m of cloth.
+
+## Marking lines on the panels
+
+The outline is split wherever it crosses a gore seam (integer \( g \)) or a row seam;
+a point on a seam belongs to the panel after or above it, so a corner exactly on a seam
+still splits it. In host gore \( k_h \) the part of the outline is drawn in the panel's
+pattern coordinates
+
+\[ x = (2 f - 1)\, h(s), \quad f = g - (k_h - 1), \qquad
+   y = s - s_{bottom} \;\; (\text{flat-chord rows: } y = \tfrac{s - s_{bottom}}{s_{top} - s_{bottom}}\, \text{rise}). \]
+
+Centred on the gore centreline and inside one lobe row the mapping is a pure translation,
+\( x = a \), \( y = s_0 + b - s_{bottom} \): the marked line is the outline itself. Each
+crossing gets a numbered match mark on the cut piece and on both panels.
+
+## Assumptions and valid range
+
+The envelope is doubly curved and a flat patch cannot lie on it exactly. The mapping keeps
+lengths across the cloth and up the tape, but it shears a patch whose centre is off the
+gore centreline (\( x \) moves with \( h(s) \)), and adjacent flat panels meet at an angle.
+The **ease** is the outline's length on the piece less the length marked on the panels;
+it is worked in between the match marks, and a warning is given above 1 % of the outline
+(source: assumed, about what a fabric patch takes without puckering). The outline must
+not cross itself, must lie between the mouth and the crown, and must span less than the
+whole circumference.
+
+## Build pack
+
+Each overlay is cut once (its finished outline with the hem turned under round it) and
+every panel its outline crosses gets a marking sheet with the line and the numbered
+marks; the seam pair outline ⇄ marked lines carries the ease, which the output QA checks
+(`envelopelab.export.overlays`).
+
+## Reference
+
+The gore-map development of `envelopelab.project.placement_map` (ADR-0044), extended here
+from points to finite patches.

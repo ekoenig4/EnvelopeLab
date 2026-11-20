@@ -154,6 +154,8 @@ class PackContext:
     slug: str = "design"
     files: list[FileEntry] = field(default_factory=list)
     colours: PanelColours | None = None
+    #: Overlays laid on the envelope (``OverlayLayout``, ADR-0056).
+    overlays: list[Any] = field(default_factory=list)
 
     def shape_pieces(self, shape: str) -> str:
         """The template files of a special shape's skin pieces, as a range in words."""

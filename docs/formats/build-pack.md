@@ -15,6 +15,7 @@ one page each** (ADR-0038):
 | `<slug>-panel-<R>-gore-<g>.pdf` | The panel `R` of gore `g` when a shape is sewn on it or a feed hole is cut in it: the same panel with that panel's footprint lines, side ticks, numbered match marks and feed holes (every shape's marks on that panel), *mark only* (ADR-0039) |
 | `<slug>-parachute-panel.pdf`, `<slug>-parachute-centre.pdf` | The parachute radial panel and centre panel |
 | `<slug>-<shape>-<piece>.pdf` | Every skin piece of every special shape (e.g. `<slug>-eye-G1.pdf`, `<slug>-horn-TIP.pdf`) |
+| `<slug>-<overlay>-overlay.pdf` | Every overlay (appliqué, ADR-0056), cut once; its outline is marked on the panel pages of every panel it crosses (`<slug>-panel-<R>-gore-<g>.pdf`) |
 
 The page is the piece's cut outline plus 20 mm, so the **whole piece is on one page,
 never split**. From format 4 (ADR-0042) the page is in the print roll's frame: **the page
@@ -46,6 +47,8 @@ at 1:1, ticks every T mm`, `along: …`) is generated from the same values.
 | `cad/<shape>-G<k>.dxf`, `cad/<shape>-P<k>.dxf` | Skin gore or panel `k` of a special shape; with horizontal splits each tier's piece has its letter, `A` at the rim (`cad/<shape>-G<k>A.dxf`, `-G<k>B.dxf`, …) and an upper tier's piece has a `bottom` edge, paired with the `top` of the piece below it in `seam_pairs` |
 | `cad/<shape>-TIP.dxf` | Flat tip disc of a tube or revolved shape |
 | `cad/<shape>-mark-G<g>-<R>.dxf` | Marking sheet: envelope panel (gore `g`, row `R`) with the shape's footprint line, match marks and feed hole |
+| `cad/<overlay>-overlay.dxf` | Overlay piece (kind `overlay`, cut 1): the finished outline (`SEW`, edge `outline`), the hem turned under (`CUT`) and a numbered match mark at every seam it crosses |
+| `cad/<overlay>-mark-G<g>-<R>.dxf` | Marking sheet of an overlay: the panel with the part of the overlay's outline on it (`ATTACH`) and the same numbered marks; seam pair: the piece's `outline` against every `attach<k>` line, with the planned ease |
 | `cad/index.json` | The index (below); it lists every other file of the pack |
 
 Formats 1 and 2 had the DXFs and `index.json` at the top and `pattern.pdf` (every sheet
@@ -189,7 +192,8 @@ fabric totals).
 shapes, ADR-0041) by name; it is empty when no shape is grouped, and each grouped shape's
 skin sheets name the object.
 
-`kind` is `envelope panel`, `parachute panel`, `skin piece` or `marking` (cut count 0). A
+`kind` is `envelope panel`, `parachute panel`, `skin piece`, `overlay` or `marking` (cut
+count 0). A
 seam pair lists the finished edges sewn together, with lengths summed on each side (all
 of a tube's panel tops against its tip disc, or the `top` of the parachute radial panel
 once per radial panel against the centre panel's `rim`, for example). `ease_mm` is the planned length of side `a`

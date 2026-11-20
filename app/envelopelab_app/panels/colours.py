@@ -224,8 +224,8 @@ class ColoursPanel(QWidget):
 
     def targets(self, ref: PanelRef) -> list[PanelRef]:
         """The panels a click on ``ref`` paints with the current tool and repeat."""
-        if self.tool == "pick":
-            return [ref]
+        if self.tool == "pick" or ref.shape in self.grid.scene.overlays:
+            return [ref]  # an overlay is painted on its own
         every = self.repeat.value()
         if ref.shape is None:
             m = self._map
@@ -313,6 +313,20 @@ class ColoursPanel(QWidget):
             1.0 if m is None else m.column,
             list(grids.values()),
         )
+        # Overlays (appliqués) over the panels, each one cell per gore it covers.
+        if m is not None and session.state.overlays:
+            from envelopelab.project.colours import PanelRef
+            from envelopelab.project.overlays import map_polygons, overlay_layout
+
+            surface = self.controller.envelope_surface()
+            for overlay in session.state.overlays:
+                try:
+                    layout = overlay_layout(overlay, surface)  # type: ignore[arg-type]
+                except ValueError:
+                    continue
+                ref = PanelRef(overlay.name, "A", 1)
+                scene.cells += [(ref, poly[:-1]) for _gore, poly in map_polygons(layout, m)]
+                scene.overlays.add(overlay.name)
         self.grid.set_scene(scene)
         colours = session.state.colours
         self.grid.set_colours(colours)

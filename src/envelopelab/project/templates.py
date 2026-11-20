@@ -281,6 +281,7 @@ def state_from_template(template: Project, name: str) -> DesignState:
         shapes=state.shapes,
         symmetry_axes=state.symmetry_axes,
         colours=state.colours,
+        overlays=state.overlays,
     )
 
 

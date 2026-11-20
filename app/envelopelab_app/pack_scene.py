@@ -164,7 +164,7 @@ def scene_from_view(view: View3DPanel) -> Scene:
         if len(layer.faces) == len(mesh.triangles):
             mesh.face_rgb = np.asarray(layer.face_colors, dtype=np.uint8)
     for key, layer in view.layers.items():
-        if not key.startswith("shape:"):
+        if not key.startswith(("shape:", "overlay:")):
             continue
         scene.meshes.append(
             SceneMesh(

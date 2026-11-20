@@ -6,6 +6,8 @@ A build pack holds one *sheet* per piece to cut or mark:
 * the parachute's radial panel (cut once per radial panel) and, when it has one, its
   circular centre panel (cut once);
 * every piece of every special shape's skin (its gores or panels and a tip disc);
+* every overlay (an appliqué sewn on top of the envelope, ADR-0056) and a marking sheet
+  for every panel its outline crosses (:mod:`envelopelab.export.overlays`);
 * a *marking* sheet for every envelope panel a shape crosses or lies over: the panel with
   the footprint line (the shape's rim is sewn on it; short ticks point into the shape),
   the numbered match marks (each naming the skin piece that carries the same number) and
@@ -63,6 +65,7 @@ if TYPE_CHECKING:
     from envelopelab.features.primitives import PrimitiveDesign
     from envelopelab.project.colours import PanelColours
     from envelopelab.project.model import PatternSet
+    from envelopelab.project.overlays import OverlaySpec
 
 MM = 1000.0  # mm per m
 PT_PER_M = 72.0 / 0.0254  # PDF points per m
@@ -90,7 +93,7 @@ class Sheet:
         File stem (unique in the pack).
     piece : str
         Piece label printed in the header.
-    kind : {"envelope panel", "parachute panel", "skin piece", "marking"}
+    kind : {"envelope panel", "parachute panel", "skin piece", "overlay", "marking"}
         What the sheet is for.
     cut_count : int
         Pieces to cut from this sheet (0 for a marking sheet).
@@ -252,6 +255,10 @@ def sheet_colours(
             else:
                 by_label[piece.label] = (name, TIER_LETTERS[piece.tier], piece.index + 1)
     for sheet in sheets:
+        if sheet.kind == "overlay":  # an overlay is coloured as piece 1 of tier A
+            name = sheet.piece.removesuffix(" overlay")
+            sheet.colours = [(colours.shapes.get(name, {}).get("A", {}).get(1), [1])]
+            continue
         if sheet.kind != "skin piece" or sheet.name not in by_label:
             continue
         name, group, index = by_label[sheet.name]
@@ -1067,6 +1074,7 @@ def export_build_pack(
     extras: PackExtras | None = None,
     groups: dict[str, str] | None = None,
     colours: PanelColours | None = None,
+    overlays: Sequence[OverlaySpec] = (),
 ) -> Path:
     """Export the envelope rows, the parachute, and every primitive's pieces and marking
     sheets, and the documents chosen in ``extras``.
@@ -1099,6 +1107,11 @@ def export_build_pack(
         Panel colours (ADR-0055): each envelope row and skin piece sheet says which
         pieces to cut in which colour (header notes, template, ``index.json``
         ``colours``), the 3D view draws them and the documents add the colour plan.
+    overlays : sequence of OverlaySpec
+        Appliqués sewn on the envelope (ADR-0056): each gets its cut piece, a marking
+        sheet per panel its outline crosses and a seam pair
+        (:mod:`envelopelab.export.overlays`). The fabric of each is its own, else that of
+        the row under its centre.
 
     Returns
     -------
@@ -1122,6 +1135,24 @@ def export_build_pack(
         group = (groups or {}).get(name)
         sheets += primitive_sheets(p, fabric, marking_allowance, hem, hole_tape, group)
         pairs += primitive_seam_pairs(p)
+    layouts: list[Any] = []
+    if overlays:
+        from envelopelab.export.overlays import overlay_pack
+        from envelopelab.project.model import PatternSet as Patterns
+        from envelopelab.project.shapes import envelope_surface
+
+        surface = envelope_surface(design, patterns if patterns is not None else Patterns())
+        rows = {s.letter: s.fabric for s in sheets if s.kind == "envelope panel"}
+        fabric_of = {}
+        for o in overlays:
+            if o.fabric:
+                fabric_of[o.name] = o.fabric
+            else:
+                row = surface.rows[int(surface.row_index(np.array([o.placement.tape_position]))[0])]
+                fabric_of[o.name] = rows.get(row.label, "applique")
+        more, more_pairs, layouts = overlay_pack(overlays, surface, fabric_of)
+        sheets += more
+        pairs += more_pairs
     gores = design.gores.count if design.gores is not None else 0
     sheet_colours(sheets, colours, gores, primitives)
     documents: list[dict[str, str]] = []
@@ -1137,6 +1168,7 @@ def export_build_pack(
             primitives,
             roll_width,
             colours,
+            layouts,
         )
     return write_pack(
         sheets,
@@ -1206,6 +1238,7 @@ def write_documents(
     primitives: Sequence[PrimitiveDesign] = (),
     roll_width: float = DEFAULT_ROLL_WIDTH,
     colours: PanelColours | None = None,
+    overlays: Sequence[Any] = (),
 ) -> tuple[list[dict[str, str]], Any]:
     """Write the documents of ``extras`` into ``out``; returns their index entries and the
     provenance used. The build-pack index is written last: it lists every file. With
@@ -1251,6 +1284,7 @@ def write_documents(
         extras.status,
         stem,
         colours=None if colours is None or colours.is_empty() else colours,
+        overlays=list(overlays),
     )
     written: list[tuple[Path, str, str, str, str]] = []  # path, kind, group, tag, what
 
@@ -1384,6 +1418,7 @@ def write_documents(
             "envelope panel": "PANEL TEMPLATES",
             "parachute panel": "TOP & BOTTOM / CAD",
             "skin piece": "APPENDAGES",
+            "overlay": "APPENDAGES",
         }
         for t in templates:
             group = groups.get(t.pages[0].sheet.kind, "PANEL TEMPLATES")

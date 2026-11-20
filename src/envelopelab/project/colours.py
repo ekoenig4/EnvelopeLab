@@ -16,6 +16,8 @@ Colours are sRGB hex strings ``#rrggbb`` (lower case; :func:`normalise_colour` a
   towards the previous gore (gore positions :math:`k - 1` to :math:`k - \tfrac12` of gore
   :math:`k`), as the cut half panels (:func:`envelopelab.geometry.gore.half_panel`, cut
   down :math:`x = 0`), the gore map and the 3D views all lay it;
+* an **overlay** (an appliqué, :mod:`envelopelab.project.overlays`) as a one-piece shape:
+  its name, tier ``A``, piece 1 (:func:`overlay_grid`);
 * a **special-shape piece** by the shape name, its tier letter (``A`` at the rim, then
   ``B``, ... above each horizontal split; ``A`` when the shape is not split) or
   :data:`CAP` for the cap that closes its top, and its gore or panel number round the
@@ -474,6 +476,12 @@ class ShapeGrid:
         return out
 
 
+def overlay_grid(name: str) -> ShapeGrid:
+    """An overlay (appliqué, :mod:`envelopelab.project.overlays`) as a one-piece grid:
+    its colour is that of piece 1 of tier ``A`` (``PanelRef(name, "A", 1)``)."""
+    return ShapeGrid(name, 1, (1.0,), (0.0, 1.0), False)
+
+
 def shape_grid(spec: ShapeSpec) -> ShapeGrid:
     """The grid of a special shape's pieces (its count, widths, splits and cap)."""
     from envelopelab.project.shapes import TubeShape, cap_diameter, piece_count
@@ -775,6 +783,7 @@ __all__ = [
     "envelope_targets",
     "face_halves",
     "normalise_colour",
+    "overlay_grid",
     "painted",
     "pruned",
     "renamed",

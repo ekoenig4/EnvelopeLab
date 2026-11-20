@@ -1,6 +1,7 @@
 """The balloon's panels as a flat grid to paint (Colours mode).
 
-The envelope is drawn as its gore map: the gores side by side at their true flat width,
+The envelope is drawn as its gore map (with the overlays, the appliqués sewn on it,
+over its panels): the gores side by side at their true flat width,
 cut at the row seams (:func:`envelopelab.project.colours.envelope_cells`, m). Every
 special shape follows on the right as a schematic grid, one column per gore or panel
 round its axis and one band per tier, its cap a band on top
@@ -45,6 +46,8 @@ from envelopelab_app.view_tools import FitButton
 #: Uncoloured panels: alternate gores (or pieces) in two light greys, as the gore map.
 EMPTY_FILL = ("#eef2f8", "#e3e9f2")
 SEAM = "#4d4d4d"
+#: An overlay with no colour chosen.
+OVERLAY_FILL = "#f3e6cf"
 #: Outline of the panels a click would paint.
 TARGET = "#e8590c"
 #: Height of a shape's grid, as a fraction of the envelope's (display only).
@@ -64,10 +67,14 @@ class GridScene:
         Every panel's outline.
     labels : list of (str, float, float, str)
         Text, position and alignment (``"top"``, ``"left"``, ``"title"``).
+    overlays : set of str
+        Names of the overlays among the cells (drawn last, so on top, and hit first).
     """
 
     cells: list[tuple[PanelRef, np.ndarray]] = field(default_factory=list)
     labels: list[tuple[str, float, float, str]] = field(default_factory=list)
+    #: Overlays (appliqués) drawn over the envelope cells: their names.
+    overlays: set[str] = field(default_factory=set)
 
     def bounds(self) -> QRectF:
         """Smallest rectangle round every cell."""
@@ -222,7 +229,8 @@ class ColourGridView(QWidget):
     def panel_at(self, p: QPointF) -> PanelRef | None:
         """The panel under widget point ``p`` (None: none)."""
         w = self.to_world(p)
-        for ref, path in self._paths:
+        # Last drawn first: an overlay lies over the panels under it.
+        for ref, path in reversed(self._paths):
             if path.contains(w):
                 return ref
         return None
@@ -301,6 +309,8 @@ class ColourGridView(QWidget):
         colour = self.colours.colour_of(ref)
         if colour is not None:
             return QColor(colour)
+        if ref.shape in self.scene.overlays:
+            return QColor(OVERLAY_FILL)
         shade = (ref.index + (1 if ref.group == CAP else 0)) % 2
         return QColor(EMPTY_FILL[shade])
 

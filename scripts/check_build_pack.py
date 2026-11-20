@@ -6,7 +6,9 @@ cut list, rigging, sewing schedule, 3D view), to a temporary directory and runs
 :func:`envelopelab.export.qa.check_pack`; then the same with three rows (one carrying the
 dome) cut as half gores and panel colours (ADR-0055) on envelope rows, halves, split
 and unsplit skin pieces and a tip disc, so the colour lines on the DXFs and templates, the
-colour plan and the cloth table are checked too. Exits non-zero when any check fails. Run
+colour plan and the cloth table are checked too, and three overlays (appliqués: across a
+gore seam, across a row seam, across the last-to-first gore seam) with their pieces,
+marking sheets and seam pairs. Exits non-zero when any check fails. Run
 by ``scripts/verify.py``.
 """
 
@@ -29,6 +31,8 @@ from envelopelab.features.primitives import (
 )
 from envelopelab.project.colours import CAP, PanelColours, PanelRef, painted
 from envelopelab.project.gore_design import standard_gore_design
+from envelopelab.project.overlays import OverlaySpec
+from envelopelab.project.shapes import ShapePlacement
 from envelopelab.validation.primitives import ellipsoid_mesh
 
 
@@ -76,8 +80,46 @@ def main() -> int:
         colours = painted(colours, [PanelRef(None, rows[4], 8, "left")], "#92d050")
         colours = painted(colours, [PanelRef("dome", "A", p) for p in (1, 3)], "#7030a0")
         colours = painted(colours, [PanelRef("tube", CAP, 1), PanelRef("blob", "A", 2)], "#00b050")
+        # Overlays (ADR-0056): across a gore seam, across a row seam, and on the seam
+        # between the last gore and the first.
+        overlays = [
+            OverlaySpec(
+                name="sun",
+                placement=ShapePlacement(gore=5, tape_position=8.0, across=0.5),
+                width=1.5,
+            ),
+            OverlaySpec(
+                name="band",
+                placement=ShapePlacement(gore=9, tape_position=6.0),
+                outline="rectangle",
+                width=0.8,
+                height=2.5,
+                turn_deg=10.0,
+            ),
+            OverlaySpec(
+                name="star",
+                placement=ShapePlacement(gore=12, tape_position=13.0, across=0.5),
+                outline="polygon",
+                points=[
+                    (0, 0.6),
+                    (0.2, 0.2),
+                    (0.6, 0),
+                    (0.2, -0.2),
+                    (0, -0.6),
+                    (-0.2, -0.2),
+                    (-0.6, 0),
+                    (-0.2, 0.2),
+                ],
+            ),
+        ]
+        colours = painted(colours, [PanelRef("sun", "A", 1)], "#ffc000")
         export_build_pack(
-            halved, shapes, out, extras=PackExtras(frozenset(DOCUMENTS)), colours=colours
+            halved,
+            shapes,
+            out,
+            extras=PackExtras(frozenset(DOCUMENTS)),
+            colours=colours,
+            overlays=overlays,
         )
         findings += check_pack(out)
     for f in findings:
