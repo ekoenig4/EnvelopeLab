@@ -1006,7 +1006,8 @@ def meeting_point_shift(
 
     Seen from above the shape (along its axis), the meeting point sits at
     :math:`(x, y) = R\,(a, u)` from the tip, :math:`R` the shape's widest radius,
-    :math:`a` across (towards the next gore) and :math:`u` up the tape. The skin point
+    :math:`a` across in the shape's frame (along :math:`\mathbf{b}_2`, towards the
+    previous gore) and :math:`u` up the tape. The skin point
     with that plan position lies on the meridian in direction
     :math:`\psi = \operatorname{atan2}(a, u)` (0 up the tape, as ``cap_direction``) at
     radius :math:`\rho = R\sqrt{a^2 + u^2}`, which the meridian first reaches at arc

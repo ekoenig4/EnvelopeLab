@@ -96,12 +96,23 @@ in the editor next to them, and you can move the selected shape on either:
    **Panel layout** decides how the skin is cut:
 
    * **Seam turn** (degrees) turns every seam round the shape's axis. Gore or panel 1 is
-     centred this far round from the direction up the tape (0°), towards the next gore
-     at 90°. Use it to keep a seam off a face, a marking or a feed hole.
+     centred this far round from the direction up the tape (0°), towards the previous
+     gore at 90° (−90° towards the next gore). Use it to keep a seam off a face, a
+     marking or a feed hole.
    * **Panel widths**: one relative width per gore or panel, piece 1 first (2 is twice as
      wide as 1); the second column shows the angle each piece spans. **Equal widths**
      makes them all the same again. Changing the number of gores or panels keeps the
      widths of the first ones (new ones get the last width).
+
+     Click a row to pick that gore or panel: it is shown in amber on the balloon (this
+     tab, the 3D views of the other modes), in the cut pieces (every tier of it) and in
+     the **Where the panels meet** circle, so you can see which piece the numbers act
+     on. Picking a row of the crown widths does the same. **Split panel in two** cuts the
+     picked piece into two of half its width: the shape gets one more gore or panel,
+     every other seam stays where it was (the seam turn is corrected when piece 1 is
+     split, as it is centred on it) and the crown's widths are split alike. Start from
+     equal panels, split the ones that are too wide for the print roll; one undo joins
+     them again.
    * **Horizontal splits** cut every gore or panel across, in per cent of the profile's
      length from the base circle (0) to the tip (100). **Add split** splits the tallest
      tier in the middle; **Remove split** removes the selected one (or the top one). The

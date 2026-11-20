@@ -109,6 +109,13 @@ The layout of the pieces is the builder's choice (`seam_angles`, `split_heights`
   \phi_j = \phi_0 + \sum_{k<j} \Delta_k .
   \]
   With equal widths and no turn this is the layout above, to the last bit.
+
+  **Splitting a piece** (`split_piece`) replaces \( w_k \) by two widths \( w_k/2 \) and
+  adds one piece. The seams after \( \phi_0 \) are partial sums, so all old seams stay and
+  one appears at \( \phi_k + \Delta_k/2 \); only \( \phi_0 \) depends on the turn, so
+  splitting piece 1 sets \( \phi_{off}' = \phi_{off} - \Delta_0/4 \), which keeps
+  \( \phi_0 \). The crown's widths and turn are split the same way
+  (`tests/unit/test_split_piece.py`: every old seam kept to 10\(^{-9}\) rad).
 * **Horizontal splits** \( 0 < f_1 < \dots < f_n < 1 \) cut every piece across at the
   meridian arc lengths \( u_i = f_i\,\ell \) from the base circle, where \( \ell \) is the
   meridian's length to the tip (or the cap's edge). On a surface of revolution a split is
@@ -162,12 +169,14 @@ are helices); it is laid out as a classic gore like the others.
 
 **Where the panels meet, as plan fractions (ADR-0052).** The meeting point (the cap's
 centre) can instead be given seen from above the shape, as fractions \( (a, u) \) of its
-widest radius \( R = \max \rho \) of the pointed meridian: \( a \) across the gores,
+widest radius \( R = \max \rho \) of the pointed meridian: \( a \) across the gores
+(towards the next gore, which is \( -\mathbf{b}_2 \): the frame's angles turn from up the
+tape towards the previous gore),
 \( u \) up the tape, \( a^2 + u^2 \le 1 \) (`cap_across`, `cap_up`). They give the move
 below through `meeting_point_shift`:
 
 \[
-\phi_P = \operatorname{atan2}(a, u), \qquad
+\phi_P = \operatorname{atan2}(-a, u), \qquad
 e = s_{tip}\!\left(\rho = R\sqrt{a^2 + u^2}\right),
 \]
 
@@ -323,7 +332,7 @@ one loop turning once round the axis. The point where the axis leaves the mesh (
 and the pole (or the cap's edge, see [Caps](#caps)).
 
 **Moved meeting point (ADR-0053).** With plan fractions \( (a, u) \) the seam line is moved
-off the axis to \( \mathbf{c} = \mathbf{P}_0 + R\,(u\,\mathbf{b}_1 + a\,\mathbf{b}_2) \),
+off the axis to \( \mathbf{c} = \mathbf{P}_0 + R\,(u\,\mathbf{b}_1 - a\,\mathbf{b}_2) \),
 parallel to it, \( R \) the mesh's widest distance from the axis seen from above
 (`FreeformShape.widest_radius`, `seam_centre`). The pole, the half-planes, the cap's
 cylinder and every angle round the shape are taken about that line, so the panels meet

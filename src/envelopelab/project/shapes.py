@@ -119,8 +119,9 @@ class _ShapeBase(BaseModel):
         pieces meet in a point.
     seam_offset_deg : float
         Turn of every seam round the shape's axis, deg: the first gore or panel is
-        centred this far round from the direction up the tape (0), towards the next gore
-        (90). Where the panels meet.
+        centred this far round from the direction up the tape (0), towards the previous
+        gore (90; the shape's frame turns from up the tape towards the previous gore,
+        unlike the lean). Where the panels meet.
     panel_widths : list of float
         Relative width of every gore or panel round the axis, one per piece, piece 1
         first (empty: all equal). ``[2, 1, 1]`` makes piece 1 half the shape.
@@ -140,7 +141,7 @@ class _ShapeBase(BaseModel):
         centred). It must still cover the tip. Domes and revolved shapes with a cap.
     cap_direction_deg : float
         Direction round the axis the cap moves towards, deg (0 up the tape, 90 towards
-        the next gore, as the seam turn).
+        the previous gore, as the seam turn).
     cap_across, cap_up : float
         Where the panels meet (the cap's centre), seen from above the shape, as fractions
         of its widest radius from the tip: across (towards the next gore) and up (up the
@@ -285,7 +286,9 @@ def _meeting_point(spec: ShapeSpec, prim: Any) -> Primitive:
         out: Primitive = prim
         return out
     rho, zeta = dataclasses.replace(prim, cap_radius=0.0).meridian()
-    shift, direction = meeting_point_shift(rho, zeta, spec.cap_across, spec.cap_up)
+    # The shape's frame turns from up the tape towards the previous gore (b2 = axis x
+    # b1), so "towards the next gore" is -b2 there.
+    shift, direction = meeting_point_shift(rho, zeta, -spec.cap_across, spec.cap_up)
     moved: Primitive = dataclasses.replace(prim, cap_shift=shift, cap_direction=direction)
     return moved
 
@@ -302,7 +305,10 @@ def meeting_point(spec: ShapeSpec) -> tuple[float, float]:
         return 0.0, 0.0
     prim: Any = to_primitive(spec)
     rho, zeta = dataclasses.replace(prim, cap_radius=0.0).meridian()
-    return meeting_point_plan(rho, zeta, spec.cap_shift, math.radians(spec.cap_direction_deg))
+    frame_across, up = meeting_point_plan(
+        rho, zeta, spec.cap_shift, math.radians(spec.cap_direction_deg)
+    )
+    return -frame_across, up  # the frame's across is towards the previous gore
 
 
 def to_primitive(spec: ShapeSpec) -> Primitive:
@@ -407,9 +413,72 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
         # Where the panels meet, seen from above: the seam line through it (ADR-0052).
         widest = shape.widest_radius
         shape = dataclasses.replace(
-            shape, seam_centre=(spec.cap_up * widest, spec.cap_across * widest)
+            shape, seam_centre=(spec.cap_up * widest, -spec.cap_across * widest)
         )
     return shape
+
+
+#: Most gores or panels round a shape (the specification's limit).
+MAX_PIECES = 64
+
+
+def split_piece(spec: ShapeSpec, index: int) -> dict[str, Any]:
+    r"""The values that split gore or panel ``index`` (0-based) of ``spec`` in two equal
+    halves, every other seam staying where it is.
+
+    Piece :math:`k` of relative width :math:`w_k` becomes two of :math:`w_k/2` and the
+    count grows by one (``panel_widths`` is written out; equal pieces stay equal in angle
+    except the two halves). Piece 1 is centred on the seam turn (:func:`~envelopelab.
+    features.primitives.seam_angles`), so splitting it moves the turn back by a quarter
+    of its span, :math:`\phi_{off}' = \phi_{off} - \Delta_0/4`, which keeps its first
+    seam :math:`\phi_0 = \phi_{off} - \Delta_0/2` in place. The crown's widths and turn
+    (when set, ADR-0049) are split the same way.
+
+    Parameters
+    ----------
+    spec : ShapeSpec
+        Shape.
+    index : int
+        Piece to split, 0-based round the axis.
+
+    Returns
+    -------
+    dict
+        Field values for ``update_shape``: the count (``gores`` or ``panels``),
+        ``panel_widths``, and the seam turns and crown widths that change.
+
+    Raises
+    ------
+    ValueError
+        For an index out of range, or a shape at :data:`MAX_PIECES` pieces.
+    """
+    count = piece_count(spec)
+    if not 0 <= index < count:
+        raise ValueError(f"no gore or panel {index + 1}: the shape has {count}")
+    if count >= MAX_PIECES:
+        raise ValueError(f"a shape has at most {MAX_PIECES} gores or panels")
+
+    def halved(widths: list[float]) -> list[float]:
+        w = float(widths[index]) / 2.0
+        return [float(x) for x in widths[:index]] + [w, w] + [float(x) for x in widths[index + 1 :]]
+
+    def turned(offset: float, widths: list[float]) -> float:
+        if index != 0:
+            return offset
+        span = 360.0 * float(widths[0]) / float(sum(widths))
+        return ((offset - span / 4.0 + 180.0) % 360.0) - 180.0
+
+    rim = list(spec.panel_widths) or [1.0] * count
+    key = "gores" if isinstance(spec, DomeShape | RevolvedShape) else "panels"
+    values: dict[str, Any] = {key: count + 1, "panel_widths": halved(rim)}
+    if index == 0:
+        values["seam_offset_deg"] = round(turned(spec.seam_offset_deg, rim), 9)
+    if spec.crown_panel_widths:
+        values["crown_panel_widths"] = halved(list(spec.crown_panel_widths))
+    if spec.crown_seam_offset_deg is not None and index == 0:
+        crown = list(spec.crown_panel_widths) or rim
+        values["crown_seam_offset_deg"] = round(turned(spec.crown_seam_offset_deg, crown), 9)
+    return values
 
 
 def piece_count(spec: ShapeSpec) -> int:

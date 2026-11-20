@@ -88,7 +88,8 @@ def test_the_skin_point_seen_from_above_is_at_the_fractions() -> None:
     ]
     rel = point - placed.base_point
     widest = float(np.max(dataclasses.replace(prim, cap_radius=0.0).meridian()[0]))
-    plan = np.array([rel @ placed.b2, rel @ placed.b1]) / widest  # across, up
+    # Across is towards the next gore: -b2 (the frame turns towards the previous one).
+    plan = np.array([-(rel @ placed.b2), rel @ placed.b1]) / widest  # across, up
     assert plan == pytest.approx([0.15, 0.1], abs=1e-3)
     assert not [c for c in placed.checks if c.severity == "error"]
 
@@ -106,7 +107,8 @@ def test_the_point_keeps_its_place_when_the_shape_is_resized() -> None:
 def test_a_cap_shift_reads_as_fractions_and_the_two_ways_are_exclusive() -> None:
     old = _dome(cap_shift=0.04, cap_direction_deg=90.0)
     across, up = meeting_point(old)
-    assert up == pytest.approx(0.0, abs=1e-9) and across > 0.0
+    # 90 deg turns towards b2, the previous gore: a negative across.
+    assert up == pytest.approx(0.0, abs=1e-9) and across < 0.0
     new = DomeShape.model_validate({**old.model_dump(), "cap_shift": 0.0, "cap_across": across})
     assert to_primitive(new).cap_shift == pytest.approx(0.04, abs=1e-6)  # type: ignore[union-attr]
     with pytest.raises(ValueError):
@@ -146,7 +148,7 @@ def test_a_mesh_shapes_panels_meet_at_the_fractions(across: float, up: float) ->
     placed = shape_design(_blob(cap_across=across, cap_up=up), surface)
     prim: Any = placed.primitive
     rel = placed._skin.pole - placed.base_point
-    plan = np.array([rel @ placed.b2, rel @ placed.b1]) / prim.widest_radius
+    plan = np.array([-(rel @ placed.b2), rel @ placed.b1]) / prim.widest_radius
     assert plan == pytest.approx([across, up], abs=1e-9)
     # Every panel ends round that point, on the edge of the cap cut about the seam line.
     skin = placed._skin
@@ -167,3 +169,20 @@ def test_a_mesh_shape_on_its_axis_is_unchanged() -> None:
     b = shape_design(_blob(cap_across=0.0, cap_up=0.0), surface)
     for p, q in zip(a.pieces, b.pieces, strict=True):
         np.testing.assert_array_equal(p.finished, q.finished)
+
+
+def test_a_positive_across_moves_the_point_towards_the_next_gore() -> None:
+    # Gore numbers grow with the azimuth theta (EnvelopeSurface.theta_at), so the next
+    # gore is at a larger theta than the base point.
+    surface = envelope_surface(SESSION.design, SESSION.patterns)
+    dome = DomeShape.model_validate({**_dome().model_dump(), "cap_across": 0.2})
+    placed = shape_design(dome, surface)
+    prim: Any = placed.primitive
+    point = placed._skin.at_u(
+        np.array([placed._skin.total_full - prim.cap_shift]), np.array([prim.cap_direction])
+    )[0]
+    _s, theta, _d = surface.locate(point[None])
+    assert float(theta[0]) > placed.base_theta
+    blob = shape_design(_blob(cap_across=0.2), surface)
+    _s, theta, _d = surface.locate(blob._skin.pole[None])
+    assert float(theta[0]) > blob.base_theta

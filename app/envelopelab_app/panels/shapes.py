@@ -79,6 +79,7 @@ from envelopelab.project.placement_map import snap
 from envelopelab.project.shape_groups import group_names
 from envelopelab.project.shapes import (
     CAP_PANEL_TOP_WIDTH,
+    MAX_PIECES,
     DomeShape,
     MeshShape,
     RevolvedShape,
@@ -108,6 +109,9 @@ from envelopelab_app.refresh import Refresher
 from envelopelab_app.view_tools import FitButton
 
 FAIL_COLOR = "#b00020"
+#: The gore or panel being edited in the Panel layout (as the balloon views' amber).
+EDITED_FILL = "#ffc062"
+EDITED_EDGE = "#e65100"
 WARN_COLOR = "#8a6d3b"
 OK_COLOR = "#2e7d32"
 SEVERITY_COLORS = {"error": FAIL_COLOR, "warning": WARN_COLOR, "info": "#31708f"}
@@ -265,8 +269,9 @@ def _scrolled(page: QWidget) -> QScrollArea:
 class MeetingPointPad(QWidget):
     """Where a shape's panels meet, seen from above the shape (ADR-0052).
 
-    The circle is the shape's outline at its widest; the cross marks the tip (0, 0).
-    Right is across the gores (towards the next gore), up is up the tape. The seams are
+    The circle is the shape's outline at its widest; the cross marks the tip (0, 0). It
+    is drawn as the balloon is seen from outside: right is across the gores (towards
+    the next gore), up is up the tape. The seams are
     drawn from the meeting point to where they leave the rim, so the panel layout round
     the point can be seen. Click or drag to move the point (inside the circle); double
     click to put it back on the tip.
@@ -285,6 +290,8 @@ class MeetingPointPad(QWidget):
         self.up = 0.0
         #: Seam angles where they leave the rim, rad (0 up the tape, as the seam turn).
         self.seams: list[float] = []
+        #: Gore or panel being edited (0-based), filled amber; None: none.
+        self.edited: int | None = None
         self.setMinimumSize(230, 190)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
         self.setCursor(Qt.CursorShape.CrossCursor)
@@ -296,6 +303,18 @@ class MeetingPointPad(QWidget):
     def set_state(self, across: float, up: float, seams: list[float]) -> None:
         """Show the point at (across, up) and the seams leaving the rim at ``seams``."""
         self.across, self.up, self.seams = float(across), float(up), list(seams)
+        self.update()
+
+    @staticmethod
+    def rim_at(phi: float) -> tuple[float, float]:
+        """Where seam angle ``phi`` (rad, the shape's frame: 0 up the tape, turning
+        towards the previous gore) meets the outline in the pad, as (across, up)
+        fractions. Seen from outside the balloon the previous gore is to the left."""
+        return -math.sin(phi), math.cos(phi)
+
+    def set_edited(self, piece: int | None) -> None:
+        """Fill gore or panel ``piece`` (0-based) amber; None: none."""
+        self.edited = piece
         self.update()
 
     def _frame(self) -> tuple[QPointF, float]:
@@ -327,9 +346,20 @@ class MeetingPointPad(QWidget):
         painter.setPen(QPen(QColor("#8a7a66" if enabled else "#bbbbbb"), 1.2))
         painter.drawEllipse(centre, radius, radius)
         point = self._to_screen(self.across, self.up)
+        k = self.edited
+        if k is not None and enabled and 0 <= k < len(self.seams):
+            # The piece being edited: from the point out to its stretch of the rim.
+            a = self.seams[k]
+            span = (self.seams[(k + 1) % len(self.seams)] - a) % (2.0 * math.pi)
+            b = a + (span if span > 0.0 else 2.0 * math.pi)
+            arc = [self._to_screen(*self.rim_at(float(t))) for t in np.linspace(a, b, 24)]
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(EDITED_FILL)))
+            painter.drawPolygon(QPolygonF([point, *arc]))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.setPen(QPen(QColor("#5a4a3a" if enabled else "#c4c4c4"), 1.0))
         for phi in self.seams:
-            rim = self._to_screen(math.sin(phi), math.cos(phi))
+            rim = self._to_screen(*self.rim_at(phi))
             painter.drawLine(point, rim)
         painter.setPen(QPen(QColor("#9aa3ad"), 1.0, Qt.PenStyle.DashLine))
         painter.drawLine(QPointF(centre.x() - 6, centre.y()), QPointF(centre.x() + 6, centre.y()))
@@ -384,6 +414,8 @@ class PiecePreview(QWidget):
         super().__init__()
         self.pieces: list[CutPiece] = []
         self.oversize: frozenset[str] = frozenset()
+        #: Gore or panel being edited (0-based): its pieces (every tier) filled amber.
+        self.edited: int | None = None
         self.on_roll = False
         self.roll_width = DEFAULT_ROLL_WIDTH
         self.zoom = 1.0
@@ -571,8 +603,11 @@ class PiecePreview(QWidget):
         for piece, (finished, cut, rim) in drawn:
             path = _path(polygon(finished))
             big = piece.label in self.oversize
-            painter.fillPath(path, QBrush(QColor(OVERSIZE_FILL if big else "#e8eef7")))
-            painter.setPen(QPen(QColor("#1f3b73"), 1.5))
+            edited = self.edited is not None and piece.role != "tip" and piece.index == self.edited
+            fill = OVERSIZE_FILL if big else EDITED_FILL if edited else "#e8eef7"
+            painter.fillPath(path, QBrush(QColor(fill)))
+            edge = QColor(EDITED_EDGE if edited else "#1f3b73")
+            painter.setPen(QPen(edge, 2.5 if edited else 1.5))
             painter.drawPolygon(polygon(finished))
             pen = QPen(QColor("#555555"), 1.0)
             pen.setStyle(Qt.PenStyle.DashLine)
@@ -614,6 +649,9 @@ class ShapesPanel(QWidget):
         super().__init__()
         self.controller = controller
         self.selected: str | None = None
+        #: Gore or panel of the selected shape being edited in the Panel layout (0-based;
+        #: None: none), highlighted in every view of it.
+        self.edited_piece: int | None = None
         self.mesh_mm = DEFAULT_MESH_MM
         self._form_key: tuple[str, str, int] | None = None
         self._placement_key: str | None = None
@@ -683,7 +721,8 @@ class ShapesPanel(QWidget):
         self.seam_turn.setKeyboardTracking(False)
         self.seam_turn.setToolTip(
             "Turn every seam round the shape's axis: the first gore or panel is centred this "
-            "far round from the direction up the tape (0°), towards the next gore (90°)"
+            "far round from the direction up the tape (0°), towards the previous gore (90°; "
+            "−90° towards the next gore)"
         )
         self.seam_turn.valueChanged.connect(
             lambda v: self.set_value_live(("seam_offset_deg",), round(float(v), 1))
@@ -697,9 +736,19 @@ class ShapesPanel(QWidget):
             "Relative width of every gore or panel, piece 1 first: 2 is twice as wide as 1"
         )
         self.widths_table.itemChanged.connect(self._width_edited)
+        self.widths_table.currentCellChanged.connect(
+            lambda row, _c, _pr, _pc: self.set_edited_piece(row if row >= 0 else None)
+        )
         equal = QPushButton("Equal widths")
         equal.setObjectName("shapeEqualWidths")
         equal.clicked.connect(lambda: self.set_value(("panel_widths",), []))
+        self.split_piece_button = QPushButton("Split panel in two")
+        self.split_piece_button.setObjectName("shapeSplitPiece")
+        self.split_piece_button.setToolTip(
+            "Split the gore or panel selected above into two of half its width (one more "
+            "gore or panel; every other seam stays where it is). Undo merges them again."
+        )
+        self.split_piece_button.clicked.connect(lambda: self.split_piece(self.edited_piece))
         self.splits_table = QTableWidget(0, 1)
         self.splits_table.setObjectName("shapeSplits")
         self.splits_table.setHorizontalHeaderLabels(["Split at (% of the profile)"])
@@ -724,7 +773,10 @@ class ShapesPanel(QWidget):
         layout_form.addRow("Seam turn", self.seam_turn)
         widths = QVBoxLayout()
         widths.addWidget(self.widths_table)
-        widths.addWidget(equal)
+        width_buttons = QHBoxLayout()
+        width_buttons.addWidget(self.split_piece_button)
+        width_buttons.addWidget(equal)
+        widths.addLayout(width_buttons)
         layout_form.addRow("Panel widths", widths)
         splits = QVBoxLayout()
         splits.addWidget(self.splits_table)
@@ -1025,6 +1077,8 @@ class ShapesPanel(QWidget):
 
     def select(self, name: str | None) -> None:
         """Select a shape by name."""
+        if name != self.selected:
+            self._forget_edited_piece()
         self.selected = name
         for i in range(self.list.count()):
             item = self.list.item(i)
@@ -1309,7 +1363,10 @@ class ShapesPanel(QWidget):
 
     def _current_changed(self, item: QListWidgetItem | None, _previous: object) -> None:
         if item is not None:
-            self.selected = str(item.data(Qt.ItemDataRole.UserRole))
+            name = str(item.data(Qt.ItemDataRole.UserRole))
+            if name != self.selected:
+                self._forget_edited_piece()
+            self.selected = name
             self._show_selected()
 
     def _result_tab_shown(self, _index: int) -> None:
@@ -1707,7 +1764,9 @@ class ShapesPanel(QWidget):
         def place_at(name: str, point: np.ndarray) -> Any:
             return placement_at(surface, point, specs[name].placement)
 
-        return PlacementData(gore_map, sketch, axes, shapes, self.selected, place_at)
+        data = PlacementData(gore_map, sketch, axes, shapes, self.selected, place_at)
+        data.edited_piece = self.edited_piece
+        return data
 
     def show_hint(self) -> None:
         """Draw the controller's hint on the On the balloon tab (amber, no redraw of the
@@ -2133,6 +2192,11 @@ class ShapesPanel(QWidget):
             span.setFlags(span.flags() & ~Qt.ItemFlag.ItemIsEditable)
             self.widths_table.setItem(k, 1, span)
         self.widths_table.blockSignals(False)
+        if self.edited_piece is not None and self.edited_piece >= count:
+            self.edited_piece = None
+        self.preview.edited = self.edited_piece
+        self.meeting_pad.set_edited(self.edited_piece)
+        self.split_piece_button.setEnabled(self.edited_piece is not None and count < MAX_PIECES)
         mesh = isinstance(spec, MeshShape)
         self.splits_table.blockSignals(True)
         self.splits_table.setRowCount(len(spec.splits))
@@ -2166,6 +2230,7 @@ class ShapesPanel(QWidget):
             (self.holes_table, "shape:feed_holes"),
             (self.seam_turn, "shape:seam_offset_deg"),
             (self.widths_table, "shape:panel_widths"),
+            (self.split_piece_button, "shape:panel_widths"),
             (self.splits_table, "shape:splits"),
             (self.add_split_button, "shape:splits"),
             (self.remove_split_button, "shape:splits"),
@@ -2219,6 +2284,9 @@ class ShapesPanel(QWidget):
         )
         self.crown_widths_table.setMinimumHeight(120)
         self.crown_widths_table.itemChanged.connect(self._crown_width_edited)
+        self.crown_widths_table.currentCellChanged.connect(
+            lambda row, _c, _pr, _pc: self.set_edited_piece(row if row >= 0 else None)
+        )
         equal = QPushButton("Equal at crown")
         equal.setObjectName("shapeCrownEqual")
         equal.setToolTip("Every piece the same width where they meet at the top")
@@ -2434,6 +2502,54 @@ class ShapesPanel(QWidget):
             self.crown_note.setText(" ".join(notes))
         finally:
             self._crown_filling = False
+
+    def _forget_edited_piece(self) -> None:
+        """Another shape is selected: no piece of it is being edited yet."""
+        self.edited_piece = None
+        self.preview.edited = None
+        self.meeting_pad.set_edited(None)
+        for table in (self.widths_table, self.crown_widths_table):
+            table.blockSignals(True)
+            table.setCurrentCell(-1, -1)
+            table.blockSignals(False)
+
+    def set_edited_piece(self, piece: int | None) -> None:
+        """Highlight gore or panel ``piece`` (0-based) of the selected shape as the one
+        being edited: amber on the balloon, in the cut pieces and in the meeting pad."""
+        spec = self.spec()
+        if spec is None or piece is None or not 0 <= piece < piece_count(spec):
+            piece = None
+        changed = piece != self.edited_piece
+        self.edited_piece = piece
+        self.preview.edited = piece
+        self.preview.update()
+        self.meeting_pad.set_edited(piece)
+        self.split_piece_button.setEnabled(
+            piece is not None and spec is not None and piece_count(spec) < MAX_PIECES
+        )
+        if changed and self.placement.data.sketch is not None:
+            self.placement.data.edited_piece = piece
+            self.placement.set_data(self.placement.data)
+
+    def split_piece(self, piece: int | None) -> bool:
+        """Split gore or panel ``piece`` (0-based) of the selected shape into two of half
+        its width, every other seam in place (:func:`envelopelab.project.shapes.
+        split_piece`); one undo step. The first half stays highlighted."""
+        from envelopelab.project.shapes import split_piece
+
+        name, spec = self.selected, self.spec()
+        if name is None or spec is None or piece is None:
+            return False
+        try:
+            values = split_piece(spec, piece)
+        except ValueError:
+            return False
+        if not self.controller.edit("update_shape", name, values):
+            self.refresh()
+            return False
+        self.widths_table.setCurrentCell(piece, 0)
+        self.set_edited_piece(piece)
+        return True
 
     def set_panel_widths(self, widths: list[float]) -> bool:
         """Set the relative widths of the gores or panels (empty: all equal)."""

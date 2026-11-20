@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: **Split panel in two** in a special shape's Panel layout cuts the picked gore
+  or panel into two of half its width, keeping every other seam in place (one undo
+  step). The picked gore or panel (a row of the widths tables) is highlighted in amber
+  on the balloon, in the cut pieces and in the Where the panels meet circle.
+- Fixed: **Across** of Where the panels meet moved the point towards the previous gore,
+  not the next one as labelled, and the circle was drawn mirrored relative to the
+  balloon seen from outside; both now match the balloon. The seam turn's and cap
+  direction's descriptions now say that 90° turns towards the previous gore (their
+  behaviour is unchanged).
 - Added: move where a mesh shape's panels meet (ADR-0053). The **Where the panels meet**
   pad and Across/Up boxes now work on mesh shapes such as eye pods: the seams are cut
   straight from the rim to the point and the panels meet there, with or without a cap.
