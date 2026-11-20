@@ -11,9 +11,15 @@ gore 1, half way up, and the overlay editor opens:
 * **Gore**, **Tape position from mouth**, **Across gore**: where its centre lies. You can
   also drag it on the gore map or in 3D, or nudge it with the arrow buttons or keys, as
   a shape.
-* **Outline**: circle, ellipse, rectangle, **polygon** (type its corners about the centre
-  in mm, and tick *Smooth curve* for a rounded shape) or an **imported outline** (the
+* **Outline**: circle, ellipse, rectangle, **polygon** or an **imported outline** (the
   largest closed outline of a DXF or SVG file, scaled to fit the width and height).
+  Shape a polygon in the drawing of the cut piece under the fields: **drag a corner** to
+  move it (one undo step per drag; the drawing keeps its scale while you drag), **double
+  click an edge** to add a corner there, **double click or right click a corner** to
+  remove it (three always stay). A move that would make the outline cross itself is
+  drawn red and not applied. Tick *Smooth curve* for a rounded shape through the corners;
+  **Corner table (mm)** unfolds a table to type exact corner positions about the centre.
+  A polygon's size is its corners, so *Width* and *Height* are greyed out.
 * **Width**, **Height**, **Turn**: its size across and up the tape, and its turn.
 * **Hem turned under**: cloth added round the outline for the hem (12 mm by default).
 * **Fabric** (default: as the panel under its centre) and **Colour**.

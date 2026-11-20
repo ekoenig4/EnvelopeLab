@@ -31,7 +31,10 @@ and simulations; an appliqué is none of that.
 * The Special shapes mode lists overlays with the shapes (**Add shape ▸ Overlay
   (appliqué)**); selecting one shows an overlay editor (placement, outline, size, turn,
   corners or import, hem, fabric, colour, the cut piece drawn with what it covers and its
-  fit). Overlays are drawn on the gore map and in 3D and are dragged and nudged like
+  fit). A polygon's corners are dragged in that drawing (double click an edge to add
+  one, double click or right click one to remove it; a self-crossing outline is refused
+  while dragging, one undo step per drag); the corner table is folded away for exact
+  values. Overlays are drawn on the gore map and in 3D and are dragged and nudged like
   shapes. The 3D / Simulation view has a layer per overlay. The Validation panel reports
   an overlay that cannot be laid (error) or fits badly (warning).
 * Build pack (`envelopelab.export.overlays`): per overlay a piece sheet (kind `overlay`,

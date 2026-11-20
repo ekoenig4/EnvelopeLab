@@ -7,6 +7,10 @@ or SVG file), size and turn; the hem turned under round it; its fabric and colou
 the cut piece drawn (the cut line, the sew line dotted, the numbered marks where it
 crosses seams) with what it covers and how well it fits the curved envelope.
 
+A polygon is shaped in that drawing (:class:`PiecePreview`): drag a corner to move it,
+double click an edge to add a corner, double click or right click a corner to remove it;
+the corner table (folded away) is for typing exact values.
+
 The editor computes nothing: it shows the overlay and its layout
 (:func:`envelopelab.project.overlays.overlay_layout`) it is given, and reports every
 change as field values (JSON: m, degrees) through ``changed`` (live: being spun).
@@ -14,11 +18,12 @@ change as field values (JSON: m, degrees) through ``changed`` (live: being spun)
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QPointF, Qt, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -32,6 +37,7 @@ from PySide6.QtWidgets import (
     QSpinBox,
     QTableWidget,
     QTableWidgetItem,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -47,16 +53,52 @@ KIND_TEXT = {
 }
 
 
+#: Distance from a corner (or an edge) within which the pointer takes it, px.
+PICK_PX = 8.0
+
+
+def _turn(points: np.ndarray, deg: float) -> np.ndarray:
+    """``points`` turned anticlockwise by ``deg`` degrees (as the overlay's turn)."""
+    c, s = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    out: np.ndarray = np.asarray(points, dtype=np.float64) @ np.array([[c, s], [-s, c]])
+    return out
+
+
 class PiecePreview(QWidget):
-    """The overlay's cut piece: cut line solid, sew line dotted, seam marks numbered."""
+    """The overlay's cut piece: cut line solid, sew line dotted, seam marks numbered.
+
+    For a polygon the corners are handles (module docstring of
+    :mod:`envelopelab_app.overlay_editor`): drag a corner to move it, double click an
+    edge to add a corner, double click or right click a corner to remove it (three stay).
+    The drawing keeps its scale while a corner is dragged. A change that would make the
+    outline cross itself is drawn red and not reported.
+
+    Signals
+    -------
+    cornersChanged(list, bool)
+        The new corners (m about the centre, before the turn) and whether the change is
+        live (a corner being dragged: the drag is one undo step).
+    """
+
+    cornersChanged = Signal(list, bool)  # noqa: N815 (Qt naming)
 
     def __init__(self) -> None:
         super().__init__()
+        self.setObjectName("overlayPiecePreview")
         self.finished: np.ndarray | None = None
         self.cut: np.ndarray | None = None
         self.marks: list[tuple[float, float, str]] = []
         self.colour: str | None = None
-        self.setMinimumSize(200, 180)
+        #: Polygon corners about the centre before the turn, m (None: not a polygon).
+        self.corners: np.ndarray | None = None
+        self.turn_deg = 0.0
+        #: Returns "" for corners that make a valid outline, else why not.
+        self.validate: Any = lambda _corners: ""
+        self._drag: int | None = None
+        self._frozen: tuple[float, float, float] | None = None
+        self._invalid = False
+        self.setMinimumSize(240, 300)
+        self.setMouseTracking(True)
 
     def set_piece(
         self,
@@ -68,6 +110,149 @@ class PiecePreview(QWidget):
         self.finished, self.cut, self.marks, self.colour = finished, cut, marks, colour
         self.update()
 
+    def set_corners(self, corners: Any, turn_deg: float) -> None:
+        """Make the polygon ``corners`` (m about the centre) draggable (None: none)."""
+        if self._drag is not None:
+            return  # the corners being dragged are ours
+        self.corners = None if corners is None else np.asarray(corners, dtype=np.float64)
+        self.turn_deg = turn_deg
+        self._invalid = False
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.update()
+
+    # -- frame: m to pixels -------------------------------------------------------------
+
+    def frame(self) -> tuple[float, float, float]:
+        """Scale (px per m) and the centre of the drawing (m); kept while dragging."""
+        if self._frozen is not None:
+            return self._frozen
+        parts = [a for a in (self.cut, self._turned()) if a is not None and len(a)]
+        if not parts:
+            return 1.0, 0.0, 0.0
+        pts = np.vstack(parts)
+        lo, hi = pts.min(axis=0), pts.max(axis=0)
+        k = 0.85 * min(
+            self.width() / max(hi[0] - lo[0], 1e-9), self.height() / max(hi[1] - lo[1], 1e-9)
+        )
+        return k, 0.5 * float(lo[0] + hi[0]), 0.5 * float(lo[1] + hi[1])
+
+    def to_screen(self, x: float, y: float) -> QPointF:
+        k, cx, cy = self.frame()
+        return QPointF(self.width() / 2 + (x - cx) * k, self.height() / 2 - (y - cy) * k)
+
+    def to_cloth(self, p: QPointF) -> tuple[float, float]:
+        k, cx, cy = self.frame()
+        return cx + (p.x() - self.width() / 2) / k, cy - (p.y() - self.height() / 2) / k
+
+    def _turned(self) -> np.ndarray | None:
+        return None if self.corners is None else _turn(self.corners, self.turn_deg)
+
+    def corner_at(self, p: QPointF) -> int | None:
+        """The corner under widget point ``p`` (None: none)."""
+        turned = self._turned()
+        if turned is None:
+            return None
+        for i, (x, y) in enumerate(turned):
+            q = self.to_screen(float(x), float(y))
+            if math.hypot(q.x() - p.x(), q.y() - p.y()) <= PICK_PX:
+                return i
+        return None
+
+    def edge_at(self, p: QPointF) -> int | None:
+        """The edge (from corner i to i + 1) under widget point ``p`` (None: none)."""
+        turned = self._turned()
+        if turned is None:
+            return None
+        n = len(turned)
+        for i in range(n):
+            a = self.to_screen(*map(float, turned[i]))
+            b = self.to_screen(*map(float, turned[(i + 1) % n]))
+            dx, dy = b.x() - a.x(), b.y() - a.y()
+            length2 = dx * dx + dy * dy
+            if length2 <= 0.0:
+                continue
+            t = max(0.0, min(1.0, ((p.x() - a.x()) * dx + (p.y() - a.y()) * dy) / length2))
+            if math.hypot(a.x() + t * dx - p.x(), a.y() + t * dy - p.y()) <= PICK_PX:
+                return i
+        return None
+
+    # -- editing ------------------------------------------------------------------------
+
+    def _unturned(self, p: QPointF) -> np.ndarray:
+        """Widget point ``p`` as a corner about the centre before the turn, m (to 1 mm)."""
+        point = _turn(np.array([self.to_cloth(p)]), -self.turn_deg)[0]
+        out: np.ndarray = np.round(point, 3)
+        return out
+
+    def _report(self, corners: np.ndarray, live: bool) -> None:
+        reason = self.validate(corners.tolist())
+        self._invalid = bool(reason)
+        self.setToolTip(reason)
+        if not reason:
+            self.cornersChanged.emit(corners.tolist(), live)
+        self.update()
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        if self.corners is None:
+            return
+        i = self.corner_at(event.position())
+        if event.button() == Qt.MouseButton.RightButton and i is not None:
+            self.remove_corner(i)
+            return
+        if event.button() == Qt.MouseButton.LeftButton and i is not None:
+            self._drag = i
+            self._frozen = self.frame()
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        if self.corners is None:
+            return
+        if self._drag is None:
+            over = self.corner_at(event.position()) is not None
+            self.setCursor(Qt.CursorShape.OpenHandCursor if over else Qt.CursorShape.ArrowCursor)
+            return
+        corners = self.corners.copy()
+        corners[self._drag] = self._unturned(event.position())
+        self.corners = corners
+        self._report(corners, live=True)
+
+    def mouseReleaseEvent(self, _event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        if self._drag is None:
+            return
+        self._drag = None
+        self._frozen = None
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.update()
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        if self.corners is None:
+            return
+        i = self.corner_at(event.position())
+        if i is not None:
+            self.remove_corner(i)
+            return
+        edge = self.edge_at(event.position())
+        if edge is not None:
+            self.add_corner(edge, event.position())
+
+    def add_corner(self, edge: int, at: QPointF) -> None:
+        """Add a corner at widget point ``at`` on the edge after corner ``edge``."""
+        if self.corners is None:
+            return
+        corners = np.insert(self.corners, edge + 1, self._unturned(at), axis=0)
+        self.corners = corners
+        self._report(corners, live=False)
+
+    def remove_corner(self, i: int) -> None:
+        """Remove corner ``i`` (a polygon keeps at least three)."""
+        if self.corners is None or len(self.corners) <= 3:
+            return
+        corners = np.delete(self.corners, i, axis=0)
+        self.corners = corners
+        self._report(corners, live=False)
+
+    # -- drawing ------------------------------------------------------------------------
+
     def paintEvent(self, _event: object) -> None:  # noqa: N802 (Qt API)
         p = QPainter(self)
         p.fillRect(self.rect(), QColor("white"))
@@ -75,19 +260,12 @@ class PiecePreview(QWidget):
             p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "No piece")
             return
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        lo, hi = self.cut.min(axis=0), self.cut.max(axis=0)
-        k = 0.9 * min(
-            self.width() / max(hi[0] - lo[0], 1e-9), self.height() / max(hi[1] - lo[1], 1e-9)
-        )
-        cx, cy = 0.5 * (lo + hi)
 
-        def at(x: float, y: float) -> QPointF:
-            return QPointF(self.width() / 2 + (x - cx) * k, self.height() / 2 - (y - cy) * k)
-
-        def path(points: np.ndarray) -> QPainterPath:
+        def path(points: np.ndarray, closed: bool = True) -> QPainterPath:
             out = QPainterPath()
-            out.addPolygon(QPolygonF([at(float(x), float(y)) for x, y in points]))
-            out.closeSubpath()
+            out.addPolygon(QPolygonF([self.to_screen(float(x), float(y)) for x, y in points]))
+            if closed:
+                out.closeSubpath()
             return out
 
         fill = QColor(self.colour) if self.colour else QColor("#f3e6cf")
@@ -98,10 +276,29 @@ class PiecePreview(QWidget):
         p.strokePath(path(self.finished), dotted)
         p.setPen(QPen(QColor("#c62828")))
         for x, y, text in self.marks:
-            q = at(x, y)
+            q = self.to_screen(x, y)
             p.drawLine(QPointF(q.x() - 4, q.y()), QPointF(q.x() + 4, q.y()))
             p.drawLine(QPointF(q.x(), q.y() - 4), QPointF(q.x(), q.y() + 4))
             p.drawText(QPointF(q.x() + 5, q.y() - 5), text)
+        turned = self._turned()
+        if turned is None:
+            return
+        # The corners: their polygon (red while it would cross itself) and a handle each.
+        line = QPen(QColor("#c62828" if self._invalid else "#1565c0"), 1.0)
+        line.setStyle(Qt.PenStyle.DashLine)
+        p.strokePath(path(turned), line)
+        p.setPen(QPen(QColor("#0d47a1"), 1.2))
+        for i, (x, y) in enumerate(turned):
+            q = self.to_screen(float(x), float(y))
+            p.setBrush(QColor("#ff8f00") if i == self._drag else QColor("white"))
+            p.drawRect(int(q.x()) - 4, int(q.y()) - 4, 8, 8)
+        p.setPen(QPen(QColor("#5f6b7a")))
+        p.drawText(
+            8,
+            self.height() - 8,
+            "Drag a corner; double click an edge: add one; double click or right click a "
+            "corner: remove it",
+        )
 
 
 class OverlayEditor(QWidget):
@@ -175,27 +372,43 @@ class OverlayEditor(QWidget):
         form.addRow("Colour", self.colour_button)
         layout.addLayout(form)
 
-        # Polygon corners (mm) / imported outline.
+        # Polygon: the corners are dragged in the drawing below; the table (folded away)
+        # is for typing exact values.
         self.points_box = QWidget()
         points_layout = QVBoxLayout(self.points_box)
         points_layout.setContentsMargins(0, 0, 0, 0)
-        points_layout.addWidget(QLabel("Corners about the centre (mm): across, up"))
+        row = QHBoxLayout()
+        self.smooth = QCheckBox("Smooth curve through the corners")
+        self.smooth.toggled.connect(lambda on: self._emit({"smooth": on}))
+        self.table_button = QToolButton()
+        self.table_button.setObjectName("overlayTableToggle")
+        self.table_button.setText("Corner table (mm) ▸")
+        self.table_button.setCheckable(True)
+        self.table_button.setToolTip("Type exact corner positions instead of dragging them")
+        row.addWidget(self.smooth)
+        row.addStretch(1)
+        row.addWidget(self.table_button)
+        points_layout.addLayout(row)
+        self.table_box = QWidget()
+        table_layout = QVBoxLayout(self.table_box)
+        table_layout.setContentsMargins(0, 0, 0, 0)
+        table_layout.addWidget(QLabel("Corners about the centre (mm): across, up"))
         self.points = QTableWidget(0, 2)
         self.points.setObjectName("overlayPoints")
         self.points.setHorizontalHeaderLabels(["across", "up"])
         self.points.itemChanged.connect(self._points_edited)
-        points_layout.addWidget(self.points)
-        row = QHBoxLayout()
+        table_layout.addWidget(self.points)
+        buttons = QHBoxLayout()
         add = QPushButton("Add corner")
         add.clicked.connect(self._add_point)
         remove = QPushButton("Remove corner")
         remove.clicked.connect(self._remove_point)
-        self.smooth = QCheckBox("Smooth curve through the corners")
-        self.smooth.toggled.connect(lambda on: self._emit({"smooth": on}))
-        row.addWidget(add)
-        row.addWidget(remove)
-        row.addWidget(self.smooth)
-        points_layout.addLayout(row)
+        buttons.addWidget(add)
+        buttons.addWidget(remove)
+        table_layout.addLayout(buttons)
+        self.table_box.setVisible(False)
+        self.table_button.toggled.connect(self._show_table)
+        points_layout.addWidget(self.table_box)
         layout.addWidget(self.points_box)
         self.import_box = QWidget()
         import_layout = QHBoxLayout(self.import_box)
@@ -209,6 +422,10 @@ class OverlayEditor(QWidget):
         layout.addWidget(self.import_box)
 
         self.preview = PiecePreview()
+        self.preview.validate = self._corners_problem
+        self.preview.cornersChanged.connect(
+            lambda corners, live: self._emit({"points": corners}, live=live)
+        )
         layout.addWidget(self.preview, 1)
         self.info = QLabel()
         self.info.setObjectName("overlayInfo")
@@ -243,7 +460,9 @@ class OverlayEditor(QWidget):
             self.kind.setCurrentIndex(OUTLINE_KINDS.index(spec.outline))
             self.width_box.setValue(spec.width * 1000.0)
             self.height_box.setValue(spec.height * 1000.0)
-            self.height_box.setEnabled(spec.outline != "circle")
+            # A polygon's size is its corners (dragged in the drawing).
+            self.width_box.setEnabled(spec.outline != "polygon")
+            self.height_box.setEnabled(spec.outline not in ("circle", "polygon"))
             self.turn.setValue(spec.turn_deg)
             self.hem.setValue(spec.hem * 1000.0)
             self.fabric.setText(spec.fabric or "")
@@ -263,6 +482,7 @@ class OverlayEditor(QWidget):
             )
         finally:
             self._filling = False
+        self.preview.set_corners(spec.points if spec.outline == "polygon" else None, spec.turn_deg)
         if layout is None:
             self.preview.set_piece(None, None, [], colour)
             self.info.setText(f"<span style='color:#b00020'>{error}</span>")
@@ -292,6 +512,22 @@ class OverlayEditor(QWidget):
         self.info.setText(text)
 
     # -- edits ------------------------------------------------------------------------
+
+    def _show_table(self, on: bool) -> None:
+        self.table_box.setVisible(on)
+        self.table_button.setText("Corner table (mm) ▾" if on else "Corner table (mm) ▸")
+
+    def _corners_problem(self, corners: list[list[float]]) -> str:
+        """Why ``corners`` (m) make no valid outline ("" when they do)."""
+        from envelopelab.project.overlays import outline_points
+
+        if self.spec is None:
+            return "no overlay"
+        try:
+            outline_points(self.spec.model_copy(update={"points": [tuple(c) for c in corners]}))
+        except ValueError as exc:
+            return str(exc)
+        return ""
 
     def _emit(self, values: dict[str, Any], live: bool = False) -> None:
         if not self._filling and self.spec is not None:

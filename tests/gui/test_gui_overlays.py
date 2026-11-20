@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
 
 from envelopelab.project.colours import PanelRef
 from envelopelab_app.main_window import MainWindow
+from envelopelab_app.overlay_editor import PiecePreview
+from envelopelab_app.panels.shapes import ShapesPanel
 
 
 def test_add_edit_move_and_remove_an_overlay(gore_window: MainWindow) -> None:
@@ -64,3 +67,58 @@ def test_overlays_are_painted_in_the_colours_mode(gore_window: MainWindow) -> No
     assert session.state.colours.colour_of(ref) == "#ffc000"
     # The validation panel says nothing about an overlay that fits.
     assert not [f for f in gore_window.controller.findings() if f.target == f"shape:{name}"]
+
+
+def _polygon_overlay(gore_window: MainWindow) -> tuple[ShapesPanel, PiecePreview]:
+    gore_window.set_mode("shapes")
+    panel = gore_window.shapes
+    panel.add_overlay()
+    square = [[-0.4, -0.4], [0.4, -0.4], [0.4, 0.4], [-0.4, 0.4]]
+    panel.overlay_editor.changed.emit({"outline": "polygon", "points": square}, False)
+    preview = panel.overlay_editor.preview
+    preview.resize(400, 400)
+    return panel, preview
+
+
+def test_polygon_corners_are_dragged_in_the_drawing(gore_window: MainWindow) -> None:
+    panel, preview = _polygon_overlay(gore_window)
+    session = gore_window.controller.session
+    assert session is not None
+    assert preview.corners is not None and len(preview.corners) == 4
+    assert not panel.overlay_editor.width_box.isEnabled()
+    corner = preview.to_screen(0.4, 0.4).toPoint()
+    target = preview.to_screen(0.6, 0.7).toPoint()
+    depth = session.stack.index
+    left, none = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+    QTest.mousePress(preview, left, none, corner)
+    for k in range(1, 6):
+        step = corner + (target - corner) * (k / 5)
+        QTest.mouseMove(preview, step)
+    QTest.mouseRelease(preview, left, none, target)
+    (spec,) = session.state.overlays
+    assert spec.points[2] == pytest.approx((0.6, 0.7), abs=0.01)
+    assert session.stack.index == depth + 1  # the whole drag is one undo step
+    # Double click an edge: a corner is added there; right click a corner: removed.
+    edge = preview.to_screen(0.0, -0.4).toPoint()
+    QTest.mouseDClick(preview, left, none, edge)
+    assert len(session.state.overlays[0].points) == 5
+    added = preview.to_screen(0.0, -0.4).toPoint()
+    QTest.mouseClick(preview, Qt.MouseButton.RightButton, none, added)
+    assert len(session.state.overlays[0].points) == 4
+    session.undo()
+    assert len(session.state.overlays[0].points) == 5
+
+
+def test_a_drag_that_crosses_the_outline_is_not_applied(gore_window: MainWindow) -> None:
+    _panel, preview = _polygon_overlay(gore_window)
+    session = gore_window.controller.session
+    assert session is not None
+    before = list(session.state.overlays[0].points)
+    left, none = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+    corner = preview.to_screen(0.4, 0.4).toPoint()
+    across = preview.to_screen(-0.6, -0.1).toPoint()  # past the opposite edge: a bow tie
+    QTest.mousePress(preview, left, none, corner)
+    QTest.mouseMove(preview, across)
+    assert "crosses itself" in preview.toolTip()
+    QTest.mouseRelease(preview, left, none, across)
+    assert list(session.state.overlays[0].points) == before
