@@ -322,6 +322,16 @@ one loop turning once round the axis. The point where the axis leaves the mesh (
 \( \phi_j = 2\pi j/M - \pi/M \), so every panel is a disc bounded by the footprint, two seams
 and the pole (or the cap's edge, see [Caps](#caps)).
 
+**Moved meeting point (ADR-0053).** With plan fractions \( (a, u) \) the seam line is moved
+off the axis to \( \mathbf{c} = \mathbf{P}_0 + R\,(u\,\mathbf{b}_1 + a\,\mathbf{b}_2) \),
+parallel to it, \( R \) the mesh's widest distance from the axis seen from above
+(`FreeformShape.widest_radius`, `seam_centre`). The pole, the half-planes, the cap's
+cylinder and every angle round the shape are taken about that line, so the panels meet
+where it leaves the mesh, at \( R\,(a, u) \) seen from above
+(`tests/unit/test_meeting_point.py`, to 10\(^{-9}\)). The footprint must still turn once
+round the line, and every panel stay a disc, or the shape says so; on the line through
+the base point (0, 0) the panels are bit-identical to before.
+
 **Flattening** [Levy, Liu]. Each panel is mapped by least-squares conformal maps, then
 by as-rigid-as-possible iterations that fit every triangle's best rotation and solve the
 cotangent-weighted Laplace system

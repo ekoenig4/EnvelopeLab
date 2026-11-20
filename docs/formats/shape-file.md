@@ -282,7 +282,8 @@ The other keys are those of the project's shape specification, in its units:
   `cap_shift: 50 mm`) and `cap_direction_deg` (towards which direction round the axis,
   degrees), or instead `cap_across` and `cap_up` (where the panels meet seen from above,
   fractions of the shape's widest radius across the gores and up the tape, for example
-  `cap_across: 0.2`; ADR-0052);
+  `cap_across: 0.2`; ADR-0052; `cap_across` and `cap_up` also apply to `mesh` shapes,
+  ADR-0053);
 * `group` names the object a shape belongs to (shapes with the same group are moved,
   mirrored and exported together).
 

@@ -120,7 +120,11 @@ in the editor next to them, and you can move the selected shape on either:
      to the edge towards the next gore. The point keeps its place when the shape is
      resized; the line under the numbers says how far down the skin the cap's centre
      then is. **Back to the tip** (or a double click in the circle) centres it again.
-     It needs a dome or revolved shape with a cap (**Feed holes & cap**): the panels
+     On a **mesh** shape (for example an eye pod) the seams are cut straight from the
+     rim to the point, with or without a cap; the crown seam turn and widths stay as at
+     the rim. A mesh shape is placed again in full on every change (about a second for
+     an eye pod; it has no fast preview), so drag the point and let go, or type the
+     numbers. A dome or revolved shape needs a cap (**Feed holes & cap**): the panels
      meet round the cap's edge. The cap stays a flat disc square to the skin there, the
      same depth as before; the gores on that side end lower on a slant and those
      opposite reach higher. The cap must still cover the tip, so the point moves by less

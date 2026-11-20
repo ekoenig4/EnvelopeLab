@@ -146,6 +146,9 @@ class _ShapeBase(BaseModel):
         of its widest radius from the tip: across (towards the next gore) and up (up the
         tape), each -1 to 1 with ``cap_across² + cap_up² <= 1`` (0, 0: the tip). They move
         with the shape when it is resized (ADR-0052); use them or ``cap_shift``, not both.
+        A dome or revolved shape needs a cap (the panels meet round its edge); a mesh
+        shape's seams are cut about the line through the point instead (with or without
+        a cap). Not for tubes.
     group : str or None
         Name of the object the shape belongs to (several shapes with the same group are
         moved, mirrored and exported together, :mod:`envelopelab.project.shape_groups`;
@@ -210,8 +213,8 @@ class _ShapeBase(BaseModel):
             raise ValueError("cap_shift: a tube's tip disc cannot be moved off its axis")
         relative = bool(self.cap_across or self.cap_up)
         if relative:
-            if getattr(self, "kind", None) in ("tube", "mesh"):
-                raise ValueError("cap_across, cap_up: only a dome's or revolved shape's cap moves")
+            if getattr(self, "kind", None) == "tube":
+                raise ValueError("cap_across, cap_up: a tube's panels meet on its axis")
             if self.cap_shift:
                 raise ValueError(
                     "cap_across, cap_up: set where the panels meet either as fractions or "
@@ -399,7 +402,14 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
         np.asarray(spec.triangles, dtype=np.int64),
         spec.source,
     )
-    return FreeformShape(spec.name, placement, mesh, spec.panels, marks, rc, **layout)  # type: ignore[arg-type]
+    shape = FreeformShape(spec.name, placement, mesh, spec.panels, marks, rc, **layout)  # type: ignore[arg-type]
+    if spec.cap_across or spec.cap_up:
+        # Where the panels meet, seen from above: the seam line through it (ADR-0052).
+        widest = shape.widest_radius
+        shape = dataclasses.replace(
+            shape, seam_centre=(spec.cap_up * widest, spec.cap_across * widest)
+        )
+    return shape
 
 
 def piece_count(spec: ShapeSpec) -> int:

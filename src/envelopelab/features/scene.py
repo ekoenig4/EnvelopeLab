@@ -162,7 +162,13 @@ def _piece_of(
     prim = design.primitive
     m = prim.pieces
     seams = _seams(prim)
-    rel = centroids - design.base_point
+    # About the seam line: a mesh shape's moved meeting point shifts it off the axis.
+    origin = (
+        getattr(design._skin, "base", design.base_point)
+        if prim.kind == "mesh"
+        else design.base_point
+    )
+    rel = centroids - origin
     phi = np.arctan2(rel @ design.b2, rel @ design.b1)
     rel_phi = np.mod(phi - seams[0], 2.0 * math.pi)
     out: IntArray

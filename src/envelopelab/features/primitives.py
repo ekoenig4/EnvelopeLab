@@ -794,6 +794,11 @@ class FreeformShape:
         Turn of every seam round the axis, rad (:func:`seam_angles`).
     panel_widths : tuple of float
         Relative widths of the panels round the axis, one per panel (empty: all equal).
+    seam_centre : (float, float)
+        Where the panels meet, seen from above: the seam line's offset from the axis in
+        the shape's frame, m (:math:`x` up the tape, :math:`y` across the gores; 0, 0:
+        on the axis). The seams are cut along half-planes about the line through it
+        parallel to the axis, and meet where that line leaves the mesh (ADR-0052).
     """
 
     name: str
@@ -804,6 +809,7 @@ class FreeformShape:
     cap_radius: float = 0.0
     seam_offset: float = 0.0
     panel_widths: tuple[float, ...] = ()
+    seam_centre: tuple[float, float] = (0.0, 0.0)
 
     kind: PrimitiveKind = field(default="mesh", init=False)
 
@@ -836,7 +842,16 @@ class FreeformShape:
             raise PrimitiveError(f"{self.name}: a free-form shape needs at least 2 panels")
         if self.cap_radius < 0.0:
             raise PrimitiveError(f"{self.name}: cap radius must not be negative")
+        if not all(math.isfinite(float(c)) for c in self.seam_centre):
+            raise PrimitiveError(f"{self.name}: the meeting point must be a number")
         _check_layout(self)
+
+    @property
+    def widest_radius(self) -> float:
+        """Widest distance of the mesh from its axis seen from above, m (the radius the
+        meeting point's fractions are given in, ADR-0052)."""
+        v = np.asarray(self.mesh.vertices, dtype=np.float64)
+        return float(np.hypot(v[:, 0], v[:, 1]).max())
 
     @property
     def splits(self) -> tuple[float, ...]:

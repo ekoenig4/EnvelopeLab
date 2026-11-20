@@ -21,7 +21,9 @@ The clipped skin is cut along the half-planes through the axis at
 :math:`\phi_j = 2\pi j/M - \pi/M`, like the gores of a revolved shape. Every panel must
 be a disc bounded by the footprint, its two seams and the *pole*, where the axis leaves
 the mesh; shapes whose axis does not pass through their top are rejected (lean the
-placement or use more panels).
+placement or use more panels). A moved meeting point (``seam_centre``, ADR-0052) takes
+the half-planes, the pole and the cap about the line parallel to the axis through it
+instead, so the panels meet where that line leaves the mesh.
 
 Flattening
 ----------
@@ -480,6 +482,8 @@ class _MeshSkin:
 
     shape: FreeformShape
     surface: EnvelopeSurface
+    #: A point on the seam line (the axis, or parallel to it through a moved meeting
+    #: point): every angle round the shape is taken about it.
     base: FloatArray
     axis: FloatArray
     b1: FloatArray
@@ -568,6 +572,10 @@ def build_mesh_skin(
     name = shape.name
     local = np.asarray(shape.mesh.vertices, dtype=np.float64)
     world = base + local[:, :1] * b1 + local[:, 1:2] * b2 + local[:, 2:3] * axis
+    # The seams, the pole and the cap are taken about the seam line: parallel to the axis
+    # through the meeting point seen from above (on the axis unless it is moved).
+    cx, cy = (float(c) for c in shape.seam_centre)
+    centre = base + cx * b1 + cy * b2
 
     def refine(a: FloatArray, b: FloatArray, _s: FloatArray) -> FloatArray:
         """Crossings of edges ``ab`` with the envelope, by bisection (all at once)."""
@@ -611,13 +619,13 @@ def build_mesh_skin(
         )
     if not np.allclose(surface.signed_distance(x[loops[0]]), 0.0, atol=1e-5):
         raise FeatureBuildError(f"{name}: the mesh has holes above the envelope")
-    x, tri, pole_index = _insert_pole(x, tri, base, axis)
+    x, tri, pole_index = _insert_pole(x, tri, centre, axis)
     rim0 = set(loops[0])
 
     rc = float(shape.cap_radius)
     cap_tri = np.zeros(len(tri), dtype=bool)
     if rc > 0.0:
-        x, tri, cap_tri = _cut_cap(name, x, tri, pole_index, rim0, base, axis, rc, tol)
+        x, tri, cap_tri = _cut_cap(name, x, tri, pole_index, rim0, centre, axis, rc, tol)
 
     # Cut along the seam half-planes (each ends at the pole, which lies on every plane).
     m = shape.panels
@@ -626,7 +634,7 @@ def build_mesh_skin(
     for ph in seams:
         d = math.cos(ph) * b1 + math.sin(ph) * b2
         n = -math.sin(ph) * b1 + math.cos(ph) * b2
-        f = (x - base) @ n
+        f = (x - centre) @ n
         f[pole_index] = 0.0
         parents: list[int] = []
         x, tri = _cut(
@@ -635,20 +643,20 @@ def build_mesh_skin(
             f,
             "both",
             tol,
-            accept=lambda p, d=d: (p - base) @ d > 0.0,
+            accept=lambda p, d=d: (p - centre) @ d > 0.0,
             parents=parents,
         )
         cap_tri = cap_tri[np.asarray(parents, dtype=np.int64)]
 
     rim = _boundary_loops(tri)[0]
-    rel = x - base
+    rel = x - centre
     phi = np.arctan2(rel @ b2, rel @ b1)
     turns = np.sum(np.diff(np.unwrap(np.append(phi[rim], phi[rim][0])))) / (2 * math.pi)
     if abs(abs(turns) - 1.0) > 1e-6:
         raise FeatureBuildError(f"{name}: the footprint must turn once round the shape's axis")
     if turns < 0:
         rim = rim[::-1]
-    skin = _MeshSkin(shape, surface, base, axis, b1, b2, x, tri, rim, phi[rim])
+    skin = _MeshSkin(shape, surface, centre, axis, b1, b2, x, tri, rim, phi[rim])
     skin.cap_mask = cap_tri
     # The panels end on the cap circle, or at the pole without a cap.
     on_top = np.zeros(len(x), dtype=bool)
@@ -663,7 +671,7 @@ def build_mesh_skin(
     else:
         on_top[pole_index] = True
     # Assign the other triangles to panels by centroid angle.
-    cen = x[tri].mean(axis=1) - base
+    cen = x[tri].mean(axis=1) - centre
     cphi = np.mod(np.arctan2(cen @ b2, cen @ b1) - seams[0], 2 * math.pi)
     if shape.panel_widths:
         which = np.minimum(np.searchsorted(full - full[0], cphi, side="right") - 1, m - 1)
@@ -688,7 +696,7 @@ def build_mesh_skin(
                 "top (lean the placement) or use more panels"
             )
         loop = loops[0]
-        rel = px - base
+        rel = px - centre
         fa = rel @ (-math.sin(seams[k]) * b1 + math.cos(seams[k]) * b2)
         fb_phi = seams[(k + 1) % m]
         fb = rel @ (-math.sin(fb_phi) * b1 + math.cos(fb_phi) * b2)
@@ -757,7 +765,7 @@ def build_mesh_skin(
         )
     skin.pole = x[pole_index]
     if rc > 0.0:
-        skin.cap = _flatten_cap(name, x, tri[cap_tri], base, b1, b2, axis, skin.panels[0])
+        skin.cap = _flatten_cap(name, x, tri[cap_tri], centre, b1, b2, axis, skin.panels[0])
         skin.cap_floor = float(((x[on_top] - base) @ axis).min())
     return skin
 

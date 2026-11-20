@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: move where a mesh shape's panels meet (ADR-0053). The **Where the panels meet**
+  pad and Across/Up boxes now work on mesh shapes such as eye pods: the seams are cut
+  straight from the rim to the point and the panels meet there, with or without a cap.
+  Mesh shapes left on their axis are unchanged.
 - Added: set where a special shape's panels meet with relative coordinates (ADR-0052,
   project format 6). **Where the panels meet** (Panel layout, at the top of the renamed
   *Where the panels meet (crown)* box) is a top-down pad of the shape: click or drag the

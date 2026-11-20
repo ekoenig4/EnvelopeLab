@@ -2275,7 +2275,7 @@ class ShapesPanel(QWidget):
         form.addRow(self.crown_note)
         return box
 
-    def _fill_meeting(self, spec: ShapeSpec, capped: bool) -> None:
+    def _fill_meeting(self, spec: ShapeSpec, capped: bool, mesh: bool = False) -> None:
         """Show where ``spec``'s panels meet (pad, numbers and the distance it means)."""
         from envelopelab.features.primitives import crown_seam_angles
         from envelopelab.project.shapes import meeting_point, to_primitive
@@ -2296,6 +2296,13 @@ class ShapesPanel(QWidget):
             widget.setEnabled(capped)
         if not capped:
             self.meeting_info.setText("At the tip (the shape has no cap).")
+        elif mesh:
+            self.meeting_info.setText(
+                "The seams are cut about the line through this point (along the shape's "
+                "axis); the panels meet where it leaves the mesh."
+                if across or up
+                else "At the top, where the shape's axis leaves the mesh."
+            )
         elif shift > 0.0:
             self.meeting_info.setText(
                 f"The cap's centre is {shift * 1000.0:.0f} mm down the skin from the tip."
@@ -2407,10 +2414,13 @@ class ShapesPanel(QWidget):
                 and pointed(spec)
                 and cap_diameter(spec) > 0.0
             )
-            self._fill_meeting(spec, capped)
+            self._fill_meeting(spec, capped or mesh, mesh)
             notes = []
             if mesh:
-                notes.append("A mesh shape's seams and cap stay as they are at the crown.")
+                notes.append(
+                    "A mesh shape's seams are cut straight from the rim to where the panels "
+                    "meet; their turn and widths at the crown stay as at the rim."
+                )
             elif own:
                 notes.append(
                     "The seams turn smoothly from the rim to these angles above the "

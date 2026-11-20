@@ -22,12 +22,16 @@ from envelopelab.project.session import ProjectSession
 from envelopelab.project.shape_groups import mirrored
 from envelopelab.project.shapes import (
     DomeShape,
+    MeshShape,
+    ShapePlacement,
     default_shape,
     envelope_surface,
     meeting_point,
+    mesh_shape,
     shape_design,
     to_primitive,
 )
+from envelopelab.validation.primitives import ellipsoid_mesh
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "standard_gore" / "design.elproj"
 SESSION = ProjectSession.open(FIXTURE)
@@ -126,3 +130,40 @@ def test_relative_meeting_points_survive_a_save_and_load() -> None:
     assert isinstance(back, Project) and back.format_version == 6
     (shape,) = back.state.shapes
     assert (shape.cap_across, shape.cap_up) == (0.2, -0.1)
+
+
+def _blob(**values: float) -> MeshShape:
+    mesh = ellipsoid_mesh(0.3, 0.25, 0.35, -0.05, rings=16, segments=24)
+    spec = mesh_shape(
+        "Blob", mesh.vertices, mesh.triangles, ShapePlacement(gore=3, tape_position=4.0)
+    )
+    return MeshShape.model_validate({**spec.model_dump(), **values})
+
+
+@pytest.mark.parametrize(("across", "up"), [(0.2, 0.0), (0.0, -0.25), (-0.15, 0.15)])
+def test_a_mesh_shapes_panels_meet_at_the_fractions(across: float, up: float) -> None:
+    surface = envelope_surface(SESSION.design, SESSION.patterns)
+    placed = shape_design(_blob(cap_across=across, cap_up=up), surface)
+    prim: Any = placed.primitive
+    rel = placed._skin.pole - placed.base_point
+    plan = np.array([rel @ placed.b2, rel @ placed.b1]) / prim.widest_radius
+    assert plan == pytest.approx([across, up], abs=1e-9)
+    # Every panel ends round that point, on the edge of the cap cut about the seam line.
+    skin = placed._skin
+    assert skin.cap is not None
+    cap_nodes = {int(g) for g in skin.cap.glob}
+    for panel in skin.panels:
+        assert {int(g) for g in panel.glob[panel.top]} <= cap_nodes
+    # The cap is centred on the seam line: its nodes all lie within its radius of it.
+    rel = skin.x[sorted(cap_nodes)] - skin.base
+    off = np.linalg.norm(rel - np.outer(rel @ skin.axis, skin.axis), axis=1)
+    assert float(off.max()) <= prim.cap_radius + 1e-9
+    assert not [c for c in placed.checks if c.severity == "error" and not c.passed]
+
+
+def test_a_mesh_shape_on_its_axis_is_unchanged() -> None:
+    surface = envelope_surface(SESSION.design, SESSION.patterns)
+    a = shape_design(_blob(), surface)
+    b = shape_design(_blob(cap_across=0.0, cap_up=0.0), surface)
+    for p, q in zip(a.pieces, b.pieces, strict=True):
+        np.testing.assert_array_equal(p.finished, q.finished)
