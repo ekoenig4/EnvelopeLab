@@ -262,6 +262,7 @@ def design_scene(
     design: DesignDocument,
     rigging: RiggingOutputs | None = None,
     status: SceneStatus | None = None,
+    colours: Any = None,
 ) -> Scene:
     """The parts a design gives without a solver run.
 
@@ -273,6 +274,9 @@ def design_scene(
         Its rigging outputs, for the parachute, lines and flying wires.
     status : SceneStatus, optional
         The banner (default: design only, no solver result).
+    colours : PanelColours, optional
+        Panel colours (ADR-0055): coloured panels are drawn in their colour, the others
+        in the design colour.
 
     Returns
     -------
@@ -289,6 +293,13 @@ def design_scene(
     shade = np.array(_rgb(DESIGN_COLOR), dtype=np.float64)
     gores = np.asarray(surface.face_gore)
     face_rgb = np.where((gores % 2 == 0)[:, None], shade * 0.88, shade).astype(np.uint8)
+    if colours is not None and not colours.is_empty():
+        from envelopelab.project.colours import envelope_face_colours
+
+        painted, mask = envelope_face_colours(
+            colours, surface.row_letters, surface.face_row, surface.face_gore
+        )
+        face_rgb[mask] = np.round(painted[mask] * 255.0).astype(np.uint8)
     scene.meshes.append(
         SceneMesh(
             "design",

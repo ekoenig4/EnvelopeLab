@@ -54,4 +54,8 @@ Colours are saved in the project file (format 8). A design with no coloured pane
 as before. Removing a row or a shape keeps its colours until your next paint, so undoing
 the removal brings them back.
 
-Colours are not yet shown in the build pack.
+## In the build pack
+**File ▸ Export build pack** carries the colours: each panel template says how many to
+cut in each colour and for which gores, each skin piece names its colour, and the
+planning documents add a **colour plan** (the panels in their colours) and the **cloth
+per colour** for ordering fabric. See [Exporting a build pack](build-pack.md).

@@ -1269,6 +1269,7 @@ class ShapesPanel(QWidget):
             roll_width=roll_width,
             extras=extras,
             groups=groups,
+            colours=session.state.colours,
         )
         if index is not None:
             self.controller.message.emit(f"Build pack written to {out_dir}")

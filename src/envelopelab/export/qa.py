@@ -14,6 +14,11 @@
 * every PDF page is as wide as the roll;
 * every sheet header (piece, cut count, fabric, finished size) matches the index, and the
   finished size matches the ``SEW`` outline drawn in the DXF;
+* panel colours (ADR-0055): a sheet's colours account for every piece it cuts (their
+  counts add up to the cut count, each gore or piece once, the counts match the numbers
+  listed), and the DXF label and every template page of the sheet print the colour line
+  generated from the index entry (``%COLOURS`` comment; a gore's marking page: that
+  gore's colour);
 * every sewn edge pair differs by its planned ease (``ease_mm``, 0 for edges cut to the
   same length) within its tolerance (default 3 mm), measured from the ``EDGE_*``
   polylines and, for a shape's footprint lines, the ``ATTACH`` polylines;
@@ -210,6 +215,7 @@ def check_pack(out_dir: str | Path) -> list[QAFinding]:
                 findings.append(
                     QAFinding(name, "header", f"{key} {header[key]!r} != index {value!r}")
                 )
+        findings += _check_colours(name, entry, dxf["label"])
         sew = dxf["sew"]
         drawn = (sew.max(axis=0) - sew.min(axis=0)) if sew is not None else np.zeros(2)
         for k, key in enumerate(("w", "h")):
@@ -267,6 +273,46 @@ def check_pack(out_dir: str | Path) -> list[QAFinding]:
     return findings
 
 
+def _entry_colours(entry: dict[str, Any]) -> list[tuple[str | None, list[int]]]:
+    return [(c.get("colour"), [int(n) for n in c.get("numbers", [])]) for c in entry["colours"]]
+
+
+def _check_colours(name: str, entry: dict[str, Any], labels: list[str]) -> list[QAFinding]:
+    """A sheet's panel colours (module docstring): counts and the DXF colour line."""
+    from envelopelab.export.build_pack import colour_line
+
+    if "colours" not in entry:
+        return []
+    findings = []
+    numbers = [n for c in entry["colours"] for n in c.get("numbers", [])]
+    if sum(int(c["count"]) for c in entry["colours"]) != int(entry["cut_count"]):
+        findings.append(QAFinding(name, "colours", "colour counts do not add up to the cut"))
+    if len(set(numbers)) != len(numbers):
+        findings.append(QAFinding(name, "colours", "a gore or piece has two colours"))
+    if any(int(c["count"]) != len(c.get("numbers", [])) for c in entry["colours"]):
+        findings.append(QAFinding(name, "colours", "a count differs from the numbers listed"))
+    line = colour_line(_entry_colours(entry), entry["kind"])
+    if line not in labels[1:2]:
+        findings.append(QAFinding(name, "colours", f"DXF label lacks {line!r}"))
+    return findings
+
+
+def _page_colours(entry: dict[str, Any], page: dict[str, Any], content: str) -> list[QAFinding]:
+    """The colour line on a template page (the page's ``%COLOURS`` comment)."""
+    from envelopelab.export.build_pack import colour_line
+
+    colours = _entry_colours(entry)
+    gore = page.get("gore")
+    if gore is not None:
+        mine = [c for c, where in colours if int(gore) in where]
+        line = f"colour of this panel (gore {gore}): {(mine[0] if mine else None) or 'none chosen'}"
+    else:
+        line = colour_line(colours, entry["kind"])
+    if f"%COLOURS {line}\n" in content or content.rstrip().endswith(f"%COLOURS {line}"):
+        return []
+    return [QAFinding(page["sheet"], "colours", f"template page lacks {line!r}")]
+
+
 def _page_boxes(path: Path) -> list[tuple[float, float, str]]:
     """(width, height in pt, content stream) of every page of a PDF, in order."""
     data = path.read_bytes()
@@ -320,6 +366,7 @@ def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> li
         return findings
     roll_pt = index["roll_width_mm"] / 1000.0 * PT_PER_M
     drawn: set[str] = set()
+    by_sheet = {Path(e["file"]).stem: e for e in index["sheets"]}
     for t in templates:
         name = t["file"]
         if name not in present:
@@ -352,6 +399,9 @@ def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> li
                 )
             findings += _check_cal_pdf(name, k, content)
             findings += _check_cal_vertical(name, k, content)
+            sheet_entry = by_sheet.get(str(entry["sheet"]))
+            if sheet_entry is not None and "colours" in sheet_entry:
+                findings += _page_colours(sheet_entry, entry, content)
     for entry in index["sheets"]:
         if Path(entry["file"]).stem not in drawn:
             findings.append(QAFinding(entry["file"], "template", "on no template page"))

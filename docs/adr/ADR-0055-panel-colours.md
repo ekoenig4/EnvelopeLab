@@ -47,10 +47,21 @@ stale. Painting must not do that.
   position of its centre (display only: a triangle across a split takes its centre's
   tier). Result fields (stress, factor of safety) still replace the colours when shown.
 
+* **The build pack carries the colours** (`export_build_pack(colours=...)`):
+  every envelope row sheet (and each half of a half-gore row) gets the pieces to cut in
+  each colour with their gores, every skin piece its colour (by tier and piece number; a
+  tip or cap is piece 1), printed under the header of the DXF and on the 1:1 template
+  (a swatch per colour; a gore's marking page names its one panel's colour) from the
+  same data as `cad/index.json` `colours`. The output QA checks that the counts add up to
+  the cut count and that the DXF and every page print the line generated from the index.
+  The planning documents add a colour plan PDF and a cloth-per-colour CSV, and the 3D
+  view draws the colours. A design without colours exports exactly as before (no
+  `colours` keys, no colour documents), so the pack format stays
+  `envelopelab-build-pack/4` (the keys are optional additions).
+
 ## Consequences
-* Colours do not reach the build pack or the cut lists yet; a builder still chooses each
-  panel's fabric through zones. Listing cloth by colour in the build pack is a natural
-  follow-up.
+* The colours do not choose fabrics: a builder still sets each panel's fabric through
+  zones (the cut list stays by fabric; the cloth per colour is a separate table).
 * Solved shapes (shape simulations) have no tiers: a split shape's solved skin takes the
   colours of its first tier.
 * Shape grids are schematic (pieces as equal-height columns at their relative widths);

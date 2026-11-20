@@ -11,7 +11,11 @@ All notable changes to this project will be documented in this file.
   and repeat every N gores. Colours are for display only: they change no fabric, mass,
   pattern or simulation result, and make nothing stale. The colours are drawn on the
   balloon in every 3D view (the balloon beside the grid, the mode inlays, On the
-  balloon, 3D / Simulation), toggled by **Show on the 3D views**.
+  balloon, 3D / Simulation), toggled by **Show on the 3D views**. The build pack
+  carries them: each panel template and DXF says how many to cut in each colour and for
+  which gores (each skin piece its colour), `cad/index.json` lists them, the planning
+  documents add a colour plan and the cloth per colour, the 3D view shows them and the
+  output QA checks them. Uncoloured designs export as before.
 - Added: shape a special shape's crown cap (ADR-0054, project format 7). **Cap shape**
   (Panel layout, under Where the panels meet) offers the footprint scaled to the cap
   diameter, an ellipse, a polygon by points (straight or smooth) or an outline imported

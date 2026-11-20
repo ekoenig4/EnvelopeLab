@@ -61,6 +61,7 @@ from envelopelab.solvers.membrane import FloatArray
 if TYPE_CHECKING:
     from envelopelab.design.model import DesignDocument
     from envelopelab.features.primitives import PrimitiveDesign
+    from envelopelab.project.colours import PanelColours
     from envelopelab.project.model import PatternSet
 
 MM = 1000.0  # mm per m
@@ -120,6 +121,10 @@ class Sheet:
     whole : Sheet, optional
         For half of a row panel cut as half gores: the whole row panel's sheet (drawn by
         the documents that show the envelope row by row, :func:`row_sheets`).
+    colours : list of (str or None, list of int)
+        Panel colours (ADR-0055) of the pieces cut from this sheet: each colour
+        (``#rrggbb``; None: no colour chosen) with the gores (envelope panels) or piece
+        numbers (skin pieces) cut in it, from 1. Empty: the design has no panel colours.
     """
 
     name: str
@@ -139,6 +144,7 @@ class Sheet:
     texts: list[tuple[float, float, str]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
     whole: Sheet | None = field(default=None, repr=False)
+    colours: list[tuple[str | None, list[int]]] = field(default_factory=list)
 
     @property
     def letter(self) -> str:
@@ -158,6 +164,91 @@ class Sheet:
             f"{self.piece} | {self.kind} | cut {self.cut_count} | fabric {self.fabric} | "
             f"finished {w * MM:.0f} x {h * MM:.0f} mm"
         )
+
+    def colour_line(self) -> str:
+        """The sheet's panel colours in words ("" when the design has none), generated
+        from :attr:`colours` (:func:`colour_line`)."""
+        return colour_line(self.colours, self.kind)
+
+
+def colour_line(colours: Sequence[tuple[str | None, Sequence[int]]], kind: str) -> str:
+    """Panel colours of a sheet in words, as printed on the sheet and checked by the QA.
+
+    ``colour #c00000`` for a single skin piece; ``colours: cut 3 in #c00000 (gores 1, 5,
+    7), 5 with no colour (gores 2, 3, 4, 6, 8)`` for an envelope row; "" for none.
+
+    Parameters
+    ----------
+    colours : sequence of (str or None, sequence of int)
+        Colour (``#rrggbb``; None: none chosen) and the gores or piece numbers cut in it.
+    kind : str
+        Sheet kind (``envelope panel`` names gores).
+    """
+    if not colours:
+        return ""
+    if kind != "envelope panel" and len(colours) == 1:
+        colour = colours[0][0]
+        return f"colour {colour}" if colour else "colour: none chosen"
+    word = "gore" if kind == "envelope panel" else "piece"
+    parts = []
+    for colour, where in colours:
+        what = f"in {colour}" if colour else "with no colour"
+        numbers = ", ".join(str(n) for n in where)
+        parts.append(f"{len(where)} {what} ({word}{'s' if len(where) != 1 else ''} {numbers})")
+    return "colours: cut " + ", ".join(parts)
+
+
+def sheet_colours(
+    sheets: Sequence[Sheet],
+    colours: PanelColours | None,
+    gores: int,
+    primitives: Sequence[PrimitiveDesign] = (),
+) -> None:
+    """Set :attr:`Sheet.colours` of the envelope row sheets (both halves of a half-gore
+    row alike) and the skin pieces from the design's panel colours (ADR-0055); nothing
+    when no panel is coloured, so uncoloured designs export as before.
+
+    Parameters
+    ----------
+    sheets : sequence of Sheet
+        The pack's sheets (changed in place).
+    colours : PanelColours or None
+        Panel colours.
+    gores : int
+        Gore count (every row panel is cut once per gore).
+    primitives : sequence of PrimitiveDesign
+        The placed special shapes (their skin pieces' tiers and numbers).
+    """
+    from envelopelab.project.colours import CAP, TIER_LETTERS
+
+    if colours is None or colours.is_empty():
+        return
+
+    def grouped(pairs: Sequence[tuple[int, str | None]]) -> list[tuple[str | None, list[int]]]:
+        out: dict[str | None, list[int]] = {}
+        for number, colour in pairs:
+            out.setdefault(colour, []).append(number)
+        # Most pieces first; no colour last.
+        return sorted(out.items(), key=lambda kv: (kv[0] is None, -len(kv[1]), kv[1][0]))
+
+    for sheet in sheets:
+        if sheet.kind == "envelope panel":
+            row = colours.envelope.get(sheet.letter, {})
+            sheet.colours = grouped([(g, row.get(g)) for g in range(1, gores + 1)])
+    by_label: dict[str, tuple[str, str, int]] = {}
+    for p in primitives:
+        name = p.primitive.name
+        for piece in p.pieces:
+            if piece.role == "tip":
+                by_label[piece.label] = (name, CAP, 1)
+            else:
+                by_label[piece.label] = (name, TIER_LETTERS[piece.tier], piece.index + 1)
+    for sheet in sheets:
+        if sheet.kind != "skin piece" or sheet.name not in by_label:
+            continue
+        name, group, index = by_label[sheet.name]
+        colour = colours.shapes.get(name, {}).get(group, {}).get(index)
+        sheet.colours = [(colour, [index])]
 
 
 @dataclass(frozen=True)
@@ -825,7 +916,9 @@ def write_dxf(sheet: Sheet, path: str | Path) -> Path:
     msp.add_line((cx, cy - g), (cx, cy + g), dxfattribs={"layer": "GRAIN"})
     msp.add_line((cx, cy + g), (cx - 15, cy + g - 40), dxfattribs={"layer": "GRAIN"})
     msp.add_line((cx, cy + g), (cx + 15, cy + g - 40), dxfattribs={"layer": "GRAIN"})
-    lines = [sheet.header()] + ([sheet.note] if sheet.note else []) + sheet.notes
+    colour = sheet.colour_line()
+    lines = [sheet.header()] + ([colour] if colour else [])
+    lines += ([sheet.note] if sheet.note else []) + sheet.notes
     # Header first (also the first LABEL text, which the QA reads), the notes under it.
     for k, text in enumerate(lines):
         y = (hi[1] + 0.08) * MM + 45 * (len(lines) - 1 - k)
@@ -913,6 +1006,11 @@ def write_pack(
                 "finished_height_mm": round(h * MM, 3),
             }
         )
+        if sheet.colours:
+            entries[-1]["colours"] = [
+                {"colour": colour, "count": len(where), "numbers": list(where)}
+                for colour, where in sheet.colours
+            ]
     files = template_files(title, sheets)
     templates = []
     for tfile in files:
@@ -960,6 +1058,7 @@ def export_build_pack(
     hole_hem: float | None = None,
     extras: PackExtras | None = None,
     groups: dict[str, str] | None = None,
+    colours: PanelColours | None = None,
 ) -> Path:
     """Export the envelope rows, the parachute, and every primitive's pieces and marking
     sheets, and the documents chosen in ``extras``.
@@ -988,6 +1087,10 @@ def export_build_pack(
     groups : dict of str to str, optional
         Shape group (object) of each primitive that has one, by primitive name; listed in
         ``index.json`` (``shape_groups``) and named on the skin sheets.
+    colours : PanelColours, optional
+        Panel colours (ADR-0055): each envelope row and skin piece sheet says which
+        pieces to cut in which colour (header notes, template, ``index.json``
+        ``colours``), the 3D view draws them and the documents add the colour plan.
 
     Returns
     -------
@@ -1011,11 +1114,21 @@ def export_build_pack(
         group = (groups or {}).get(name)
         sheets += primitive_sheets(p, fabric, marking_allowance, hem, hole_tape, group)
         pairs += primitive_seam_pairs(p)
+    gores = design.gores.count if design.gores is not None else 0
+    sheet_colours(sheets, colours, gores, primitives)
     documents: list[dict[str, str]] = []
     prov = None
     if extras is not None and extras.include:
         documents, prov = write_documents(
-            design, sheets, pairs, Path(out_dir), extras, patterns, primitives, roll_width
+            design,
+            sheets,
+            pairs,
+            Path(out_dir),
+            extras,
+            patterns,
+            primitives,
+            roll_width,
+            colours,
         )
     return write_pack(
         sheets,
@@ -1084,9 +1197,12 @@ def write_documents(
     patterns: PatternSet | None = None,
     primitives: Sequence[PrimitiveDesign] = (),
     roll_width: float = DEFAULT_ROLL_WIDTH,
+    colours: PanelColours | None = None,
 ) -> tuple[list[dict[str, str]], Any]:
     """Write the documents of ``extras`` into ``out``; returns their index entries and the
-    provenance used. The build-pack index is written last: it lists every file."""
+    provenance used. The build-pack index is written last: it lists every file. With
+    panel ``colours`` the 3D view draws them (when it is the default design scene) and
+    the planning documents add the colour plan."""
     from envelopelab.export import documents as docs
     from envelopelab.export.shop import (
         FileEntry,
@@ -1126,6 +1242,7 @@ def write_documents(
         prov,
         extras.status,
         stem,
+        colours=None if colours is None or colours.is_empty() else colours,
     )
     written: list[tuple[Path, str, str, str, str]] = []  # path, kind, group, tag, what
 
@@ -1137,7 +1254,9 @@ def write_documents(
     if "viewer" in extras.include:
         scene = extras.scene
         if scene is None:
-            scene = design_scene(design, None if outputs is None else outputs.rigging)
+            scene = design_scene(
+                design, None if outputs is None else outputs.rigging, colours=ctx.colours
+            )
         add("viewer", write_viewer(scene, out / docs.document_files(stem, "viewer")[0]))
         from envelopelab.export.templates import piece_name
 
@@ -1164,6 +1283,11 @@ def write_documents(
             planning.write_gore_layout(ctx, out / ctx.file("gore-layout.pdf")),
             *planning.write_dimensions(ctx, out),
         )
+        if ctx.colours is not None:
+            from envelopelab.export.colour_plan import write_colour_plan
+
+            for path, what in write_colour_plan(ctx, out):
+                written.append((path, "planning", "LAYOUT & PLANNING", "REF", what))
     if "sewing" in extras.include:
         from envelopelab.export.planning import write_sewing_schedule
 

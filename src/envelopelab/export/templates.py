@@ -24,8 +24,10 @@ with the piece, so the template is laid on the cloth by its grain, not by the pa
 
 A page shows the cut outline (solid), the sewn outline (dotted), feature marks in red
 (footprint lines, match marks, feed holes, side ticks), the finished widths and height in
-blue, the panel letter, cut count, fabric and finished size, the warp (UP) arrow, a
-legend, and two calibration lines, across and along the page. Their labels are generated
+blue, the panel letter, cut count, fabric and finished size, the panel colours when the
+design has them (a swatch per colour and which gores or pieces to cut in each, ADR-0055;
+preceded by a ``%COLOURS <line>`` comment), the warp (UP) arrow, a legend, and two
+calibration lines, across and along the page. Their labels are generated
 from the lengths that draw them; each line is preceded by a ``%CAL L T`` or ``%CALV L T``
 comment in the page stream so that :mod:`envelopelab.export.qa` can measure it, and each
 page by ``%PAGE <sheet> 1 1 <turn> <marking sheets drawn over it>``.
@@ -89,6 +91,25 @@ class TemplatePage:
     title: str
     overlays: list[Overlay] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    #: The gore of a page drawn for one panel of a row (its marking page; None: every
+    #: gore's): the page shows that panel's colour only.
+    gore: int | None = None
+
+    def colours(self) -> list[tuple[str | None, list[int]]]:
+        """The panel colours on this page (ADR-0055): the sheet's, or only this gore's."""
+        if self.gore is None:
+            return list(self.sheet.colours)
+        return [(c, [self.gore]) for c, where in self.sheet.colours if self.gore in where]
+
+    def colour_line(self) -> str:
+        """The page's panel colours in words (``""``: none)."""
+        from envelopelab.export.build_pack import colour_line
+
+        colours = self.colours()
+        if self.gore is not None and colours:
+            colour = colours[0][0]
+            return f"colour of this panel (gore {self.gore}): {colour or 'none chosen'}"
+        return colour_line(colours, self.sheet.kind)
 
 
 @dataclass
@@ -186,6 +207,7 @@ def template_files(name: str, sheets: Sequence[Sheet]) -> list[TemplateFile]:
                             f"PANEL {letter} - GORE {gore}",
                             [_overlay(m) for m in marks],
                             notes,
+                            gore,
                         )
                     ],
                 )
@@ -537,6 +559,8 @@ def write_template_pdf(
                 "markings": [o.source for o in tpage.overlays if o.source],
             }
         )
+        if tpage.gore is not None:
+            written[-1]["gore"] = tpage.gore
         _draw_page(canvas, tpage, lay.to_page, size, 0, 1)
         _draw_roll(canvas, lay, size, roll_width)
     if canvas is None:
@@ -582,6 +606,7 @@ def _draw_page(
     bands: int,
 ) -> None:
     from envelopelab.export.build_pack import MM, calibration_label
+    from envelopelab.project.colours import colour_rgb
     from envelopelab.report.pdf import PdfCanvas
 
     assert isinstance(canvas, PdfCanvas)
@@ -679,10 +704,29 @@ def _draw_page(
     top = y1p - 0.12 * span_y
     hs = min(4 * u, 0.8 * span_x / max(len(head), 1) / 0.55)
     canvas.text(cx - 0.27 * hs * len(head), top, head, size=hs, bold=True)
-    for j, note in enumerate([*tpage.notes, *sheet.notes][:3]):
+    # Panel colours (ADR-0055): a swatch per colour, then the colours in words.
+    line = tpage.colour_line()
+    shift = 0
+    if line:
+        canvas.comment(f"COLOURS {line}")
+        swatches = [c for c, _w in tpage.colours() if c]
+        cs = min(3.5 * u, 0.8 * span_x / max(len(line) + 3 * len(swatches), 1) / 0.52)
+        width = 0.26 * cs * len(line) + 1.6 * cs * len(swatches)
+        x = cx - width / 2
+        y = top - (hs + 1.4 * cs)
+        for swatch in swatches:
+            canvas.rect(x, y - 0.2 * cs, 1.2 * cs, 1.2 * cs, fill=colour_rgb(swatch), stroke=BLACK)
+            x += 1.6 * cs
+        canvas.text(x, y, line, size=cs, bold=True)
+        shift = 1
+    for j, note in enumerate([*tpage.notes, *sheet.notes][: 3 - shift]):
         ns = min(3 * u, 0.8 * span_x / max(len(note), 1) / 0.52)
         canvas.text(
-            cx - 0.26 * ns * len(note), top - (hs + 1.2 * ns) * (j + 1), note, ns, color=GREY
+            cx - 0.26 * ns * len(note),
+            top - (hs + 1.2 * ns) * (j + 1 + shift),
+            note,
+            ns,
+            color=GREY,
         )
     legend = [
         ("CUT LINE - cut here", BLACK, None),

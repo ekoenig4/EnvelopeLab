@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from envelopelab.export.build_pack import SeamPair, Sheet
     from envelopelab.export.templates import TemplateFile
     from envelopelab.features.primitives import PrimitiveDesign
+    from envelopelab.project.colours import PanelColours
     from envelopelab.project.gore_design import GoreOutputs
 
 A3_LANDSCAPE = (1190.55, 841.89)  # points
@@ -136,6 +137,8 @@ class PackContext:
         The structural result in one line ("" for none).
     slug : str
         File-name prefix.
+    colours : PanelColours, optional
+        Panel colours (ADR-0055; None: none chosen).
     """
 
     design: DesignDocument
@@ -150,6 +153,7 @@ class PackContext:
     status: str = ""
     slug: str = "design"
     files: list[FileEntry] = field(default_factory=list)
+    colours: PanelColours | None = None
 
     def shape_pieces(self, shape: str) -> str:
         """The template files of a special shape's skin pieces, as a range in words."""

@@ -4,8 +4,10 @@ Exports the envelope rows of a generic standard-gore design with a dome, a leane
 a revolved bulb and a free-form mesh shape on it, with every document (cover, spec,
 cut list, rigging, sewing schedule, 3D view), to a temporary directory and runs
 :func:`envelopelab.export.qa.check_pack`; then the same with three rows (one carrying the
-dome) cut as half gores. Exits non-zero when any check fails. Run by
-``scripts/verify.py``.
+dome) cut as half gores and panel colours (ADR-0055) on envelope rows, halves, split
+and unsplit skin pieces and a tip disc, so the colour lines on the DXFs and templates, the
+colour plan and the cloth table are checked too. Exits non-zero when any check fails. Run
+by ``scripts/verify.py``.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from envelopelab.features.primitives import (
     Tube,
     design_primitive,
 )
+from envelopelab.project.colours import CAP, PanelColours, PanelRef, painted
 from envelopelab.project.gore_design import standard_gore_design
 from envelopelab.validation.primitives import ellipsoid_mesh
 
@@ -61,7 +64,17 @@ def main() -> int:
         }
     )
     with tempfile.TemporaryDirectory() as out:
-        export_build_pack(halved, shapes, out, extras=PackExtras(frozenset(DOCUMENTS)))
+        rows = [r.letter for r in design.gores.panel_rows]
+        colours = painted(
+            PanelColours(), [PanelRef(None, rows[2], g) for g in (1, 4, 7)], "#c00000"
+        )
+        colours = painted(colours, [PanelRef(None, rows[0], g) for g in range(1, 13)], "#ffc000")
+        colours = painted(colours, [PanelRef(None, rows[3], 3)], "#0070c0")  # under the dome
+        colours = painted(colours, [PanelRef("dome", "A", p) for p in (1, 3)], "#7030a0")
+        colours = painted(colours, [PanelRef("tube", CAP, 1), PanelRef("blob", "A", 2)], "#00b050")
+        export_build_pack(
+            halved, shapes, out, extras=PackExtras(frozenset(DOCUMENTS)), colours=colours
+        )
         findings += check_pack(out)
     for f in findings:
         print(f"FAIL {f.file}: {f.check}: {f.message}")
