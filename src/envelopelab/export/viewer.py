@@ -294,10 +294,16 @@ def design_scene(
     gores = np.asarray(surface.face_gore)
     face_rgb = np.where((gores % 2 == 0)[:, None], shade * 0.88, shade).astype(np.uint8)
     if colours is not None and not colours.is_empty():
-        from envelopelab.project.colours import envelope_face_colours
+        from envelopelab.project.colours import envelope_face_colours, face_halves
 
+        assert design.gores is not None
         painted, mask = envelope_face_colours(
-            colours, surface.row_letters, surface.face_row, surface.face_gore
+            colours,
+            surface.row_letters,
+            surface.face_row,
+            surface.face_gore,
+            face_halves(surface.points, surface.faces, design.gores.count),
+            [r.letter for r in design.gores.panel_rows if r.half_gore],
         )
         face_rgb[mask] = np.round(painted[mask] * 255.0).astype(np.uint8)
     scene.meshes.append(

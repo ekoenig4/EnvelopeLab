@@ -176,7 +176,8 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
 `colours` (only when the design has panel colours, ADR-0055) lists the pieces a sheet
 cuts in each colour: `colour` (`#rrggbb`, or `null` for no colour chosen), `count` and
 `numbers`, the gores (envelope rows; both halves of a half-gore row alike) or the piece
-number round the shape (skin pieces; a tip or cap is piece 1). Marking and parachute
+number round the shape (skin pieces; a tip or cap is piece 1). Each half of a half-gore
+row lists its own half's colours (the half's own colour, else the panel's). Marking and parachute
 sheets have none. A template page drawn for one panel (a marking page) records its
 `gore` in `templates[].pages[]`. The planning documents then add
 `<slug>-colour-plan.pdf` (the gores and the shapes' pieces in their colours, and the

@@ -70,6 +70,10 @@ def main() -> int:
         )
         colours = painted(colours, [PanelRef(None, rows[0], g) for g in range(1, 13)], "#ffc000")
         colours = painted(colours, [PanelRef(None, rows[3], 3)], "#0070c0")  # under the dome
+        # Half gores (rows 2-4): the halves of one panel in two colours, another's left only.
+        colours = painted(colours, [PanelRef(None, rows[3], 5, "left")], "#ffffff")
+        colours = painted(colours, [PanelRef(None, rows[3], 5, "right")], "#002060")
+        colours = painted(colours, [PanelRef(None, rows[4], 8, "left")], "#92d050")
         colours = painted(colours, [PanelRef("dome", "A", p) for p in (1, 3)], "#7030a0")
         colours = painted(colours, [PanelRef("tube", CAP, 1), PanelRef("blob", "A", 2)], "#00b050")
         export_build_pack(

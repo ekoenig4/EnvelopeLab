@@ -58,7 +58,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from envelopelab.project.colours import envelope_face_colours, shape_face_colours
+from envelopelab.project.colours import (
+    envelope_face_colours,
+    face_halves,
+    shape_face_colours,
+)
 from envelopelab.project.deviation import interpolate_on_mesh
 from envelopelab.project.gore_design import (
     DisplaySurface,
@@ -1036,7 +1040,12 @@ class View3DPanel(QWidget):
         colours = self._panel_colours()
         if colours is not None:
             painted, mask = envelope_face_colours(
-                colours, surface.row_letters, surface.face_row, surface.face_gore
+                colours,
+                surface.row_letters,
+                surface.face_row,
+                surface.face_gore,
+                face_halves(surface.points, surface.faces, n),
+                [r.letter for r in design.gores.panel_rows if r.half_gore],
             )
             rgb[mask] = painted[mask] * 255.0
         return np.asarray(np.round(rgb).astype(np.uint8))

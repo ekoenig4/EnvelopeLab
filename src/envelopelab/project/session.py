@@ -525,9 +525,10 @@ class ProjectSession:
         state = self.project.state
         gores = state.design.gores
         rows = [r.letter for r in gores.panel_rows] if gores is not None else []
+        halved = [r.letter for r in gores.panel_rows if r.half_gore] if gores is not None else []
         count = gores.count if gores is not None else 0
         grids = [shape_grid(s) for s in state.shapes]
-        colours = pruned(change(state.colours), rows, count, grids)
+        colours = pruned(change(state.colours), rows, count, grids, halved)
         after = state.model_copy(update={"colours": colours})
         return self.apply_state(after, description)
 

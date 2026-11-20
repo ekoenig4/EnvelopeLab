@@ -4,7 +4,8 @@ A tool bar over the panel grid (:mod:`envelopelab_app.colour_grid`), the balloon
 (:class:`~envelopelab_app.placement_view.EnvelopeInlay`, painted as you go) and the colour
 picker (:mod:`envelopelab_app.colour_picker`) beside it:
 
-* **Paint** (P) paints the panels clicked or dragged over; **Fill row** (R) every panel
+* **Paint** (P) paints the panels clicked or dragged over (on a row cut as half gores,
+  the half clicked: each half may have its own colour); **Fill row** (R) every panel
   of the row clicked (every piece of a shape's tier); **Fill gore** (G) every panel of
   the gore clicked (every tier of a shape's piece); **Eyedropper** (I) takes the colour
   of the panel clicked and goes back to the previous tool;
@@ -230,7 +231,9 @@ class ColoursPanel(QWidget):
             if m is None:
                 return [ref]
             rows = [label for label, _s0, _s1 in m.rows]
-            return envelope_targets(rows, m.gores, ref.group, ref.index, self.scope(), every)
+            return envelope_targets(
+                rows, m.gores, ref.group, ref.index, self.scope(), every, ref.half
+            )
         grid = self._grids.get(ref.shape)
         return [ref] if grid is None else grid.targets(ref.group, ref.index, self.scope(), every)
 
@@ -273,13 +276,16 @@ class ColoursPanel(QWidget):
 
     def _envelope_cells(self) -> None:
         """Rebuild the envelope cells when the envelope's shape changed."""
-        key = self.controller.shape_host_hash() if self.controller.session else None
+        session = self.controller.session
+        gores = None if session is None else session.design.gores
+        halved = tuple(r.letter for r in gores.panel_rows if r.half_gore) if gores else ()
+        key = (self.controller.shape_host_hash(), halved) if session else None
         if key == self._envelope_key:
             return
         self._envelope_key = key
         surface = self.controller.envelope_surface()
         self._map = None if surface is None else gore_map(surface)
-        self._envelope = [] if self._map is None else envelope_cells(self._map)
+        self._envelope = [] if self._map is None else envelope_cells(self._map, halved)
 
     def refresh(self) -> None:
         """Show the current design's panels and colours."""

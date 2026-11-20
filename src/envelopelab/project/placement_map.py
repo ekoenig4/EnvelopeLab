@@ -254,6 +254,11 @@ class Sketch:
         Panel row (index into ``row_letters``, mouth first) of every triangle.
     row_letters : tuple of str
         Row letters, mouth first.
+    face_half : ndarray of int, shape (t,)
+        Half of every triangle within its gore: 0 left (towards the previous gore),
+        1 right.
+    halved : tuple of str
+        Rows cut as half gores.
     """
 
     points: FloatArray
@@ -262,6 +267,8 @@ class Sketch:
     face_gore: IntArray = field(default_factory=lambda: np.zeros(0, dtype=np.int64))
     face_row: IntArray = field(default_factory=lambda: np.zeros(0, dtype=np.int64))
     row_letters: tuple[str, ...] = ()
+    face_half: IntArray = field(default_factory=lambda: np.zeros(0, dtype=np.int64))
+    halved: tuple[str, ...] = ()
 
 
 def envelope_sketch(design: Any, per_gore: int = 4, rings: int = 30) -> Sketch:
@@ -307,4 +314,7 @@ def envelope_sketch(design: Any, per_gore: int = 4, rings: int = 30) -> Sketch:
         np.asarray(column // per_gore + 1, dtype=np.int64),
         np.asarray(face_row, dtype=np.int64),
         tuple(r.letter for r in design.gores.panel_rows),
+        # Each gore is per_gore columns: the first half of them is its left half.
+        np.asarray(2 * (column % per_gore) >= per_gore, dtype=np.int64),
+        tuple(r.letter for r in design.gores.panel_rows if r.half_gore),
     )

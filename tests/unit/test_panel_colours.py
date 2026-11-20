@@ -333,3 +333,67 @@ def test_shape_display_tiers_and_face_colours(session: ProjectSession) -> None:
     assert np.array_equal(mask, on_skin | cap) and on_skin.any() and cap.any()
     # Another shape's colours do not leak.
     assert not shape_face_colours(c, "Other", shown.piece, shown.pieces, shown.tier)[1].any()
+
+
+# -- half gores (each half its own colour) -------------------------------------------------
+
+
+def test_a_half_overrides_its_panel_and_a_whole_paint_resets_both_halves() -> None:
+    left = PanelRef(None, "C", 3, "left")
+    c = painted(PanelColours(), [PanelRef(None, "C", 3)], "#ff0000")
+    c = painted(c, [left], "#0000ff")
+    assert c.half_colours("C", 3) == ("#0000ff", "#ff0000")
+    assert c.colour_of(PanelRef(None, "C", 3)) == "#ff0000"
+    assert set(c.used()) == {"#ff0000", "#0000ff"}
+    assert painted(c, [left], None).half_colours("C", 3) == ("#ff0000", "#ff0000")
+    whole = painted(c, [PanelRef(None, "C", 3)], "#00ff00")
+    assert whole.halves == {} and whole.half_colours("C", 3) == ("#00ff00", "#00ff00")
+    # Replacing a colour keeps the other half's own colour.
+    swapped = replaced(c, "#ff0000", "#00ff00")
+    assert swapped.half_colours("C", 3) == ("#0000ff", "#00ff00")
+    with pytest.raises(ValueError, match="left or right"):
+        PanelColours.model_validate({"halves": {"C": {"3": {"middle": "#ffffff"}}}})
+
+
+def test_halves_round_trip_prune_and_rename() -> None:
+    c = painted(PanelColours(), [PanelRef(None, "C", 3, "right")], "#123456")
+    assert PanelColours.model_validate(json.loads(json.dumps(c.to_data()))) == c
+    assert pruned(c, ["C"], 8, halved=["C"]) == c
+    assert pruned(c, ["C"], 8).is_empty()  # C no longer cut as half gores
+    assert renamed(c, ["C"], ["Z"], shapes=False).half_colours("Z", 3)[1] == "#123456"
+
+
+def test_envelope_targets_paint_the_half_clicked() -> None:
+    assert envelope_targets(["A", "C"], 8, "C", 2, "panel", every=4, half="left") == [
+        PanelRef(None, "C", 2, "left"),
+        PanelRef(None, "C", 6, "left"),
+    ]
+    assert all(r.half is None for r in envelope_targets(["A", "C"], 8, "C", 2, "row", half="left"))
+
+
+def test_half_gore_cells_and_3d_faces_agree(session: ProjectSession) -> None:
+    from envelopelab.project.colours import envelope_face_colours, face_halves
+    from envelopelab.project.placement_map import envelope_sketch
+
+    edits.set_half_gores(session, [_rows(session)[1]], True)
+    row = _rows(session)[1]
+    m = gore_map(envelope_surface(session.design, session.patterns))
+    cells = dict(envelope_cells(m, [row]))
+    left, right = cells[PanelRef(None, row, 2, "left")], cells[PanelRef(None, row, 2, "right")]
+    centre = 1.5 * m.column
+    assert left[:, 0].max() == pytest.approx(centre) and right[:, 0].min() == pytest.approx(centre)
+    sketch = envelope_sketch(session.design)
+    assert sketch.halved == (row,)
+    # The sketch's halves by column are the halves by azimuth.
+    assert np.array_equal(sketch.face_half, face_halves(sketch.points, sketch.triangles, m.gores))
+    c = painted(PanelColours(), [PanelRef(None, row, 2, "left")], "#ff0000")
+    _rgb, mask = envelope_face_colours(
+        c, sketch.row_letters, sketch.face_row, sketch.face_gore, sketch.face_half, sketch.halved
+    )
+    expected = (sketch.face_row == 1) & (sketch.face_gore == 2) & (sketch.face_half == 0)
+    assert np.array_equal(mask, expected) and expected.any()
+    # Without the row cut as half gores the half colour is not drawn.
+    _rgb, mask = envelope_face_colours(
+        c, sketch.row_letters, sketch.face_row, sketch.face_gore, sketch.face_half, ()
+    )
+    assert not mask.any()

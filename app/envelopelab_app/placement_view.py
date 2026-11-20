@@ -228,10 +228,16 @@ def shape_rgb(
 def envelope_rgb(sketch: Any, colours: Any) -> Any:
     """RGB (0-1) of the envelope sketch: one colour (:data:`ENVELOPE`), or one per
     triangle with the panel colours (ADR-0055) where set."""
-    if colours is None or not colours.envelope or not len(getattr(sketch, "face_gore", ())):
+    painted = colours is not None and (colours.envelope or colours.halves)
+    if not painted or not len(getattr(sketch, "face_gore", ())):
         return ENVELOPE
     rgb, mask = envelope_face_colours(
-        colours, sketch.row_letters, sketch.face_row, sketch.face_gore
+        colours,
+        sketch.row_letters,
+        sketch.face_row,
+        sketch.face_gore,
+        sketch.face_half,
+        sketch.halved,
     )
     out = np.tile(np.asarray(ENVELOPE, dtype=float), (len(sketch.triangles), 1))
     out[mask] = rgb[mask]
@@ -976,7 +982,11 @@ class BalloonSketch(QWidget):
         """The shaded envelope and its seams for the current view, drawn once per view
         (the shapes are drawn over it: a nudge or an edit does not draw it again)."""
         colours = self.data.colours
-        key = (*view_key, id(self.data.sketch), None if colours is None else colours.envelope)
+        key = (
+            *view_key,
+            id(self.data.sketch),
+            None if colours is None else (colours.envelope, colours.halves),
+        )
         if self._envelope is None or self._envelope[0] != key:
             picture = QPixmap(self.size())
             picture.fill(QColor("#f7f9fc"))
@@ -1213,7 +1223,7 @@ class BalloonGpuView(QWidget):
             self._lines_shown = {}
             p.render()
             return
-        painted = None if data.colours is None else data.colours.envelope
+        painted = None if data.colours is None else (data.colours.envelope, data.colours.halves)
         if sketch is not self._sketch or painted != self._painted:
             faces = np.hstack([np.full((len(sketch.triangles), 1), 3), sketch.triangles])
             envelope = pv.PolyData(sketch.points, faces.ravel())

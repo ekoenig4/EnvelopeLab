@@ -4,8 +4,9 @@ Written with the planning documents when the design has panel colours (ADR-0055)
 
 * ``<slug>-colour-plan.pdf``: page 1 draws every gore side by side as cut (the row panels
   stacked mouth to crown, :func:`envelopelab.export.planning.gore_outline`), each panel
-  filled with its colour, and every special shape as a grid of its pieces (one column
-  per gore or panel round the axis, one band per tier, its cap on top;
+  filled with its colour (a half-gore panel each half in its own), and every special
+  shape as a grid of its pieces (one column per gore or panel round the axis, one band
+  per tier, its cap on top;
   :class:`envelopelab.project.colours.ShapeGrid`); page 2 lists the cloth per colour;
 * ``<slug>-colour-cloth.csv``: the same table, for ordering cloth.
 
@@ -27,6 +28,7 @@ import numpy as np
 
 from envelopelab.export.documents import pdf_text
 from envelopelab.geometry.polygon import signed_area
+from envelopelab.project.colours import HALVES, PanelRef
 
 if TYPE_CHECKING:
     from envelopelab.export.build_pack import Sheet
@@ -88,6 +90,22 @@ def primitive_grid(p: PrimitiveDesign) -> ShapeGrid:
     )
 
 
+def half_outline(outline: np.ndarray, side: str) -> np.ndarray:
+    """The ``left`` (x <= 0) or ``right`` (x >= 0) part of a closed outline (m), cut down
+    x = 0 as a half gore is (Sutherland-Hodgman clipping against one line)."""
+    sign = -1.0 if side == "left" else 1.0
+    pts = np.asarray(outline, dtype=np.float64)
+    out: list[np.ndarray] = []
+    for a, b in zip(pts, np.roll(pts, -1, axis=0), strict=True):
+        a_in, b_in = sign * a[0] >= 0.0, sign * b[0] >= 0.0
+        if a_in:
+            out.append(a)
+        if a_in != b_in:
+            t = a[0] / (a[0] - b[0])
+            out.append(a + t * (b - a))
+    return np.asarray(out, dtype=np.float64).reshape(-1, 2)
+
+
 def _rgb(colour: str | None) -> tuple[float, float, float]:
     from envelopelab.project.colours import colour_rgb
 
@@ -126,12 +144,24 @@ def write_colour_plan(ctx: PackContext, out: Path) -> list[tuple[Path, str]]:
         n = ctx.gores
         share = 0.72 if grids else 1.0
         sc = min((page_w - 2 * margin) * share / (n * widest * 1.1), (top - bottom) / height)
+        halved = {s.letter for s in ctx.sheets if s.whole is not None}
         for k in range(1, n + 1):
             ox = margin + (k - 0.5) * widest * 1.1 * sc
             for letter, outline, y in stack:
-                colour = colours.envelope.get(letter, {}).get(k)
-                pts = [(ox + x * sc, bottom + (y + yy) * sc) for x, yy in outline]
-                canvas.polygon(pts, fill=_rgb(colour), stroke=(0.2, 0.2, 0.2), width=0.5)
+                if letter in halved:
+                    # Each half in its own colour (left: towards the previous gore).
+                    parts = [
+                        (
+                            half_outline(outline, side),
+                            colours.colour_of(PanelRef(None, letter, k, side)),
+                        )
+                        for side in HALVES
+                    ]
+                else:
+                    parts = [(outline, colours.colour_of(PanelRef(None, letter, k)))]
+                for part, colour in parts:
+                    pts = [(ox + x * sc, bottom + (y + yy) * sc) for x, yy in part]
+                    canvas.polygon(pts, fill=_rgb(colour), stroke=(0.2, 0.2, 0.2), width=0.5)
             canvas.text(ox - 4, bottom + height * sc + 6, str(k), 8)
         for letter, outline, y in stack:
             mid = bottom + (y + 0.5 * float(np.ptp(outline[:, 1]))) * sc
@@ -198,4 +228,10 @@ def write_colour_plan(ctx: PackContext, out: Path) -> list[tuple[Path, str]]:
     ]
 
 
-__all__ = ["NONE_LABEL", "cloth_per_colour", "primitive_grid", "write_colour_plan"]
+__all__ = [
+    "NONE_LABEL",
+    "cloth_per_colour",
+    "half_outline",
+    "primitive_grid",
+    "write_colour_plan",
+]

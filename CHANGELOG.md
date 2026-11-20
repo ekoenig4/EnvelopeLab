@@ -15,7 +15,8 @@ All notable changes to this project will be documented in this file.
   carries them: each panel template and DXF says how many to cut in each colour and for
   which gores (each skin piece its colour), `cad/index.json` lists them, the planning
   documents add a colour plan and the cloth per colour, the 3D view shows them and the
-  output QA checks them. Uncoloured designs export as before.
+  output QA checks them. Uncoloured designs export as before. On rows cut as half
+  gores each half can have its own colour (grid, 3D views, half templates, colour plan).
 - Added: shape a special shape's crown cap (ADR-0054, project format 7). **Cap shape**
   (Panel layout, under Where the panels meet) offers the footprint scaled to the cap
   diameter, an ellipse, a polygon by points (straight or smooth) or an outline imported

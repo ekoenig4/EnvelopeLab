@@ -72,7 +72,9 @@ KEYS: tuple[tuple[str, str], ...] = (
         "Panel colours (version 8, ADR-0055; a visual layer that no result reads): "
         "`envelope` maps a row letter to gore numbers (from 1) to sRGB `#rrggbb` colours, "
         "`shapes` maps a special shape's name to its tier letter (`A` at the rim) or "
-        "`cap` to piece numbers (from 1) to colours. Written only when some panel is "
+        "`cap` to piece numbers (from 1) to colours, and `halves` maps a row cut as half "
+        "gores to gore numbers to `left` (towards the previous gore) or `right` to a "
+        "half's own colour, over the panel's. Written only when some panel is "
         "coloured; older files read as uncoloured.",
     ),
     ("`snapshots`", "Named copies of `state` with their design content hash."),

@@ -33,6 +33,12 @@ at the rim, then one band above each horizontal split), and its cap as a band on
 | Fill gore | G | every row of the gore clicked (on a shape: every tier of the piece) |
 | Eyedropper | I | nothing: it takes the panel's colour, then returns to the previous tool |
 
+On a row cut as **half gores** each gore is drawn as its two halves: **Paint** colours the
+half you click, so the left and right halves of a panel can differ (left is the half
+towards the previous gore). **Fill row**, **Fill gore** and **Fill everything** paint
+whole panels, both halves alike. The half templates of the build pack each list their
+own colours.
+
 **Repeat every N gores** also paints every N-th gore round from the one clicked (on a
 shape, every N-th piece), for repeating patterns such as alternating gores (2) or a
 stripe in every fourth gore (4). **Fill everything** paints every panel; **Clear all**

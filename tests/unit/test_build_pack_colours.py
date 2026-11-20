@@ -168,3 +168,40 @@ def test_the_3d_view_draws_the_panel_colours() -> None:
     assert (rgb == [255, 192, 0]).all(axis=1).any() and (rgb == [192, 0, 0]).all(axis=1).any()
     plain = design_scene(DESIGN).meshes[0].face_rgb
     assert plain is not None and not np.array_equal(plain, rgb)
+
+
+def test_each_half_of_a_half_gore_row_has_its_own_colours(tmp_path: Path) -> None:
+    from envelopelab.export.colour_plan import half_outline
+
+    assert DESIGN.gores is not None
+    halved = DESIGN.model_copy(
+        update={
+            "gores": DESIGN.gores.model_copy(
+                update={
+                    "panel_rows": [
+                        r.model_copy(update={"half_gore": i == 2})
+                        for i, r in enumerate(DESIGN.gores.panel_rows)
+                    ]
+                }
+            )
+        }
+    )
+    row = ROWS[2]
+    c = painted(PanelColours(), [PanelRef(None, row, g) for g in range(1, 13)], "#c00000")
+    c = painted(c, [PanelRef(None, row, g, "left") for g in (1, 2)], "#ffffff")
+    export_build_pack(halved, [], tmp_path, extras=PackExtras(frozenset({"planning"})), colours=c)
+    assert check_pack(tmp_path) == []
+    left = _sheet(tmp_path, f"row {row} left half")["colours"]
+    right = _sheet(tmp_path, f"row {row} right half")["colours"]
+    assert left == [
+        {"colour": "#c00000", "count": 10, "numbers": list(range(3, 13))},
+        {"colour": "#ffffff", "count": 2, "numbers": [1, 2]},
+    ]
+    assert right == [{"colour": "#c00000", "count": 12, "numbers": list(range(1, 13))}]
+    # The cloth table counts each half once.
+    with (tmp_path / "generic-colour-cloth.csv").open(encoding="utf-8") as f:
+        by = {r["colour"]: int(r["pieces"]) for r in csv.DictReader(f)}
+    assert by["#ffffff"] == 2 and by["#c00000"] == 22
+    square = np.array([[-1.0, 0.0], [1.0, 0.0], [1.0, 2.0], [-1.0, 2.0]])
+    assert half_outline(square, "left")[:, 0].max() == pytest.approx(0.0)
+    assert half_outline(square, "right")[:, 0].min() == pytest.approx(0.0)

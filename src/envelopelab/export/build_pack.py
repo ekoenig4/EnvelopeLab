@@ -204,9 +204,10 @@ def sheet_colours(
     gores: int,
     primitives: Sequence[PrimitiveDesign] = (),
 ) -> None:
-    """Set :attr:`Sheet.colours` of the envelope row sheets (both halves of a half-gore
-    row alike) and the skin pieces from the design's panel colours (ADR-0055); nothing
-    when no panel is coloured, so uncoloured designs export as before.
+    """Set :attr:`Sheet.colours` of the envelope row sheets (each half of a half-gore row
+    its half's colours: its own, else the panel's) and the skin pieces from the design's
+    panel colours (ADR-0055); nothing when no panel is coloured, so uncoloured designs
+    export as before.
 
     Parameters
     ----------
@@ -219,7 +220,7 @@ def sheet_colours(
     primitives : sequence of PrimitiveDesign
         The placed special shapes (their skin pieces' tiers and numbers).
     """
-    from envelopelab.project.colours import CAP, TIER_LETTERS
+    from envelopelab.project.colours import CAP, HALVES, TIER_LETTERS, PanelRef
 
     if colours is None or colours.is_empty():
         return
@@ -233,8 +234,15 @@ def sheet_colours(
 
     for sheet in sheets:
         if sheet.kind == "envelope panel":
-            row = colours.envelope.get(sheet.letter, {})
-            sheet.colours = grouped([(g, row.get(g)) for g in range(1, gores + 1)])
+            # A half's sheet is named envelope-row-<R>-<left|right>-half.
+            side = sheet.name.rsplit("-", 2)[-2] if sheet.whole is not None else None
+            half = next((h for h in HALVES if h == side), None)
+            sheet.colours = grouped(
+                [
+                    (g, colours.colour_of(PanelRef(None, sheet.letter, g, half)))
+                    for g in range(1, gores + 1)
+                ]
+            )
     by_label: dict[str, tuple[str, str, int]] = {}
     for p in primitives:
         name = p.primitive.name

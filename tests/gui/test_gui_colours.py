@@ -188,3 +188,27 @@ def test_colours_show_on_the_3d_views(gore_window: MainWindow) -> None:
     view.refresh()
     colours = view.layers["design"].face_colors
     assert colours is not None and not (colours == [255, 0, 0]).all(axis=1).any()
+
+
+def test_half_gore_rows_paint_each_half(qtbot: QtBot, gore_window: MainWindow) -> None:
+    session = gore_window.controller.session
+    assert session is not None
+    row = _rows(gore_window)[1]
+    gore_window.controller.edit("set_half_gores", [row], True)
+    gore_window.set_mode("colours")
+    panel = gore_window.colours
+    refs = {ref for ref, _poly in panel.grid.scene.cells}
+    assert PanelRef(None, row, 2, "left") in refs and PanelRef(None, row, 2) not in refs
+    panel.picker.set_colour("#ff0000")
+    _click(qtbot, gore_window, PanelRef(None, row, 2, "left"))
+    assert session.state.colours.half_colours(row, 2) == ("#ff0000", None)
+    # Fill row paints whole panels (both halves).
+    panel.set_tool("row")
+    panel.picker.set_colour("#0000ff")
+    _click(qtbot, gore_window, PanelRef(None, row, 4, "right"))
+    assert session.state.colours.half_colours(row, 2) == ("#0000ff", "#0000ff")
+    # Undo and the left half is red again; the balloon beside the grid shows it.
+    session.undo()
+    assert session.state.colours.half_colours(row, 2) == ("#ff0000", None)
+    data = panel.inlay.data
+    assert data.sketch is not None and data.sketch.halved == (row,)

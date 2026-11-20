@@ -669,7 +669,7 @@ class ShapesPanel(QWidget):
         self.edited_piece: int | None = None
         self.mesh_mm = DEFAULT_MESH_MM
         self._form_key: tuple[str, str, int] | None = None
-        self._placement_key: str | None = None
+        self._placement_key: tuple[str, tuple[str, ...]] | None = None
         self._placement_shown: tuple[int, str | None] | None = None
         #: Each placed shape's drawing: (placed design, gore map, 3D points, triangles,
         #: footprint on the map, base point), rebuilt when the shape is placed again.
@@ -1705,7 +1705,9 @@ class ShapesPanel(QWidget):
         if session is None or surface is None or session.design.gores is None:
             return PlacementData()
         design = session.design
-        key = self.controller.shape_host_hash()  # the envelope inputs only
+        # The envelope inputs only (and the half-gore rows the sketch colours by halves).
+        halved = tuple(r.letter for r in session.design.gores.panel_rows if r.half_gore)
+        key = (self.controller.shape_host_hash(), halved)
         if self._placement_key != key:
             self._placement_cache = (pm.gore_map(surface), pm.envelope_sketch(design))
             self._placement_key = key

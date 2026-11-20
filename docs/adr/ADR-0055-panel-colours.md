@@ -17,7 +17,12 @@ stale. Painting must not do that.
   `DesignState.colours` (`envelopelab.project.colours.PanelColours`) holds sRGB
   `#rrggbb` colours by envelope row letter and gore number (from 1), and by special-shape
   name, tier letter (`A` at the rim, or `cap`) and piece number (from 1). Uncoloured
-  panels are left out. A half-gore row (ADR-0048) is coloured as one panel.
+  panels are left out. On a half-gore row (ADR-0048) each half may have its own colour
+  (`halves`: row, gore, `left` or `right`), over the panel's; `left` is the half towards
+  the previous gore, which is the same half on the cut half panels (cut down x = 0), the
+  gore map and the 3D views (by the triangle's azimuth within its gore). Painting a whole
+  panel resets its halves; half colours are drawn and exported only on rows cut as half
+  gores, and dropped at the next colour edit from a row that is not.
 * **Project format 8** writes `state.colours` (snapshots and versions too) only when
   some panel is coloured; versions 1 to 7 read as uncoloured. Older releases cannot open
   format 8 files.
