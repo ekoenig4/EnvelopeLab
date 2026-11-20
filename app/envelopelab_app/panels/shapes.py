@@ -1745,18 +1745,30 @@ class ShapesPanel(QWidget):
                         np.asarray(shown.piece),
                         shown.pieces,
                         [np.asarray(seam, float) + shift for seam in shown.seams],
+                        None if shown.tier is None else np.asarray(shown.tier),
                     )
                     self._drawn[spec.name] = cached
-                (_p, _m, points, triangles, footprint, base3d, gs, fp3d, piece, pieces, seams) = (
-                    cached
-                )
+                (
+                    _p,
+                    _m,
+                    points,
+                    triangles,
+                    footprint,
+                    base3d,
+                    gs,
+                    fp3d,
+                    piece,
+                    pieces,
+                    seams,
+                    tier,
+                ) = cached
             else:
                 theta = surface.theta_at(spec.placement.gore, spec.placement.across)
                 base3d = display_points(design, np.array([s]), np.array([theta]))[0]
                 points, triangles = np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64)
                 footprint = []
                 gs, fp3d = None, None
-                piece, pieces, seams = None, 0, []
+                piece, pieces, seams, tier = None, 0, [], None
             shapes.append(
                 PlacedShape(
                     spec.name,
@@ -1772,6 +1784,7 @@ class ShapesPanel(QWidget):
                     piece,
                     pieces,
                     seams,
+                    tier,
                 )
             )
         specs = {s.name: s for s in session.state.shapes}
@@ -1781,6 +1794,8 @@ class ShapesPanel(QWidget):
 
         data = PlacementData(gore_map, sketch, axes, shapes, self.selected, place_at)
         data.edited_piece = self.edited_piece
+        if self.controller.show_panel_colours and not session.state.colours.is_empty():
+            data.colours = session.state.colours
         return data
 
     def show_hint(self) -> None:

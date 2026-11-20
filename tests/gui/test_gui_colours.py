@@ -153,3 +153,38 @@ def test_palettes() -> None:
     assert len(recent) == MAX_RECENT and recent[0] == f"#0000{MAX_RECENT + 2:02x}"
     assert with_recent(recent, recent[3])[0] == recent[3]
     assert len(with_recent(recent, recent[3])) == MAX_RECENT
+
+
+def test_colours_show_on_the_3d_views(gore_window: MainWindow) -> None:
+    import numpy as np
+
+    from envelopelab.project.colours import colour_rgb
+    from envelopelab_app.placement_view import ENVELOPE, envelope_rgb
+
+    gore_window.set_mode("colours")
+    panel, controller = gore_window.colours, gore_window.controller
+    rows = _rows(gore_window)
+    panel.picker.set_colour("#ff0000")
+    panel.paint([PanelRef(None, rows[0], 1)])
+    # The balloon beside the grid (and every inlay) is painted.
+    data = panel.inlay.data
+    assert data.colours is not None and data.sketch is not None
+    fill = envelope_rgb(data.sketch, data.colours)
+    hit = (data.sketch.face_row == 0) & (data.sketch.face_gore == 1)
+    assert np.allclose(fill[hit], colour_rgb("#ff0000"))
+    assert np.allclose(fill[~hit], ENVELOPE)
+    # The 3D / Simulation design surface too, over its fabric colours.
+    gore_window.set_mode("simulate")
+    view = gore_window.view3d
+    view.refresh()
+    surface = view.layers["design"]
+    assert surface.face_colors is not None
+    assert (surface.face_colors == [255, 0, 0]).all(axis=1).any()
+    # Off: fabric shades again everywhere.
+    gore_window.set_mode("colours")
+    panel.show_3d.setChecked(False)
+    assert not controller.show_panel_colours
+    assert panel.inlay.data.colours is None
+    view.refresh()
+    colours = view.layers["design"].face_colors
+    assert colours is not None and not (colours == [255, 0, 0]).all(axis=1).any()

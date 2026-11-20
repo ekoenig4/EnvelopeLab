@@ -128,6 +128,9 @@ class WorkspaceController(QObject):
         #: Hidden panels wait until they are shown before refreshing. On in the
         #: interactive application; off for scripted windows that read hidden panels.
         self.defer_hidden = False
+        #: Draw the panel colours (ADR-0055) on the 3D views (the Colours mode's
+        #: "Show on the 3D views"; change it with :meth:`set_show_panel_colours`).
+        self.show_panel_colours = True
         #: The hint shown in the 3D views: where the number pointed at (or being edited)
         #: acts on the balloon (:meth:`set_hint`), and whether it is being edited
         #: (focused: the views turn to it) or only pointed at.
@@ -318,6 +321,14 @@ class WorkspaceController(QObject):
             return hint_highlight(design, key, rows=rows, rigging=self.rigging_polylines())
         except (ValueError, IndexError, KeyError):
             return None
+
+    def set_show_panel_colours(self, on: bool) -> None:
+        """Show or hide the panel colours on the 3D views (redraws them)."""
+        if on == self.show_panel_colours:
+            return
+        self.show_panel_colours = on
+        self.bump()
+        self.stateChanged.emit()
 
     def edit_live(self, key: str, apply: Callable[[], Any]) -> None:
         """Apply an edit of a value being changed continuously (a spin box held, the

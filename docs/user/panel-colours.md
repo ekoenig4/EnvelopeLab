@@ -5,6 +5,15 @@ envelope's gores and rows and the pieces of every special shape. Colours are for
 only. They do not change fabrics, material zones, mass, patterns or simulations, and
 painting never makes a result stale. Choose each panel's fabric in **Materials** as before.
 
+## The balloon in 3D
+Beside the grid the balloon is drawn in 3D, painted as you go (drag to turn, wheel to
+zoom). With **Show on the 3D views** on (the default), the colours also appear in every
+other 3D view: the balloon beside the Shape, Patterns and Rigging editors, Special shapes
+▸ On the balloon, and the design surface and special shapes in 3D / Simulation. Panels
+you have not coloured keep their usual fabric shades; turn the option off to see only the
+fabric colours. Result colourings (stress, factor of safety) still replace them while
+they are shown.
+
 ## The panel grid
 The envelope is drawn as its gores side by side at their true flat width, cut at the row
 seams, with gore numbers on top and row letters on the left. Each special shape follows on
@@ -45,4 +54,4 @@ Colours are saved in the project file (format 8). A design with no coloured pane
 as before. Removing a row or a shape keeps its colours until your next paint, so undoing
 the removal brings them back.
 
-Colours are not yet shown in the 3D views or the build pack.
+Colours are not yet shown in the build pack.

@@ -64,6 +64,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from envelopelab.project.colours import envelope_face_colours, shape_face_colours
 from envelopelab_app.view_tools import FitButton
 
 SELECTED = "#d6008f"
@@ -152,6 +153,8 @@ class PlacedShape:
     piece: np.ndarray | None = None
     pieces: int = 0
     seams: list[np.ndarray] = field(default_factory=list)
+    #: Tier of every triangle from the rim (from 0; None: all in the first tier).
+    tier: np.ndarray | None = None
 
 
 def piece_colours(
@@ -188,6 +191,50 @@ def piece_colours(
     out = np.asarray(fill[shade], dtype=float)
     if edited is not None:
         out[piece == edited] = PANEL_FILL_EDITED
+    return out
+
+
+def shape_rgb(
+    shape: PlacedShape,
+    selected: bool,
+    edited: int | None = None,
+    colours: Any = None,
+) -> np.ndarray:
+    """RGB (0-1) of every triangle of a shape: its panel colours (ADR-0055) where set,
+    else the fabric shades of :func:`piece_colours`; the piece being edited stays amber.
+
+    Parameters
+    ----------
+    shape : PlacedShape
+        Shape as drawn.
+    selected : bool
+        The shape is selected (its uncoloured pieces are tinted magenta).
+    edited : int or None
+        Gore or panel being edited (0-based).
+    colours : PanelColours or None
+        Panel colours (None: not shown).
+    """
+    out = piece_colours(shape.piece, shape.pieces, len(shape.triangles), selected, edited)
+    piece = shape.piece
+    if colours is None or piece is None or len(piece) != len(shape.triangles):
+        return out
+    rgb, mask = shape_face_colours(colours, shape.name, piece, shape.pieces, shape.tier)
+    if edited is not None:
+        mask &= np.asarray(piece) != edited
+    out[mask] = rgb[mask]
+    return out
+
+
+def envelope_rgb(sketch: Any, colours: Any) -> Any:
+    """RGB (0-1) of the envelope sketch: one colour (:data:`ENVELOPE`), or one per
+    triangle with the panel colours (ADR-0055) where set."""
+    if colours is None or not colours.envelope or not len(getattr(sketch, "face_gore", ())):
+        return ENVELOPE
+    rgb, mask = envelope_face_colours(
+        colours, sketch.row_letters, sketch.face_row, sketch.face_gore
+    )
+    out = np.tile(np.asarray(ENVELOPE, dtype=float), (len(sketch.triangles), 1))
+    out[mask] = rgb[mask]
     return out
 
 
@@ -265,6 +312,8 @@ class PlacementData:
     hint_face: bool = False
     #: Gore or panel of the selected shape being edited (0-based; None: none).
     edited_piece: int | None = None
+    #: Panel colours drawn on the envelope and the shapes (ADR-0055; None: not shown).
+    colours: Any = None
 
     @property
     def facing_key(self) -> str | None:
@@ -926,14 +975,16 @@ class BalloonSketch(QWidget):
     def _envelope_picture(self, view_key: tuple[float, ...]) -> QPixmap:
         """The shaded envelope and its seams for the current view, drawn once per view
         (the shapes are drawn over it: a nudge or an edit does not draw it again)."""
-        key = (*view_key, id(self.data.sketch))
+        colours = self.data.colours
+        key = (*view_key, id(self.data.sketch), None if colours is None else colours.envelope)
         if self._envelope is None or self._envelope[0] != key:
             picture = QPixmap(self.size())
             picture.fill(QColor("#f7f9fc"))
             p = QPainter(picture)
             p.setRenderHint(QPainter.RenderHint.Antialiasing)
             sketch = self.data.sketch
-            self._draw_faces(p, [(sketch.points, sketch.triangles, ENVELOPE, _centre(sketch))])
+            fill = envelope_rgb(sketch, colours)
+            self._draw_faces(p, [(sketch.points, sketch.triangles, fill, _centre(sketch))])
             self._draw_lines(p, light=False, axes=False)
             p.end()
             self._envelope = (key, picture)
@@ -949,9 +1000,7 @@ class BalloonSketch(QWidget):
                 continue
             selected = shape.name == self.data.selected
             edited = self.data.edited_piece if selected else None
-            colour = piece_colours(
-                shape.piece, shape.pieces, len(shape.triangles), selected, edited
-            )
+            colour = shape_rgb(shape, selected, edited, self.data.colours)
             parts.append((shape.points, shape.triangles, colour, shape.points.mean(axis=0)))
         self._draw_faces(painter, parts)
         self._draw_shape_seams(painter)
@@ -1106,10 +1155,12 @@ class BalloonGpuView(QWidget):
         layout.addWidget(self.plotter)
         self.setObjectName("shapeView3d")
         self._sketch: Any = None
+        #: The envelope panel colours drawn (None: none).
+        self._painted: Any = None
         self._faced: str | None = None
         self._shape_keys: set[str] = set()
         #: What each shape actor shows: (its points array, whether it is selected).
-        self._shown: dict[str, tuple[np.ndarray, bool, int | None]] = {}
+        self._shown: dict[str, tuple[np.ndarray, bool, int | None, Any]] = {}
         #: The axis lines and names drawn.
         self._axes_shown: tuple[list[np.ndarray] | None, list[str]] = (None, [])
         #: The context and highlight lines drawn.
@@ -1126,9 +1177,11 @@ class BalloonGpuView(QWidget):
             style.AddObserver(event, handler)
 
     @staticmethod
-    def _panel_rgb(shape: PlacedShape, selected: bool, edited: int | None = None) -> np.ndarray:
-        """Colours of the shape's triangles by cut piece, as 8-bit RGB."""
-        rgb = piece_colours(shape.piece, shape.pieces, len(shape.triangles), selected, edited)
+    def _panel_rgb(
+        shape: PlacedShape, selected: bool, edited: int | None = None, colours: Any = None
+    ) -> np.ndarray:
+        """Colours of the shape's triangles by cut piece (or panel colour), 8-bit RGB."""
+        rgb = shape_rgb(shape, selected, edited, colours)
         return np.asarray(np.round(rgb * 255.0), dtype=np.uint8)
 
     @staticmethod
@@ -1160,15 +1213,24 @@ class BalloonGpuView(QWidget):
             self._lines_shown = {}
             p.render()
             return
-        if sketch is not self._sketch:
+        painted = None if data.colours is None else data.colours.envelope
+        if sketch is not self._sketch or painted != self._painted:
             faces = np.hstack([np.full((len(sketch.triangles), 1), 3), sketch.triangles])
+            envelope = pv.PolyData(sketch.points, faces.ravel())
+            fill = envelope_rgb(sketch, data.colours)
+            if isinstance(fill, np.ndarray):
+                envelope.cell_data["panel"] = np.asarray(np.round(fill * 255.0), dtype=np.uint8)
+                look: dict[str, Any] = {"scalars": "panel", "rgb": True}
+            else:
+                look = {"color": ENVELOPE}
             p.add_mesh(
-                pv.PolyData(sketch.points, faces.ravel()),
-                color=ENVELOPE,
+                envelope,
                 smooth_shading=True,
                 name="envelope",
                 reset_camera=False,
+                **look,
             )
+            self._painted = painted
             p.add_mesh(
                 _lines(sketch.seams),
                 color=SEAM,
@@ -1191,17 +1253,18 @@ class BalloonGpuView(QWidget):
                 p.remove_actor(f"{key}:seams")
                 self._shown.pop(key, None)
                 continue
+            painted_shape = None if data.colours is None else data.colours.shapes.get(shape.name)
             shown = self._shown.get(key)
             if (
                 shown is not None
                 and shown[0] is shape.points
-                and shown[1:] == (selected, edited)
+                and shown[1:] == (selected, edited, painted_shape)
                 and key in p.actors
             ):
                 continue  # drawn already (a selection change redraws: small meshes)
             faces = np.hstack([np.full((len(shape.triangles), 1), 3), shape.triangles])
             mesh = pv.PolyData(shape.points, faces.ravel())
-            mesh.cell_data["panel"] = self._panel_rgb(shape, selected, edited)
+            mesh.cell_data["panel"] = self._panel_rgb(shape, selected, edited, data.colours)
             p.add_mesh(
                 mesh,
                 scalars="panel",
@@ -1211,7 +1274,7 @@ class BalloonGpuView(QWidget):
                 reset_camera=False,
             )
             self._add_shape_seams(p, key, shape, selected)
-            self._shown[key] = (shape.points, selected, edited)
+            self._shown[key] = (shape.points, selected, edited, painted_shape)
         for key in self._shape_keys - keys:
             p.remove_actor(key)
             p.remove_actor(f"{key}:seams")

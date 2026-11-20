@@ -9,7 +9,9 @@ All notable changes to this project will be documented in this file.
   standard and recent colours, the colours in the design, a hex code field, More
   colours…), and tools to paint, fill a row or a gore, take a colour with the eyedropper
   and repeat every N gores. Colours are for display only: they change no fabric, mass,
-  pattern or simulation result, and make nothing stale.
+  pattern or simulation result, and make nothing stale. The colours are drawn on the
+  balloon in every 3D view (the balloon beside the grid, the mode inlays, On the
+  balloon, 3D / Simulation), toggled by **Show on the 3D views**.
 - Added: shape a special shape's crown cap (ADR-0054, project format 7). **Cap shape**
   (Panel layout, under Where the panels meet) offers the footprint scaled to the cap
   diameter, an ellipse, a polygon by points (straight or smooth) or an outline imported

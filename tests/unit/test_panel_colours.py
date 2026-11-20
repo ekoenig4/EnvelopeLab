@@ -283,3 +283,53 @@ def test_replace_and_clear_all(session: ProjectSession) -> None:
     assert session.state.colours.is_empty()
     session.undo()
     assert session.state.colours.used() == ["#00ff00", "#0000ff"]
+
+
+# -- colours on the 3D displays ----------------------------------------------------------
+
+
+def test_envelope_sketch_knows_every_triangles_gore_and_row(session: ProjectSession) -> None:
+    from envelopelab.project.placement_map import azimuth_position, envelope_sketch
+
+    sketch = envelope_sketch(session.design)
+    assert sketch.row_letters == tuple(_rows(session))
+    centres = sketch.points[sketch.triangles].mean(axis=1)
+    gores = [int(azimuth_position(c, int(sketch.face_gore.max()))) + 1 for c in centres]
+    assert np.array_equal(sketch.face_gore, gores)
+    # Row seams are grid rings: every triangle lies within its row's tape positions.
+    assert set(sketch.face_row.tolist()) == set(range(len(_rows(session))))
+
+
+def test_envelope_face_colours_follow_the_panels(session: ProjectSession) -> None:
+    from envelopelab.project.colours import envelope_face_colours
+    from envelopelab.project.placement_map import envelope_sketch
+
+    sketch = envelope_sketch(session.design)
+    rows = _rows(session)
+    c = painted(PanelColours(), [PanelRef(None, rows[1], 3)], "#ff0000")
+    rgb, mask = envelope_face_colours(c, sketch.row_letters, sketch.face_row, sketch.face_gore)
+    expected = (sketch.face_row == 1) & (sketch.face_gore == 3)
+    assert np.array_equal(mask, expected) and expected.any()
+    assert np.allclose(rgb[mask], [1.0, 0.0, 0.0]) and np.all(rgb[~mask] == 0.0)
+
+
+def test_shape_display_tiers_and_face_colours(session: ProjectSession) -> None:
+    from envelopelab.features.scene import designed_display
+    from envelopelab.project.colours import shape_face_colours
+    from envelopelab.project.shapes import shape_design
+
+    spec = _dome(session, gores=6, splits=[0.4])
+    placed = shape_design(spec, envelope_surface(session.design, session.patterns))
+    shown = designed_display(placed, rows=20, per_piece=3)
+    assert shown.tier is not None and set(shown.tier.tolist()) == {0, 1}
+    c = painted(
+        PanelColours(),
+        [PanelRef("Nose", "B", 2), PanelRef("Nose", CAP, 1)],
+        "#0000ff",
+    )
+    _rgb, mask = shape_face_colours(c, "Nose", shown.piece, shown.pieces, shown.tier)
+    on_skin = (shown.piece == 1) & (shown.tier == 1)
+    cap = shown.piece >= shown.pieces
+    assert np.array_equal(mask, on_skin | cap) and on_skin.any() and cap.any()
+    # Another shape's colours do not leak.
+    assert not shape_face_colours(c, "Other", shown.piece, shown.pieces, shown.tier)[1].any()

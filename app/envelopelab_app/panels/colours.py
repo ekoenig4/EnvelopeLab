@@ -1,6 +1,7 @@
 """Colours mode: paint every panel of the envelope and of the special shapes (ADR-0055).
 
-A tool bar over the panel grid (:mod:`envelopelab_app.colour_grid`) with the colour
+A tool bar over the panel grid (:mod:`envelopelab_app.colour_grid`), the balloon in 3D
+(:class:`~envelopelab_app.placement_view.EnvelopeInlay`, painted as you go) and the colour
 picker (:mod:`envelopelab_app.colour_picker`) beside it:
 
 * **Paint** (P) paints the panels clicked or dragged over; **Fill row** (R) every panel
@@ -9,7 +10,9 @@ picker (:mod:`envelopelab_app.colour_picker`) beside it:
   of the panel clicked and goes back to the previous tool;
 * **Repeat every N gores** also paints every N-th gore (or shape piece) round from the
   one clicked, for repeating patterns (0: off);
-* **Fill everything** paints every panel; **Clear all** removes every colour.
+* **Fill everything** paints every panel; **Clear all** removes every colour;
+* **Show on the 3D views** draws the colours on the balloon in every 3D view (the inlays,
+  On the balloon, 3D / Simulation); off, they show the fabric shades as before.
 
 Every paint is one undo step (:func:`envelopelab.project.edits.paint_panels`). Colours
 are a visual layer (:mod:`envelopelab.project.colours`): they never make patterns or
@@ -24,6 +27,7 @@ from PySide6.QtCore import QSettings, Qt
 from PySide6.QtGui import QKeySequence, QShortcut
 from PySide6.QtWidgets import (
     QButtonGroup,
+    QCheckBox,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -47,6 +51,7 @@ from envelopelab.project.placement_map import gore_map
 from envelopelab_app.colour_grid import ColourGridView, grid_scene
 from envelopelab_app.colour_picker import ColourPicker
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.placement_view import EnvelopeInlay
 from envelopelab_app.refresh import Refresher
 
 #: Tools: key, button text, shortcut, scope of a click, tooltip.
@@ -69,7 +74,7 @@ RECENT_KEY = "colours/recent"
 class ColoursPanel(QWidget):
     """See module docstring."""
 
-    def __init__(self, controller: WorkspaceController) -> None:
+    def __init__(self, controller: WorkspaceController, gpu: bool = False) -> None:
         super().__init__()
         self.controller = controller
         #: Application settings (recent colours); None: kept for this session only.
@@ -121,6 +126,8 @@ class ColoursPanel(QWidget):
         self.repeat.valueChanged.connect(lambda _v: self.grid.update())
         bar.addWidget(self.repeat)
         bar.addStretch(1)
+        bar2 = QHBoxLayout()
+        bar2.setSpacing(4)
         fill_all = QPushButton("Fill everything")
         fill_all.setObjectName("colourFillAll")
         fill_all.setToolTip("Paint every panel of the envelope and of every shape")
@@ -129,8 +136,22 @@ class ColoursPanel(QWidget):
         clear.setObjectName("colourClearAll")
         clear.setToolTip("Remove every panel colour (undoable)")
         clear.clicked.connect(lambda _c=False: self.controller.edit("clear_colours"))
-        bar.addWidget(fill_all)
-        bar.addWidget(clear)
+        bar2.addWidget(fill_all)
+        bar2.addWidget(clear)
+        self.show_3d = QCheckBox("Show on the 3D views")
+        self.show_3d.setObjectName("colourShow3d")
+        self.show_3d.setChecked(controller.show_panel_colours)
+        self.show_3d.setToolTip(
+            "Draw the panel colours on the balloon in every 3D view (off: fabric shades)"
+        )
+        self.show_3d.toggled.connect(controller.set_show_panel_colours)
+        bar2.addSpacing(12)
+        bar2.addWidget(self.show_3d)
+        bar2.addStretch(1)
+        # The balloon in 3D, painted as you go (nothing is selected in this mode).
+        self.inlay = EnvelopeInlay("coloursInlay", controller, gpu, selection=lambda: "")
+        self.inlay.caption.hide()
+        self.inlay.sketch.setToolTip("The balloon as painted. Drag: turn; wheel: zoom")
 
         self.status = QLabel()
         self.status.setObjectName("hint")
@@ -139,12 +160,14 @@ class ColoursPanel(QWidget):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.addLayout(bar)
+        left_layout.addLayout(bar2)
         left_layout.addWidget(self.grid, 1)
         left_layout.addWidget(self.status)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setObjectName("coloursSplitter")
         splitter.addWidget(left)
+        splitter.addWidget(self.inlay)
         splitter.addWidget(self.picker)
         splitter.setStretchFactor(0, 1)
         splitter.setCollapsible(0, False)

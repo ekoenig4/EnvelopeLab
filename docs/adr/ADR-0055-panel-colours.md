@@ -37,11 +37,22 @@ stale. Painting must not do that.
   to replace one everywhere), a hex code field, No colour and More colours (the Qt colour
   dialog with its own screen eyedropper). Tools: Paint (click or drag), Fill row, Fill
   gore, Eyedropper, Repeat every N gores, Fill everything, Clear all.
+* **The 3D views draw the colours** (Show on the 3D views, on by default): the balloon
+  beside the grid, the inlays of the Shape, Patterns and Rigging modes, On the balloon,
+  and the 3D / Simulation design surface and shape layers. A coloured panel takes its
+  colour; an uncoloured one keeps the fabric or default shades, and the shape piece being
+  edited stays amber. To colour by panel, the envelope sketch (`placement_map.Sketch`)
+  gives every triangle its gore and row (the row seams are now rings of its grid), and a
+  shape's display (`scene.ShapeDisplay.tier`) every triangle its tier, by the meridian
+  position of its centre (display only: a triangle across a split takes its centre's
+  tier). Result fields (stress, factor of safety) still replace the colours when shown.
 
 ## Consequences
-* Colours do not reach the 3D views, the build pack or the cut lists yet; a builder still
-  chooses each panel's fabric through zones. Showing colours on the balloon and listing
-  cloth by colour in the build pack are natural follow-ups.
+* Colours do not reach the build pack or the cut lists yet; a builder still chooses each
+  panel's fabric through zones. Listing cloth by colour in the build pack is a natural
+  follow-up.
+* Solved shapes (shape simulations) have no tiers: a split shape's solved skin takes the
+  colours of its first tier.
 * Shape grids are schematic (pieces as equal-height columns at their relative widths);
   they show which piece is which, not its cut outline.
 * Mirror twins (ADR-0043) are coloured on their own, not mirrored from their source.

@@ -58,6 +58,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from envelopelab.project.colours import envelope_face_colours, shape_face_colours
 from envelopelab.project.deviation import interpolate_on_mesh
 from envelopelab.project.gore_design import (
     DisplaySurface,
@@ -980,7 +981,8 @@ class View3DPanel(QWidget):
         }
 
     def _piece_colors(self, shown: Any, spec: Any, placed: Any) -> np.ndarray | None:
-        """Skin fabric colour per triangle, every second piece darker (display only)."""
+        """Colour per triangle: the piece's panel colour (ADR-0055) where one is set, else
+        the skin fabric's, every second piece darker (display only)."""
         session = self.controller.session
         if session is None or spec is None or session.design.gores is None:
             return None
@@ -994,11 +996,26 @@ class View3DPanel(QWidget):
             (len(shown.piece), 1),
         )
         rgb[shown.piece % 2 == 1] *= ALTERNATE_GORE_SHADE
-        return np.asarray(rgb.astype(np.uint8))
+        colours = self._panel_colours()
+        if colours is not None:
+            painted, mask = shape_face_colours(
+                colours, spec.name, shown.piece, shown.pieces, getattr(shown, "tier", None)
+            )
+            rgb[mask] = painted[mask] * 255.0
+        return np.asarray(np.round(rgb).astype(np.uint8))
+
+    def _panel_colours(self) -> Any:
+        """The panel colours to draw (ADR-0055; None: none, or not shown)."""
+        session = self.controller.session
+        if session is None or not self.controller.show_panel_colours:
+            return None
+        colours = session.state.colours
+        return None if colours.is_empty() else colours
 
     def _face_colors(self, surface: DisplaySurface) -> np.ndarray:
-        """Fabric colour per triangle: the panel's zone (a panel zone, else its row's),
-        every second gore darker (display only)."""
+        """Colour per triangle: the panel's colour (ADR-0055) where one is set, else its
+        fabric's: the panel's zone (a panel zone, else its row's), every second gore
+        darker (display only)."""
         session = self.controller.session
         assert session is not None
         design = session.design
@@ -1016,7 +1033,13 @@ class View3DPanel(QWidget):
                 palette[i, g - 1] = (color.red(), color.green(), color.blue())
         rgb = palette[surface.face_row, surface.face_gore - 1]
         rgb[surface.face_gore % 2 == 0] *= ALTERNATE_GORE_SHADE
-        return np.asarray(rgb.astype(np.uint8))
+        colours = self._panel_colours()
+        if colours is not None:
+            painted, mask = envelope_face_colours(
+                colours, surface.row_letters, surface.face_row, surface.face_gore
+            )
+            rgb[mask] = painted[mask] * 255.0
+        return np.asarray(np.round(rgb).astype(np.uint8))
 
     def _fill_list(self) -> None:
         """The layer tree: one group per role (:data:`LAYER_GROUPS`), each with its

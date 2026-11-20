@@ -125,7 +125,7 @@ class MainWindow(QMainWindow):
         self.history = HistoryPanel(self.controller)
         self.rigging = RiggingPanel(self.controller, gpu=use_3d)
         self.shapes = ShapesPanel(self.controller, enable_3d=use_3d)
-        self.colours = ColoursPanel(self.controller)
+        self.colours = ColoursPanel(self.controller, gpu=use_3d)
         self.colours.settings = settings  # recent colours
         self.colours.load_recent()
         # The 3D inlays of the design modes draw what the placement views draw.

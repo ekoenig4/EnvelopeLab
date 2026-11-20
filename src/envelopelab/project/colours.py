@@ -41,6 +41,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
+from numpy.typing import ArrayLike
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 if TYPE_CHECKING:
@@ -321,7 +322,7 @@ class ShapeGrid:
     tiers : tuple of float
         Fractions of the profile where every tier starts and ends, from 0 (rim) to 1.
     cap : bool
-        The shape has a cap.
+        The shape has a cap (or, a tube, a flat tip disc), its piece :data:`CAP`.
     """
 
     name: str
@@ -386,7 +387,7 @@ class ShapeGrid:
 
 def shape_grid(spec: ShapeSpec) -> ShapeGrid:
     """The grid of a special shape's pieces (its count, widths, splits and cap)."""
-    from envelopelab.project.shapes import cap_diameter, piece_count
+    from envelopelab.project.shapes import TubeShape, cap_diameter, piece_count
 
     n = piece_count(spec)
     widths = np.asarray(spec.panel_widths or [1.0] * n, dtype=np.float64)
@@ -397,7 +398,7 @@ def shape_grid(spec: ShapeSpec) -> ShapeGrid:
         n,
         tuple(float(w) for w in widths),
         tiers,
-        cap_diameter(spec) > 0.0,
+        cap_diameter(spec) > 0.0 or (isinstance(spec, TubeShape) and spec.tip_radius > 0.0),
     )
 
 
@@ -467,6 +468,120 @@ def pruned(
     return out
 
 
+def colour_rgb(colour: str) -> tuple[float, float, float]:
+    """sRGB components of a colour, 0-1 each."""
+    digits = normalise_colour(colour)[1:]
+    return (
+        int(digits[0:2], 16) / 255.0,
+        int(digits[2:4], 16) / 255.0,
+        int(digits[4:6], 16) / 255.0,
+    )
+
+
+def _lookup(table: Mapping[int, str], keys: Sequence[int]) -> tuple[FloatArray, np.ndarray]:
+    rgb = np.zeros((len(keys), 3), dtype=np.float64)
+    mask = np.zeros(len(keys), dtype=bool)
+    for index, colour in table.items():
+        hit = np.asarray(keys) == index
+        if hit.any():
+            rgb[hit] = colour_rgb(colour)
+            mask |= hit
+    return rgb, mask
+
+
+def envelope_face_colours(
+    colours: PanelColours,
+    rows: Sequence[str],
+    face_row: ArrayLike,
+    face_gore: ArrayLike,
+) -> tuple[FloatArray, np.ndarray]:
+    """Colour of every triangle of an envelope display mesh by its panel.
+
+    Parameters
+    ----------
+    colours : PanelColours
+        Panel colours.
+    rows : sequence of str
+        Row letters, mouth first.
+    face_row : sequence of int
+        Row index (into ``rows``) of every triangle.
+    face_gore : sequence of int
+        Gore number (from 1) of every triangle.
+
+    Returns
+    -------
+    rgb : ndarray, shape (t, 3)
+        sRGB 0-1 (0 where not coloured).
+    mask : ndarray of bool, shape (t,)
+        The triangle's panel is coloured.
+    """
+    row_of = np.asarray(face_row, dtype=np.int64)
+    gore_of = np.asarray(face_gore, dtype=np.int64)
+    rgb = np.zeros((len(row_of), 3), dtype=np.float64)
+    mask = np.zeros(len(row_of), dtype=bool)
+    for i, letter in enumerate(rows):
+        table = colours.envelope.get(letter)
+        on = row_of == i
+        if not table or not on.any():
+            continue
+        part, hit = _lookup(table, gore_of[on].tolist())
+        sub_rgb, sub_mask = rgb[on], mask[on]
+        sub_rgb[hit], sub_mask[hit] = part[hit], True
+        rgb[on], mask[on] = sub_rgb, sub_mask
+    return rgb, mask
+
+
+def shape_face_colours(
+    colours: PanelColours,
+    name: str,
+    piece: ArrayLike,
+    pieces: int,
+    tier: ArrayLike | None = None,
+) -> tuple[FloatArray, np.ndarray]:
+    """Colour of every triangle of a special shape's display mesh by its cut piece.
+
+    Parameters
+    ----------
+    colours : PanelColours
+        Panel colours.
+    name : str
+        Shape name.
+    piece : sequence of int
+        Piece of every triangle round the axis, from 0; ``pieces`` (or more): the cap or
+        tip disc.
+    pieces : int
+        Gores or panels round the axis.
+    tier : sequence of int, optional
+        Tier of every triangle from the rim, from 0 (None: all in the first tier).
+
+    Returns
+    -------
+    rgb : ndarray, shape (t, 3)
+        sRGB 0-1 (0 where not coloured).
+    mask : ndarray of bool, shape (t,)
+        The triangle's piece is coloured.
+    """
+    piece_of = np.asarray(piece, dtype=np.int64)
+    count = len(piece_of)
+    tiers = np.zeros(count, dtype=np.int64) if tier is None else np.asarray(tier, dtype=np.int64)
+    rgb = np.zeros((count, 3), dtype=np.float64)
+    mask = np.zeros(count, dtype=bool)
+    for key, table in colours.shapes.get(name, {}).items():
+        if key == CAP:
+            on = piece_of >= pieces
+            index = np.ones(count, dtype=np.int64)
+        else:
+            on = (piece_of < pieces) & (tiers == TIER_LETTERS.index(key))
+            index = piece_of + 1
+        if not on.any():
+            continue
+        part, hit = _lookup(table, index[on].tolist())
+        sub_rgb, sub_mask = rgb[on], mask[on]
+        sub_rgb[hit], sub_mask[hit] = part[hit], True
+        rgb[on], mask[on] = sub_rgb, sub_mask
+    return rgb, mask
+
+
 def renamed(
     colours: PanelColours, before: Sequence[str], after: Sequence[str], shapes: bool
 ) -> PanelColours:
@@ -498,8 +613,10 @@ __all__ = [
     "PanelRef",
     "Scope",
     "ShapeGrid",
+    "colour_rgb",
     "coloured_panels",
     "envelope_cells",
+    "envelope_face_colours",
     "envelope_targets",
     "normalise_colour",
     "painted",
@@ -507,5 +624,6 @@ __all__ = [
     "renamed",
     "repeated",
     "replaced",
+    "shape_face_colours",
     "shape_grid",
 ]
