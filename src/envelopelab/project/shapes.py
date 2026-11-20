@@ -10,6 +10,7 @@ the dependency graph.
 
 from __future__ import annotations
 
+import dataclasses
 import math
 from typing import TYPE_CHECKING, Annotated, Any, Literal
 
@@ -140,6 +141,11 @@ class _ShapeBase(BaseModel):
     cap_direction_deg : float
         Direction round the axis the cap moves towards, deg (0 up the tape, 90 towards
         the next gore, as the seam turn).
+    cap_across, cap_up : float
+        Where the panels meet (the cap's centre), seen from above the shape, as fractions
+        of its widest radius from the tip: across (towards the next gore) and up (up the
+        tape), each -1 to 1 with ``cap_across² + cap_up² <= 1`` (0, 0: the tip). They move
+        with the shape when it is resized (ADR-0052); use them or ``cap_shift``, not both.
     group : str or None
         Name of the object the shape belongs to (several shapes with the same group are
         moved, mirrored and exported together, :mod:`envelopelab.project.shape_groups`;
@@ -167,6 +173,8 @@ class _ShapeBase(BaseModel):
     crown_panel_widths: list[float] = Field(default_factory=list)
     cap_shift: float = Field(default=0.0, ge=0.0)
     cap_direction_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
+    cap_across: float = Field(default=0.0, ge=-1.0, le=1.0)
+    cap_up: float = Field(default=0.0, ge=-1.0, le=1.0)
     group: str | None = Field(
         default=None, min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_\- ]+$"
     )
@@ -200,6 +208,20 @@ class _ShapeBase(BaseModel):
             raise ValueError("a mesh shape's seams and cap cannot be moved at the crown")
         if self.cap_shift and getattr(self, "kind", None) == "tube":
             raise ValueError("cap_shift: a tube's tip disc cannot be moved off its axis")
+        relative = bool(self.cap_across or self.cap_up)
+        if relative:
+            if getattr(self, "kind", None) in ("tube", "mesh"):
+                raise ValueError("cap_across, cap_up: only a dome's or revolved shape's cap moves")
+            if self.cap_shift:
+                raise ValueError(
+                    "cap_across, cap_up: set where the panels meet either as fractions or "
+                    "with cap_shift, not both"
+                )
+            if math.hypot(self.cap_across, self.cap_up) > 1.0 + 1e-9:
+                raise ValueError(
+                    "cap_across, cap_up: the meeting point must lie inside the shape seen "
+                    "from above (across² + up² at most 1)"
+                )
         return self
 
 
@@ -250,6 +272,36 @@ ShapeSpec = Annotated[
 ]
 
 
+def _meeting_point(spec: ShapeSpec, prim: Any) -> Primitive:
+    """``prim`` with its cap moved where ``spec``'s relative meeting point says
+    (``cap_across``, ``cap_up``; :func:`~envelopelab.features.primitives.
+    meeting_point_shift` on the pointed meridian); unchanged without one."""
+    from envelopelab.features.primitives import meeting_point_shift
+
+    if not (spec.cap_across or spec.cap_up):
+        out: Primitive = prim
+        return out
+    rho, zeta = dataclasses.replace(prim, cap_radius=0.0).meridian()
+    shift, direction = meeting_point_shift(rho, zeta, spec.cap_across, spec.cap_up)
+    moved: Primitive = dataclasses.replace(prim, cap_shift=shift, cap_direction=direction)
+    return moved
+
+
+def meeting_point(spec: ShapeSpec) -> tuple[float, float]:
+    """Where ``spec``'s panels meet, seen from above, as plan fractions (across, up) of
+    its widest radius (ADR-0052): the relative values when set, else converted from
+    ``cap_shift``/``cap_direction_deg`` (0, 0 for a tube or mesh shape)."""
+    from envelopelab.features.primitives import meeting_point_plan
+
+    if spec.cap_across or spec.cap_up:
+        return float(spec.cap_across), float(spec.cap_up)
+    if not spec.cap_shift or not isinstance(spec, DomeShape | RevolvedShape):
+        return 0.0, 0.0
+    prim: Any = to_primitive(spec)
+    rho, zeta = dataclasses.replace(prim, cap_radius=0.0).meridian()
+    return meeting_point_plan(rho, zeta, spec.cap_shift, math.radians(spec.cap_direction_deg))
+
+
 def to_primitive(spec: ShapeSpec) -> Primitive:
     """The primitive of :mod:`envelopelab.features.primitives` a specification describes."""
     from envelopelab.features.primitives import (
@@ -282,18 +334,21 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
     }
     splits = tuple(float(f) for f in spec.splits)
     if isinstance(spec, DomeShape):
-        return Dome(
-            spec.name,
-            placement,
-            spec.base_radius,
-            spec.height,
-            spec.gores,
-            marks,
-            rc,
-            splits=splits,
-            **layout,  # type: ignore[arg-type]
-            **crown,  # type: ignore[arg-type]
-            **cap,
+        return _meeting_point(
+            spec,
+            Dome(
+                spec.name,
+                placement,
+                spec.base_radius,
+                spec.height,
+                spec.gores,
+                marks,
+                rc,
+                splits=splits,
+                **layout,  # type: ignore[arg-type]
+                **crown,  # type: ignore[arg-type]
+                **cap,
+            ),
         )
     if isinstance(spec, TubeShape):
         if rc > 0.0:  # a pointed tube cut off where it is as wide as the cap
@@ -323,18 +378,21 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
             **crown,  # type: ignore[arg-type]
         )
     if isinstance(spec, RevolvedShape):
-        return Revolved(
-            spec.name,
-            placement,
-            tuple((float(r), float(z)) for r, z in spec.profile),
-            spec.gores,
-            spec.smooth,
-            marks,
-            rc,
-            splits=splits,
-            **layout,  # type: ignore[arg-type]
-            **crown,  # type: ignore[arg-type]
-            **cap,
+        return _meeting_point(
+            spec,
+            Revolved(
+                spec.name,
+                placement,
+                tuple((float(r), float(z)) for r, z in spec.profile),
+                spec.gores,
+                spec.smooth,
+                marks,
+                rc,
+                splits=splits,
+                **layout,  # type: ignore[arg-type]
+                **crown,  # type: ignore[arg-type]
+                **cap,
+            ),
         )
     mesh = ReferenceMesh(
         np.asarray(spec.vertices, dtype=np.float64),

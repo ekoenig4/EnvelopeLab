@@ -55,7 +55,7 @@ def test_version_1_file_reads_without_shapes() -> None:
     raw = json.loads(FIXTURE.read_text(encoding="utf-8"))
     assert raw["format_version"] == 1
     project = load_project(FIXTURE)
-    assert project.format_version == PROJECT_FORMAT_VERSION == 5
+    assert project.format_version == PROJECT_FORMAT_VERSION == 6
     assert project.shape_runs == []
     assert project.state.shapes == []
 
@@ -72,8 +72,8 @@ def test_version_1_snapshots_are_migrated_too(session: ProjectSession) -> None:
 
 def test_unknown_version_is_refused(session: ProjectSession) -> None:
     data = json.loads(dump_project(session.project))
-    data["format_version"] = 6
-    with pytest.raises(ValueError, match="unsupported project format version 6"):
+    data["format_version"] = 7
+    with pytest.raises(ValueError, match="unsupported project format version 7"):
         load_project_text(json.dumps(data))
 
 

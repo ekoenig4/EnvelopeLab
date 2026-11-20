@@ -972,6 +972,93 @@ def cap_moved(primitive: Primitive) -> bool:
     return float(getattr(primitive, "cap_shift", 0.0)) > 0.0
 
 
+def _from_tip(rho: FloatArray, zeta: FloatArray) -> tuple[FloatArray, FloatArray, float]:
+    """Arc length from the tip and radius on a pointed meridian, from the tip down to its
+    widest point (radius made non-decreasing), and that widest radius, m."""
+    rho = np.asarray(rho, float)[::-1]
+    zeta = np.asarray(zeta, float)[::-1]
+    s = np.concatenate([[0.0], np.cumsum(np.hypot(np.diff(rho), np.diff(zeta)))])
+    k = int(np.argmax(rho))
+    widest = float(rho[k])
+    return s[: k + 1], np.maximum.accumulate(rho[: k + 1]), widest
+
+
+def meeting_point_shift(
+    rho: FloatArray, zeta: FloatArray, across: float, up: float
+) -> tuple[float, float]:
+    r"""Cap move (distance down the skin from the tip, m, and direction, rad) that puts
+    the point where the panels meet at plan fractions ``across``, ``up``.
+
+    Seen from above the shape (along its axis), the meeting point sits at
+    :math:`(x, y) = R\,(a, u)` from the tip, :math:`R` the shape's widest radius,
+    :math:`a` across (towards the next gore) and :math:`u` up the tape. The skin point
+    with that plan position lies on the meridian in direction
+    :math:`\psi = \operatorname{atan2}(a, u)` (0 up the tape, as ``cap_direction``) at
+    radius :math:`\rho = R\sqrt{a^2 + u^2}`, which the meridian first reaches at arc
+    length :math:`s` from the tip: the cap's ``cap_shift`` = :math:`s`.
+
+    Parameters
+    ----------
+    rho, zeta : ndarray
+        The pointed meridian (no cap) from the base circle to the tip, m.
+    across, up : float
+        Plan fractions of the widest radius, -1 to 1 each, :math:`a^2 + u^2 \le 1`.
+
+    Returns
+    -------
+    (float, float)
+        Distance down the skin from the tip, m, and direction round the axis, rad.
+
+    Raises
+    ------
+    PrimitiveError
+        When the point lies outside the shape's outline seen from above.
+
+    Notes
+    -----
+    Valid for meridians whose radius grows from the tip down to the widest point (domes,
+    most revolved shapes); a radius that shrinks again on the way down is taken as its
+    running maximum, so the first point reaching each radius is used.
+    """
+    h = math.hypot(float(across), float(up))
+    if not math.isfinite(h) or h > 1.0 + 1e-9:
+        raise PrimitiveError(
+            "the meeting point must lie inside the shape seen from above (across² + up² at most 1)"
+        )
+    if h == 0.0:
+        return 0.0, 0.0
+    s, r, widest = _from_tip(rho, zeta)
+    shift = float(np.interp(min(h, 1.0) * widest, r, s))
+    return shift, math.atan2(float(across), float(up))
+
+
+def meeting_point_plan(
+    rho: FloatArray, zeta: FloatArray, shift: float, direction: float
+) -> tuple[float, float]:
+    """Plan fractions (across, up) of a cap moved ``shift`` m down the skin towards
+    ``direction`` (rad): the inverse of :func:`meeting_point_shift`.
+
+    Parameters
+    ----------
+    rho, zeta : ndarray
+        The pointed meridian (no cap) from the base circle to the tip, m.
+    shift : float
+        Distance down the skin from the tip, m.
+    direction : float
+        Direction round the axis, rad (0 up the tape).
+
+    Returns
+    -------
+    (float, float)
+        Across and up, fractions of the widest radius.
+    """
+    if shift <= 0.0:
+        return 0.0, 0.0
+    s, r, widest = _from_tip(rho, zeta)
+    h = float(np.interp(shift, s, r)) / widest
+    return h * math.sin(direction), h * math.cos(direction)
+
+
 def split_heights(primitive: Primitive, total: float) -> FloatArray:
     """Meridian arc lengths of the horizontal splits from the base circle, m.
 

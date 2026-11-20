@@ -160,6 +160,25 @@ At least 10 % of the profile must lie between \( u_s \) and \( u_e \) (assumed),
 shape is refused. A frustum with turned seams is no longer developed exactly (its seams
 are helices); it is laid out as a classic gore like the others.
 
+**Where the panels meet, as plan fractions (ADR-0052).** The meeting point (the cap's
+centre) can instead be given seen from above the shape, as fractions \( (a, u) \) of its
+widest radius \( R = \max \rho \) of the pointed meridian: \( a \) across the gores,
+\( u \) up the tape, \( a^2 + u^2 \le 1 \) (`cap_across`, `cap_up`). They give the move
+below through `meeting_point_shift`:
+
+\[
+\phi_P = \operatorname{atan2}(a, u), \qquad
+e = s_{tip}\!\left(\rho = R\sqrt{a^2 + u^2}\right),
+\]
+
+with \( s_{tip}(\rho) \) the arc length from the apex at which the meridian first reaches
+radius \( \rho \) (its running maximum from the apex to the widest point, linearly
+interpolated). On a hemisphere \( e = R \arcsin\sqrt{a^2 + u^2} \)
+(`tests/unit/test_meeting_point.py`, within 1 µm); the skin point found lies at
+\( R\,(a, u) \) in the base frame within 0.1 % of \( R \). The fractions scale with the
+shape, so the point keeps its place when the shape is resized; `meeting_point_plan` is the
+inverse, used to show a `cap_shift` as fractions.
+
 **A moved cap.** A cap can be moved off the tip by \( e \) (`cap_shift`) along the meridian
 \( \phi_P \) (`cap_direction`). Its centre is \( \mathbf{P} = \mathbf{S}(\ell_{full} - e,
 \phi_P) \) on the whole, pointed skin (\( \ell_{full} \) the meridian's length to the

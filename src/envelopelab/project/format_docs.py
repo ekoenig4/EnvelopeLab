@@ -50,10 +50,13 @@ KEYS: tuple[tuple[str, str], ...] = (
         "`crown_seam_offset_deg` (the seam turn at the cap or tip, degrees; null: as at the "
         "rim), `crown_panel_widths` (relative widths there; empty: as at the rim), "
         "`cap_shift` (m the cap is moved off the tip) and `cap_direction_deg` (towards "
-        "which direction round the axis). "
+        "which direction round the axis), and from version 6 `cap_across` and `cap_up` "
+        "(where the panels meet seen from above, fractions of the shape's widest radius "
+        "across the gores and up the tape; 0, 0: the tip; ADR-0052). "
         "Version 1 files read as having no shapes; versions 1 to 3 as having equal, "
         "unturned and unsplit pieces; versions 1 to 4 with the seams meeting the crown as "
-        "they leave the rim and the cap centred.",
+        "they leave the rim and the cap centred; versions 1 to 5 without relative meeting "
+        "points.",
     ),
     (
         "`state.symmetry_axes`",

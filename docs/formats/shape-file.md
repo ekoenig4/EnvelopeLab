@@ -280,7 +280,9 @@ The other keys are those of the project's shape specification, in its units:
   (relative widths there; omit for the rim's), and for a dome or revolved shape with a
   cap, `cap_shift` (how far the cap is moved off the tip, a length with a unit, e.g.
   `cap_shift: 50 mm`) and `cap_direction_deg` (towards which direction round the axis,
-  degrees);
+  degrees), or instead `cap_across` and `cap_up` (where the panels meet seen from above,
+  fractions of the shape's widest radius across the gores and up the tape, for example
+  `cap_across: 0.2`; ADR-0052);
 * `group` names the object a shape belongs to (shapes with the same group are moved,
   mirrored and exported together).
 

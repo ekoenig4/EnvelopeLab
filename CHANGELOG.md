@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: set where a special shape's panels meet with relative coordinates (ADR-0052,
+  project format 6). **Where the panels meet** (Panel layout, at the top of the renamed
+  *Where the panels meet (crown)* box) is a top-down pad of the shape: click or drag the
+  point, or type **Across** and **Up** as fractions of the shape's widest radius (0, 0:
+  the tip). The point keeps its place when the shape is resized; mirror twins mirror it.
+  Replaces the *Move the cap* distance and angle (older files read unchanged and show
+  their move as fractions). No results change for existing shapes.
 - Changed: special shape edits show almost at once (ADR-0051). Every view of the
   balloon draws a fast preview of the shape's skin on each change (about 25–45 ms to
   compute for the fixture shapes, where the full placement takes 0.3–0.5 s); the full

@@ -39,9 +39,9 @@ from envelopelab.project.shapes import ShapeSpec
 from envelopelab.project.symmetry import SymmetryAxis
 
 PROJECT_FORMAT: Literal["envelopelab.project"] = "envelopelab.project"
-PROJECT_FORMAT_VERSION: Literal[5] = 5
+PROJECT_FORMAT_VERSION: Literal[6] = 6
 #: Older versions :func:`load_project_text` still reads (see :func:`migrate_project_data`).
-READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3, 4, 5)
+READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6)
 PROJECT_SUFFIX = ".elproj"
 
 NotchEdge = Literal["left", "right", "bottom", "top"]
@@ -515,7 +515,7 @@ class Project(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     format: Literal["envelopelab.project"] = PROJECT_FORMAT
-    format_version: Literal[5] = PROJECT_FORMAT_VERSION
+    format_version: Literal[6] = PROJECT_FORMAT_VERSION
     state: DesignState
     locks: ConstraintLocks = Field(default_factory=ConstraintLocks)
     profile_target: ProfileTarget | None = None
@@ -560,7 +560,9 @@ def migrate_project_data(raw: dict[str, Any]) -> dict[str, Any]:
     (ADR-0040), and no symmetry axes or mirror twins (ADR-0043). Versions 1 to 4 have no
     crown layouts (``crown_seam_offset_deg``, ``crown_panel_widths``, ``cap_shift``,
     ``cap_direction_deg``); their seams meet the crown as they leave the rim and their
-    caps are centred (ADR-0049).
+    caps are centred (ADR-0049). Versions 1 to 5 have no relative meeting points
+    (``cap_across``, ``cap_up``); their caps are placed by ``cap_shift`` as before
+    (ADR-0052).
 
     Raises
     ------

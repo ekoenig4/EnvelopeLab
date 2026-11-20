@@ -22,6 +22,7 @@ listed in the Validation panel. Lengths are shown in m, angles in degrees.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -72,7 +73,7 @@ from PySide6.QtWidgets import (
 from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH, PackExtras
 from envelopelab.export.templates import MARGIN, roll_fit, turn_points
 from envelopelab.features.metrics import REQUIRED_FOS
-from envelopelab.features.primitives import CutPiece, PrimitiveDesign
+from envelopelab.features.primitives import CutPiece, PrimitiveDesign, PrimitiveError
 from envelopelab.project.model import SOLVER_LABELS
 from envelopelab.project.placement_map import snap
 from envelopelab.project.shape_groups import group_names
@@ -259,6 +260,107 @@ def _scrolled(page: QWidget) -> QScrollArea:
     area.setWidgetResizable(True)
     area.setFrameShape(QScrollArea.Shape.NoFrame)
     return area
+
+
+class MeetingPointPad(QWidget):
+    """Where a shape's panels meet, seen from above the shape (ADR-0052).
+
+    The circle is the shape's outline at its widest; the cross marks the tip (0, 0).
+    Right is across the gores (towards the next gore), up is up the tape. The seams are
+    drawn from the meeting point to where they leave the rim, so the panel layout round
+    the point can be seen. Click or drag to move the point (inside the circle); double
+    click to put it back on the tip.
+
+    Signals
+    -------
+    moved(float, float)
+        The point was moved to (across, up), fractions of the widest radius.
+    """
+
+    moved = Signal(float, float)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.across = 0.0
+        self.up = 0.0
+        #: Seam angles where they leave the rim, rad (0 up the tape, as the seam turn).
+        self.seams: list[float] = []
+        self.setMinimumSize(230, 190)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self.setToolTip(
+            "Where the panels meet, seen from above the shape: right = across the gores, "
+            "up = up the tape. Click or drag to move it; double click: back to the tip."
+        )
+
+    def set_state(self, across: float, up: float, seams: list[float]) -> None:
+        """Show the point at (across, up) and the seams leaving the rim at ``seams``."""
+        self.across, self.up, self.seams = float(across), float(up), list(seams)
+        self.update()
+
+    def _frame(self) -> tuple[QPointF, float]:
+        """Centre and radius of the outline (room for the labels outside it), px."""
+        radius = max(min(self.width() - 80.0, self.height() - 34.0) / 2.0, 10.0)
+        return QPointF(radius + 10.0, self.height() / 2.0 + 6.0), radius
+
+    def _to_screen(self, across: float, up: float) -> QPointF:
+        centre, radius = self._frame()
+        return QPointF(centre.x() + across * radius, centre.y() - up * radius)
+
+    def _from_screen(self, point: QPointF) -> tuple[float, float]:
+        centre, radius = self._frame()
+        across = (point.x() - centre.x()) / radius
+        up = (centre.y() - point.y()) / radius
+        h = math.hypot(across, up)
+        if h > 1.0:  # stay inside the outline
+            across, up = across / h, up / h
+        if h < 0.03:  # snap to the tip
+            across = up = 0.0
+        return round(across, 3), round(up, 3)
+
+    def paintEvent(self, _event: object) -> None:  # noqa: N802 (Qt API)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        centre, radius = self._frame()
+        enabled = self.isEnabled()
+        painter.setBrush(QBrush(QColor("#f3ede2" if enabled else "#f0f0f0")))
+        painter.setPen(QPen(QColor("#8a7a66" if enabled else "#bbbbbb"), 1.2))
+        painter.drawEllipse(centre, radius, radius)
+        point = self._to_screen(self.across, self.up)
+        painter.setPen(QPen(QColor("#5a4a3a" if enabled else "#c4c4c4"), 1.0))
+        for phi in self.seams:
+            rim = self._to_screen(math.sin(phi), math.cos(phi))
+            painter.drawLine(point, rim)
+        painter.setPen(QPen(QColor("#9aa3ad"), 1.0, Qt.PenStyle.DashLine))
+        painter.drawLine(QPointF(centre.x() - 6, centre.y()), QPointF(centre.x() + 6, centre.y()))
+        painter.drawLine(QPointF(centre.x(), centre.y() - 6), QPointF(centre.x(), centre.y() + 6))
+        painter.setPen(QPen(QColor("#6b7785")))
+        painter.drawText(QPointF(centre.x() - 14, centre.y() - radius - 5), "up ↑")
+        painter.drawText(QPointF(centre.x() + radius + 5, centre.y() + 4), "across →")
+        colour = QColor("#d6008f" if enabled else "#c4c4c4")
+        painter.setPen(QPen(colour, 2.0))
+        painter.setBrush(QBrush(colour))
+        painter.drawEllipse(point, 5.0, 5.0)
+
+    def _pick(self, event: QMouseEvent) -> None:
+        if not self.isEnabled():
+            return
+        self.across, self.up = self._from_screen(event.position())
+        self.update()
+        self.moved.emit(self.across, self.up)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        self._pick(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        if event.buttons():
+            self._pick(event)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        if self.isEnabled():
+            self.across = self.up = 0.0
+            self.update()
+            self.moved.emit(0.0, 0.0)
 
 
 class PiecePreview(QWidget):
@@ -1657,7 +1759,7 @@ class ShapesPanel(QWidget):
         if field == "splits":
             lines = splits or gore_seams
             return Highlight(f"{label}: its horizontal splits", lines, base, key)
-        if field in ("cap_diameter", "cap_shift", "cap_direction_deg"):
+        if field in ("cap_diameter", "cap_shift", "cap_direction_deg", "cap_across", "cap_up"):
             lines = cap or gore_seams
             return Highlight(f"{label}: its cap", lines, lines[0][0] if lines else base, key)
         if field.startswith("feed_hole"):
@@ -2070,8 +2172,10 @@ class ShapesPanel(QWidget):
             (self.crown_turn, "shape:crown_seam_offset_deg"),
             (self.crown_widths_table, "shape:crown_panel_widths"),
             (self.crown_own, "shape:crown_seam_offset_deg"),
-            (self.cap_shift, "shape:cap_shift"),
-            (self.cap_direction, "shape:cap_direction_deg"),
+            (self.meeting_pad, "shape:cap_across"),
+            (self.cap_across, "shape:cap_across"),
+            (self.cap_up, "shape:cap_up"),
+            (self.meeting_centre, "shape:cap_across"),
             (self.profile_table, "shape:profile"),
         ):
             set_hint(widget, key)
@@ -2079,12 +2183,13 @@ class ShapesPanel(QWidget):
     def _crown_box(self) -> QGroupBox:
         """Where the panels meet at the crown: the seams' angles there and the cap's
         position (ADR-0049)."""
-        box = QGroupBox("Panels at the crown")
+        box = QGroupBox("Where the panels meet (crown)")
         box.setObjectName("shapeCrownBox")
         box.setToolTip(
-            "Where the gores or panels meet at the top. The seams leave the rim where the "
-            "seam turn and widths above put them and turn smoothly to the angles set here; "
-            "the cap can be moved off the tip."
+            "Where the gores or panels meet at the top: the point they meet at (seen from "
+            "above the shape, click or drag it) and their angles there. The seams leave the "
+            "rim where the seam turn and widths above put them and turn smoothly to the "
+            "angles set here."
         )
         form = QFormLayout(box)
         self.crown_own = QCheckBox("Own crown layout (otherwise as at the rim)")
@@ -2128,42 +2233,112 @@ class ShapesPanel(QWidget):
         buttons.addWidget(same)
         widths.addLayout(buttons)
         form.addRow("Crown widths", widths)
-        self.cap_shift = QDoubleSpinBox()
-        self.cap_shift.setObjectName("shapeCapShift")
-        self.cap_shift.setRange(0.0, 5000.0)
-        self.cap_shift.setDecimals(0)
-        self.cap_shift.setSuffix(" mm")
-        self.cap_shift.setKeyboardTracking(False)
-        self.cap_shift.setToolTip(
-            "Move the cap off the tip: its centre this far down the skin from the tip (it "
-            "must still cover the tip). Needs a cap (Feed holes & cap)."
-        )
-        self.cap_shift.valueChanged.connect(
-            lambda v: self.set_value_live(("cap_shift",), round(float(v) / 1000.0, 4))
-        )
-        self.cap_direction = QDoubleSpinBox()
-        self.cap_direction.setObjectName("shapeCapDirection")
-        self.cap_direction.setRange(-180.0, 180.0)
-        self.cap_direction.setDecimals(1)
-        self.cap_direction.setSuffix(" °")
-        self.cap_direction.setKeyboardTracking(False)
-        self.cap_direction.setToolTip(
-            "Towards where round the axis the cap moves: 0° up the tape, 90° towards the "
-            "next gore (as the seam turn)"
-        )
-        self.cap_direction.valueChanged.connect(
-            lambda v: self.set_value_live(("cap_direction_deg",), round(float(v), 1))
-        )
-        cap = QHBoxLayout()
-        cap.addWidget(self.cap_shift)
-        cap.addWidget(QLabel("towards"))
-        cap.addWidget(self.cap_direction)
-        form.addRow("Move the cap", cap)
+        # Where the panels meet (the cap's centre), as plan fractions (ADR-0052).
+        self.meeting_pad = MeetingPointPad()
+        self.meeting_pad.setObjectName("shapeMeetingPad")
+        self.meeting_pad.moved.connect(self._meeting_dragged)
+        self.cap_across = QDoubleSpinBox()
+        self.cap_across.setObjectName("shapeCapAcross")
+        self.cap_up = QDoubleSpinBox()
+        self.cap_up.setObjectName("shapeCapUp")
+        for spin, tip in (
+            (self.cap_across, "across the gores (+ towards the next gore)"),
+            (self.cap_up, "up the tape (+ towards the crown of the balloon)"),
+        ):
+            spin.setRange(-1.0, 1.0)
+            spin.setDecimals(3)
+            spin.setSingleStep(0.05)
+            spin.setKeyboardTracking(False)
+            spin.setToolTip(
+                f"Where the panels meet, {tip}, as a fraction of the shape's widest radius "
+                "seen from above (0, 0: the tip; it stays in place when the shape is resized)"
+            )
+            spin.valueChanged.connect(self._meeting_typed)
+        self.meeting_centre = QPushButton("Back to the tip")
+        self.meeting_centre.setObjectName("shapeMeetingCentre")
+        self.meeting_centre.clicked.connect(lambda: self.set_meeting_point(0.0, 0.0))
+        numbers = QFormLayout()
+        numbers.addRow("Across", self.cap_across)
+        numbers.addRow("Up", self.cap_up)
+        numbers.addRow(self.meeting_centre)
+        self.meeting_info = QLabel()
+        self.meeting_info.setObjectName("shapeMeetingInfo")
+        self.meeting_info.setWordWrap(True)
+        numbers.addRow(self.meeting_info)
+        meeting = QHBoxLayout()
+        meeting.addWidget(self.meeting_pad)
+        meeting.addLayout(numbers, 1)
+        form.insertRow(0, "Where the panels meet", meeting)
         self.crown_note = QLabel()
         self.crown_note.setObjectName("shapeCrownNote")
         self.crown_note.setWordWrap(True)
         form.addRow(self.crown_note)
         return box
+
+    def _fill_meeting(self, spec: ShapeSpec, capped: bool) -> None:
+        """Show where ``spec``'s panels meet (pad, numbers and the distance it means)."""
+        from envelopelab.features.primitives import crown_seam_angles
+        from envelopelab.project.shapes import meeting_point, to_primitive
+
+        try:
+            across, up = meeting_point(spec)
+            prim: Any = to_primitive(spec)
+            seams = [float(a) for a in crown_seam_angles(prim)[:-1]]
+            shift = float(getattr(prim, "cap_shift", 0.0))
+        except (PrimitiveError, ValueError):
+            across, up, seams, shift = 0.0, 0.0, [], 0.0
+        for box, value in ((self.cap_across, across), (self.cap_up, up)):
+            box.blockSignals(True)
+            box.setValue(value)
+            box.blockSignals(False)
+        self.meeting_pad.set_state(across, up, seams)
+        for widget in (self.meeting_pad, self.cap_across, self.cap_up, self.meeting_centre):
+            widget.setEnabled(capped)
+        if not capped:
+            self.meeting_info.setText("At the tip (the shape has no cap).")
+        elif shift > 0.0:
+            self.meeting_info.setText(
+                f"The cap's centre is {shift * 1000.0:.0f} mm down the skin from the tip."
+            )
+        else:
+            self.meeting_info.setText("At the tip.")
+
+    def _meeting_dragged(self, across: float, up: float) -> None:
+        for box, value in ((self.cap_across, across), (self.cap_up, up)):
+            box.blockSignals(True)
+            box.setValue(value)
+            box.blockSignals(False)
+        self.set_meeting_point(across, up, live=True)
+
+    def _meeting_typed(self, _value: float) -> None:
+        across, up = float(self.cap_across.value()), float(self.cap_up.value())
+        h = math.hypot(across, up)
+        if h > 1.0:  # keep it inside the outline: shorten towards the tip
+            across, up = round(across / h, 3), round(up / h, 3)
+        self.meeting_pad.set_state(across, up, self.meeting_pad.seams)
+        self.set_meeting_point(across, up, live=True)
+
+    def set_meeting_point(self, across: float, up: float, live: bool = False) -> bool:
+        """Put the point where the selected shape's panels meet at plan fractions
+        (``across``, ``up``) of its widest radius, seen from above (ADR-0052); one undo
+        step for a drag or a held value (``live``). True when applied (or queued)."""
+        name = self.selected
+        spec = self.spec()
+        if name is None or spec is None:
+            return False
+        values = {"cap_across": float(across), "cap_up": float(up), "cap_shift": 0.0}
+        if (spec.cap_across, spec.cap_up, spec.cap_shift) == (across, up, 0.0):
+            return False
+        if live:
+            self.controller.edit_live(
+                f"shape:{name}:meeting",
+                lambda: self.controller.edit("update_shape", name, values),
+            )
+            return True
+        ok = bool(self.controller.edit("update_shape", name, values))
+        if not ok:
+            self.refresh()
+        return ok
 
     def _crown_own_toggled(self, on: bool) -> None:
         spec = self.spec()
@@ -2232,14 +2407,7 @@ class ShapesPanel(QWidget):
                 and pointed(spec)
                 and cap_diameter(spec) > 0.0
             )
-            for widget, value in (
-                (self.cap_shift, spec.cap_shift * 1000.0),
-                (self.cap_direction, spec.cap_direction_deg),
-            ):
-                widget.blockSignals(True)
-                widget.setValue(value)
-                widget.blockSignals(False)
-                widget.setEnabled(capped)
+            self._fill_meeting(spec, capped)
             notes = []
             if mesh:
                 notes.append("A mesh shape's seams and cap stay as they are at the crown.")
@@ -2250,7 +2418,8 @@ class ShapesPanel(QWidget):
                 )
             if not capped and not mesh:
                 notes.append(
-                    "Moving the cap needs a dome or revolved shape with a cap (Feed holes & cap)."
+                    "Moving where the panels meet needs a dome or revolved shape with a cap: "
+                    "the panels meet round its edge (Feed holes & cap)."
                 )
             self.crown_note.setText(" ".join(notes))
         finally:

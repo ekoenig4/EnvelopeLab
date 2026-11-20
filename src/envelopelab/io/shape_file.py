@@ -774,6 +774,8 @@ SHAPE_KEYS = frozenset(
         "crown_panel_widths",
         "cap_shift",
         "cap_direction_deg",
+        "cap_across",
+        "cap_up",
         "group",
     }
 )

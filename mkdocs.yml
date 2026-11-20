@@ -102,6 +102,7 @@ nav:
       - ADR-0049: adr/ADR-0049-crown-layout.md
       - ADR-0050: adr/ADR-0050-hints-and-live-edits.md
       - ADR-0051: adr/ADR-0051-shape-previews.md
+      - ADR-0052: adr/ADR-0052-relative-meeting-point.md
 theme:
   name: material
 markdown_extensions:
