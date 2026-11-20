@@ -1723,7 +1723,7 @@ class _Skin:
             - start,
             2.0 * math.pi,
         )
-        ang = start + np.unique(np.round(ang, 12))
+        ang = np.asarray(start + np.unique(np.round(ang, 12)), dtype=np.float64)
         top = np.interp(np.mod(ang, 2.0 * math.pi), self.phi, self._crown.top, period=2.0 * math.pi)
         n = len(ang)
         rings = []
@@ -2025,10 +2025,11 @@ class _Piece:
 
 def _newton_step(jac: FloatArray, f: FloatArray) -> FloatArray:
     """Newton step for ``jac @ step = f`` (least squares when the Jacobian is singular)."""
+    # Explicit float64: numpy's stubs type these as floating[Any] on some versions.
     try:
-        out: FloatArray = np.linalg.solve(jac, f)
+        out: FloatArray = np.asarray(np.linalg.solve(jac, f), dtype=np.float64)
     except np.linalg.LinAlgError:
-        out = np.linalg.lstsq(jac, f, rcond=None)[0]
+        out = np.asarray(np.linalg.lstsq(jac, f, rcond=None)[0], dtype=np.float64)
     return out
 
 
