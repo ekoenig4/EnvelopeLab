@@ -143,6 +143,9 @@ All notable changes to this project will be documented in this file.
   row's 1:1 page; a piece larger than the roll both ways is marked in the Special shapes
   panel (table column, amber in the drawing, a *roll width* check) and listed in
   Validation / Warnings. The build-pack export starts from the same width.
+- Fixed: the preview and CalculiX simulations failed to build the model ("unknown piece")
+  when a row name was not all capital letters, e.g. BARD92's row `i`; results of designs
+  with capital-letter row names are unchanged.
 - Fixed: exporting a build pack failed when a special shape's name had a space
   ("too many values to unpack"); the export's 3D page showed the design only when the 3D
   view had not been opened since the last change; a special shape's preview simulation

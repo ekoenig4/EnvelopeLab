@@ -57,6 +57,21 @@ def test_solver_model_from_the_fixture_design(tmp_path: Path) -> None:
     assert built.model.conditions.internal_temperature == pytest.approx(373.15)
 
 
+def test_row_names_that_are_not_capital_letters_are_imported(tmp_path: Path) -> None:
+    """Row names are any 1-8 characters (BARD92 has a row ``i``); every row must reach
+    the solver model as its own piece."""
+    s = ProjectSession.open(FIXTURE)
+    design = s.design.model_copy(deep=True)
+    assert design.gores is not None
+    names = ["A", "i", "C2", "top-1"]
+    for row, name in zip(design.gores.panel_rows, names, strict=True):
+        row.letter = name
+    session = ProjectSession.new(design)
+    built = build_solver_model(session.design, session.patterns, tmp_path, COARSE_MM)
+    assert built.build.status == "PASS"
+    assert sorted(built.build.pieces) == sorted(names)
+
+
 def test_manual_override_reaches_the_seam_audit(tmp_path: Path) -> None:
     s = ProjectSession.open(FIXTURE)
     row = panel_rows(s.design, s.patterns)[1]

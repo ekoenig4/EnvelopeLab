@@ -261,7 +261,9 @@ def write_build_pack(
                 "grain": ["GRAIN"],
                 "label": ["NOTES"],
             },
-            "labels": [{"pattern": r"^PANEL\s+(?P<panel>[A-Z]+)\s+x(?P<quantity>\d+)$"}],
+            # Row names are any 1-8 characters (lower case, digits, punctuation, spaces),
+            # so the label is read back whole, not as capital letters only.
+            "labels": [{"pattern": r"^PANEL\s+(?P<panel>.+?)\s+x(?P<quantity>\d+)$"}],
             "sources": [{"file": "design.dxf"}],
             "pieces": pieces,
         },
