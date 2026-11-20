@@ -26,10 +26,10 @@ stale. Painting must not do that.
 * **Project format 8** writes `state.colours` (snapshots and versions too) only when
   some panel is coloured; versions 1 to 7 read as uncoloured. Older releases cannot open
   format 8 files.
-* `colours` is an input group read by **no artifact**, and it is optional (left out of
-  the hashes while empty): painting marks the design unsaved but never makes patterns,
-  the rest mesh, simulations, shapes or exports stale, and existing projects keep their
-  fingerprints.
+* `colours` is an input group read **only by the export** (the build pack prints the
+  colours), and it is optional (left out of the hashes while empty): painting marks the
+  design unsaved and a written build pack stale, but never the patterns, the rest mesh,
+  simulations or shapes, and existing projects keep their fingerprints.
 * Edits: `paint_panels`, `replace_colour` and `clear_colours` (`envelopelab.project.
   edits`), one undo step each through `ProjectSession.edit_colours`. Colours follow a
   renamed row or shape. Colours of panels that left the design (a removed row, fewer

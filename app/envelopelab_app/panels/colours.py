@@ -17,7 +17,8 @@ picker (:mod:`envelopelab_app.colour_picker`) beside it:
 
 Every paint is one undo step (:func:`envelopelab.project.edits.paint_panels`). Colours
 are a visual layer (:mod:`envelopelab.project.colours`): they never make patterns or
-simulations stale. The recent colours are kept in the application settings.
+simulations stale (only a build pack, which prints them). The recent colours are kept in
+the application settings.
 """
 
 from __future__ import annotations

@@ -2,9 +2,10 @@ r"""Display colours of the panels: the envelope's and every special shape's (ADR
 
 Builders choose the colour of every panel before they order cloth. This module keeps
 those choices as a **visual layer** of the design state (``DesignState.colours``,
-project format 8): it changes no fabric, material zone, mass, pattern or simulation, and
-no artifact fingerprint reads it (:mod:`envelopelab.project.dependencies`), so painting
-never makes anything stale.
+project format 8): it changes no fabric, material zone, mass, pattern or simulation. Only
+the export (the build pack, which prints the colours) reads it
+(:mod:`envelopelab.project.dependencies`), so painting makes a written build pack stale but
+never the patterns, the rest mesh, simulations or special shapes.
 
 Colours are sRGB hex strings ``#rrggbb`` (lower case; :func:`normalise_colour` also reads
 ``#rgb`` and the forms without ``#``). A panel is addressed by a :class:`PanelRef`:

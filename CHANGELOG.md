@@ -9,7 +9,7 @@ All notable changes to this project will be documented in this file.
   standard and recent colours, the colours in the design, a hex code field, More
   colours…), and tools to paint, fill a row or a gore, take a colour with the eyedropper
   and repeat every N gores. Colours are for display only: they change no fabric, mass,
-  pattern or simulation result, and make nothing stale. The colours are drawn on the
+  pattern or simulation result, and make only a written build pack stale. The colours are drawn on the
   balloon in every 3D view (the balloon beside the grid, the mode inlays, On the
   balloon, 3D / Simulation), toggled by **Show on the 3D views**. The build pack
   carries them: each panel template and DXF says how many to cut in each colour and for

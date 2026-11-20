@@ -47,7 +47,8 @@ def test_click_paint_fill_and_undo(qtbot: QtBot, gore_window: MainWindow) -> Non
     assert colours.colour_of(PanelRef(None, rows[0], 2)) == STANDARD[1]
     assert colours.colour_of(PanelRef(None, rows[0], 1)) is None
     assert panel.grid.colours == colours  # the grid shows it at once
-    assert session.fingerprints() == fingerprints  # nothing is stale
+    changed = {k for k, v in session.fingerprints().items() if fingerprints[k] != v}
+    assert changed == {"export"}  # only the build pack, which prints the colours
     # Fill row with a repeat-independent scope: every gore of the row, one undo step.
     depth = session.stack.index
     panel.set_tool("row")

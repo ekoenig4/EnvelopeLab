@@ -1,5 +1,5 @@
 """Panel colours (ADR-0055): the model, painting helpers, grids, project format 8,
-session edits and undo, renames, and that colours never make an artifact stale."""
+session edits and undo, renames, and that colours make only the export stale."""
 
 from __future__ import annotations
 
@@ -203,12 +203,14 @@ def test_renamed_follows_a_rename_but_not_a_swap() -> None:
 # -- sessions, files and fingerprints ----------------------------------------------------
 
 
-def test_paint_is_one_undo_step_and_stales_nothing(session: ProjectSession) -> None:
+def test_paint_is_one_undo_step_and_stales_only_the_export(session: ProjectSession) -> None:
     fingerprints = session.fingerprints()
     refs = [PanelRef(None, r, 1) for r in _rows(session)]
     assert edits.paint_panels(session, refs, "#C00000")
     assert session.state.colours.colour_of(refs[0]) == "#c00000"
-    assert session.fingerprints() == fingerprints  # a visual layer: nothing is stale
+    # A visual layer: only the build pack (which prints the colours) is stale.
+    changed = {k for k, v in session.fingerprints().items() if fingerprints[k] != v}
+    assert changed == {"export"}
     assert "colours" in session.unsaved_groups()
     assert not edits.paint_panels(session, refs, "#c00000")  # no change, no history
     session.undo()

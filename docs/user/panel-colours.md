@@ -3,7 +3,8 @@
 The **Colours** mode lets you try colour schemes on every panel of the balloon: the
 envelope's gores and rows and the pieces of every special shape. Colours are for display
 only. They do not change fabrics, material zones, mass, patterns or simulations, and
-painting never makes a result stale. Choose each panel's fabric in **Materials** as before.
+painting never makes a pattern or simulation result stale (only a build pack already
+written, which prints the colours). Choose each panel's fabric in **Materials** as before.
 
 ## The balloon in 3D
 Beside the grid the balloon is drawn in 3D, painted as you go (drag to turn, wheel to

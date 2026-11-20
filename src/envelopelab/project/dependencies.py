@@ -19,9 +19,8 @@ depends on a set of *input groups* (slices of the design state, e.g. ``geometry`
     operating, materials, fabric_properties, tapes, seam_construction ──► simulation
     geometry, manual_outlines ──► flattening
     materials, fabric_properties ──► nesting
-    meta, rigging, turning_vents, scale_variants ──► export
+    meta, rigging, turning_vents, scale_variants, colours ──► export
     geometry, row_zones, materials, shapes ──► shapes
-    colours (panel display colours) ──► nothing (a visual layer: never stale-making)
 
 The *fingerprint* of an artifact is the SHA-256 of its own input slices and the
 fingerprints of its upstream artifacts. An artifact built with fingerprint ``f`` is
@@ -149,7 +148,11 @@ ARTIFACTS: tuple[ArtifactSpec, ...] = (
     ArtifactSpec("flattening", "Flattening", ("geometry", "manual_outlines")),
     ArtifactSpec("nesting", "Nesting", ("materials", "fabric_properties"), ("patterns",)),
     ArtifactSpec(
-        "export", "Export", ("meta", "rigging", "turning_vents", "scale_variants"), ("nesting",)
+        "export",
+        "Export",
+        # The build pack prints the panel colours (ADR-0055); nothing else reads them.
+        ("meta", "rigging", "turning_vents", "scale_variants", "colours"),
+        ("nesting",),
     ),
     ArtifactSpec(
         "shapes",
@@ -190,8 +193,8 @@ def input_groups(
     shapes : sequence of mapping
         Special shapes as JSON data (``ShapeSpec.model_dump(mode="json")``); m, deg.
     colours : mapping, optional
-        Panel colours as JSON data (``PanelColours.to_data()``, sRGB ``#rrggbb``). No
-        artifact reads them (a visual layer); the group only tells unsaved changes.
+        Panel colours as JSON data (``PanelColours.to_data()``, sRGB ``#rrggbb``). Only
+        the export reads them (the build pack prints them; ADR-0055).
 
     Returns
     -------
@@ -287,7 +290,8 @@ def input_groups(
             if v.get("simulate_open")
         ],
         "shapes": [dict(s) for s in shapes],
-        # Display colours only: no artifact reads them, so painting makes nothing stale.
+        # Panel colours: only the build pack prints them (the export), so painting never
+        # makes patterns, meshes or simulations stale.
         "colours": {k: v for k, v in (colours or {}).items() if v},
     }
 
