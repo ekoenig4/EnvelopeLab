@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: a **Colours** mode to colour every panel of the envelope and of the special
+  shapes (ADR-0055, project format 8). It shows the panels as a flat grid with a colour
+  picker like office and image-editing programs (theme colours with tints and shades,
+  standard and recent colours, the colours in the design, a hex code field, More
+  colours…), and tools to paint, fill a row or a gore, take a colour with the eyedropper
+  and repeat every N gores. Colours are for display only: they change no fabric, mass,
+  pattern or simulation result, and make nothing stale.
 - Added: shape a special shape's crown cap (ADR-0054, project format 7). **Cap shape**
   (Panel layout, under Where the panels meet) offers the footprint scaled to the cap
   diameter, an ellipse, a polygon by points (straight or smooth) or an outline imported

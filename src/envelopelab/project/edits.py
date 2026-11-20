@@ -30,6 +30,13 @@ from envelopelab.geometry.profile_segments import (
     split_segment,
 )
 from envelopelab.materials.repository import FabricCatalog, FabricLibraryRepository
+from envelopelab.project.colours import (
+    PanelColours,
+    PanelRef,
+    normalise_colour,
+    painted,
+    replaced,
+)
 from envelopelab.project.dependencies import canonical_hash
 from envelopelab.project.gore_design import (
     DEFAULT_CREST_LOFT,
@@ -2338,3 +2345,61 @@ def move_feed_holes_clear(
 
         session.edit_shapes("Move feed holes clear of seams", mutate)
     return notes
+
+
+# -- panel colours (a visual layer, ADR-0055) ---------------------------------------------
+
+
+def paint_panels(
+    session: ProjectSession,
+    refs: Sequence[PanelRef],
+    colour: str | None,
+    description: str | None = None,
+) -> bool:
+    """Set the display colour of the panels ``refs`` (one undo step).
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Open project.
+    refs : sequence of PanelRef
+        Envelope panels and special-shape pieces (:mod:`envelopelab.project.colours`).
+    colour : str or None
+        sRGB ``#rrggbb`` (or ``#rgb``); None clears the colour.
+    description : str, optional
+        History text (default: says what was painted).
+
+    Returns
+    -------
+    bool
+        Whether the state changed.
+
+    Raises
+    ------
+    ValueError
+        For a malformed colour (nothing is changed).
+    """
+    value = None if colour is None else normalise_colour(colour)
+    if description is None:
+        what = refs[0].label() if len(refs) == 1 else f"{len(refs)} panels"
+        description = f"Clear colour of {what}" if value is None else f"Paint {what} {value}"
+    return session.edit_colours(description, lambda c: painted(c, refs, value))
+
+
+def replace_colour(session: ProjectSession, old: str, new: str | None) -> bool:
+    """Repaint every panel of colour ``old`` with ``new`` (None: clear them; one step).
+
+    Raises
+    ------
+    ValueError
+        For a malformed colour.
+    """
+    old = normalise_colour(old)
+    value = None if new is None else normalise_colour(new)
+    text = f"Replace colour {old} with {value}" if value else f"Clear colour {old}"
+    return session.edit_colours(text, lambda c: replaced(c, old, value))
+
+
+def clear_colours(session: ProjectSession) -> bool:
+    """Clear every panel colour (one step)."""
+    return session.edit_colours("Clear all panel colours", lambda _c: PanelColours())

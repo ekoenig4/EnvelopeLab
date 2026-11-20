@@ -37,6 +37,7 @@ MODES: tuple[tuple[str, str], ...] = (
     ("rigging", "Rigging"),
     ("shapes", "Special shapes"),
     ("simulate", "3D / Simulation"),
+    ("colours", "Colours"),
     ("history", "History"),
 )
 MODE_KEYS = tuple(key for key, _ in MODES)
@@ -52,6 +53,7 @@ DEFAULT_SIZES: dict[str, tuple[int, ...]] = {
     "patternPanelSplitter": (700, 250),  # pattern drawing above its row form
     "simulateSplitter": (620, 220),  # 3D view above the runs table
     "shapesSplitter": (200, 620, 620),  # shape list | tabbed editor | tabbed results
+    "coloursSplitter": (900, 280),  # panel grid beside the colour picker
 }
 
 

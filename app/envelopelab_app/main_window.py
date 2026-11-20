@@ -44,6 +44,7 @@ from envelopelab_app.gore_editor import GoreEditor
 from envelopelab_app.hints import HintTracker
 from envelopelab_app.layout import MODE_KEYS, MODES
 from envelopelab_app.panels.base import UNSAVED_MARK, Panel
+from envelopelab_app.panels.colours import ColoursPanel
 from envelopelab_app.panels.design_tree import DesignTreePanel
 from envelopelab_app.panels.history import HistoryPanel
 from envelopelab_app.panels.materials import MaterialsPanel
@@ -124,6 +125,9 @@ class MainWindow(QMainWindow):
         self.history = HistoryPanel(self.controller)
         self.rigging = RiggingPanel(self.controller, gpu=use_3d)
         self.shapes = ShapesPanel(self.controller, enable_3d=use_3d)
+        self.colours = ColoursPanel(self.controller)
+        self.colours.settings = settings  # recent colours
+        self.colours.load_recent()
         # The 3D inlays of the design modes draw what the placement views draw.
         self.controller.placement_provider = self.shapes.placement_data
         # Pointing at or editing a number shows where on the balloon it acts.
@@ -176,6 +180,7 @@ class MainWindow(QMainWindow):
                 scope={"shapes"},
                 artifacts=("shapes",),
             ),
+            "colours": Panel("Panel Colours", self.controller, self.colours, scope={"colours"}),
         }
         self._build_workspace()
 
@@ -252,6 +257,7 @@ class MainWindow(QMainWindow):
             "simulate": self._splitter(
                 "simulateSplitter", vertical, self.panels["view3d"], self.panels["runs"]
             ),
+            "colours": self.panels["colours"],
             "history": self.panels["history"],
         }
         #: Mode holding each panel (the sidebar and warnings strip show in every mode).
@@ -265,6 +271,7 @@ class MainWindow(QMainWindow):
             "shapes": "shapes",
             "view3d": "simulate",
             "runs": "simulate",
+            "colours": "colours",
             "history": "history",
         }
         self.mode_stack = QStackedWidget()

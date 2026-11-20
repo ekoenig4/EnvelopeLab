@@ -214,7 +214,7 @@ def test_a_crown_shape_reaches_the_primitive_and_survives_save_and_load() -> Non
         update={"state": session.state.model_copy(update={"shapes": [spec]})}
     )
     back = load_project_text(dump_project(project))
-    assert back.format_version == 7 and back.state.shapes[0].crown_shape == spec.crown_shape
+    assert back.format_version == 8 and back.state.shapes[0].crown_shape == spec.crown_shape
     with pytest.raises(ValueError):
         _dome_spec(kind="ellipse", width=0.2)  # no length
     with pytest.raises(ValueError):

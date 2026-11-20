@@ -67,6 +67,14 @@ KEYS: tuple[tuple[str, str], ...] = (
         "of the meridian plane (gore widths from the first seam; gore n's centreline is "
         "n - 0.5). Mirror twins are mirrored across them. Older files read as having none.",
     ),
+    (
+        "`state.colours`",
+        "Panel colours (version 8, ADR-0055; a visual layer that no result reads): "
+        "`envelope` maps a row letter to gore numbers (from 1) to sRGB `#rrggbb` colours, "
+        "`shapes` maps a special shape's name to its tier letter (`A` at the rim) or "
+        "`cap` to piece numbers (from 1) to colours. Written only when some panel is "
+        "coloured; older files read as uncoloured.",
+    ),
     ("`snapshots`", "Named copies of `state` with their design content hash."),
     ("`versions`", "Committed design versions (`version_id`, `parent_id`, message, state)."),
     ("`provenance`", "Append-only log of flagged edits (manual overrides and their undo)."),

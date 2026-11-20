@@ -10,7 +10,8 @@ the menu **View** lists the same modes with shortcuts:
 | **Rigging** | Ctrl+3 | The **Rigging** panel: parachute, red line, flying wires, turning vents, scoop |
 | **Special shapes** | Ctrl+4 | The **Special Shapes** panel: domes, tubes, revolved and mesh shapes on the envelope, their cutting patterns and simulations ([guide](special-shape-primitives.md#in-the-desktop-application)) |
 | **3D / Simulation** | Ctrl+5 | The 3D view above the **Simulation Runs** table |
-| **History** | Ctrl+6 | Undo history, snapshots, versions and provenance |
+| **Colours** | Ctrl+6 | The **Panel Colours** grid and colour picker: colour every panel of the envelope and the special shapes ([guide](panel-colours.md)) |
+| **History** | Ctrl+7 | Undo history, snapshots, versions and provenance |
 
 Two areas stay visible in every mode:
 
