@@ -1547,7 +1547,9 @@ class ShapesPanel(QWidget):
                 holes += pm.ring_lines(gore_map, g, s, spec.feed_hole_radius)
             for h in spec.feed_holes:
                 holes += pm.ring_lines(gore_map, h.gore - 0.5 + h.across, h.tape_position, h.radius)
-            result = self.controller.shapes.result(spec.name)
+            # While the shape is placed again its last placed design is drawn: the
+            # views keep the shape on screen and change it when the new one arrives.
+            result = self.controller.shapes.shown(spec.name)
             placed = None if result is None else result.design
             if placed is not None:
                 cached = self._drawn.get(spec.name)
@@ -1623,7 +1625,7 @@ class ShapesPanel(QWidget):
 
         field = key.removeprefix("shape:")
         spec = self.spec()
-        result = None if spec is None else self.controller.shapes.result(spec.name)
+        result = None if spec is None else self.controller.shapes.shown(spec.name)
         placed = None if result is None else result.design
         session = self.controller.session
         if spec is None or placed is None or session is None:
@@ -2447,7 +2449,12 @@ class ShapesPanel(QWidget):
             return
         result = self.controller.shapes.result(spec.name)
         if result is None:
-            self.status.setText(f"{spec.name}: being placed…")
+            updating = self.controller.shapes.updating(spec.name)
+            self.status.setText(
+                f"{spec.name}: updating… (the views show it as last placed)"
+                if updating
+                else f"{spec.name}: being placed…"
+            )
             self.status.setStyleSheet("")
             return
         design = result.design

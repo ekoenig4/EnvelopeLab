@@ -82,6 +82,15 @@ including where a leaned base circle dips below it. A meridian that crosses the 
 more than once (the skin touching the envelope again) is rejected; a second crossing
 closer than the sample spacing is not detected.
 
+### Drawing preview
+
+`preview_primitive` builds the same skin (base frame, profile, seams, splits, cap) with
+`PREVIEW_SAMPLES` = 96 footprint samples instead of 720 and stops there: no piece is
+flattened, no allowance offset, no mark, attachment line or check. Its skin differs from
+the designed one only through the footprint interpolation (under 0.1 mm for the fixture
+shapes, `tests/unit/test_shape_preview.py`). It is a drawing aid while a value is
+edited (ADR-0051), flagged `preview`, and never used as a result.
+
 ## Cutting pattern
 
 The skin is cut into \(M\) pieces between the meridians

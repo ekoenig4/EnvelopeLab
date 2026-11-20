@@ -419,6 +419,20 @@ def shape_design(
     )
 
 
+def shape_preview(spec: ShapeSpec, surface: EnvelopeSurface) -> PrimitiveDesign:
+    """A shape's skin on the envelope for drawing while it is edited
+    (:func:`envelopelab.features.primitives.preview_primitive`; not a design result).
+
+    Raises
+    ------
+    PrimitiveError
+        When the shape does not fit, or it has no fast preview (a mesh shape).
+    """
+    from envelopelab.features.primitives import preview_primitive
+
+    return preview_primitive(to_primitive(spec), surface)
+
+
 def feed_hole_clearance(design: DesignDocument, patterns: PatternSet) -> float:
     r"""Least distance from a feed hole's finished edge to a seam of its panel, m.
 

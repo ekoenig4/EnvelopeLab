@@ -1231,6 +1231,9 @@ class PrimitiveDesign:
     _skin: Any = field(repr=False)
     mark_ease: FloatArray = field(default_factory=lambda: np.zeros(0), repr=False)
     extra_feed_holes: tuple[FeedHoleMark, ...] = ()
+    #: A drawing preview (:func:`preview_primitive`): no pieces, attachment, marks or
+    #: checks; never a design result.
+    preview: bool = False
 
     @property
     def feed_holes(self) -> tuple[FeedHoleMark, ...]:
@@ -2605,6 +2608,78 @@ def design_primitive(
     design.checks = _checks(design, pieces, tolerance)
     design.checks += _seam_clearance_checks(design, seam_clearance)
     return design
+
+
+#: Footprint samples of a drawing preview (:func:`preview_primitive`).
+PREVIEW_SAMPLES = 96
+
+
+def preview_primitive(
+    primitive: Primitive, surface: EnvelopeSurface, samples: int = PREVIEW_SAMPLES
+) -> PrimitiveDesign:
+    """A placed primitive's 3D skin and footprint only, fast enough to draw on every edit.
+
+    The skin is built exactly as :func:`design_primitive` builds it (same base frame,
+    profile, seams, splits and cap), with ``samples`` footprint points instead of 720. The
+    cut pieces are not flattened and nothing is checked, so the result is a drawing aid
+    only (``preview`` is True; its pieces, attachment, marks and checks are empty): the
+    design, its checks and the build pack always come from :func:`design_primitive`.
+
+    Parameters
+    ----------
+    primitive : Dome, Tube or Revolved
+        Feature definition, m and deg (a free-form shape has no preview).
+    surface : EnvelopeSurface
+        Host envelope.
+    samples : int
+        Footprint samples round the axis.
+
+    Returns
+    -------
+    PrimitiveDesign
+        Base frame, footprint (m, rad) and skin; ``preview`` True.
+
+    Raises
+    ------
+    PrimitiveError
+        When the primitive cannot be placed, or it is a free-form shape.
+    """
+    if isinstance(primitive, FreeformShape):
+        raise PrimitiveError(f"{primitive.name}: a free-form shape has no fast preview")
+    primitive.validate()
+    pl = primitive.placement
+    if not 1 <= pl.gore <= surface.gore_count:
+        raise PrimitiveError(f"{primitive.name}: gore must be within 1..{surface.gore_count}")
+    length = surface.profile.meridian_length
+    if not 0.0 < pl.tape_position < length:
+        raise PrimitiveError(f"{primitive.name}: tape position must be within (0, {length:.3f}) m")
+    s0, theta0 = pl.tape_position, surface.theta_at(pl.gore, pl.across)
+    base, axis, b1, b2 = _axis_frame(surface, pl, s0, theta0)
+    skin = _Skin(primitive, surface, base, axis, b1, b2, samples)
+    fp = skin.at(np.zeros(samples), skin.phi)
+    fp_s, fp_theta, _ = surface.locate(fp)
+    _check_splits(primitive, skin)
+    return PrimitiveDesign(
+        primitive=primitive,
+        surface=surface,
+        base_s=s0,
+        base_theta=theta0,
+        base_point=base,
+        axis=axis,
+        b1=b1,
+        b2=b2,
+        footprint_phi=skin.phi,
+        footprint_points=fp,
+        footprint_s=fp_s,
+        footprint_theta=fp_theta,
+        pieces=[],
+        attachment=[],
+        marks=[],
+        feed_hole=None,
+        checks=[],
+        _skin=skin,
+        preview=True,
+    )
 
 
 def _piece_at(primitive: Primitive, seams: FloatArray, phi: float) -> int:

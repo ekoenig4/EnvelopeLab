@@ -43,7 +43,16 @@ to share the height): every shape, its footprint and feed holes, and the symmetr
 Each shape is drawn by its cut panels: neighbouring gores or panels in alternating fabric
 shades, a flat tip disc in its own shade, and its seams and horizontal splits drawn over
 them, so the panel layout can be judged on the balloon. The selected shape's panels are
-tinted magenta with magenta seams; the axes are green. They follow every number you type
+tinted magenta with magenta seams; the axes are green.
+
+Changes show at once, as in a game engine's viewport: while you type, scroll or hold a
+value, every view of the balloon (this tab, the 3D views of the other modes and the 3D /
+Simulation view) draws a fast preview of the shape's skin, within a tenth of a second or
+so. When you stop for about a third of a second the shape is placed in full (its pieces
+flattened and checked) and the preview is replaced; until then the status line says
+*updating…*. The checks, cut pieces, markings, simulations and exports never use a
+preview, only the full placement. A shape imported from a mesh has no preview and
+updates when it is placed. The views follow every number you type
 in the editor next to them, and you can move the selected shape on either:
 
 * **Nudge**: the ◀ ▶ buttons move the selected shape round the envelope, ▲ ▼ up and down

@@ -101,6 +101,7 @@ nav:
       - ADR-0048: adr/ADR-0048-half-gores.md
       - ADR-0049: adr/ADR-0049-crown-layout.md
       - ADR-0050: adr/ADR-0050-hints-and-live-edits.md
+      - ADR-0051: adr/ADR-0051-shape-previews.md
 theme:
   name: material
 markdown_extensions:

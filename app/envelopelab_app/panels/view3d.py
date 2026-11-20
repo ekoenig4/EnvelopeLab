@@ -917,9 +917,10 @@ class View3DPanel(QWidget):
         specs = {s.name: s for s in session.state.shapes} if session is not None else {}
         designed: dict[str, Any] = {}
         for name in service.keys:
-            result = service.result(name)
+            result = service.shown(name)  # the last placed design while it is updated
             if result is None or result.design is None:
                 continue
+            state = "updating" if service.updating(name) else "current"
             shown = designed_display(result.design)
             designed[name] = shown
             # Sit the shape and its feed holes on the drawn envelope (display only).
@@ -931,7 +932,7 @@ class View3DPanel(QWidget):
             layer = Layer(
                 f"shape:{name}",
                 "shape",
-                f"Special shape {name} (as designed, current)"
+                f"Special shape {name} (as designed, {state})"
                 + (f", {len(holes)} feed hole(s)" if holes else ""),
                 shown.points + shift,
                 shown.triangles,
@@ -941,7 +942,7 @@ class View3DPanel(QWidget):
             layer.visible = service.simulation_status(name) != "current"
             self.layers[layer.key] = layer
         for name, sim in service.simulations.items():
-            result = service.result(name)
+            result = service.shown(name)
             if name not in service.keys or result is None or result.design is None:
                 continue
             placed = result.design  # the shape as placed now (offset and fabric)

@@ -65,6 +65,8 @@ from envelopelab_app.simulation import CALCULIX, PREVIEW, SimulationManager
 from envelopelab_app.wizard import NewDesignWizard
 
 FILE_FILTER = f"EnvelopeLab projects (*{PROJECT_SUFFIX})"
+#: Pause after the last edit of a special shape before it is placed in full, ms.
+SHAPE_SETTLE_MS = 350
 
 
 class MainWindow(QMainWindow):
@@ -97,6 +99,9 @@ class MainWindow(QMainWindow):
         self.controller.defer_hidden = interactive
         # Scripted windows (tests) apply live edits at once, so a value set reads back.
         self.controller.live_deferred = interactive
+        # Shape edits show as fast previews at once; the full placement (pieces, checks)
+        # waits until the edits pause (scripted windows place at once).
+        self.controller.shapes.settle_ms = SHAPE_SETTLE_MS if interactive else 0
         self.simulation = SimulationManager(self.controller)
         self.setWindowTitle("EnvelopeLab")
         self.resize(1500, 950)

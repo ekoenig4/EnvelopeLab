@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: special shape edits show almost at once (ADR-0051). Every view of the
+  balloon draws a fast preview of the shape's skin on each change (about 25–45 ms to
+  compute for the fixture shapes, where the full placement takes 0.3–0.5 s); the full
+  placement (pieces, checks) runs when the edits pause for 350 ms. The shape no longer
+  disappears while it is placed again: the newest preview or placement stays on screen
+  (status "updating…"). Checks, pieces, simulations and exports always use the full
+  placement; the envelope surface is built once per envelope. No results change.
 - Changed: special shapes on the balloon (Special shapes mode and the 3D inlays of the
   other modes) are drawn by their cut panels, in alternating fabric shades with their
   seams, splits and cap, instead of as solid pink objects; the selected shape is tinted
