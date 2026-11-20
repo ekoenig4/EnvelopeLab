@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QTest
@@ -170,3 +172,38 @@ def test_symmetry_axes_and_the_scale_dial(gore_window: MainWindow) -> None:
     editor.symmetry.setCurrentIndex(0)
     spec = session.state.overlays[0]
     assert spec.symmetry == 0 and len(spec.points) == 8
+
+
+def test_an_overlay_shows_and_exports_its_own_pattern(
+    gore_window: MainWindow, tmp_path: Path
+) -> None:
+    from envelopelab.export.qa import _check_cal_pdf, _page_boxes, _read_dxf
+
+    gore_window.set_mode("shapes")
+    panel = gore_window.shapes
+    name = panel.add_overlay()
+    assert name is not None
+    panel.overlay_editor.changed.emit({"placement": {"across": 0.5}}, False)  # on a seam
+    # Cut pieces: the overlay's piece; Checks: its fit; Envelope panels: its markings.
+    assert panel.pieces.topLevelItemCount() == 1
+    first = panel.pieces.topLevelItem(0)
+    assert first is not None and first.text(0) == f"{name}-overlay"
+    assert [p.label for p in panel.preview.pieces] == [f"{name}-overlay"]
+    items = [panel.checks.topLevelItem(i) for i in range(panel.checks.topLevelItemCount())]
+    checks = [item.text(0) for item in items if item is not None]
+    assert any("fit on the envelope" in c for c in checks)
+    _surface, layout, _error = panel.overlay_layout()
+    assert layout is not None
+    panels = {(r.gore, r.row) for r in layout.runs}
+    assert len(panel.markings.sheets) == len(panels) >= 2
+    assert panel.attachment.topLevelItemCount() == len(layout.runs)
+    # Its own pattern: a 1:1 template and DXFs (mm), calibration lines as labelled.
+    files = panel.export_overlay_pattern(tmp_path)
+    names = {f.name for f in files}
+    assert any(n.endswith(f"-{name}-overlay.pdf") for n in names)
+    assert f"{name}-overlay.dxf" in names
+    assert sum(n.startswith(f"{name}-mark-") for n in names) == len(panels)
+    pdf = next(f for f in files if f.suffix == ".pdf")
+    for k, (_w, _h, content) in enumerate(_page_boxes(pdf), 1):
+        assert "%CAL" in content and _check_cal_pdf(pdf.name, k, content) == []
+    assert _read_dxf(tmp_path / f"{name}-overlay.dxf")["units"] == 4

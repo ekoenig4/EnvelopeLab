@@ -696,6 +696,7 @@ class ShapesPanel(QWidget):
         self.overlay_editor = OverlayEditor()
         self.overlay_editor.changed.connect(self._overlay_changed)
         self.overlay_editor.colourRequested.connect(self._overlay_colour)
+        self.overlay_editor.exportRequested.connect(lambda: self.export_overlay_pattern())
         #: Each overlay's layout on the envelope: name -> (spec, surface, layout, error).
         self._overlay_layouts: dict[str, tuple[Any, Any, Any, str]] = {}
         self.duplicate_button = QPushButton("Duplicate")
@@ -1173,6 +1174,122 @@ class ShapesPanel(QWidget):
             self.selected = name
             self._show_selected()
 
+    def _show_overlay_result(self, layout: Any) -> None:
+        """The selected overlay's pattern in the result tabs: its cut piece (Cut pieces,
+        with how its 1:1 page lies on the print roll), its checks (fit on the envelope,
+        on the roll), the line marked on each panel it crosses (Envelope panels) and the
+        length of that line per panel (Attachment)."""
+        from envelopelab.export.overlays import overlay_checks, overlay_cut_piece, overlay_sheets
+
+        if layout is None:
+            return
+        roll = self.controller.prefs.print_roll_width
+        piece = overlay_cut_piece(layout)
+        fit = roll_fit(piece.cut, roll)
+        w, h = piece.size
+        on_roll = (
+            f"LARGER THAN {roll * 1000:.0f} mm ROLL"
+            if fit.oversize
+            else f"{fit.across * 1000:.0f} mm across, {fit.describe()}"
+        )
+        item = QTreeWidgetItem(
+            [
+                piece.label,
+                str(piece.cut_count),
+                f"{w:.3f} × {h:.3f}",
+                f"{piece.flat_area:.4f}",
+                f"{piece.surface_area:.4f}",
+                on_roll,
+            ]
+        )
+        if fit.oversize:
+            item.setForeground(5, QBrush(QColor(WARN_COLOR)))
+        self.pieces.addTopLevelItem(item)
+        for check in overlay_checks(layout, roll):
+            row = QTreeWidgetItem(
+                [
+                    check.name,
+                    f"{check.value:.4g} {check.unit}",
+                    f"{check.limit:.4g} {check.unit}",
+                    "passed" if check.passed else check.severity.upper(),
+                ]
+            )
+            row.setToolTip(0, check.message)
+            row.setForeground(3, QBrush(QColor(SEVERITY_COLORS[check.severity])))
+            self.checks.addTopLevelItem(row)
+        for run in layout.runs:
+            length = float(np.linalg.norm(np.diff(run.panel, axis=0), axis=1).sum())
+            self.attachment.addTopLevelItem(
+                QTreeWidgetItem([f"gore {run.gore}, row {run.row}", f"{length:.3f}"])
+            )
+        for tree in (self.pieces, self.checks, self.attachment):
+            for column in range(tree.columnCount()):
+                tree.resizeColumnToContents(column)
+        self.preview.set_pieces([piece], frozenset({piece.label} if fit.oversize else ()), roll)
+        surface = self.controller.envelope_surface()
+        if surface is None:
+            return
+        sheets, _pairs = overlay_sheets(layout, surface, "envelope")
+        markings = [s for s in sheets if s.kind == "marking"]
+        stale = self.controller.artifact_status("patterns") == "stale"
+        self.markings.set_sheets(markings, stale)
+        lines = [
+            f"{len(markings)} envelope panel(s) to mark: "
+            + ", ".join(s.piece for s in markings)
+            + "; match each numbered mark to the same number on the piece."
+        ]
+        if stale:
+            lines.append("Patterns are STALE: regenerate them before marking (shown greyed).")
+        self.marking_notes.setText("\n".join(lines))
+
+    def export_overlay_pattern(self, out_dir: str | Path | None = None) -> list[Path]:
+        """Write the selected overlay's own cutting pattern (its 1:1 template PDF and the
+        DXFs of the piece and of every panel marking) into ``out_dir`` (asked for when
+        None); returns the files written (empty when refused or cancelled)."""
+        from PySide6.QtWidgets import QFileDialog
+
+        from envelopelab.export.overlays import write_overlay_pattern
+        from envelopelab.project.colours import PanelRef
+
+        overlay = self.overlay()
+        session = self.controller.session
+        surface, layout, error = self.overlay_layout()
+        if overlay is None or session is None or surface is None:
+            return []
+        if layout is None:
+            self.controller.editRejected.emit(f"pattern not written: {error}")
+            return []
+        if out_dir is None:
+            chosen = QFileDialog.getExistingDirectory(self, f"Export the pattern of {overlay.name}")
+            if not chosen:
+                return []
+            out_dir = chosen
+        fabric = overlay.fabric
+        if not fabric:
+            row = surface.rows[
+                int(surface.row_index(np.array([overlay.placement.tape_position]))[0])
+            ]
+            from envelopelab.project.gore_design import row_zone
+
+            zone = row_zone(session.design, session.patterns, row.label)
+            fabric = session.design.zones.get(zone, zone)
+        colour = session.state.colours.colour_of(PanelRef(overlay.name, "A", 1))
+        files = self.controller.attempt(
+            write_overlay_pattern,
+            layout,
+            surface,
+            fabric,
+            out_dir,
+            self.controller.prefs.print_roll_width,
+            session.design.meta.name,
+            colour,
+        )
+        if files:
+            self.controller.message.emit(
+                f"Pattern of {overlay.name} written to {out_dir} ({len(files)} files)"
+            )
+        return list(files or [])
+
     def _overlay_colour(self) -> None:
         from PySide6.QtWidgets import QColorDialog
 
@@ -1502,6 +1619,8 @@ class ShapesPanel(QWidget):
             self._show_selected()
 
     def _result_tab_shown(self, _index: int) -> None:
+        if self.overlay() is not None:
+            return  # an overlay's results are filled when it is shown (they are quick)
         if self._results_stale and self.result_tabs.currentWidget() is not self.placement:
             self._show_result(self.spec())
 
@@ -1535,6 +1654,7 @@ class ShapesPanel(QWidget):
         self._show_simulation(spec)
         self._update_buttons()
         if overlay is not None:
+            self._show_overlay_result(layout)
             self.status.setText(
                 f"{overlay.name}: overlay (appliqué)"
                 + ("" if layout is not None else f" - CANNOT BE LAID: {error}")

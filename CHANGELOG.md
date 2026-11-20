@@ -11,7 +11,9 @@ All notable changes to this project will be documented in this file.
   dragged and nudged like a shape, coloured like a panel. The build pack cuts each one
   (1:1 template, cut once) and marks the line to sew it on every panel it crosses, with
   numbered marks at the seams; the fit on the curved envelope is reported (warning above
-  1 % ease). No existing result changes.
+  1 % ease). Each overlay's own pattern is shown in the Cut pieces, Checks and Envelope
+  panels tabs and can be exported alone (1:1 PDF + DXF); the build pack's index lists
+  the overlays and its build order cuts and sews them. No existing result changes.
 - Added: a **Colours** mode to colour every panel of the envelope and of the special
   shapes (ADR-0055, project format 8). It shows the panels as a flat grid with a colour
   picker like office and image-editing programs (theme colours with tints and shades,

@@ -397,10 +397,14 @@ class OverlayEditor(QWidget):
         change) and whether the change is live (a value being spun: one undo step).
     colourRequested()
         Choose the overlay's colour.
+    exportRequested()
+        Write the overlay's own cutting pattern.
     """
 
     changed = Signal(dict, bool)
     colourRequested = Signal()  # noqa: N815 (Qt naming)
+    #: Write this overlay's own cutting pattern (1:1 PDF and DXFs).
+    exportRequested = Signal()  # noqa: N815 (Qt naming)
 
     def __init__(self) -> None:
         super().__init__()
@@ -456,6 +460,15 @@ class OverlayEditor(QWidget):
         self.colour_button.setObjectName("overlayColour")
         self.colour_button.clicked.connect(lambda _c=False: self.colourRequested.emit())
         form.addRow("Colour", self.colour_button)
+        self.export_button = QPushButton("Export pattern (1:1 PDF + DXF)…")
+        self.export_button.setObjectName("overlayExport")
+        self.export_button.setToolTip(
+            "Write this overlay's own cutting pattern: its 1:1 template (PDF, print at 100 %) "
+            "and DXFs of the piece and of the line marked on each panel it crosses. The "
+            "build pack (Export build pack…) has it too."
+        )
+        self.export_button.clicked.connect(lambda _c=False: self.exportRequested.emit())
+        form.addRow("Pattern", self.export_button)
         layout.addLayout(form)
 
         # Polygon: the corners are dragged in the drawing below; the table (folded away)

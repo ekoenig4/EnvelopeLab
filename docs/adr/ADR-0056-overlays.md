@@ -45,7 +45,12 @@ and simulations; an appliqué is none of that.
   cut 1, `<slug>-<name>-overlay.pdf`), a marking sheet per panel its outline crosses
   (named like a shape's, so a panel's marking template draws every shape's and overlay's
   lines), numbered match marks at every seam crossing, and a seam pair with the planned
-  ease, checked by the output QA. The colour plan draws the overlays over the gores.
+  ease, checked by the output QA. The colour plan draws the overlays over the gores;
+  the index lists them among the features and its build order cuts them after the
+  panels and sews them on before the panels are joined (inside one panel) or after the
+  seams they cross. In the application the result tabs show an overlay's pattern (Cut
+  pieces, Checks, Envelope panels, Attachment), and **Export pattern** writes one
+  overlay's own pattern (`write_overlay_pattern`: its 1:1 template and DXFs).
 
 ## Consequences
 * Overlays are not mirrored by symmetry axes or grouped with shapes yet.

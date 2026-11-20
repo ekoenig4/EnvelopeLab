@@ -297,3 +297,24 @@ def test_a_corner_within_a_millimetre_of_an_axis_lies_on_it() -> None:
     off = np.array([[0.0008, 0.7], [-0.3, 0.2]])  # 0.8 mm right of the first (up) axis
     outline, _owners = symmetric_polygon(off, 2)
     assert np.allclose(outline[0], [0.0, 0.7])
+
+
+def test_the_build_order_cuts_and_sews_the_overlays(session: ProjectSession) -> None:
+    from envelopelab.export.build_pack import envelope_sheets
+    from envelopelab.export.overlays import overlay_pack
+    from envelopelab.export.shop import PackContext, build_order, features
+
+    edits.add_overlay(session, _spec(name="tag", s=_rows_mid(session, 1), width=0.3))
+    edits.add_overlay(session, _spec(name="sun", across=0.5, s=4.8, width=1.6))
+    surface = envelope_surface(session.design, session.patterns)
+    sheets = envelope_sheets(session.design, session.patterns)
+    more, pairs, layouts = overlay_pack(session.state.overlays, surface, {})
+    ctx = PackContext(session.design, None, sheets + more, pairs, [], [], 1.524, overlays=layouts)
+    steps = dict(build_order(ctx))
+    assert "2 appliqué(s)" in steps["CUT OVERLAYS"]
+    assert "tag on panel" in steps["SEW OVERLAYS"]  # inside one panel: before joining
+    assert "sun" in steps["SEW OVERLAYS ACROSS SEAMS"]  # across seams: after them
+    order = [name for name, _text in build_order(ctx)]
+    assert order.index("SEW OVERLAYS") < order.index("BUILD GORES")
+    assert order.index("SEW OVERLAYS ACROSS SEAMS") > order.index("JOIN GORES")
+    assert {"tag", "sun"} <= {name for name, _text in features(ctx)}

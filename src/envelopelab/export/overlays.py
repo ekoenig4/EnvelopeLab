@@ -12,11 +12,16 @@ Every overlay (:mod:`envelopelab.project.overlays`) gives
 
 and one seam pair: the piece's outline against the marked lines, with the planned ease
 (:attr:`envelopelab.project.overlays.OverlayLayout.ease`) that the QA checks.
+
+:func:`write_overlay_pattern` writes one overlay's own cutting pattern (its 1:1 template
+and DXFs) without the rest of the pack; :func:`overlay_cut_piece` and
+:func:`overlay_checks` give the application its piece and checks.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -25,7 +30,7 @@ from envelopelab.export.build_pack import SeamPair, Sheet
 from envelopelab.geometry.polygon import offset_polygon
 
 if TYPE_CHECKING:
-    from envelopelab.features.primitives import EnvelopeSurface
+    from envelopelab.features.primitives import CutPiece, DesignCheck, EnvelopeSurface
     from envelopelab.project.overlays import OverlayLayout
 
 
@@ -143,4 +148,121 @@ def overlay_pack(
     return sheets, pairs, layouts
 
 
-__all__ = ["overlay_pack", "overlay_sheet_name", "overlay_sheets"]
+__all__ = [
+    "overlay_checks",
+    "overlay_cut_piece",
+    "overlay_pack",
+    "overlay_sheet_name",
+    "overlay_sheets",
+    "write_overlay_pattern",
+]
+
+
+def overlay_cut_piece(layout: OverlayLayout) -> CutPiece:
+    """The overlay as a cut piece (as a special shape's skin pieces are drawn and listed):
+    finished outline, cut outline (the hem added), its outline as its one edge; its
+    surface area is its flat area (a patch lies flat on the cloth under it)."""
+    from envelopelab.features.primitives import CutPiece
+    from envelopelab.geometry.gore import polygon_area
+
+    spec = layout.spec
+    finished = layout.outline
+    cut = offset_polygon(finished, spec.hem) if spec.hem > 0 else finished.copy()
+    return CutPiece(
+        label=overlay_sheet_name(spec.name),
+        finished=finished,
+        cut=cut,
+        rim=None,
+        edges={"outline": np.vstack([finished, finished[:1]])},
+        surface_area=float(polygon_area(finished)),
+    )
+
+
+def overlay_checks(layout: OverlayLayout, roll_width: float) -> list[DesignCheck]:
+    """Checks of an overlay's pattern: how its outline fits the curved envelope (the ease
+    between the piece and the marked line against :data:`~envelopelab.project.overlays.
+    EASE_WARNING` of it) and whether its 1:1 page fits the print roll
+    (:func:`envelopelab.export.templates.roll_checks`)."""
+    from envelopelab.export.templates import roll_checks
+    from envelopelab.features.primitives import DesignCheck
+    from envelopelab.project.overlays import EASE_WARNING
+
+    limit = EASE_WARNING * layout.perimeter
+    ok = abs(layout.ease) <= limit
+    fit = DesignCheck(
+        f"{layout.spec.name}: fit on the envelope",
+        abs(layout.ease) * 1000.0,
+        limit * 1000.0,
+        "mm",
+        "info" if ok else "warning",
+        (
+            f"the outline is {layout.ease * 1000:+.0f} mm longer on the piece than the line "
+            "marked on the panels; work it in between the numbered marks"
+            + ("" if ok else " (too much for a flat patch here: make it smaller)")
+        ),
+    )
+    piece = overlay_cut_piece(layout)
+    return [fit, *roll_checks([(piece.label, piece.cut)], roll_width)]
+
+
+def write_overlay_pattern(
+    layout: OverlayLayout,
+    surface: EnvelopeSurface,
+    fabric: str,
+    out_dir: str | Path,
+    roll_width: float,
+    title: str = "",
+    colour: str | None = None,
+) -> list[Path]:
+    """Write one overlay's own cutting pattern into ``out_dir`` (created): its 1:1
+    template PDF (as in the build pack, ``<slug>-<name>-overlay.pdf``), its DXF in mm and
+    one DXF per envelope panel it is marked on (``<name>-mark-G<g>-<row>.dxf``).
+
+    Parameters
+    ----------
+    layout : OverlayLayout
+        The overlay laid on the envelope.
+    surface : EnvelopeSurface
+        The envelope, m.
+    fabric : str
+        Fabric printed on the piece.
+    out_dir : str or Path
+        Folder to write.
+    roll_width : float
+        Print roll width, m (the template page is no wider, or says so in red).
+    title : str
+        Design name (the file-name prefix of the template).
+    colour : str or None
+        The overlay's colour (``#rrggbb``), printed on the piece.
+
+    Returns
+    -------
+    list of Path
+        The files written, the template first.
+    """
+    from envelopelab.export.build_pack import write_dxf
+    from envelopelab.export.templates import (
+        TemplateFile,
+        TemplatePage,
+        piece_name,
+        slug,
+        write_template_pdf,
+    )
+
+    out = Path(out_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    sheets, _pairs = overlay_sheets(layout, surface, fabric)
+    piece = sheets[0]
+    if colour is not None:
+        piece.colours = [(colour, [1])]
+    stem = slug(title) if title else "overlay"
+    template = TemplateFile(
+        f"{stem}-{piece_name(piece.name)}.pdf",
+        f"{piece.piece} (appliqué), cut {piece.cut_count}",
+        [TemplatePage(piece, piece.piece.upper())],
+    )
+    written = [out / template.name]
+    write_template_pdf(template, written[0], roll_width)
+    for sheet in sheets:
+        written.append(write_dxf(sheet, out / f"{sheet.name}.dxf"))
+    return written

@@ -51,8 +51,25 @@ Choose its colour with **Colour…**, or paint it in **Colours**: overlays are d
 the panels there, and a click with **Paint** colours the overlay (the fill tools paint the
 panels under it, never the overlay).
 
+## Its cutting pattern
+With an overlay selected, the result tabs on the right show its pattern:
+
+* **Cut pieces**: the piece as cut (cut line, sew line dotted), its size and area, and how
+  its 1:1 page lies on the print roll (tick *Show as printed on the roll*);
+* **Checks**: how well it fits the curved envelope and whether its page fits the roll;
+* **Envelope panels**: every panel it crosses with the line to sew it on and the numbered
+  marks; **Attachment**: the length of that line on each panel.
+
+**Export pattern (1:1 PDF + DXF)…** writes just this overlay's pattern into a folder: its
+1:1 template (print at 100 % and measure both calibration lines) and DXFs in mm of the
+piece and of the line marked on each panel. The build pack has the same files.
+
 ## In the build pack
 Each overlay gets its 1:1 template `<name>-<overlay>-overlay.pdf` (cut once, with its
 colour) and every panel its outline crosses gets a marking page (`…-panel-<row>-gore-<g>.pdf`)
 with the line to sew it on and the same numbered marks. The colour plan draws the
-overlays over the gores and the cloth table counts them.
+overlays over the gores and the cloth table counts them. The index lists every overlay
+among the features, and its build order says when to cut them (**CUT OVERLAYS**) and
+sew them on: an overlay inside one panel before the panels are joined (**SEW
+OVERLAYS**), one that crosses seams once those seams are sewn (**SEW OVERLAYS ACROSS
+SEAMS**).
