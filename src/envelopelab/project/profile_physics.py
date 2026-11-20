@@ -21,7 +21,7 @@ import numpy as np
 from envelopelab.atmosphere import G0
 from envelopelab.design.model import DesignDocument
 from envelopelab.materials.repository import FabricCatalog, FabricLibraryRepository
-from envelopelab.project.gore_design import design_profile, gore_outputs
+from envelopelab.project.gore_design import GoreOutputs, design_profile, gore_outputs
 from envelopelab.project.model import PatternSet
 from envelopelab.solvers.axisymmetric import (
     AxisymmetricLoad,
@@ -55,15 +55,20 @@ def design_load(
     design: DesignDocument,
     patterns: PatternSet,
     fabrics: FabricLibraryRepository | FabricCatalog | None = None,
+    outputs: GoreOutputs | None = None,
 ) -> DesignLoad:
     """Load of a gore design for the membrane check (module docstring).
+
+    ``outputs``: the design's :func:`gore_outputs` when already computed (for these
+    ``design``, ``patterns`` and ``fabrics``).
 
     Raises
     ------
     ValueError
         For a special-shape design or an invalid profile.
     """
-    outputs = gore_outputs(design, patterns, fabrics)
+    if outputs is None:
+        outputs = gore_outputs(design, patterns, fabrics)
     profile = design_profile(design)
     gamma = (outputs.ambient_density - outputs.internal_density) * G0.value
     weight, note = 0.0, ""

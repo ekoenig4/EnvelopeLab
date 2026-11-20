@@ -17,10 +17,18 @@ one page each** (ADR-0038):
 | `<slug>-<shape>-<piece>.pdf` | Every skin piece of every special shape (e.g. `<slug>-eye-G1.pdf`, `<slug>-horn-TIP.pdf`) |
 
 The page is the piece's cut outline plus 20 mm, so the **whole piece is on one page,
-never split**: upright when its height fits the roll (the row height across the bolt, the
-gore width along the roll), turned a quarter when only its width fits; a piece larger
-than the roll both ways stays whole and the page says `LARGER THAN THE … MM ROLL BOTH
-WAYS` in red. A page shows the cut line (solid black), the sewn line (dotted grey),
+never split**. From format 4 (ADR-0042) the page is in the print roll's frame: **the page
+width runs across the roll** and is never wider than it, **the page height runs along
+the roll** and may be any length, so every page prints at 100 % without being rotated.
+The piece is turned on its page to fit: a quarter turn first (its height, the row height,
+across the roll, as panels are cut across the bolt), then upright, then the narrowest
+turn of a piece that fits no other way (rotating calipers over its convex hull). A piece
+wider than the roll at any turn stays whole and the page says `LARGER THAN THE … MM ROLL
+AT ANY TURN` in red. The bottom margin carries a double arrow across the page,
+`ACROSS THE ROLL: <page width> mm of the <roll> mm roll - <turn>`. The UP / warp arrow
+turns with the piece: lay the template on the cloth by its grain, not by the page. (Format
+3 drew the piece upright when its height fitted the roll, so the page *height* went
+across the roll.) A page shows the cut line (solid black), the sewn line (dotted grey),
 feature marks (red), the finished widths and height (blue), the panel letter, cut count,
 fabric and finished size, the warp (UP) arrow, a legend, the sheet header (as in the DXF)
 and two calibration lines, across and along the page, inside the piece. Each page's
@@ -35,7 +43,7 @@ at 1:1, ticks every T mm`, `along: …`) is generated from the same values.
 | `cad/envelope-row-<R>.dxf` | Envelope row panel `R`, cut once per gore |
 | `cad/parachute-panel.dxf` | Parachute radial panel, cut once per radial panel; bottom = the parachute edge |
 | `cad/parachute-centre.dxf` | Parachute centre panel (a circle), cut once; only when the parachute has one |
-| `cad/<shape>-G<k>.dxf`, `cad/<shape>-P<k>.dxf` | Skin gore or panel `k` of a special shape |
+| `cad/<shape>-G<k>.dxf`, `cad/<shape>-P<k>.dxf` | Skin gore or panel `k` of a special shape; with horizontal splits each tier's piece has its letter, `A` at the rim (`cad/<shape>-G<k>A.dxf`, `-G<k>B.dxf`, …) and an upper tier's piece has a `bottom` edge, paired with the `top` of the piece below it in `seam_pairs` |
 | `cad/<shape>-TIP.dxf` | Flat tip disc of a tube or revolved shape |
 | `cad/<shape>-mark-G<g>-<R>.dxf` | Marking sheet: envelope panel (gore `g`, row `R`) with the shape's footprint line, match marks and feed hole |
 | `cad/index.json` | The index (below); it lists every other file of the pack |
@@ -127,7 +135,7 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
 
 ```json
 {
-  "format": "envelopelab-build-pack/3",
+  "format": "envelopelab-build-pack/4",
   "title": "design name",
   "units": "mm",
   "roll_width_mm": 1524.0,
@@ -135,7 +143,8 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
                  "created": "2026-11-03T20:56:43+00:00", "project": "balloon.elproj"},
   "templates": [
     {"file": "sample-panel-A.pdf", "description": "panel A, cut 20",
-     "pages": [{"sheet": "envelope-row-A", "band": 1, "bands": 1, "turned": false,
+     "pages": [{"sheet": "envelope-row-A", "band": 1, "bands": 1, "turn_deg": 90.0,
+                "across_roll_mm": 1440.2, "along_roll_mm": 2693.7,
                 "markings": []}, "…"]}
   ],
   "documents": [
@@ -146,6 +155,7 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
     {"file": "cad/ear-G1.dxf", "piece": "ear-G1", "kind": "skin piece", "cut_count": 1,
      "fabric": "ripstop red", "finished_width_mm": 392.1, "finished_height_mm": 1855.0}
   ],
+  "shape_groups": {"Head": ["face", "ear", "ear mirror"]},
   "seam_pairs": [
     {"a": [{"file": "cad/ear-G1.dxf", "edge": "right"}],
      "b": [{"file": "cad/ear-G2.dxf", "edge": "left"}],
@@ -156,6 +166,10 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
   ]
 }
 ```
+
+`shape_groups` lists the special shapes of every group (one object made of several
+shapes, ADR-0041) by name; it is empty when no shape is grouped, and each grouped shape's
+skin sheets name the object.
 
 `kind` is `envelope panel`, `parachute panel`, `skin piece` or `marking` (cut count 0). A
 seam pair lists the finished edges sewn together, with lengths summed on each side (all
@@ -171,7 +185,8 @@ marks (checked per mark interval when the shape is designed).
 the index and the directory list the same files; every DXF is in mm; every calibration
 line, in every DXF and on every template page (across and along), measures what its
 label says; every piece is on one page of its own file, never split, listed with its
-sheet, with one side no longer than the roll or the red larger-than-the-roll note
+sheet, no wider than the roll across it (format 4: the page width; format 3: one side)
+or with the red larger-than-the-roll note
 (formats 1 and 2: every `pattern.pdf` page is as wide as the roll); every sheet is drawn
 exactly once (a marking sheet over its row's panel); every header matches the index and the drawn `SEW` outline; every
 document opens (PDFs have pages, HTML pages load nothing from outside themselves, combined

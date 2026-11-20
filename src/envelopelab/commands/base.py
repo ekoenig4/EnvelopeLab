@@ -20,6 +20,12 @@ class Command(ABC):
     def undo(self) -> None:
         """Revert the command."""
 
+    def absorb(self, previous: Command) -> bool:
+        """Take ``previous`` (the command just before this one) into this one, so that
+        both are one undo step (undo then goes back to before ``previous``); False when
+        this kind of command cannot (the default)."""
+        return False
+
     @property
     def description(self) -> str:
         """Short human-readable description for the history list."""
@@ -52,10 +58,22 @@ class CommandStack:
 
     # -- editing ------------------------------------------------------------------------
 
-    def do(self, command: Command) -> None:
+    def do(self, command: Command, merge: bool = False) -> None:
+        """Execute ``command`` and add it to the history. With ``merge`` it replaces the
+        last command when it can take it in (:meth:`Command.absorb`): a run of edits of
+        one value (a spin box held down, a value dragged) is one undo step. The command
+        saved last is never merged away, so the unsaved-changes state stays right."""
         command.execute()
         if self._clean_index is not None and self._clean_index > len(self._undo_stack):
             self._clean_index = None  # the saved state was in the discarded redo history
+        if (
+            merge
+            and self._undo_stack
+            and not self._redo_stack
+            and self._clean_index != len(self._undo_stack)
+            and command.absorb(self._undo_stack[-1])
+        ):
+            self._undo_stack.pop()
         self._undo_stack.append(command)
         self._redo_stack.clear()
         self._notify()
@@ -95,6 +113,11 @@ class CommandStack:
         self._notify()
 
     # -- state --------------------------------------------------------------------------
+
+    @property
+    def last(self) -> Command | None:
+        """The command undo would revert next (None: nothing to undo)."""
+        return self._undo_stack[-1] if self._undo_stack else None
 
     @property
     def can_undo(self) -> bool:

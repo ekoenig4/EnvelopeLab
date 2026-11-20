@@ -40,7 +40,32 @@ KEYS: tuple[tuple[str, str], ...] = (
         "fraction across the gore, lean and lean direction in degrees), the shape's sizes "
         "(m) or revolved profile (m) or mesh vertices (m) and triangles, panel or gore "
         "count, match marks per piece, feed-hole radius (m, optional), seam allowance (m) "
-        "and skin fabric id (optional). Version 1 files read as having no shapes.",
+        "and skin fabric id (optional), and from version 4 the panel layout: "
+        "`seam_offset_deg` (turn of the seams round the axis, degrees), `panel_widths` "
+        "(relative width of every gore or panel; empty: equal) and `splits` (horizontal "
+        "splits as fractions of the profile from the base circle; not for mesh shapes) "
+        "`group` (optional name of the object the shape belongs to, ADR-0041) and "
+        "`mirror` (a mirror twin's source shape `of` and symmetry `axis`, ADR-0043), and "
+        "from version 5 where the panels meet at the crown (ADR-0049): "
+        "`crown_seam_offset_deg` (the seam turn at the cap or tip, degrees; null: as at the "
+        "rim), `crown_panel_widths` (relative widths there; empty: as at the rim), "
+        "`cap_shift` (m the cap is moved off the tip) and `cap_direction_deg` (towards "
+        "which direction round the axis), and from version 6 `cap_across` and `cap_up` "
+        "(where the panels meet seen from above, fractions of the shape's widest radius "
+        "across the gores and up the tape; 0, 0: the tip; ADR-0052), and from version 7 "
+        "`crown_shape` (the cap's outline seen from above: `kind` footprint, ellipse, "
+        "polygon or outline, with `width`, `length`, `turn_deg`, `points`, `smooth` and "
+        "`source`; null: a circle; ADR-0054). "
+        "Version 1 files read as having no shapes; versions 1 to 3 as having equal, "
+        "unturned and unsplit pieces; versions 1 to 4 with the seams meeting the crown as "
+        "they leave the rim and the cap centred; versions 1 to 5 without relative meeting "
+        "points; versions 1 to 6 with round caps.",
+    ),
+    (
+        "`state.symmetry_axes`",
+        "Named symmetry axes (version 4, ADR-0043): `name` and `line`, the gore position "
+        "of the meridian plane (gore widths from the first seam; gore n's centreline is "
+        "n - 0.5). Mirror twins are mirrored across them. Older files read as having none.",
     ),
     ("`snapshots`", "Named copies of `state` with their design content hash."),
     ("`versions`", "Committed design versions (`version_id`, `parent_id`, message, state)."),

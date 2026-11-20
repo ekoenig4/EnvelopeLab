@@ -9,11 +9,20 @@ panel); the pack format is described in [Build pack](../formats/build-pack.md).
 
 * **Folder**: where the pack is written (created if needed; files of the same names are
   replaced). The last folder is remembered.
-* **Roll width**: the width of your fabric roll (default 60 in). Every piece has its own
-  1:1 PDF whose one page shows the whole piece, turned so that one side fits the roll
-  (the row height runs across the bolt and the gore width along the roll). A piece
-  larger than the roll both ways is never split: its page says so in red, so you can
-  join cloth before cutting or plot it on a wider plotter.
+* **Roll width**: the width of the roll you print on (default 60 in). Every piece has its
+  own 1:1 PDF whose one page shows the whole piece. **The page width runs across the
+  roll and is never wider than it; the page height runs along the roll, as long as the
+  piece needs.** Print every page at 100 % with the page width across the roll, without
+  rotating it. To fit, the piece is turned on its page: a quarter turn first (the row
+  height across the roll, as panels are cut across the bolt), then upright, then whatever
+  turn is narrowest. The bottom margin of every page says so: an arrow across the page,
+  *ACROSS THE ROLL: 1440 mm of the 1524 mm roll - piece turned 90 deg*. The UP / warp
+  arrow turns with the piece, so lay the paper template on the cloth by that arrow.
+  A piece wider than the roll at any turn is never split: its page says so in red, so you
+  can join paper or plot it in parts.
+  The dialog starts from the **Print roll width** in **Preferences**; with that width
+  the Special shapes panel and **Validation / Warnings** already warn about every panel
+  larger than the roll before you export.
 * **Include**: the documents (all ticked by default). The cutting sheets are always
   written.
 
@@ -28,6 +37,7 @@ it never leaves a shape out without saying so.
 | `<name>-spec-summary.pdf` | The design at a glance, metric and English: size, volume, mouth, parachute hole and overlap, line lengths, lift and lift margin, configuration, rigging factors of safety, and **every value tagged *assumed*** (check these against datasheets before building) |
 | `<name>-build-log.pdf` | Sign-off sheets for the floor: panel cutting, each special shape, the turning vents, and the parachute, rigging and final inspection |
 | `<name>-panel-A.pdf`, `<name>-panel-B.pdf`, … | Cutting the envelope: one PDF per panel, the whole panel at 1:1 on one page |
+| `<name>-panel-C-left-half.pdf`, `<name>-panel-C-right-half.pdf`, … | Rows cut as **half gores** (Shape mode, *Panels and print roll*): one PDF per half instead of the panel's; cut each once per gore and sew each pair together along the centre seam first (the sewing schedule lists these seams first) |
 | `<name>-panel-H-gore-3.pdf`, … | Marking: one PDF per envelope panel that carries a special shape or a feed hole, with the lines where the shape is sewn on, the numbered marks and the feed holes drawn on it |
 | `<name>-assembly-envelope.pdf`, `<name>-assembly-<shape>.pdf` | Building: picture instructions, step by step, for the base envelope and for each special shape |
 | `<name>-<shape>-3d.html` | Each special shape in 3D, designed and inflated, with its simulation's metrics |

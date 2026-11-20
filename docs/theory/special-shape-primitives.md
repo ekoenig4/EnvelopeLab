@@ -82,11 +82,153 @@ including where a leaned base circle dips below it. A meridian that crosses the 
 more than once (the skin touching the envelope again) is rejected; a second crossing
 closer than the sample spacing is not detected.
 
+### Drawing preview
+
+`preview_primitive` builds the same skin (base frame, profile, seams, splits, cap) with
+`PREVIEW_SAMPLES` = 96 footprint samples instead of 720 and stops there: no piece is
+flattened, no allowance offset, no mark, attachment line or check. Its skin differs from
+the designed one only through the footprint interpolation (under 0.1 mm for the fixture
+shapes, `tests/unit/test_shape_preview.py`). It is a drawing aid while a value is
+edited (ADR-0051), flagged `preview`, and never used as a result.
+
 ## Cutting pattern
 
 The skin is cut into \(M\) pieces between the meridians
 \( \phi_j = 2\pi j/M - \pi/M \), so piece 1 is centred on the top of the feature. Each
 meridian runs from its footprint point (\(t = 0\)) to the tip (\(t = 1\)).
+
+### Panel layout: seam turn, panel widths and horizontal splits
+
+The layout of the pieces is the builder's choice (`seam_angles`, `split_heights`):
+
+* **Seam turn** \( \phi_{off} \) turns every seam round the axis.
+* **Panel widths** \( w_k > 0 \), one per piece, set how much of the turn each piece
+  spans: \( \Delta_k = 2\pi w_k / \sum w \). Piece 1 stays centred on the seam turn, so
+  \[
+  \phi_0 = \phi_{off} - \tfrac{1}{2}\Delta_0, \qquad
+  \phi_j = \phi_0 + \sum_{k<j} \Delta_k .
+  \]
+  With equal widths and no turn this is the layout above, to the last bit.
+
+  **Splitting a piece** (`split_piece`) replaces \( w_k \) by two widths \( w_k/2 \) and
+  adds one piece. The seams after \( \phi_0 \) are partial sums, so all old seams stay and
+  one appears at \( \phi_k + \Delta_k/2 \); only \( \phi_0 \) depends on the turn, so
+  splitting piece 1 sets \( \phi_{off}' = \phi_{off} - \Delta_0/4 \), which keeps
+  \( \phi_0 \). The crown's widths and turn are split the same way
+  (`tests/unit/test_split_piece.py`: every old seam kept to 10\(^{-9}\) rad).
+* **Horizontal splits** \( 0 < f_1 < \dots < f_n < 1 \) cut every piece across at the
+  meridian arc lengths \( u_i = f_i\,\ell \) from the base circle, where \( \ell \) is the
+  meridian's length to the tip (or the cap's edge). On a surface of revolution a split is
+  a circle round the axis. Tier 0 runs from the footprint to \(u_1\), tier \(i\) from
+  \(u_i\) to \(u_{i+1}\), and the last one to the tip. Each tier is a band with its own
+  parameter \(t\) from 0 (lower edge) to 1 (upper edge), developed like a whole skin:
+  exactly for a frustum, as a classic gore with true-length seams otherwise. Every split
+  must lie above the footprint all round (\( u_1 > \max u_0(\phi) + 0.02\,\ell \)), and
+  splits lie at least 2 % of the profile apart and from its ends (assumed).
+
+The top edge of a lower piece and the bottom edge of the piece above it both lie at the
+parallel \(u_i\): each is laid straight with the circle's true arc length, so the two match
+exactly (check *split seam match*). The shear and stretch of a dome gore are found tier
+by tier, so a split moves the flattening strain: each tier is equalised to its own seam
+lengths. For a 12-gore half-spheroid dome of radius 0.8 m and height 0.6 m, one split at
+45 % takes the flat-to-designed area of the whole skin from 98.0 % to 98.4 %, and puts
+−3.1 % in the top tier instead of −2.0 % along the whole gore; the preview simulation
+then predicts a slightly lower dome (0.568 m against 0.592 m, mesh 70 mm). The area
+distortion check reports the worst piece and the simulation shows the shape that follows.
+Unequal widths make the wide gores more distorted (the distortion of a gore grows with
+its width squared, see below); the narrowest piece sets the automatic cap diameter
+\( d = w_{top} \sum w / (\pi \min w) \).
+
+Mesh shapes take the seam turn and panel widths (the cut half-planes move with them) but
+no horizontal splits: their panels must stay discs from the footprint to the pole.
+
+### Crown layout: seam angles at the crown and a moved cap
+
+Where the pieces meet at the top is set separately from where they leave the rim
+(`crown_seam_angles`, `twisted`, `cap_moved`; ADR-0049).
+
+**Seam angles at the crown.** The crown has its own seam turn and widths, which give crown
+angles \( \phi^c_j \) by the formula above (each defaulting to the rim's; on the branch
+with \( \phi^c_0 - \phi_0 \in (-\pi, \pi] \)). Piece edges keep a *seam coordinate*
+\( \psi \), equal to the rim angle, and the skin point of \( (u, \psi) \) lies at the angle
+
+\[
+\phi(u, \psi) = \psi + \delta(\psi)\,g(u), \qquad
+\delta(\psi_j) = \phi^c_j - \phi_j, \qquad
+g = f^2 (3 - 2f), \quad f = \operatorname{clip}\!\left(\frac{u - u_s}{u_e - u_s}, 0, 1\right),
+\]
+
+with \( \delta \) linear between the seams, \( u_s \) the highest footprint point and
+\( u_e \) the lowest top of the skin. So the rim, the footprint, the marks and the
+attachment lines are exactly those of the plain shape (\( g = 0 \) below \( u_s \)), every
+seam turns smoothly to its crown angle and runs straight up from \( u_e \).
+\( \partial\phi/\partial\psi = (1-g) + g\,\Delta^c_k/\Delta_k > 0 \): the pieces never fold.
+At least 10 % of the profile must lie between \( u_s \) and \( u_e \) (assumed), or the
+shape is refused. A frustum with turned seams is no longer developed exactly (its seams
+are helices); it is laid out as a classic gore like the others.
+
+**Where the panels meet, as plan fractions (ADR-0052).** The meeting point (the cap's
+centre) can instead be given seen from above the shape, as fractions \( (a, u) \) of its
+widest radius \( R = \max \rho \) of the pointed meridian: \( a \) across the gores
+(towards the next gore, which is \( -\mathbf{b}_2 \): the frame's angles turn from up the
+tape towards the previous gore),
+\( u \) up the tape, \( a^2 + u^2 \le 1 \) (`cap_across`, `cap_up`). They give the move
+below through `meeting_point_shift`:
+
+\[
+\phi_P = \operatorname{atan2}(-a, u), \qquad
+e = s_{tip}\!\left(\rho = R\sqrt{a^2 + u^2}\right),
+\]
+
+with \( s_{tip}(\rho) \) the arc length from the apex at which the meridian first reaches
+radius \( \rho \) (its running maximum from the apex to the widest point, linearly
+interpolated). On a hemisphere \( e = R \arcsin\sqrt{a^2 + u^2} \)
+(`tests/unit/test_meeting_point.py`, within 1 µm); the skin point found lies at
+\( R\,(a, u) \) in the base frame within 0.1 % of \( R \). The fractions scale with the
+shape, so the point keeps its place when the shape is resized; `meeting_point_plan` is the
+inverse, used to show a `cap_shift` as fractions.
+
+**A moved cap.** A cap can be moved off the tip by \( e \) (`cap_shift`) along the meridian
+\( \phi_P \) (`cap_direction`). Its centre is \( \mathbf{P} = \mathbf{S}(\ell_{full} - e,
+\phi_P) \) on the whole, pointed skin (\( \ell_{full} \) the meridian's length to the
+apex), and its plane is square to the skin's normal \( \mathbf{n} \) there, a depth
+\( d \) below it:
+
+\[
+(\mathbf{x} - \mathbf{P})\cdot\mathbf{n} = -d,
+\]
+
+with \( d \) the centred cap's depth (from the apex to its plane along the axis), so a cap
+moved round a sphere keeps its size. On every meridian the top of the skin \( u_T(\phi) \)
+is the plane's crossing nearest the tip (bisection to `ROOT_TOLERANCE`), and the last tier
+runs from its lower edge to \( u_T \). The cap is the plane's section of the skin: exactly
+flat, cut as drawn. The cap must still cover the apex (its edge must go round the axis),
+it must stay clear of the footprint, and the highest split must lie below its edge (with
+the 2 % gap); otherwise the shape is refused.
+
+The gores of the top tier then end on a slanted edge. Laying their rows straight across,
+as below, would misplace the cloth near the cap, so each of those gores is developed on
+the parallels up to the highest point of its cap edge and the edge is drawn on it where it
+lies. The seam equalisation then fits three lengths, both seams up to the cap and the cap
+edge itself:
+
+\[
+x' = x\,(1 + \beta\,(y/Y)^2) + \kappa\,y, \qquad y' = (1 + \alpha + \gamma\,x/X)\,y,
+\]
+
+(\(X, Y\) the developed half width and height; Gauss-Newton with least-norm steps), so
+the gores' tops are as long as the flat cap's edge (check *cap seam match*, within
+0.02 mm in the tests). The term in \( \gamma \) lengthens one side more than the other: it
+is also used for any gore whose two seams do not close in on each other (a band below a
+split whose seams turn towards the crown), where the shear alone lengthens both alike.
+
+On the generic 8-gore fixture envelope, an 8-gore dome of radius 0.8 m and height 0.9 m
+with a 0.3 m cap has 3.2 % area distortion as designed. With its seams turned 20° at the
+crown it has 1.6 %; with unequal rim widths (2, 1, ..., 1) made equal at the crown, 6.3 %;
+with the cap moved 80 mm, 3.2 %; with a 15° crown turn, the cap moved 80 mm and a split at
+40 %, 9.4 %. Every seam, split and cap edge matches within the 3 mm tolerance, and the
+*area distortion* warning reports the worst piece; more gores reduce it and the
+simulation shows the shape that follows.
 
 ### Tube panels: exact developments
 
@@ -127,7 +269,8 @@ gores (see [Special-shape primitives](../validation/special-shape-primitives.md)
 | footprint between mouth and crown | tape clearance, m | > 0 |
 | rim length | sum of rim edges − footprint length, m | 3 mm (assumed, AGENTS.md sewn edges) |
 | attachment ease | largest \(|e_j|\): rim minus marked line between two match marks, m | 3 mm (assumed, AGENTS.md sewn edges) |
-| skin seam match | largest length difference of the two sides of a seam, m | 3 mm (assumed) |
+| skin seam match | largest length difference of the two sides of a seam (every tier), m | 3 mm (assumed) |
+| split seam match | largest length difference of a piece's top and the bottom of the piece above it, m | 3 mm (assumed) |
 | seam flattening | largest relative difference of a flat seam edge from its 3D seam | 2 % (assumed) |
 | area distortion | largest relative difference of a piece's flat and designed area | 1 % (assumed) |
 | cap seam match | panel tops summed − the cap's edge, m (mesh shapes; a parametric tip disc is a circle of the tops' radius) | 3 mm (assumed) |
@@ -188,6 +331,16 @@ one loop turning once round the axis. The point where the axis leaves the mesh (
 \( \phi_j = 2\pi j/M - \pi/M \), so every panel is a disc bounded by the footprint, two seams
 and the pole (or the cap's edge, see [Caps](#caps)).
 
+**Moved meeting point (ADR-0053).** With plan fractions \( (a, u) \) the seam line is moved
+off the axis to \( \mathbf{c} = \mathbf{P}_0 + R\,(u\,\mathbf{b}_1 - a\,\mathbf{b}_2) \),
+parallel to it, \( R \) the mesh's widest distance from the axis seen from above
+(`FreeformShape.widest_radius`, `seam_centre`). The pole, the half-planes, the cap's
+cylinder and every angle round the shape are taken about that line, so the panels meet
+where it leaves the mesh, at \( R\,(a, u) \) seen from above
+(`tests/unit/test_meeting_point.py`, to 10\(^{-9}\)). The footprint must still turn once
+round the line, and every panel stay a disc, or the shape says so; on the line through
+the base point (0, 0) the panels are bit-identical to before.
+
 **Flattening** [Levy, Liu]. Each panel is mapped by least-squares conformal maps, then
 by as-rigid-as-possible iterations that fit every triangle's best rotation and solve the
 cotangent-weighted Laplace system
@@ -217,6 +370,30 @@ triangle rests in its flat panel. No faceting correction is applied: the mesh is
 the designed surface.
 
 ## Caps
+
+**Shaped caps (ADR-0054).** A cap may have another outline than a circle, seen from above
+round the point where the panels meet (`envelopelab.features.crown`): the footprint or an
+imported outline (centred on its area centroid, widest width the cap diameter), an
+ellipse or a polygon. As one closed star-shaped polygon \( \mathbf{v}_i \) its radius in
+plan direction \( \theta \) is the exact ray-edge intersection
+
+\[
+r(\theta) = \frac{\mathbf{v}_i \times (\mathbf{v}_{i+1} - \mathbf{v}_i)}
+{\mathbf{d}(\theta) \times (\mathbf{v}_{i+1} - \mathbf{v}_i)}, \qquad
+\mathbf{d} = (\cos\theta, \sin\theta),
+\]
+
+and a point is inside the cap when \( |\mathbf{q}| < r(\theta) \), \( \mathbf{q} \) its
+plan position from the meeting point. The cap is the skin inside that prism along the
+axis: each meridian of a dome or revolved shape ends where it leaves it (the crossing
+nearest the tip, bisected to `ROOT_TOLERANCE`; within 10 µm of the outline,
+`tests/unit/test_crown_cap.py`), and the patch above is meshed (96 edge points plus every
+seam's top and every corner of the outline, 12 rings) and flattened like a mesh cap, so
+its edge keeps the gores' top lengths. A mesh shape's cap is cut by the prism instead of
+the cylinder below. The designed skin is unchanged; only where the cap is cut changes.
+A doubly curved cap cannot lie flat: with its edge at true length its flat area is less
+than its designed area (about \( 7\,\% \) for a spherical cap of half-angle
+\( 30^\circ \)), which the area distortion check reports.
 
 Pieces that meet in a point are hard to sew: \(M\) seams and \(M\) seam allowances pile
 up in one spot. Balloon practice sews their tops round a circle of measurable diameter
@@ -277,10 +454,13 @@ nodes were numbered differently.
 
 `primitive_appendage` builds an `AppendageSpec` with `skin_mode="designed"`. The skin
 factory triangulates every cut piece **in its own flat coordinates** around the footprint
-nodes of the host mesh. Seam, rim, tip and apex nodes are shared between the pieces that
-meet there, and interior nodes start on the designed shape through the inverse of the
-piece's development. Every triangle therefore rests in the cut cloth and the seams are mesh
-lines.
+nodes of the host mesh. Seam, rim, split, tip and apex nodes are shared between the
+pieces that meet there, and interior nodes start on the designed shape through the
+inverse of the piece's development. Every triangle therefore rests in the cut cloth and
+the seams are mesh lines. A node on a horizontal split keeps its meridian arc length
+\(u\) and angle \(\phi\), so the tier below (\(t = 1\)) and the tier above (\(t = 0\)) share
+it; each split is a seam of its own (`<name>:split <i>`). Unequal pieces get nodes on the
+cap's edge and on each split in proportion to their widths.
 
 **Faceting correction.** A flat triangle stands in for a patch of curved cloth: its sides
 are chords of the designed surface, but the cut cloth between its corners follows the
@@ -335,6 +515,49 @@ skin and as a shape that differs from the design. In the
 taller than designed, and taller than the same model with its skin resting in the designed
 shape. Read the projected height and the inflated shape as the prediction. The wrinkled
 fraction depends on the mesh and is an indicator only.
+
+## Shape groups
+
+Several shapes can form one object (`group`, `envelopelab.project.shape_groups`). A
+member's base point is at gore position \( g = n - \tfrac12 + a \) (gore number \(n\),
+fraction \(a\) across from the centreline) and tape position \(s\). Moving the group maps
+\( g' = (g + \Delta g) \bmod N \), \( s' = s + \Delta s \) for every base point and feed
+hole. A turn \( \Delta g \) is a rotation about the envelope's axis, a symmetry of the
+surface of revolution, so a whole-gore turn leaves every pattern unchanged (tested). A
+shift along the tape keeps each shape but not the arc between members, which scales
+about as \( r(s')/r(s) \).
+
+Mirroring in the meridian plane at \( g_m \) maps \( g' = 2g_m - g \) and reverses every
+direction round the shape's own axis: lean direction \( \psi' = -\psi \), seam turn
+\( \phi'_{off} = -\phi_{off} \), panel widths \( w_1, w_M, \dots, w_2 \) (piece 1 stays
+centred on the seam turn), and a mesh's \( y' = -y \) with every triangle turned over. The
+mirrored shape's pattern is the mirror image of the original's (equal piece areas and
+footprint length, tested). Groups have no pattern, check or simulation of their own;
+members that touch are not joined or checked against each other.
+
+**Symmetry axes and mirror twins** (`envelopelab.project.symmetry`, ADR-0043). A named
+axis stores \( g_m \). A twin is stored in full as the mirror image of its source across
+its axis, so its pattern, checks and simulation are those of an ordinary shape. After
+every edit of the shapes or axes the link is restored: an edit that changed a twin but
+not its source is first carried to the source (the mirror of the edited twin), then
+every twin is made the mirror image of its source again. Mirroring twice gives the
+shape back to within the stored rounding (\(10^{-6}\) of a gore width; tested over random
+placements, lean directions and panel layouts). Moving a group by \( \Delta g \) also
+moves the axes of its twins by \( \Delta g \), which keeps the pair a rigid copy of itself.
+
+## Gore map
+
+The Special shapes panel draws where every shape sits on a **gore map**
+(`envelopelab.project.placement_map`): the gores side by side as cut, gore \(k\) the column
+centred on \( x_k = (k + \tfrac12) W \) with \( W = 2 w_{max}(1 + 0.06) \), its outline
+\( x_k \pm w(s) \) up the tape \( y = s \). A point at gore position \(g\) and tape position
+\(s\) is drawn at \( x = x_k + 2(g - k - \tfrac12)\,w(s) \), \( y = s \) with
+\( k = \lfloor g \rfloor \bmod N \): the panel's own \(x\) for lobe gores, the same fraction
+across the gore's half width for flat-chord rows (their seam bows are not drawn).
+Dragging on the map inverts this (`map_to_placement`, tested as a round trip). A
+footprint that crosses a seam is drawn in each gore it covers, broken at the seam; the
+gaps between columns are only for display. A feed hole is drawn as a circle in the
+tangent plane, its hoop extent divided by \(2w(s)\) at each height.
 
 ## Valid range
 

@@ -232,3 +232,37 @@ def test_flat_chord_panel_mapping_follows_the_bowed_seams() -> None:
         < 1e-6
     )
     assert math.isclose(band.half_bottom * 2, row.bottom_width)
+
+
+def test_shape_files_carry_the_panel_layout() -> None:
+    layout = {"seam_offset_deg": 22.5, "panel_widths": [2, 1] * 4, "splits": [0.4]}
+    sf = parse_shape_file(_raw([DOME | layout]), PATH)
+    (spec,) = sf.shapes(sf.design())
+    assert spec.seam_offset_deg == pytest.approx(22.5)
+    assert spec.panel_widths == [2.0, 1.0] * 4 and spec.splits == [0.4]
+    with pytest.raises(ShapeFileError, match=r"(?s)special_shapes\[0\].*panel_widths: 2 widths"):
+        sf2 = parse_shape_file(_raw([DOME | {"panel_widths": [1, 2]}]), PATH)
+        sf2.shapes(sf2.design())
+
+
+def test_shape_files_carry_the_crown_layout() -> None:
+    crown = {
+        "crown_seam_offset_deg": 10.0,
+        "crown_panel_widths": [1] * 8,
+        "cap_shift": "50 mm",
+        "cap_direction_deg": -30.0,
+    }
+    sf = parse_shape_file(_raw([DOME | {"panel_widths": [2, 1] * 4} | crown]), PATH)
+    (spec,) = sf.shapes(sf.design())
+    assert spec.crown_seam_offset_deg == pytest.approx(10.0)
+    assert spec.crown_panel_widths == [1.0] * 8
+    assert spec.cap_shift == pytest.approx(0.05) and spec.cap_direction_deg == -30.0
+    with pytest.raises(ShapeFileError, match="unit"):
+        sf2 = parse_shape_file(_raw([DOME | {"cap_shift": 0.05}]), PATH)
+        sf2.shapes(sf2.design())
+
+
+def test_shape_files_carry_the_group() -> None:
+    sf = parse_shape_file(_raw([DOME | {"group": "Head"}]), PATH)
+    (spec,) = sf.shapes(sf.design())
+    assert spec.group == "Head"

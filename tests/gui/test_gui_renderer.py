@@ -371,3 +371,121 @@ def test_solved_preview_is_drawn_with_its_factor_of_safety_scale(
     image = tmp_path / "fos.png"
     assert view.save_screenshot(str(image)) and image.stat().st_size > 1000
     w.close()
+
+
+def test_on_the_balloon_tab_draws_on_the_graphics_card(
+    qtbot: QtBot, settings: QSettings, tmp_path: Path
+) -> None:
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.resize(1600, 1000)
+    w.show()
+    w.open_project(GORE_PROJECT)
+    w.show_panel("shapes")
+    panel = w.shapes
+    panel.add_shape("dome")
+    assert w.controller.shapes.wait(120_000)
+    panel.add_axis("Face centre", 5.5)
+    qtbot.waitUntil(lambda: panel.placement.gpu_view is not None, timeout=10_000)
+    gpu = panel.placement.gpu_view
+    assert gpu is not None and panel.placement.view3d is gpu
+    assert not panel.placement.sketch.isVisible()
+    assert {"envelope", "seams", "shape:Dome", "axes"} <= set(gpu.plotter.actors)
+    # It faces the selected shape.
+    cam = gpu.plotter.camera
+    shape = gpu.data.shapes[0]
+    look = np.asarray(cam.position) - np.asarray(cam.focal_point)
+    to_shape = shape.base3d - np.asarray(cam.focal_point)
+    cos = float(look @ to_shape / (np.linalg.norm(look) * np.linalg.norm(to_shape)))
+    assert cos > 0.999
+    image = tmp_path / "balloon.png"
+    gpu.plotter.screenshot(str(image))
+    assert image.stat().st_size > 1000
+    # Nudging updates the shape's actor.
+    tape = w.controller.session.state.shapes[0].placement.tape_position  # type: ignore[union-attr]
+    panel.placement.nudge_buttons["up"].click()
+    assert w.controller.shapes.wait(120_000)
+    qtbot.waitUntil(lambda: gpu.data.shapes[0].placement.tape_position > tape, timeout=10_000)
+    w.close()
+
+
+def test_axis_preview_on_the_graphics_card(qtbot: QtBot, settings: QSettings) -> None:
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.resize(1600, 1000)
+    w.show()
+    w.open_project(GORE_PROJECT)
+    w.show_panel("shapes")
+    panel = w.shapes
+    panel.add_shape("dome")
+    assert w.controller.shapes.wait(120_000)
+    qtbot.waitUntil(lambda: panel.placement.gpu_view is not None, timeout=10_000)
+    gpu = panel.placement.gpu_view
+    assert gpu is not None
+    panel.begin_mirror()
+    assert gpu.axis_mode
+    panel.placement.axis_line.setValue(4.0)  # the seam 3|4, typed
+    assert {"axis-preview", "axis-ghosts"} <= set(gpu.plotter.actors)
+    panel.cancel_axis()
+    assert not gpu.axis_mode
+    assert "axis-preview" not in gpu.plotter.actors
+    w.close()
+
+
+def test_design_mode_inlays_and_the_3d_mode_highlight_on_the_graphics_card(
+    qtbot: QtBot, settings: QSettings
+) -> None:
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.resize(1600, 1000)
+    w.show()
+    w.open_project(GORE_PROJECT)
+    w.mode_tabs.setCurrentIndex(0)  # Shape
+    inlay = w.gore_editor.inlay
+    qtbot.waitUntil(lambda: inlay.gpu_view is not None, timeout=10_000)
+    gpu = inlay.gpu_view
+    assert gpu is not None
+    w.controller.select("row:B")
+    inlay.refresh()
+    assert {"envelope", "seams", "highlight"} <= set(gpu.plotter.actors)
+    # It faces the highlighted panel.
+    focus = inlay.data.highlight.focus
+    cam = gpu.plotter.camera
+    look = np.asarray(cam.position) - np.asarray(cam.focal_point)
+    to_focus = focus - np.asarray(cam.focal_point)
+    cos = float(look @ to_focus / (np.linalg.norm(look) * np.linalg.norm(to_focus)))
+    assert cos > 0.999
+    # The 3D / Simulation mode draws the same selection.
+    w.show_panel("view3d")
+    w.controller.select("row:C")
+    assert "selection-highlight" in w.view3d.plotter.actors
+    w.view3d.redraw()  # kept when the scene is rebuilt
+    assert "selection-highlight" in w.view3d.plotter.actors
+    w.controller.select("operating")
+    assert "selection-highlight" not in w.view3d.plotter.actors
+    w.close()
+
+
+def test_placement_view_draws_a_shape_by_its_panels(qtbot: QtBot, settings: QSettings) -> None:
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.show()
+    assert w.open_project(GORE_PROJECT) is not None
+    w.show_panel("shapes")
+    w.shapes.add_shape("dome")
+    assert w.controller.shapes.wait(120_000)
+    w.shapes.refresh()
+    view = w.shapes.placement.view3d
+    plotter = view.plotter  # type: ignore[attr-defined]
+    assert plotter is not None
+    actor = plotter.actors["shape:Dome"]
+    colours = np.asarray(actor.mapper.dataset.cell_data["panel"])
+    assert len({tuple(c) for c in colours.tolist()}) >= 2  # neighbouring panels differ
+    assert "shape:Dome:seams" in plotter.actors
+    # Clearing the selection recolours the shape.
+    data = w.shapes.placement.data
+    data.selected = None
+    view.set_data(data)  # type: ignore[attr-defined]
+    after = np.asarray(plotter.actors["shape:Dome"].mapper.dataset.cell_data["panel"])
+    assert not np.array_equal(colours, after)
+    w.close()

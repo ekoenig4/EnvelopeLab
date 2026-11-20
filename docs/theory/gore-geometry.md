@@ -151,6 +151,43 @@ meridian within 1 mm (unless `require_full_coverage=False`).
 Check: with the small-bulge form, \(N \sum A_{finished} = \int 2\pi r\,ds = A\) exactly; with a
 loft, \(N \sum A_{finished}\) equals the lofted area \(A\) above.
 
+### Half gores — `half_panel`
+
+A row marked `half_gore` is cut as two pieces per panel, split along the gore centreline
+\(x = 0\) and sewn back together along a **centre seam**. The right half is bounded by
+
+\[
+\underbrace{(x, y_b(x))}_{\text{bottom seam},\ 0 \le x \le w_b}\ \to\
+\underbrace{(w(s), s - s_{bottom})}_{\text{gore side}}\ \to\
+\underbrace{(x, y_t(x))}_{\text{top seam},\ w_t \ge x \ge 0}\ \to\
+\underbrace{(0, y)}_{\text{centre seam}}
+\]
+
+(\(y_b, y_t\) the straight or bowed seam lines of the row, \(w_b, w_t\) the corner
+half-widths), and the left half is its mirror image. Every edge is offset outward by the
+row's seam allowance \(a\) and neighbouring offset edges meet at mitred corners, so the
+gore side of a half is cut exactly as the whole panel's side.
+
+* The halves' finished areas add up to the panel's: the sewn envelope, the rest mesh and
+  every simulation are unchanged (the `half_gore` flag is not a geometry input; it is the
+  `piece_split` input group of the patterns only).
+* Extra cloth per panel: \(A_{cut,L} + A_{cut,R} - A_{cut} = 2 a h_c + 4a^2\) for a centre
+  seam of length \(h_c\) (the row's centreline height); checked in
+  `tests/unit/test_half_gores.py` for lobe and bowed flat-chord rows.
+* Each half's page is about half as wide on the print roll, which is the reason to use
+  them (`envelopelab.project.roll_advice`: the smallest gore count at which every piece
+  fits, found by bisection, the rows that half gores make fit, or the smallest number of
+  equal rows).
+
+### Equal rows — `set_row_count`
+
+`envelopelab.project.edits.set_row_count` divides a tape of length \(L\) into \(n\) rows,
+row \(k\) from \(s = kL/n\) to \((k+1)L/n\) (heights stored to 0.1 mm; the top row takes the
+rounding, which `panel_rows` absorbs anyway). What a row carried follows by tape position:
+a new row takes the zone and half-gore cut of the old row containing its middle; turning
+vents and panel zones the new rows overlapping their old stretch. Shorter rows change the
+geometry (the horizontal seams move), so the rest mesh and simulations go stale.
+
 ## Vertical tape length
 
 The flat gore is drawn with the tape arc length on its axis, so its side edge is longer
@@ -296,8 +333,10 @@ few stations when the data are noisy.
   cut − finished.
 * Tapes: vertical \(N\sum \ell_{side}\); horizontal rings on internal row boundaries
   \(N\,w_{full}(s_k)\); rim ring at the mouth; hole ring at the top.
-* Thread: \(c\,(n_v L_{seam,v} + n_h L_{seam,h})\) × linear mass, with \(c\) the thread length
-  per seam length per stitch row (lockstitch ≈ 2.5–3).
+* Thread: \(c\,(n_v (L_{seam,v} + L_{centre}) + n_h L_{seam,h})\) × linear mass, with \(c\) the
+  thread length per seam length per stitch row (lockstitch ≈ 2.5–3) and \(L_{centre}\) the
+  centre seams of rows cut as half gores (sewn like the gore seams: assumed; no tape on
+  them). Their cut area replaces the panel's in the fabric sum.
 * Lift margin: \(V(\rho_{amb} - \rho_{int}) - m_{envelope} - m_{payload}\) (kg).
 
 Every material value is passed in as a `MaterialProperty` with a source tag; the estimate

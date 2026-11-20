@@ -463,12 +463,15 @@ def _stem(name: str) -> str:
 
 def write_shape_assembly(ctx: PackContext, p: PrimitiveDesign, path: Path) -> Path:
     """``<slug>-assembly-<shape>.pdf`` (module docstring)."""
+    from envelopelab.features.primitives import TIER_LETTERS
     from envelopelab.features.scene import designed_display
 
     name = p.primitive.name
     pieces = [s for s in ctx.sheets if s.kind == "skin piece" and s.name.rsplit("-", 1)[0] == name]
-    side = [s for s in pieces if "left" in s.edges]
+    cut = {c.label: c for c in p.pieces}
+    side = [s for s in pieces if s.name in cut and cut[s.name].role == "panel"]
     tips = [s for s in pieces if s not in side]
+    tiers = sorted({cut[s.name].tier for s in side})
     marks = [s for s in ctx.sheets if s.kind == "marking" and s.name.split("-mark-")[0] == name]
     rows = {s.piece.removeprefix("row "): s for s in ctx.rows}
     doc = Frames(
@@ -483,8 +486,21 @@ def write_shape_assembly(ctx: PackContext, p: PrimitiveDesign, path: Path) -> Pa
             "envelope panels",
             marked_frame(rows, marks),
         )
-    if side:
+    if len(tiers) == 1:
         doc.frame("Sew the skin pieces side by side, in order, into a ring", _join_pieces(side))
+    for i in tiers if len(tiers) > 1 else []:
+        ring = [s for s in side if cut[s.name].tier == i]
+        letter = TIER_LETTERS[i]
+        doc.frame(
+            f"Tier {letter}: sew its pieces side by side, in order, into a ring", _join_pieces(ring)
+        )
+        if i > 0:
+            below = TIER_LETTERS[i - 1]
+            doc.frame(
+                f"Sew the bottom of ring {letter} to the top of ring {below}, piece on piece "
+                f"(each {letter} piece onto the {below} piece of the same number)",
+                parts_frame(ring, lambda s: s.piece),
+            )
     if tips:
         doc.frame(
             f"Sew every piece's top to the tip piece {tips[0].piece}",

@@ -16,6 +16,10 @@ from envelopelab_app.theme import apply_theme, look_report
 
 ORGANIZATION = "EnvelopeLab"
 APPLICATION = "EnvelopeLab"
+#: Interpreter thread switch interval, s (Python's default is 0.005): the background
+#: placement of special shapes and the simulations share the interpreter with the window,
+#: which then gets its turn sooner while a value is being changed in real time.
+SWITCH_INTERVAL = 0.002
 
 
 def create_application(argv: list[str]) -> QApplication:
@@ -23,6 +27,7 @@ def create_application(argv: list[str]) -> QApplication:
     existing = QApplication.instance()
     if isinstance(existing, QApplication):
         return existing
+    sys.setswitchinterval(SWITCH_INTERVAL)
     app = QApplication(argv)
     app.setOrganizationName(ORGANIZATION)
     app.setApplicationName(APPLICATION)

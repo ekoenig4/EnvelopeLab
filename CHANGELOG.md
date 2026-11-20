@@ -3,6 +3,146 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: shape a special shape's crown cap (ADR-0054, project format 7). **Cap shape**
+  (Panel layout, under Where the panels meet) offers the footprint scaled to the cap
+  diameter, an ellipse, a polygon by points (straight or smooth) or an outline imported
+  from a DXF or SVG file. The cap is cut from the skin inside the outline and flattened,
+  the gores end on its edge; the balloon, cut pieces, simulation and build pack follow.
+  Round caps are unchanged (bit-identical results).
+- Added: **Split panel in two** in a special shape's Panel layout cuts the picked gore
+  or panel into two of half its width, keeping every other seam in place (one undo
+  step). The picked gore or panel (a row of the widths tables) is highlighted in amber
+  on the balloon, in the cut pieces and in the Where the panels meet circle.
+- Fixed: **Across** of Where the panels meet moved the point towards the previous gore,
+  not the next one as labelled, and the circle was drawn mirrored relative to the
+  balloon seen from outside; both now match the balloon. The seam turn's and cap
+  direction's descriptions now say that 90° turns towards the previous gore (their
+  behaviour is unchanged).
+- Added: move where a mesh shape's panels meet (ADR-0053). The **Where the panels meet**
+  pad and Across/Up boxes now work on mesh shapes such as eye pods: the seams are cut
+  straight from the rim to the point and the panels meet there, with or without a cap.
+  Mesh shapes left on their axis are unchanged.
+- Added: set where a special shape's panels meet with relative coordinates (ADR-0052,
+  project format 6). **Where the panels meet** (Panel layout, at the top of the renamed
+  *Where the panels meet (crown)* box) is a top-down pad of the shape: click or drag the
+  point, or type **Across** and **Up** as fractions of the shape's widest radius (0, 0:
+  the tip). The point keeps its place when the shape is resized; mirror twins mirror it.
+  Replaces the *Move the cap* distance and angle (older files read unchanged and show
+  their move as fractions). No results change for existing shapes.
+- Changed: special shape edits show almost at once (ADR-0051). Every view of the
+  balloon draws a fast preview of the shape's skin on each change (about 25–45 ms to
+  compute for the fixture shapes, where the full placement takes 0.3–0.5 s); the full
+  placement (pieces, checks) runs when the edits pause for 350 ms. The shape no longer
+  disappears while it is placed again: the newest preview or placement stays on screen
+  (status "updating…"). Checks, pieces, simulations and exports always use the full
+  placement; the envelope surface is built once per envelope. No results change.
+- Changed: special shapes on the balloon (Special shapes mode and the 3D inlays of the
+  other modes) are drawn by their cut panels, in alternating fabric shades with their
+  seams, splits and cap, instead of as solid pink objects; the selected shape is tinted
+  magenta. Drawing only; no results change.
+- Added: pointing at or editing any design number draws where it acts on the balloon in
+  amber, in every 3D view, and a focused number turns the views to face it (ADR-0050).
+- Added: Properties numbers change in real time with the wheel or ↑/↓ (Shift ×10,
+  Ctrl ×0.1); spin boxes and profile point drags update the views as they move, and one
+  continuous change is one undo step.
+- Changed: live edits no longer stutter (p95 frame gap 17–30 ms, was up to 117 ms):
+  edits are coalesced per frame, roll fits are memoised and shortlisted, display outlines
+  thinned, summary panels refresh after the edit stops. Numerical results are unchanged.
+- Added: where a special shape's panels meet at the crown (ADR-0049, project format 5).
+  **Panels at the crown** (Panel layout) gives the crown its own seam turn and widths;
+  the seams turn smoothly from the rim to the crown angles. **Move the cap** shifts a
+  dome's or revolved shape's cap off the tip, still covering it. The pieces, cap, checks,
+  simulation skin and build pack follow; shapes without a crown layout are unchanged
+  (bit-identical results). Turned seams and moved caps distort the pieces a little more,
+  as the area distortion check reports (e.g. 3.2 % to 6.3 % for an 8-gore dome with its
+  rim's unequal widths made equal at the crown).
+- Fixed: the gore map of the Special shapes mode (On the balloon) could only be panned
+  with the right mouse button and had no visible way back to the whole map. Every 2D view
+  of the mode (gore map, envelope panels, cut pieces) now pans with a drag on empty space
+  or with the middle or right button, and has a **Fit** button (as well as the double
+  click); the envelope panels pan at any zoom.
+- Added: **Panel rows** and **Space equally** (Shape mode, Panels and print roll): divide
+  every gore into any number of panel rows of equal length along the tape, in one
+  undoable edit. Zones, half gores, row settings, turning vents and appliques follow the
+  rows by position; marks placed on the old rows are removed. **Suggest…** now also gives
+  the fewest equal rows at which every panel fits the print roll.
+- Added: half gores (ADR-0048, design schema version 9). Any panel row can be cut as two
+  halves sewn down the gore centre, about half as wide on the print roll: Shape mode's
+  new **Panels and print roll** box (all rows, the rows too wide, none), the rows table
+  and Patterns. The build pack cuts and sews the halves (centre seams first); the mass
+  estimate adds their extra allowance and thread (+2·a·h per panel, e.g. +0.12 m² per
+  panel of the 8-gore fixture's rows at 25 mm). The sewn shape and simulations are
+  unchanged; designs without half gores give the same results and fingerprints as before.
+- Added: the gore count sits at the top of the Shape mode (Panels and print roll), with
+  the print-roll fit status and **Suggest…**: the fewest gores at which every panel fits
+  the roll, the rows half gores would fix, or the rows to split.
+- Added: the Shape, Patterns and Rigging modes show the balloon in 3D beside their
+  editor, with the selected panel row, control point or rigging component highlighted
+  and faced (as the Special shapes' On the balloon tab); click a rigging card to select
+  its component (ADR-0047).
+- Added: the 3D / Simulation mode highlights and faces the selection, nudges a selected
+  special shape with the same arrows and steps as On the balloon, and opens the live
+  symmetry-axis placement (**Symmetry axis…**); pressing a shape with Drag selects it.
+  Selecting a shape there no longer switches to the Special shapes mode.
+- Added: the Patterns mode shows the base envelope's pieces on the print roll (Layout ▸
+  *On the print roll*): each 1:1 page turned as printed, one after another down a strip
+  of the roll, as the special shapes' roll view does; *Selected row* says how the row's
+  page goes on the roll, and pieces larger than the roll are labelled in every layout.
+  The special shapes' roll view now runs down the view the same way.
+- Changed: symmetry axes are placed on the On the balloon tab instead of in a dialog: the
+  axis follows the pointer on the gore map and the 3D view (snapped to gore centres and
+  seams), a click puts it there, and the mirror images it would make are drawn dashed
+  while you decide. **Mirror…** and **Mirror group…** work the same way, or across an
+  existing axis; an axis can be dragged on the gore map, its twins following.
+- Changed: **On the balloon** is the first tab of the Special shapes mode and opens by
+  default. Nudge the selected shape with ◀ ▶ ▲ ▼ (10-250 mm steps) or the arrow keys in
+  either view, or drag it in the 3D view as well as on the gore map. The 3D view is drawn
+  by the graphics card when the 3D View is on.
+- Fixed: the Special shapes mode was slow to respond: an edit took about 3 s (the roll
+  check's narrowest-turn search ran in Python per hull edge, and was repeated on every
+  refresh), the placement views redrew point by point, and hidden result tabs were
+  refilled on every change. An edit now takes well under 0.1 s on the GUI thread and
+  views redraw in 2-5 ms (software drawing); results are unchanged.
+- Added: the Special shapes mode shows where the shapes sit on the balloon, in an
+  **On the balloon** tab of its right column: a 3D sketch (turn, zoom; faces the selected shape) and a gore map (the gores
+  side by side as cut) with every footprint, feed hole and symmetry axis. Click a shape
+  on the map to select it, drag it to move it.
+- Added: symmetry axes and linked mirror twins (ADR-0043). Named axes (a gore line,
+  shown as *centre of gore 6* or *seam 6|7*) are listed under the shapes and drawn on
+  the envelope in the 3D view. **Mirror…** adds a shape's mirror twin across an axis;
+  editing or dragging either side keeps the other its mirror image (position, lean,
+  feed holes, panel layout, sizes, mesh geometry), moving an axis moves its twins, and
+  **Unlink** frees a twin. **Mirror group…** now makes linked twins across an axis.
+- Changed: 1:1 template pages are drawn in the print roll's frame (pack format 4,
+  ADR-0042): the page width runs across the roll and is never wider than it, the height
+  along the roll, so pages print at 100 % without rotating. Pieces are turned on the page
+  to fit (row height across the roll first, then upright, then the narrowest turn, so a
+  long diagonal piece that fitted no axis now fits); each page's bottom margin says how
+  it goes on the roll. The Special shapes panel shows each piece's width across the roll
+  and its turn, and **Show as printed on the roll** draws them along a strip of the roll.
+  Envelope panels lie on the roll as before (row height across) but their pages are now
+  turned a quarter. No pattern geometry changes.
+- Added: shape groups (ADR-0041): several special shapes form one object (a head with
+  ears and a nose). A **Group** field in the shape editor; **Move group…** (turn round
+  the envelope, move along the tape), **Mirror group…** (a mirrored copy of the other
+  side, or in place, about a gore line) and **Export group to Blender…**; dragging a
+  grouped shape moves the whole group. The build pack lists the groups and names each
+  skin sheet's object. Shapes keep their own patterns; no numerical result changes.
+- Added: panel layout of special shapes (ADR-0040). A **Panel layout** tab sets the seam
+  turn (where the panels meet round the axis), the relative width of every gore or panel,
+  and horizontal splits that cut every piece across into tiers (`Ear-G3A`, `Ear-G3B`, …),
+  each flattened on its own and sewn edge to edge (new *split seam match* check). The
+  build pack, its QA seam pairs, sewing directions, assembly instructions, the 3D view
+  and the shape simulation follow the layout. Mesh shapes take the turn and widths.
+  Shape files accept `seam_offset_deg`, `panel_widths` and `splits`.
+- Changed: the project format is version 4 (shape panel layouts); versions 1 to 3 still
+  open, their shapes with equal, unturned and unsplit pieces. Shapes with the default
+  layout give bit-identical patterns and simulations.
+- Added: warnings on every panel larger than the print roll. A **Print roll width**
+  preference (default 60 in) is compared with each special-shape piece's and envelope
+  row's 1:1 page; a piece larger than the roll both ways is marked in the Special shapes
+  panel (table column, amber in the drawing, a *roll width* check) and listed in
+  Validation / Warnings. The build-pack export starts from the same width.
 - Fixed: the preview and CalculiX simulations failed to build the model ("unknown piece")
   when a row name was not all capital letters, e.g. BARD92's row `i`; results of designs
   with capital-letter row names are unchanged.

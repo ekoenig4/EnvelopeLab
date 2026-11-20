@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
 from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QGraphicsPolygonItem, QGraphicsRectItem
 from pytestqt.qtbot import QtBot
 
 from envelopelab.export.qa import check_pack
@@ -453,9 +455,11 @@ def test_editor_and_results_are_in_tabs(gore_window: MainWindow) -> None:
         "Placement && size",
         "Profile",
         "Feed holes && cap",
+        "Panel layout",
         "Simulation",
     ]
     assert [results.tabText(i) for i in range(results.count())] == [
+        "On the balloon",
         "Cut pieces",
         "Envelope panels",
         "Checks",
@@ -597,3 +601,536 @@ def test_one_run_colours_the_envelope_and_its_shapes_together(
     on_envelope = view.layers[PREVIEW].points[0]
     assert view.part_at(on_envelope) == PREVIEW
     assert view.probe_text(PREVIEW, 0).startswith("Envelope · element 0")
+
+
+def test_pieces_larger_than_the_print_roll_are_warned(gore_window: MainWindow) -> None:
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("dome")
+    _placed(gore_window)
+    assert not panel.preview.oversize
+    roll_column = panel.pieces.headerItem().text(5)
+    assert roll_column == "Page on print roll"
+    assert not any("shape Dome: piece" in m for m in _messages(gore_window))
+
+    # A roll narrower than the pieces: every piece is warned, nothing else changes.
+    gore_window.apply_preferences(replace(gore_window.prefs, print_roll_width=0.1))
+    items = [panel.pieces.topLevelItem(i) for i in range(panel.pieces.topLevelItemCount())]
+    texts = [item.text(5) for item in items if item is not None]
+    assert all("LARGER THAN 100 mm ROLL" in t for t in texts)
+    assert panel.preview.oversize == {p.label for p in panel.preview.pieces}
+    assert "need attention" in panel.status.text()
+    found = [m for m in _messages(gore_window) if "[WARNING] shape Dome: piece" in m]
+    assert len(found) == panel.pieces.topLevelItemCount()
+    # The envelope panels are checked against the same roll (the fixture's 2.5 m rows are
+    # larger than a 60 in roll too, so only the roll's width in the message changes).
+    assert any(
+        m.startswith("[WARNING] row ") and "THE 100 mm print roll" in m
+        for m in _messages(gore_window)
+    )
+
+    gore_window.apply_preferences(replace(gore_window.prefs, print_roll_width=60 * 0.0254))
+    assert not panel.preview.oversize
+    assert not any("shape Dome: piece" in m for m in _messages(gore_window))
+    assert not any("THE 100 mm print roll" in m for m in _messages(gore_window))
+
+
+def test_export_dialog_starts_from_the_print_roll_preference(gore_window: MainWindow) -> None:
+    from envelopelab_app.dialogs import PreferencesDialog
+    from envelopelab_app.export_dialog import ExportPackDialog
+
+    prefs = replace(gore_window.prefs, print_roll_width=72 * 0.0254)
+    dialog = PreferencesDialog(prefs, gore_window)
+    assert dialog.print_roll.value() == pytest.approx(72.0)
+    assert dialog.result_preferences().print_roll_width == pytest.approx(72 * 0.0254)
+    export = ExportPackDialog(gore_window, "", prefs.print_roll_width)
+    assert export.roll_width() == pytest.approx(72 * 0.0254)
+
+
+def test_panel_layout_turns_widens_and_splits_the_pieces(gore_window: MainWindow) -> None:
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("dome")
+    _placed(gore_window)
+    session = gore_window.controller.session
+    assert session is not None
+    assert panel.widths_table.rowCount() == 16
+    assert "16 gores round the axis (equal), one tier" in panel.layout_note.text()
+
+    panel.seam_turn.setValue(10.0)
+    _placed(gore_window)
+    assert session.state.shapes[0].seam_offset_deg == pytest.approx(10.0)
+
+    assert panel.set_panel_widths([2.0] + [1.0] * 15)
+    _placed(gore_window)
+    item = panel.widths_table.item(0, 1)
+    assert item is not None and item.text() == f"{360.0 * 2 / 17:.1f}°"
+
+    assert panel.add_split()
+    _placed(gore_window)
+    assert session.state.shapes[0].splits == [0.5]
+    labels = [panel.pieces.topLevelItem(i) for i in range(panel.pieces.topLevelItemCount())]
+    names = [i.text(0) for i in labels if i is not None]
+    assert names[:2] == ["Dome-G1A", "Dome-G2A"] and "Dome-G16B" in names
+    assert names[-1] == "Dome-TIP" and len(names) == 2 * 16 + 1
+    assert "in 2 tiers, A at the rim" in panel.layout_note.text()
+    assert not any("shape Dome" in m and "[ERROR]" in m for m in _messages(gore_window))
+
+    # Fewer gores keep the widths given for the first ones.
+    panel.fields[("gores",)].setValue(8)
+    _placed(gore_window)
+    assert session.state.shapes[0].panel_widths == [2.0] + [1.0] * 7
+    assert panel.widths_table.rowCount() == 8
+
+    assert panel.remove_split()
+    _placed(gore_window)
+    assert session.state.shapes[0].splits == []
+    gore_window.undo()
+    _placed(gore_window)
+    assert session.state.shapes[0].splits == [0.5]
+
+
+def test_shapes_grouped_as_one_object_move_mirror_and_export_together(
+    gore_window: MainWindow, tmp_path: Path
+) -> None:
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    session = gore_window.controller.session
+    assert session is not None
+    panel.add_shape("dome")
+    panel.add_shape("tube")
+    _placed(gore_window)
+    assert not panel.move_group_button.isEnabled()
+    for name in ("Dome", "Tube"):
+        panel.select(name)
+        panel.group_combo.setCurrentText("Head")
+        panel._group_edited()
+    _placed(gore_window)
+    assert [s.group for s in session.state.shapes] == ["Head", "Head"]
+    assert panel.list.item(0).text().startswith("Head ▸ Dome")
+    assert panel.move_group_button.isEnabled() and panel.mirror_group_button.isEnabled()
+
+    before = {s.name: s.placement for s in session.state.shapes}
+    assert panel.move_group(1.0, 0.5)
+    after = {s.name: s.placement for s in session.state.shapes}
+    for name, p in before.items():
+        assert after[name].gore == p.gore % 12 + 1
+        assert after[name].tape_position == pytest.approx(p.tape_position + 0.5)
+
+    # Dragging one member takes the whole group (one undo step).
+    view = gore_window.view3d
+    history = len(session.stack.history())
+    start = session.state.shapes[0].placement
+    assert view.begin_shape_drag("Dome")
+    view.drag_shape_to(_surface_point(gore_window, start.gore + 2, start.tape_position))
+    assert view.end_shape_drag()
+    assert len(session.stack.history()) == history + 1
+    tube = next(s for s in session.state.shapes if s.name == "Tube")
+    assert tube.placement.gore == after["Tube"].gore + 2
+
+    assert panel.mirror_group(0.0, copy=True)
+    names = [s.name for s in session.state.shapes]
+    assert names == ["Dome", "Tube", "Dome mirror", "Tube mirror"]
+    _placed(gore_window)
+    assert not any("[ERROR]" in m and "mirror" in m for m in _messages(gore_window))
+
+    out = panel.export_blender(tmp_path / "head.obj", "Head")
+    assert out is not None
+    text = (tmp_path / "head.obj").read_text(encoding="utf-8")
+    assert "o Tube_mirror_designed" in text and "o envelope" in text
+
+
+def test_cut_pieces_show_how_they_lie_on_the_print_roll(gore_window: MainWindow) -> None:
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("tube")
+    _placed(gore_window)
+    item = panel.pieces.topLevelItem(0)
+    assert item is not None
+    assert " mm across, " in item.text(5)
+    assert "across the roll" in item.toolTip(5)
+    preview = panel.preview
+    side_by_side, _w, _h = preview.drawn()
+    panel.on_roll_check.setChecked(True)
+    assert preview.on_roll
+    on_roll, width, length = preview.drawn()
+    roll = gore_window.prefs.print_roll_width
+    assert width == pytest.approx(roll)
+    # One page after the other down the roll (as the PDF pages and the Patterns view),
+    # every page within the roll's width.
+    tops = [cut[:, 1].max() for _p, (_f, cut, _r) in on_roll]
+    assert tops == sorted(tops, reverse=True) and max(tops) <= length
+    for _piece, (_f, cut, _r) in on_roll:
+        assert cut[:, 0].min() >= 0.0 and cut[:, 0].max() <= roll
+    preview.grab()  # paints without error
+    panel.on_roll_check.setChecked(False)
+    assert len(side_by_side) == len(on_roll)
+
+
+def test_symmetry_axes_and_linked_mirror_twins(gore_window: MainWindow) -> None:
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    session = gore_window.controller.session
+    assert session is not None
+    panel.add_shape("dome")
+    _placed(gore_window)
+    assert not panel.edit_axis_button.isEnabled()
+    assert panel.add_axis("Face centre", 5.5)
+    item = panel.axes_list.item(0)
+    assert item is not None and item.text() == "Face centre — centre of gore 6"
+    assert "symmetry" in gore_window.view3d.labels()
+    assert "Face centre (centre of gore 6)" in gore_window.view3d.labels()["symmetry"]
+
+    assert panel.mirror_selected("Face centre") == "Dome mirror"
+    _placed(gore_window)
+    assert panel.selected == "Dome mirror"
+    assert panel.mirror_label.text().startswith("⇄ Mirror twin of Dome across axis Face centre")
+    assert not panel.unlink_button.isHidden() and not panel.mirror_button.isEnabled()
+    texts = [panel.list.item(i).text() for i in range(panel.list.count())]
+    assert texts[0].endswith("⇄") and texts[1].endswith("⇄ mirror of Dome")
+    assert not any("[ERROR]" in m for m in _messages(gore_window))
+
+    # Dragging the twin moves the original as its mirror image (one undo step).
+    view = gore_window.view3d
+    history = len(session.stack.history())
+    assert view.begin_shape_drag("Dome mirror")
+    view.drag_shape_to(_surface_point(gore_window, 8, 6.0, 0.25))
+    assert view.end_shape_drag()
+    assert len(session.stack.history()) == history + 1
+    dome, twin = session.state.shapes
+    g_dome = dome.placement.gore - 0.5 + dome.placement.across
+    g_twin = twin.placement.gore - 0.5 + twin.placement.across
+    assert (g_dome + g_twin) % 12 == pytest.approx(11.0 % 12)
+    assert dome.placement.tape_position == pytest.approx(6.0)
+
+    panel.select("Dome mirror")
+    assert panel.unlink_selected()
+    assert session.state.shapes[1].mirror is None
+    assert panel.unlink_button.isHidden()
+
+
+def test_placement_views_show_and_move_the_shapes(gore_window: MainWindow) -> None:
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    session = gore_window.controller.session
+    assert session is not None
+    panel.add_shape("dome")
+    panel.add_shape("tube")
+    _placed(gore_window)
+    panel.add_axis("Face centre", 5.5)
+    view = panel.placement
+    assert panel.result_tabs.indexOf(view) == 0  # the On the balloon tab, the default
+    assert panel.result_tabs.currentWidget() is view
+    data = view.map.data
+    assert [s.name for s in data.shapes] == ["Dome", "Tube"]
+    assert [a[0] for a in data.axes] == ["Face centre"]
+    assert data.selected == "Tube"
+    assert all(len(s.triangles) and s.footprint for s in data.shapes)
+    # The 3D sketch faces the selected shape.
+    tube = data.shapes[1]
+    from envelopelab_app.placement_view import _centre
+
+    rel = tube.base3d - _centre(data.sketch)
+    assert view.sketch.azimuth == pytest.approx(np.degrees(np.arctan2(rel[1], rel[0])))
+    view.sketch.grab()
+    view.map.grab()
+
+    # Click the dome on the map: it is selected.
+    mapv = view.map
+    mapv.resize(600, 400)
+    dome = data.shapes[0]
+    at = mapv.to_screen(float(dome.base[0]), float(dome.base[1])).toPoint()
+    QTest.mouseClick(mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at)
+    assert panel.selected == "Dome"
+    # Drag it one gore to the right on the map: it moves there, in one undo step.
+    before = session.state.shapes[0].placement
+    target = mapv.to_screen(float(dome.base[0]) + mapv.data.gore_map.column, float(dome.base[1]))
+    history = len(session.stack.history())
+    QTest.mousePress(mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, at)
+    QTest.mouseMove(mapv, QPoint(at.x() + 5, at.y()))
+    QTest.mouseMove(mapv, target.toPoint())
+    QTest.mouseRelease(
+        mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, target.toPoint()
+    )
+    after = session.state.shapes[0].placement
+    assert after.gore == before.gore % 12 + 1
+    assert after.tape_position == pytest.approx(before.tape_position, abs=0.05)
+    assert len(session.stack.history()) == history + 1
+
+
+def test_nudge_and_drag_the_shape_in_either_view(gore_window: MainWindow) -> None:
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    session = gore_window.controller.session
+    assert session is not None
+    panel.add_shape("dome")
+    _placed(gore_window)
+    view = panel.placement
+    assert view.step.currentData() == pytest.approx(0.05)
+
+    def where() -> tuple[float, float]:
+        p = session.state.shapes[0].placement
+        return p.gore - 0.5 + p.across, p.tape_position
+
+    g0, s0 = where()
+    view.nudge_buttons["up"].click()
+    assert where()[1] == pytest.approx(s0 + 0.05)
+    view.nudge_buttons["right"].click()
+    assert where()[0] > g0
+    # Arrow keys in the gore map or the 3D view; Shift takes five steps; one undo each.
+    history = len(session.stack.history())
+    _g1, s1 = where()
+    QTest.keyClick(view.map, Qt.Key.Key_Down)
+    assert where()[1] == pytest.approx(s1 - 0.05)
+    QTest.keyClick(view.view3d, Qt.Key.Key_Down, Qt.KeyboardModifier.ShiftModifier)
+    assert where()[1] == pytest.approx(s1 - 0.30)
+    assert len(session.stack.history()) == history + 2
+    gore_window.undo()
+    assert where()[1] == pytest.approx(s1 - 0.05)
+
+    # Drag the shape in the 3D sketch: press on its base point, release over the envelope.
+    _placed(gore_window)
+    sketch = view.sketch
+    gore_window.resize(1600, 1000)
+    QApplication.processEvents()  # the splitter sizes the view
+    data = sketch.data
+    shape = data.shapes[0]
+    ((x, y),) = sketch._projector()(shape.base3d[None])
+    start = QPoint(int(x), int(y))
+    before = where()
+    QTest.mousePress(sketch, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+    QTest.mouseMove(sketch, QPoint(start.x() + 40, start.y() - 30))
+    QTest.mouseRelease(
+        sketch,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(start.x() + 40, start.y() - 30),
+    )
+    assert where() != pytest.approx(before)  # moved over the envelope ...
+    gore_window.undo()
+    assert where() == pytest.approx(before)  # ... in one undo step
+    # Dragging the background turns the view instead.
+    az = sketch.azimuth
+    QTest.mousePress(
+        sketch, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(5, 5)
+    )
+    QTest.mouseMove(sketch, QPoint(60, 5))
+    QTest.mouseRelease(
+        sketch, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(60, 5)
+    )
+    assert sketch.azimuth != az
+
+
+def test_hidden_result_tabs_are_filled_when_shown(gore_window: MainWindow) -> None:
+    """In the interactive application the result tabs behind On the balloon are filled
+    when one is opened, not on every change."""
+    gore_window.controller.defer_hidden = True
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("dome")
+    _placed(gore_window)
+    panel.refresh()
+    assert panel.result_tabs.currentWidget() is panel.placement
+    assert "placed" in panel.status.text()  # the status is always current
+    assert panel.pieces.topLevelItemCount() == 0
+    panel.result_tabs.setCurrentIndex(1)  # Cut pieces
+    assert panel.pieces.topLevelItemCount() == 16 + 1
+    assert panel.checks.topLevelItemCount() >= 1
+
+
+def _map_point(panel: Any, g: float, frac: float = 0.5) -> Any:
+    """Widget point of gore position ``g`` at ``frac`` of the tape on the gore map."""
+    gm = panel.placement.map.data.gore_map
+    ((x, y),) = gm.points(np.array([g]), np.array([frac * gm.length]))
+    return panel.placement.map.to_screen(float(x), float(y)).toPoint()
+
+
+def test_an_axis_is_seen_while_it_is_placed(gore_window: MainWindow) -> None:
+    from PySide6.QtTest import QTest
+
+    gore_window.resize(1600, 1000)
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    session = gore_window.controller.session
+    assert session is not None
+    panel.add_shape("dome")
+    _placed(gore_window)
+    place, mapv = panel.placement, panel.placement.map
+    panel.begin_add_axis()
+    assert place.axis_bar.isVisibleTo(place) and mapv.axis_mode
+    assert panel.result_tabs.currentWidget() is place
+    # The pointer shows where the axis would go (snapped to the centre of gore 3) ...
+    QTest.mouseMove(mapv, _map_point(panel, 2.4))
+    preview = mapv.preview
+    assert preview is not None and preview.hover is not None
+    assert preview.hover[:, 0] == pytest.approx(2.5 * mapv.data.gore_map.column)
+    assert preview.hover3d and preview.ghosts  # and the dome's mirror image across it
+    # ... a click puts it there; the bar says where; Place adds it.
+    QTest.mouseClick(
+        mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, _map_point(panel, 2.4)
+    )
+    assert place.axis_line.value() == pytest.approx(3.0)
+    assert place.axis_where.text() == "centre of gore 3"
+    place.axis_name.setText("Face centre")
+    place.axis_ok.click()
+    assert [(a.name, a.line) for a in session.state.symmetry_axes] == [("Face centre", 2.5)]
+    assert not place.axis_bar.isVisibleTo(place) and not mapv.axis_mode
+
+    # Typing the gore line moves the preview too; Escape cancels.
+    panel.begin_add_axis()
+    place.axis_line.setValue(6.5)
+    assert panel._axis is not None and panel._axis.line == pytest.approx(6.0)
+    QTest.keyClick(mapv, Qt.Key.Key_Escape)
+    assert not place.axis_bar.isVisibleTo(place)
+    assert len(session.state.symmetry_axes) == 1
+
+
+def test_mirror_shows_the_mirror_image_before_the_axis_is_placed(
+    gore_window: MainWindow,
+) -> None:
+    from PySide6.QtTest import QTest
+
+    gore_window.resize(1600, 1000)
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    session = gore_window.controller.session
+    assert session is not None
+    panel.add_shape("dome")
+    _placed(gore_window)
+    dome = session.state.shapes[0].placement
+    g_dome = dome.gore - 0.5 + dome.across
+    place, mapv = panel.placement, panel.placement.map
+    panel.begin_mirror()
+    QTest.mouseMove(mapv, _map_point(panel, 3.0))  # the seam 3|4
+    preview = mapv.preview
+    assert preview is not None and preview.map_line is None  # not placed yet
+    ghost = np.vstack(preview.ghosts)
+    gm = mapv.data.gore_map
+    centre_g = (ghost[:, 0].min() + ghost[:, 0].max()) / 2 / gm.column
+    assert abs(centre_g - (6.0 - g_dome)) < 0.6  # mirrored across gore position 3
+    assert len(preview.ghosts3d) == 1
+    QTest.mouseClick(
+        mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, _map_point(panel, 3.0)
+    )
+    place.axis_ok.click()
+    _placed(gore_window)
+    names = [s.name for s in session.state.shapes]
+    assert names == ["Dome", "Dome mirror"]
+    twin = session.state.shapes[1]
+    assert twin.mirror is not None and twin.mirror.axis == "Axis 1"
+    assert (twin.placement.gore - 0.5 + twin.placement.across) == pytest.approx(6.0 - g_dome)
+    # Mirroring across an existing axis: choosing it fixes the line; the pointer does not
+    # move it.
+    panel.add_shape("tube")
+    _placed(gore_window)
+    panel.begin_mirror()
+    place.axis_target.setCurrentIndex(1)  # Across Axis 1
+    assert not place.axis_line.isEnabled()
+    QTest.mouseClick(
+        mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, _map_point(panel, 5.0)
+    )
+    assert panel._axis is not None and panel._axis.line == pytest.approx(3.0)
+    place.axis_ok.click()
+    assert [s.name for s in session.state.shapes][-1] == "Tube mirror"
+
+
+def test_dragging_an_axis_on_the_map_moves_it_and_its_twins(gore_window: MainWindow) -> None:
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+
+    gore_window.resize(1600, 1000)
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    session = gore_window.controller.session
+    assert session is not None
+    panel.add_shape("dome")
+    _placed(gore_window)
+    panel.add_axis("Face centre", 2.5)
+    panel.mirror_selected("Face centre")
+    _placed(gore_window)
+    panel.select("Dome")
+    mapv = panel.placement.map
+    start = _map_point(panel, 2.5, 0.8)  # on the axis, away from the shapes
+    target = _map_point(panel, 3.5, 0.8)
+    history = len(session.stack.history())
+    QTest.mousePress(mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+    assert mapv.preview is not None and mapv.preview.ghosts  # the twin's new place, live
+    QTest.mouseMove(mapv, QPoint(start.x() + 3, start.y()))
+    QTest.mouseMove(mapv, target)
+    QTest.mouseRelease(mapv, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, target)
+    assert session.state.symmetry_axes[0].line == pytest.approx(3.5)
+    assert len(session.stack.history()) == history + 1
+    dome, twin = session.state.shapes
+    g = dome.placement.gore - 0.5 + dome.placement.across
+    gt = twin.placement.gore - 0.5 + twin.placement.across
+    assert (g + gt) % 12 == pytest.approx(7.0)
+    assert not panel.placement.axis_bar.isVisibleTo(panel.placement)
+
+
+def test_the_3d_view_places_an_axis_too(gore_window: MainWindow) -> None:
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+    from PySide6.QtWidgets import QApplication
+
+    gore_window.resize(1600, 1000)
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("dome")
+    _placed(gore_window)
+    QApplication.processEvents()
+    panel.begin_add_axis()
+    sketch = panel.placement.sketch
+    centre = QPoint(sketch.width() // 2, sketch.height() // 2)
+    QTest.mouseClick(sketch, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, centre)
+    line = panel._axis.line  # type: ignore[union-attr]
+    assert line is not None and (line * 2) == pytest.approx(round(line * 2))  # snapped
+    assert sketch.preview is not None and sketch.preview.lines3d
+    sketch.grab()
+
+
+def test_patterns_show_the_print_roll_like_the_special_shapes(gore_window: MainWindow) -> None:
+    from dataclasses import replace
+
+    gore_window.show_panel("patterns")
+    patterns = gore_window.patterns
+    patterns.regenerate()
+    letter = patterns.selected_letter()
+    assert letter is not None
+    text = patterns.roll_label.text()
+    # The fixture's rows are taller and wider than a 60 in roll.
+    assert text.startswith("LARGER THAN THE 1524 mm ROLL")
+    gore_window.apply_preferences(replace(gore_window.prefs, print_roll_width=3.7))
+    patterns.refresh()
+    assert "mm across the 3700 mm roll" in patterns.roll_label.text()
+    assert "turned 90°" in patterns.roll_label.text()
+    patterns.layout_mode.setCurrentIndex(patterns.layout_mode.findData("roll"))
+    patterns._layout_changed(0)
+    texts = [i.text() for i in patterns.view.scene().items() if hasattr(i, "text")]
+    assert any(t.startswith("Print roll 3700 mm wide") for t in texts)
+    assert sum(t.startswith("row ") and "mm across" in t for t in texts) == len(
+        patterns.rows_by_letter()
+    )
+    # Every page lies within the roll's width.
+    rect = patterns.view.content_rect
+    assert rect.left() >= -1e-6
+    # The pieces themselves are drawn on their pages, turned, inside the roll's edges.
+    pieces = [
+        i
+        for i in patterns.view.scene().items()
+        # The piece containers (turned); parentItem() is not called: in PySide 6.11 a
+        # temporary wrapper it was called on deletes its item when dropped.
+        if isinstance(i, QGraphicsRectItem) and i.rotation() != 0.0
+    ]
+    assert len(pieces) == len(patterns.rows_by_letter())
+    for piece in pieces:
+        for cut in piece.childItems():
+            if isinstance(cut, QGraphicsPolygonItem):
+                drawn = cut.sceneBoundingRect()
+                assert drawn.left() > -0.01 and drawn.right() < 3.7 + 0.01

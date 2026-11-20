@@ -92,8 +92,10 @@ from envelopelab.geometry.gore import (
     SeamAllowance,
     crest_offsets_from_bows,
     flat_chord_rows,
+    half_panel,
     lofted_area,
     lofted_volume,
+    polygon_area,
     split_rows,
 )
 from envelopelab.geometry.profile_segments import Segment, segment_kinks, segment_points
@@ -458,6 +460,84 @@ def seam_fractions(design: DesignDocument) -> list[float]:
     return [float(v) for v in cumulative / cumulative[-1]]
 
 
+@dataclass(frozen=True)
+class RowPiece:
+    """One piece cut for an envelope panel row: the whole panel, or one of its halves when
+    the row is cut as half gores (``PanelRow.half_gore``), m.
+
+    Attributes
+    ----------
+    row : PanelRow
+        The row (its finished panel).
+    side : {"whole", "left", "right"}
+        The whole panel or which half (seen from outside the envelope).
+    finished, cut : ndarray, shape (n, 2)
+        Finished and cut outlines in the row panel's coordinates, m.
+    centre_seam : float
+        Length of the centre seam of a half, m (0 for a whole panel).
+    """
+
+    row: PanelRow
+    side: Literal["whole", "left", "right"]
+    finished: FloatArray = field(repr=False)
+    cut: FloatArray = field(repr=False)
+    centre_seam: float = 0.0
+
+    @property
+    def name(self) -> str:
+        """``row C`` or ``row C left half``."""
+        return f"row {self.row.label}" + ("" if self.side == "whole" else f" {self.side} half")
+
+
+def half_gore_rows(design: DesignDocument) -> set[str]:
+    """Letters of the rows cut as half gores."""
+    if design.gores is None:
+        return set()
+    return {r.letter for r in design.gores.panel_rows if r.half_gore}
+
+
+def row_pieces(
+    design: DesignDocument, patterns: PatternSet, rows: Sequence[PanelRow] | None = None
+) -> list[RowPiece]:
+    """The pieces cut for the envelope's panel rows, mouth first: one per row, or its left
+    and right halves for a row cut as half gores (:func:`~envelopelab.geometry.gore.
+    half_panel`, with the row's seam allowance). Each is cut once per gore.
+
+    Parameters
+    ----------
+    design : DesignDocument
+        Standard-gore design.
+    patterns : PatternSet
+        Row seam-allowance overrides (m).
+    rows : sequence of PanelRow, optional
+        Precomputed :func:`panel_rows`.
+
+    Returns
+    -------
+    list of RowPiece
+        Outlines in m.
+    """
+    rows = list(rows) if rows is not None else panel_rows(design, patterns)
+    halves = half_gore_rows(design)
+    out: list[RowPiece] = []
+    for row in rows:
+        if row.label not in halves:
+            out.append(RowPiece(row, "whole", row.finished_outline, row.cut_outline))
+            continue
+        for half in half_panel(row, row_allowance(design, patterns, row.label)):
+            centre = half.edges["centre"]
+            out.append(
+                RowPiece(
+                    row,
+                    half.side,
+                    half.finished,
+                    half.cut,
+                    float(np.linalg.norm(centre[-1] - centre[0])),
+                )
+            )
+    return out
+
+
 def panel_rows(
     design: DesignDocument, patterns: PatternSet, profile: MeridianProfile | None = None
 ) -> list[PanelRow]:
@@ -755,6 +835,16 @@ def gore_outputs(
             )
             areal[z] = ASSUMED_AREAL_MASS
         tape = ASSUMED_TAPE_LINEAR_MASS
+        split: dict[str, list[float]] = {}
+        if half_gore_rows(design):
+            # Rows cut as half gores: the cloth of both halves and their centre seam.
+            sums: dict[str, list[float]] = {}
+            for piece in row_pieces(design, patterns, rows):
+                if piece.side != "whole":
+                    acc = sums.setdefault(piece.row.label, [0.0, 0.0])
+                    acc[0] += polygon_area(piece.cut)
+                    acc[1] = piece.centre_seam
+            split = sums
         mass = estimate_mass(
             rows,
             design.gores.count,
@@ -763,6 +853,12 @@ def gore_outputs(
             TapeMasses(tape, tape, tape, tape),
             ASSUMED_THREAD,
             panel_zones=extra,
+            panel_cut_areas=[split[r.label][0] if r.label in split else r.cut_area for r in rows]
+            if split
+            else None,
+            centre_seams=[split[r.label][1] if r.label in split else 0.0 for r in rows]
+            if split
+            else None,
         )
     from envelopelab.rigging import rigging_outputs
 

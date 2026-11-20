@@ -121,8 +121,14 @@ def test_every_piece_has_its_own_whole_page_pdf(pack: Path) -> None:
         assert len(t["pages"]) == 1 and t["pages"][0]["bands"] == 1
         ((w, h, content),) = _page_boxes(pack / t["file"])
         assert "%CAL " in content and "%CALV " in content
-        # One side within the roll, or the page says the piece is larger than the roll.
-        assert min(w, h) <= roll + 1.0 or "LARGER THAN THE" in content
+        # The page width runs across the roll: no wider than it, or the page says the
+        # piece is larger than the roll; the index records the turn and the page's size.
+        page = t["pages"][0]
+        assert w <= roll + 1.0 or "LARGER THAN THE" in content
+        assert page["across_roll_mm"] == pytest.approx(w / PT_PER_M * 1000, abs=0.1)
+        assert page["along_roll_mm"] == pytest.approx(h / PT_PER_M * 1000, abs=0.1)
+        assert f"%PAGE {page['sheet']} 1 1 {page['turn_deg']:g} " in content
+        assert ("ACROSS THE ROLL:" in content) or ("LARGER THAN THE" in content)
     # The page holds the whole piece: as large as its cut outline plus the margins.
     entry = next(t for t in index["templates"] if t["file"].endswith("-panel-C.pdf"))
     ((w, h, _c),) = _page_boxes(pack / entry["file"])
@@ -139,6 +145,34 @@ def test_every_piece_has_its_own_whole_page_pdf(pack: Path) -> None:
     names = {t["file"].split("generic-", 1)[1] for t in index["templates"]}
     assert {f"ear-G{k}.pdf" for k in range(1, 17)} <= names
     assert {"horn-P1.pdf", "horn-TIP.pdf", "parachute-panel.pdf"} <= names
+
+
+def test_panels_print_with_the_row_height_across_the_roll() -> None:
+    """Envelope panels lie on the roll as they are cut on the bolt: the row height
+    across, so on a 3.7 m roll every page is turned a quarter, as wide as the panel's
+    cut height and as long as its cut width."""
+    from envelopelab.export.build_pack import envelope_sheets
+    from envelopelab.export.templates import MARGIN, layout
+
+    sheets = envelope_sheets(DESIGN)
+    assert len(sheets) == 6
+    for sheet in sheets:
+        span = np.ptp(sheet.cut, axis=0)
+        lay = layout(sheet, 3.7)
+        assert lay.angle == 90.0
+        assert lay.width == pytest.approx(span[1] + 2 * MARGIN)
+        assert lay.height == pytest.approx(span[0] + 2 * MARGIN)
+        assert lay.width <= 3.7
+
+
+def test_qa_catches_a_page_wider_than_the_roll(pack: Path, tmp_path: Path) -> None:
+    """A page turned back so its long side runs across the roll is refused."""
+    p = _copy(pack, tmp_path)
+    index_path = p / "cad" / "index.json"
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    index["roll_width_mm"] = 300.0
+    index_path.write_text(json.dumps(index), encoding="utf-8")
+    assert "page size" in {f.check for f in check_pack(p)}
 
 
 def test_qa_catches_a_piece_split_over_pages(pack: Path, tmp_path: Path) -> None:

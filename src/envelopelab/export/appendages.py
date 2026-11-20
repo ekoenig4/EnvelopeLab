@@ -189,11 +189,18 @@ def build_steps(ctx: PackContext, p: PrimitiveDesign) -> list[tuple[str, str]]:
                 + f" (positions on {spec}).",
             )
         )
-    tips = [c for c in p.pieces if c.rim is None]
+    tips = [c for c in p.pieces if c.role == "tip"]
+    tiers = 1 + max((c.tier for c in p.pieces if c.role == "panel"), default=0)
     steps.append(
         (
             "SEW THE SKIN",
             "Sew the skin pieces to each other side by side"
+            + (
+                f" into {tiers} rings (A at the rim), then each ring's bottom to the top of "
+                "the ring below, piece on piece of the same number"
+                if tiers > 1
+                else ""
+            )
             + (f", then the tops to the tip piece {tips[0].label}" if tips else "")
             + " (seams in the sewing schedule).",
         )

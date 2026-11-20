@@ -5,7 +5,17 @@ to a few seconds, far too long to do on every edit in the GUI thread. The
 :class:`ShapeService` keeps, for every shape of the project, the result for its current
 specification and envelope (a key from both), recomputes only the shapes whose key
 changed, in a worker thread, and announces new results with ``updated``. A result
-computed for an older key is dropped when it arrives.
+computed for an older key is never taken as current.
+
+Edits show at once, as in a game engine's viewport: every change first gets a *preview*
+(:func:`envelopelab.project.shapes.shape_preview`: the 3D skin only, tens of ms) from its
+own worker, drawn as soon as it arrives; the full placement (pieces flattened, checks run)
+starts once the edits pause for :attr:`ShapeService.settle_ms`. While a shape waits for
+its full placement the views draw the newest preview or placement
+(:meth:`ShapeService.shown`), never nothing. Previews are drawing aids only: checks, cut
+pieces, simulations and exports always use the full placement (:meth:`ShapeService.
+result`). The envelope surface the shapes sit on is built once per envelope (its host
+hash) and reused by later batches.
 
 Shape simulations (the shape's sub-model, its skin sewn from the cut pieces, solved by the
 preview solver) run in their own worker, one at a time. Each result is a run record and
@@ -24,7 +34,7 @@ from hashlib import sha256
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from PySide6.QtCore import QCoreApplication, QObject, QThread, Signal
+from PySide6.QtCore import QCoreApplication, QObject, QThread, QTimer, Signal
 
 from envelopelab.design.model import DesignDocument
 from envelopelab.features.primitives import PrimitiveDesign, PrimitiveError
@@ -35,6 +45,7 @@ from envelopelab.project.shapes import (
     envelope_surface,
     feed_hole_clearance,
     shape_design,
+    shape_preview,
 )
 
 if TYPE_CHECKING:
@@ -93,6 +104,10 @@ class ShapeSimulation:
     arrays: dict[str, np.ndarray] | None = None
 
 
+#: A batch of shapes to place: the design state and (name, key, spec) of each shape.
+_Batch = tuple[DesignDocument, PatternSet, list[tuple[str, str, ShapeSpec]]]
+
+
 class _DesignWorker(QThread):
     """Places a batch of shapes on the envelope (pure functions of copies of the data).
 
@@ -108,26 +123,47 @@ class _DesignWorker(QThread):
         design: DesignDocument,
         patterns: PatternSet,
         jobs: list[tuple[str, str, ShapeSpec]],
+        host: tuple[str, Any, float] | None = None,
+        host_hash: str = "",
+        preview: bool = False,
     ) -> None:
         super().__init__()
+        #: Previews only (the skin to draw), not full placements.
+        self.preview = preview
         self.design = design
         self.patterns = patterns
         self.jobs = jobs
+        #: (host hash, envelope surface, feed hole clearance): reused when the hash
+        #: matches, otherwise built here and kept for the next batch.
+        self.host = host if host is not None and host[0] == host_hash else None
+        self.host_hash = host_hash
         #: Set from the GUI thread when the batch is out of date (a plain flag is enough:
         #: it is only read between shapes).
         self.stop = False
 
     def run(self) -> None:  # noqa: D102 (QThread entry point)
-        try:
-            surface = envelope_surface(self.design, self.patterns)
-        except Exception as exc:  # the envelope itself cannot be built
-            message = f"the envelope cannot be built: {exc}"
-            self.done.emit([(n, ShapeResult(k, None, message)) for n, k, _ in self.jobs])
-            return
-        clearance = feed_hole_clearance(self.design, self.patterns)
+        if self.host is not None:
+            _h, surface, clearance = self.host
+        else:
+            try:
+                surface = envelope_surface(self.design, self.patterns)
+            except Exception as exc:  # the envelope itself cannot be built
+                message = f"the envelope cannot be built: {exc}"
+                self.done.emit([(n, ShapeResult(k, None, message)) for n, k, _ in self.jobs])
+                return
+            clearance = feed_hole_clearance(self.design, self.patterns)
+            if self.host_hash:
+                self.host = (self.host_hash, surface, clearance)
         for name, key, spec in self.jobs:
             if self.stop:
                 return
+            if self.preview:
+                try:
+                    shown = ShapeResult(key, shape_preview(spec, surface))
+                except Exception:  # noqa: BLE001 (the full placement reports why)
+                    continue
+                self.done.emit([(name, shown)])
+                continue
             try:
                 result = ShapeResult(key, shape_design(spec, surface, clearance))
             except (PrimitiveError, ValueError) as exc:
@@ -151,19 +187,38 @@ class ShapeService(QObject):
         self.simulations: dict[str, ShapeSimulation] = {}
         self.simulation_fingerprint = ""
         self._worker: _DesignWorker | None = None
-        self._queued: tuple[DesignDocument, PatternSet, list[tuple[str, str, ShapeSpec]]] | None = (
-            None
-        )
+        self._queued: _Batch | None = None
+        #: Host hash of the current envelope, and the surface built for one (see module
+        #: docstring).
+        self.host_hash = ""
+        self._host: tuple[str, Any, float] | None = None
+        #: How long the edits must pause before the full placement starts, ms (0: at
+        #: once; the window sets it when interactive). Previews never wait.
+        self.settle_ms = 0
+        self._settle = QTimer(self)
+        self._settle.setSingleShot(True)
+        self._settle.timeout.connect(self._settled)
+        self._pending: _Batch | None = None
+        self._preview_worker: _DesignWorker | None = None
+        self._preview_queued: _Batch | None = None
+        #: What each shape is drawn as (newest preview or placement with a design), and
+        #: the order in which keys became current (a late result never replaces a newer).
+        self._latest: dict[str, ShapeResult] = {}
+        self._order: dict[str, int] = {}
+        self._count = 0
 
     @property
     def busy(self) -> bool:
-        """A worker is placing shapes."""
-        return self._worker is not None
+        """A worker is placing shapes, or a placement waits for the edits to pause."""
+        return self._worker is not None or self._pending is not None
 
     def reset(self) -> None:
         """Forget every result and simulation (another project was opened)."""
         self.keys, self.results, self.simulations = {}, {}, {}
-        self._queued = None
+        self._queued = self._pending = self._preview_queued = None
+        self._settle.stop()
+        self._latest, self._order = {}, {}
+        self._host = None
 
     def restore(self, session: ProjectSession) -> None:
         """Take the shape simulations kept with ``session``'s project (those whose result
@@ -206,22 +261,97 @@ class ShapeService(QObject):
                 self.keys, self.results = {}, {}
                 self.updated.emit()
             return
+        self.host_hash = host_hash
         keys = {s.name: shape_key(s, host_hash) for s in shapes}
+        for name, key in keys.items():
+            if self.keys.get(name) != key:
+                self._count += 1
+                self._order[key] = self._count
         # Announce only real changes: every listener redraws on ``updated``.
         changed = changed or keys != self.keys
         self.keys = keys
         for name in list(self.results):
             if name not in self.keys:
                 del self.results[name]
+        for name in list(self._latest):
+            if name not in self.keys:
+                del self._latest[name]
         jobs = [
             (s.name, self.keys[s.name], s)
             for s in shapes
             if self.results.get(s.name) is None or self.results[s.name].key != self.keys[s.name]
         ]
         if jobs:
-            self._start(design, patterns, jobs)
+            previews = [
+                job for job in jobs if job[0] in self._latest and self._latest[job[0]].key != job[1]
+            ]
+            if previews:  # shapes already drawn: show the edit at once
+                self._start_preview(design, patterns, previews)
+            if self.settle_ms > 0 and previews:
+                if self._pending is None:
+                    self.busyChanged.emit(True)
+                self._pending = (design, patterns, jobs)
+                self._settle.start(self.settle_ms)
+            else:
+                self._start(design, patterns, jobs)
         if changed:
             self.updated.emit()
+
+    def _settled(self) -> None:
+        """The edits paused: place the shapes in full."""
+        pending, self._pending = self._pending, None
+        if pending is None:
+            return
+        design, patterns, jobs = pending
+        jobs = [(n, k, s) for n, k, s in jobs if self.keys.get(n) == k]
+        if jobs:
+            self._start(design, patterns, jobs)
+        elif self._worker is None:
+            self.busyChanged.emit(False)
+
+    def _start_preview(
+        self, design: DesignDocument, patterns: PatternSet, jobs: list[tuple[str, str, ShapeSpec]]
+    ) -> None:
+        if self._preview_worker is not None:
+            self._preview_queued = (design, patterns, jobs)  # the newest edit wins
+            self._preview_worker.stop = True
+            return
+        worker = _DesignWorker(design, patterns, jobs, self._host, self.host_hash, preview=True)
+        worker.done.connect(self._previewed)
+        worker.finished.connect(self._preview_ended)
+        self._preview_worker = worker
+        worker.start()
+
+    def _previewed(self, out: list[tuple[str, ShapeResult]]) -> None:
+        if any(self._offer(name, result) for name, result in out):
+            self.updated.emit()
+
+    def _preview_ended(self) -> None:
+        worker, self._preview_worker = self._preview_worker, None
+        if worker is not None:
+            built = worker.host
+            if built is not None and built[0] == self.host_hash and self._host != built:
+                self._host = built  # the current envelope's surface: the placement reuses it
+            worker.deleteLater()
+        if self._preview_queued is not None:
+            design, patterns, jobs = self._preview_queued
+            self._preview_queued = None
+            jobs = [(n, k, s) for n, k, s in jobs if self.keys.get(n) == k]
+            if jobs:
+                self._start_preview(design, patterns, jobs)
+
+    def _offer(self, name: str, result: ShapeResult) -> bool:
+        """Draw ``result`` for shape ``name`` unless something newer is drawn already."""
+        if name not in self.keys or result.design is None:
+            return False
+        shown = self._latest.get(name)
+        if shown is not None and self._order.get(shown.key, 0) > self._order.get(result.key, 0):
+            return False
+        placed = shown is not None and shown.design is not None and not shown.design.preview
+        if placed and shown is not None and shown.key == result.key:
+            return False  # the full placement of this key is drawn already
+        self._latest[name] = result
+        return True
 
     def _start(
         self, design: DesignDocument, patterns: PatternSet, jobs: list[tuple[str, str, ShapeSpec]]
@@ -232,7 +362,7 @@ class ShapeService(QObject):
             self._queued = (design, patterns, jobs)
             self._worker.stop = True
             return
-        self._worker = _DesignWorker(design, patterns, jobs)
+        self._worker = _DesignWorker(design, patterns, jobs, self._host, self.host_hash)
         self._worker.done.connect(self._finished)
         self._worker.finished.connect(self._worker_ended)
         self.busyChanged.emit(True)
@@ -242,11 +372,14 @@ class ShapeService(QObject):
         for name, result in out:
             if self.keys.get(name) == result.key:
                 self.results[name] = result
+            self._offer(name, result)
         self.updated.emit()
 
     def _worker_ended(self) -> None:
         worker, self._worker = self._worker, None
         if worker is not None:
+            if worker.host is not None and worker.host[0] == self.host_hash:
+                self._host = worker.host  # the surface it built (or reused)
             worker.deleteLater()
         if self._queued is not None:
             design, patterns, jobs = self._queued
@@ -261,21 +394,44 @@ class ShapeService(QObject):
             if jobs:
                 self._start(design, patterns, jobs)
                 return
-        self.busyChanged.emit(False)
+        if self._pending is None:
+            self.busyChanged.emit(False)
 
     def wait(self, timeout_ms: int = 120_000) -> bool:
-        """Block until no worker runs (tests, closing the window)."""
-        while self._worker is not None:
-            if not self._worker.wait(timeout_ms):
+        """Block until every shape is placed in full and no worker runs (tests, closing
+        the window); a placement waiting for the edits to pause starts at once."""
+        while True:
+            if self._pending is not None:
+                self._settle.stop()
+                self._settled()
+            worker = self._worker or self._preview_worker
+            if worker is None:
+                return True
+            if not worker.wait(timeout_ms):
                 return False
             # Deliver the finished signals queued for this thread.
             QCoreApplication.processEvents()
-        return True
 
     def result(self, name: str) -> ShapeResult | None:
         """Current result of shape ``name`` (None while it is being computed)."""
         r = self.results.get(name)
         return r if r is not None and r.key == self.keys.get(name) else None
+
+    def shown(self, name: str) -> ShapeResult | None:
+        """The result to draw for shape ``name``: the current placement, or while the
+        shape waits for it the newest preview or placement (None: never placed, or it
+        failed). Only for drawing: checks, pieces and exports use :meth:`result`."""
+        current = self.result(name)
+        if current is not None:
+            return current
+        if name not in self.keys:
+            return None
+        return self._latest.get(name)
+
+    def updating(self, name: str) -> bool:
+        """Shape ``name`` is drawn from a preview or an older placement while it waits
+        for its full placement."""
+        return self.result(name) is None and self.shown(name) is not None
 
     def simulation_status(self, name: str) -> str:
         """``none``, ``current`` or ``stale`` for the shape's last simulation."""

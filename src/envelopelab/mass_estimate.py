@@ -106,6 +106,8 @@ class MassEstimate:
         Per tape class (vertical, horizontal, rim, hole): length in m and mass in kg.
     vertical_seam_length, horizontal_seam_length : float
         Total seam lengths, m.
+    centre_seam_length : float
+        Total length of the centre seams of rows cut as half gores, m (no tape).
     thread_length, thread_mass : float
         Thread use, m and kg.
     sources : tuple of str
@@ -120,6 +122,7 @@ class MassEstimate:
     thread_length: float
     thread_mass: float
     sources: tuple[str, ...]
+    centre_seam_length: float = 0.0
 
     @property
     def fabric_mass(self) -> float:
@@ -140,6 +143,8 @@ def estimate_mass(
     tapes: TapeMasses,
     thread: ThreadSpec,
     panel_zones: Sequence[Mapping[str, int]] | None = None,
+    panel_cut_areas: Sequence[float] | None = None,
+    centre_seams: Sequence[float] | None = None,
 ) -> MassEstimate:
     """Estimate envelope fabric, tape and thread quantities and mass.
 
@@ -160,6 +165,13 @@ def estimate_mass(
     panel_zones : sequence of mapping of str to int, optional
         Per row: number of that row's N panels cut in another zone (appliques,
         doublers), by zone; the rest are in the row's zone.
+    panel_cut_areas : sequence of float, optional
+        Per row: cloth cut for one panel, m^2, when it differs from the row's cut
+        outline (a row cut as two half gores: the sum of the halves' cut areas).
+    centre_seams : sequence of float, optional
+        Per row: centre-seam length of one panel cut as half gores, m (0 for a whole
+        panel). Sewn with the vertical seams' stitch rows (assumed: the same seam type);
+        no load tape.
 
     Returns
     -------
@@ -186,6 +198,11 @@ def estimate_mass(
     missing = sorted(set(used_zones) - set(zone_areal_mass))
     if missing:
         raise ValueError(f"no areal mass for zone(s): {', '.join(missing)}")
+    if panel_cut_areas is not None and len(panel_cut_areas) != len(rows):
+        raise ValueError("panel_cut_areas and rows differ in length")
+    if centre_seams is not None and len(centre_seams) != len(rows):
+        raise ValueError("centre_seams and rows differ in length")
+    cut_areas = [row.cut_area for row in rows] if panel_cut_areas is None else list(panel_cut_areas)
     zones: dict[str, ZoneEstimate] = {}
     for zone in used_zones:
         share = [c.get(zone, 0) for c in counts]
@@ -193,10 +210,10 @@ def estimate_mass(
             # Whole rows, summed as before panel zones existed (bit-identical results).
             members = [row for row, n in zip(rows, share, strict=True) if n]
             finished = n_gores * sum(row.finished_area for row in members)
-            cut = n_gores * sum(row.cut_area for row in members)
+            cut = n_gores * sum(c for c, n in zip(cut_areas, share, strict=True) if n)
         else:
             finished = sum(n * row.finished_area for row, n in zip(rows, share, strict=True))
-            cut = sum(n * row.cut_area for row, n in zip(rows, share, strict=True))
+            cut = sum(n * c for c, n in zip(cut_areas, share, strict=True))
         areal = zone_areal_mass[zone]
         zones[zone] = ZoneEstimate(finished, cut, cut * areal.value, areal)
     vertical_seam = n_gores * sum(row.side_length for row in rows)
@@ -214,8 +231,10 @@ def estimate_mass(
         "hole": tapes.hole,
     }
     tape_masses = {key: tape_lengths[key] * tape_props[key].value for key in tape_lengths}
+    centre_seam = n_gores * sum(centre_seams) if centre_seams is not None else 0.0
     thread_length = thread.consumption_ratio.value * (
-        thread.vertical_rows * vertical_seam + thread.horizontal_rows * horizontal_seam
+        thread.vertical_rows * (vertical_seam + centre_seam)
+        + thread.horizontal_rows * horizontal_seam
     )
     used = [*zone_areal_mass.values(), *tape_props.values()]
     used += [thread.linear_mass, thread.consumption_ratio]
@@ -228,6 +247,7 @@ def estimate_mass(
         thread_length=thread_length,
         thread_mass=thread_length * thread.linear_mass.value,
         sources=tuple(sorted({prop.source for prop in used})),
+        centre_seam_length=centre_seam,
     )
 
 

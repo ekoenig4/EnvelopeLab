@@ -33,6 +33,40 @@ it goes when the design is fixed. With *Check the shape under load* off, compres
 not checked and not reported. The boxes of the side column (*Shape under load*, *Solved
 shape*, *Constraint locks*, *Live outputs*, ...) are drawn as cards.
 
+### Panels and print roll
+
+The box at the top of the editor's side column changes how the envelope is divided into
+panels, at any time after the project is started (each change is one undoable edit):
+
+* **Gores N**: the number of gores. Every panel gets narrower with more gores (special
+  shapes keep their place by gore number). Tick *Fixed N* under *Constraint locks* to
+  lock it.
+* **Panel rows** and **Space equally**: divide every gore into this many panel rows, all
+  the same length along the load tape, lettered A, B, C ... from the mouth. Each new row
+  keeps the material zone, half-gore cut and settings (label, grain, seam allowance) of
+  the old row at its middle; turning vents and single-panel zones (appliques) move to
+  the new rows over the same stretch of tape. Notches, tape paths, feature marks and
+  manual outlines placed on the old rows are removed, since their positions belong to
+  the old panels (*Edit ▸ Undo* brings back the old rows and their marks). Rows with
+  measured seam bows (flat-chord gores) cannot be redivided: use the crest loft or
+  straight seams first. Rows of different heights are still made with *Split row* and
+  *Merge with next* under the rows table, or by typing heights.
+* **Half gores**: cut each panel in two, a left and a right half, sewn together down
+  the gore centre (the **centre seam**). Each half is about half as wide on the print
+  roll. *All rows*, *Rows too wide* (only the rows with a piece larger than the roll) or
+  *None*; the *half gores* column of the *Panel rows* table, and the *Half gores* box of
+  *Selected row* in Patterns, set one row. The sewn envelope is the same, so simulations
+  stay current; the patterns, build pack and mass change (the halves' extra seam
+  allowance and the centre seam's thread).
+* **Print roll**: whether every piece fits the roll (*Preferences ▸ Print roll width*),
+  e.g. *▲ 4 piece(s) of row A, B, C, D LARGER THAN THE 1524 mm roll*. **Suggest…** works
+  out what would make them fit, without changing anything: the fewest gores (*14 gores or
+  more (now 8)*), half gores for the rows that are too wide, or the fewest equal panel
+  rows (*7 equal panel rows or more (now 4)*: shorter panels turned across the roll).
+
+In the build pack each half has its own template and DXF (*row C left half*, *row C right
+half*, each cut once per gore); the sewing schedule starts with the centre seams.
+
 * **Profile canvas**: drag a control point; the curve follows while you drag, and
   releasing the mouse makes one edit. Radii cannot become negative.
   The canvas also marks where the panels lie: a tick across the curve at every row seam,
@@ -388,6 +422,27 @@ and its circular centre panel. **Layout** in the toolbar chooses how they are ar
   full-size one.
 * *Assembled gore*: stacked up one gore as they are sewn, the scoop at the bottom and the
   parachute's centre panel on top, so you can see how the rows meet.
+* Rows cut as half gores show their centre seam dashed blue and *(2 half gores)* in
+  their label.
+* *On the print roll*: every piece (each half of a half-gore row) as its 1:1 page is printed, one page after another
+  down a strip of the print roll (**Print roll width** in **Preferences**): the roll's
+  width runs across the view between two blue edges, its length runs down. Each piece is
+  turned as it is printed (a quarter turn if its height fits across the roll, else
+  upright, else turned to its narrowest), and the note beside its page says how much of
+  the roll's width it takes and how it is turned. A piece wider than the roll at any turn
+  is noted **▲ LARGER THAN THE … ROLL** (with its narrowest width); in the other layouts
+  it is labelled *▲ larger than the … roll*. Split the row (more panel rows) or join
+  paper to print it. The special shapes' pieces have the same view
+  ([special shapes](special-shape-primitives.md)).
+
+**Page on print roll** under *Selected row* says the same for the selected row: e.g.
+*2508 mm across the 3700 mm roll, 2085 mm along it; turned 90° (its height across the
+roll)*, or **LARGER THAN THE 1524 mm ROLL** in bold amber.
+
+Under the drawing, the *Selected row* form sits beside the balloon in 3D with that row
+highlighted: its band round the envelope and one of its panels outlined
+([the balloon in every mode](main-window.md#the-balloon-in-every-mode)). The Shape
+mode's editor has the same view under the profile.
 
 The pattern view shows only the base envelope. The envelope panels a special shape is
 sewn on (its footprint line, match marks and feed holes) are shown with that shape, in the

@@ -65,7 +65,7 @@ if TYPE_CHECKING:
 
 MM = 1000.0  # mm per m
 PT_PER_M = 72.0 / 0.0254  # PDF points per m
-PACK_FORMAT = "envelopelab-build-pack/3"
+PACK_FORMAT = "envelopelab-build-pack/4"
 CAD_DIR = "cad"
 INDEX = "index.json"
 DEFAULT_ROLL_WIDTH = 60 * 0.0254  # m (60 in roll, AGENTS.md example)
@@ -117,6 +117,9 @@ class Sheet:
         Directions placed on the sheet: position (m) and text.
     notes : list of str
         More lines under the header.
+    whole : Sheet, optional
+        For half of a row panel cut as half gores: the whole row panel's sheet (drawn by
+        the documents that show the envelope row by row, :func:`row_sheets`).
     """
 
     name: str
@@ -135,6 +138,12 @@ class Sheet:
     ticks: list[FloatArray] = field(default_factory=list)
     texts: list[tuple[float, float, str]] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
+    whole: Sheet | None = field(default=None, repr=False)
+
+    @property
+    def letter(self) -> str:
+        """Row letter of an envelope panel sheet (or of the row its half belongs to)."""
+        return (self.whole or self).piece.removeprefix("row ").strip()
 
     @property
     def finished_size(self) -> tuple[float, float]:
@@ -203,27 +212,76 @@ def envelope_sheets(design: DesignDocument, patterns: PatternSet | None = None) 
     list of Sheet
         One per row, mouth first.
     """
-    from envelopelab.project.gore_design import panel_rows, row_zone
+    from envelopelab.geometry.gore import half_panel
+    from envelopelab.project.gore_design import (
+        half_gore_rows,
+        panel_rows,
+        row_allowance,
+        row_zone,
+    )
     from envelopelab.project.model import PatternSet
 
     assert design.gores is not None
     patterns = patterns or PatternSet()
+    halves = half_gore_rows(design)
     out = []
     for row in panel_rows(design, patterns):
         zone = row_zone(design, patterns, row.label)
-        out.append(
-            Sheet(
-                name=f"envelope-row-{row.label}",
-                piece=f"row {row.label}",
-                kind="envelope panel",
-                cut_count=design.gores.count,
-                fabric=design.zones.get(zone, zone),
-                finished=row.finished_outline,
-                cut=row.cut_outline,
-                edges=_panel_edges(row.right_edge),
-            )
+        whole = Sheet(
+            name=f"envelope-row-{row.label}",
+            piece=f"row {row.label}",
+            kind="envelope panel",
+            cut_count=design.gores.count,
+            fabric=design.zones.get(zone, zone),
+            finished=row.finished_outline,
+            cut=row.cut_outline,
+            edges=_panel_edges(row.right_edge),
         )
+        if row.label not in halves:
+            out.append(whole)
+            continue
+        # Half gores: each panel cut as two halves, sewn together down the centre first.
+        for half in half_panel(row, row_allowance(design, patterns, row.label)):
+            e = half.edges
+            other = "right" if half.side == "left" else "left"
+            out.append(
+                Sheet(
+                    name=f"envelope-row-{row.label}-{half.side}-half",
+                    piece=f"row {row.label} {half.side} half",
+                    kind="envelope panel",
+                    cut_count=design.gores.count,
+                    fabric=whole.fabric,
+                    finished=half.finished,
+                    cut=half.cut,
+                    edges={
+                        half.side: e["side"],
+                        "centre": e["centre"],
+                        "bottom": e["bottom"],
+                        "top": e["top"],
+                    },
+                    note=f"half gore: sew to the {other} half along the centre seam first",
+                    whole=whole,
+                )
+            )
     return out
+
+
+def row_sheets(sheets: Sequence[Sheet]) -> list[Sheet]:
+    """One sheet per envelope panel row, mouth first: the row's own sheet, or the whole
+    panel of a row cut as half gores (for documents that show the envelope row by row)."""
+    out: list[Sheet] = []
+    for s in sheets:
+        if s.kind != "envelope panel":
+            continue
+        row = s.whole or s
+        if not out or out[-1] is not row:
+            out.append(row)
+    return out
+
+
+def row_pieces_of(sheets: Sequence[Sheet], row: Sheet) -> list[Sheet]:
+    """The sheets cut for envelope row ``row`` (itself, or its two halves)."""
+    return [s for s in sheets if s.kind == "envelope panel" and (s.whole or s) is row]
 
 
 def _panel_edges(right: FloatArray) -> dict[str, FloatArray]:
@@ -323,6 +381,7 @@ def primitive_sheets(
     seam_allowance: float | None = None,
     hole_hem: float = 0.0,
     hole_tape: str = "",
+    group: str | None = None,
 ) -> list[Sheet]:
     """Sheets of a placed primitive: its skin pieces and its envelope marking sheets.
 
@@ -339,6 +398,8 @@ def primitive_sheets(
         in radius than finished (0: cut at the finished size).
     hole_tape : str
         Tape class the feed-hole hem is turned over (named on the sheet).
+    group : str, optional
+        The object (shape group) the primitive belongs to, named on its skin sheets.
 
     Returns
     -------
@@ -347,16 +408,15 @@ def primitive_sheets(
     """
     name = design.primitive.name
     out: list[Sheet] = []
-    rim_pieces = [p for p in design.pieces if p.rim is not None]
-    tip = [p for p in design.pieces if p.rim is None]
-    order = {p.label: k for k, p in enumerate(rim_pieces)}
+    skin = {(p.tier, p.index): p for p in design.pieces if p.role == "panel"}
+    tip = [p for p in design.pieces if p.role == "tip"]
     for piece in design.pieces:
         own = [m for m in design.marks if m.piece == piece.label]
         marks = [(m.piece_xy[0], m.piece_xy[1], str(m.number)) for m in own]
         edges = {k: v for k, v in piece.edges.items()}
         if piece.rim is not None:
             edges["rim"] = piece.rim
-        texts, notes = _piece_directions(piece, own, rim_pieces, tip, order, name)
+        texts, notes = _piece_directions(piece, own, skin, design.primitive.pieces, tip, name)
         ticks = [
             np.vstack([pt, pt + TICK_LENGTH * (piece.finished.mean(axis=0) - pt) / d])
             for pt in (np.asarray(q, dtype=np.float64) for q in piece.seam_points)
@@ -373,8 +433,8 @@ def primitive_sheets(
                 cut=piece.cut,
                 edges=edges,
                 marks=marks,
-                note=f"part of {name}: sew the seams between the pieces first, then the rim "
-                "to the envelope",
+                note=f"part of {name}{f' (object {group})' if group else ''}: sew the seams "
+                "between the pieces first, then the rim to the envelope",
                 texts=texts,
                 notes=notes,
                 ticks=ticks,
@@ -513,13 +573,18 @@ def _side_ticks(line: FloatArray, sign: float) -> list[FloatArray]:
 def _piece_directions(
     piece: Any,
     own_marks: Sequence[Any],
-    rim_pieces: Sequence[Any],
+    skin: dict[tuple[int, int], Any],
+    m: int,
     tip: Sequence[Any],
-    order: dict[str, int],
     name: str,
 ) -> tuple[list[tuple[float, float, str]], list[str]]:
-    """What every edge of a skin piece is sewn to: texts placed on the piece, and notes."""
+    """What every edge of a skin piece is sewn to: texts placed on the piece, and notes.
+
+    ``skin`` holds the gores or panels by (tier, index round the axis); ``m`` is the
+    number round the axis.
+    """
     centre = piece.finished.mean(axis=0)
+    tiers = len(skin) // m
 
     def at(points: FloatArray) -> tuple[float, float]:
         pts = np.asarray(points, dtype=np.float64)
@@ -531,7 +596,7 @@ def _piece_directions(
 
     texts: list[tuple[float, float, str]] = []
     notes: list[str] = []
-    if piece.rim is None:  # the tip disc or cap
+    if piece.role == "tip":  # the tip disc or cap
         texts.append((float(centre[0]), float(centre[1]), "TIP DISC"))
         notes.append(f"TIP DISC: sew round the tops of all {name} panels")
         if piece.seam_points:
@@ -540,23 +605,30 @@ def _piece_directions(
                 inward = centre - mid
                 norm = float(np.linalg.norm(inward))
                 p = mid + (0.6 * TEXT_INSET * inward / norm if norm > 0.0 else 0.0)
-                label = _short(rim_pieces[k % len(rim_pieces)].label, name)
+                label = _short(skin[(tiers - 1, k % m)].label, name)
                 texts.append((float(p[0]), float(p[1]), label))
             notes.append(
                 "the ticks on the edge are where the seams between the panels meet it: sew "
                 "each panel's top between the ticks either side of its name"
             )
         return texts, notes
-    k, m = order[piece.label], len(rim_pieces)
-    nxt = _short(rim_pieces[(k + 1) % m].label, name)
-    prv = _short(rim_pieces[(k - 1) % m].label, name)
+    k, i = piece.index, piece.tier
+    nxt = _short(skin[(i, (k + 1) % m)].label, name)
+    prv = _short(skin[(i, (k - 1) % m)].label, name)
     numbers = sorted(mk.number for mk in own_marks)
     span = f", marks {numbers[0]}-{numbers[-1]}" if numbers else ""
-    texts.append((*at(piece.rim), f"RIM: sew to the envelope{span}"))
+    if piece.rim is not None:
+        texts.append((*at(piece.rim), f"RIM: sew to the envelope{span}"))
+    else:  # a piece of an upper tier: its bottom is sewn to the top of the piece below
+        below = _short(skin[(i - 1, k)].label, name)
+        texts.append((*at(piece.edges["bottom"]), f"BOTTOM: sew to {below} (its top)"))
     texts.append((*at(piece.edges["right"]), f"sew to {nxt} (its left side)"))
     texts.append((*at(piece.edges["left"]), f"sew to {prv} (its right side)"))
     top = np.asarray(piece.edges.get("top", np.zeros((0, 2))))
-    if tip and len(top) > 1:
+    if i < tiers - 1:
+        above = _short(skin[(i + 1, k)].label, name)
+        texts.append((*at(top), f"TOP: sew to {above} (its bottom)"))
+    elif tip and len(top) > 1:
         texts.append((*at(top), "TOP: sew to the tip disc"))
     elif len(top):
         texts.append((float(top[0][0]), float(top[0][1]) - TEXT_INSET, f"APEX of {name}"))
@@ -612,7 +684,9 @@ def shape_row_notes(primitives: Sequence[PrimitiveDesign]) -> dict[str, list[str
 
 
 def primitive_seam_pairs(design: PrimitiveDesign) -> list[SeamPair]:
-    """Edges of a primitive sewn together: skin seams, tip, and the rim to the envelope.
+    """Edges of a primitive sewn together: skin seams (in every tier), the horizontal
+    splits (each piece's top to the bottom of the piece above it), tip, and the rim to
+    the envelope.
 
     The rim is sewn to the footprint lines marked on the envelope panels (the marking
     sheets of :func:`primitive_sheets`). Those lines are on the flat panels, so they
@@ -620,15 +694,25 @@ def primitive_seam_pairs(design: PrimitiveDesign) -> list[SeamPair]:
     (:attr:`~envelopelab.features.primitives.PrimitiveDesign.mark_ease`, checked per
     match-mark interval); the pair carries that total as its ``ease``.
     """
-    pieces = [p for p in design.pieces if p.rim is not None]
-    m = len(pieces)
+    m = design.primitive.pieces
+    by = {(p.tier, p.index): p for p in design.pieces if p.role == "panel"}
+    tiers = len(by) // m
+    pieces = [by[(0, k)] for k in range(m)]
     pairs = [
-        SeamPair(((pieces[k].label, "right"),), ((pieces[(k + 1) % m].label, "left"),))
+        SeamPair(((by[(i, k)].label, "right"),), ((by[(i, (k + 1) % m)].label, "left"),))
+        for i in range(tiers)
         for k in range(m)
     ]
-    tip = [p for p in design.pieces if p.rim is None]
+    # Horizontal splits: every piece's top to the bottom of the piece above it.
+    pairs += [
+        SeamPair(((by[(i, k)].label, "top"),), ((by[(i + 1, k)].label, "bottom"),))
+        for i in range(tiers - 1)
+        for k in range(m)
+    ]
+    tip = [p for p in design.pieces if p.role == "tip"]
     if tip:
-        pairs.append(SeamPair(tuple((p.label, "top") for p in pieces), ((tip[0].label, "top"),)))
+        top = tuple((by[(tiers - 1, k)].label, "top") for k in range(m))
+        pairs.append(SeamPair(top, ((tip[0].label, "top"),)))
     lines: list[tuple[str, str]] = []
     for gore, row in sorted({(a.gore, a.row) for a in design.attachment}):
         runs = [a for a in design.attachment if (a.gore, a.row) == (gore, row)]
@@ -649,13 +733,24 @@ def _length(points: FloatArray) -> float:
 
 
 def envelope_seam_pairs(sheets: Sequence[Sheet]) -> list[SeamPair]:
-    """Edges of the envelope rows sewn together (gore sides, row seams)."""
-    rows = [s for s in sheets if s.kind == "envelope panel"]
-    pairs = [SeamPair(((s.name, "left"),), ((s.name, "right"),)) for s in rows]
-    pairs += [
-        SeamPair(((a.name, "top"),), ((b.name, "bottom"),))
-        for a, b in zip(rows[:-1], rows[1:], strict=True)
-    ]
+    """Edges of the envelope rows sewn together: the centre seams of rows cut as half
+    gores, the gore sides (a panel's left side to the next gore's right side) and the row
+    seams (a row's top to the next row's bottom, both halves together)."""
+    rows = row_sheets(sheets)
+    pieces = [row_pieces_of(sheets, r) for r in rows]
+    pairs: list[SeamPair] = []
+    for parts in pieces:
+        if len(parts) == 2:
+            left, right = parts
+            pairs.append(SeamPair(((left.name, "centre"),), ((right.name, "centre"),)))
+    for parts in pieces:
+        left = next(p for p in parts if "left" in p.edges)
+        right = next(p for p in parts if "right" in p.edges)
+        pairs.append(SeamPair(((left.name, "left"),), ((right.name, "right"),)))
+    for low, high in zip(pieces[:-1], pieces[1:], strict=True):
+        pairs.append(
+            SeamPair(tuple((p.name, "top") for p in low), tuple((p.name, "bottom") for p in high))
+        )
     return pairs
 
 
@@ -760,6 +855,7 @@ def write_pack(
     title: str = "",
     documents: Sequence[dict[str, str]] = (),
     provenance: dict[str, str] | None = None,
+    shape_groups: dict[str, list[str]] | None = None,
 ) -> Path:
     """Write a build pack: the 1:1 template PDFs at the top of ``out_dir``
     (:mod:`envelopelab.export.templates`) and, in ``cad/``, one DXF per sheet and
@@ -782,6 +878,8 @@ def write_pack(
         paths relative to ``out_dir``), listed in the index.
     provenance : dict, optional
         Where the pack comes from (:class:`envelopelab.export.documents.Provenance`).
+    shape_groups : dict of str to list of str, optional
+        Members of every shape group (object), listed in the index.
 
     Returns
     -------
@@ -835,6 +933,7 @@ def write_pack(
         "templates": templates,
         "documents": list(documents),
         "sheets": entries,
+        "shape_groups": shape_groups or {},
         "seam_pairs": [
             {
                 "a": [{"file": f"{CAD_DIR}/{n}.dxf", "edge": e} for n, e in pair.a],
@@ -860,6 +959,7 @@ def export_build_pack(
     marking_allowance: float | None = None,
     hole_hem: float | None = None,
     extras: PackExtras | None = None,
+    groups: dict[str, str] | None = None,
 ) -> Path:
     """Export the envelope rows, the parachute, and every primitive's pieces and marking
     sheets, and the documents chosen in ``extras``.
@@ -885,6 +985,9 @@ def export_build_pack(
         hole tape, twice its width).
     extras : PackExtras, optional
         Documents to write with the sheets (default: none, the sheets only).
+    groups : dict of str to str, optional
+        Shape group (object) of each primitive that has one, by primitive name; listed in
+        ``index.json`` (``shape_groups``) and named on the skin sheets.
 
     Returns
     -------
@@ -896,7 +999,8 @@ def export_build_pack(
     sheets = envelope_sheets(design, patterns)
     row_notes = shape_row_notes(primitives)
     for sheet in sheets:
-        sheet.notes += row_notes.get(sheet.piece.removeprefix("row "), [])
+        if sheet.kind == "envelope panel":
+            sheet.notes += row_notes.get(sheet.letter, [])
     pairs = envelope_seam_pairs(sheets)
     chute = parachute_sheets(design)
     sheets += chute
@@ -904,7 +1008,8 @@ def export_build_pack(
     for p in primitives:
         name = p.primitive.name
         fabric = skin_fabric if isinstance(skin_fabric, str) else skin_fabric.get(name, "skin")
-        sheets += primitive_sheets(p, fabric, marking_allowance, hem, hole_tape)
+        group = (groups or {}).get(name)
+        sheets += primitive_sheets(p, fabric, marking_allowance, hem, hole_tape, group)
         pairs += primitive_seam_pairs(p)
     documents: list[dict[str, str]] = []
     prov = None
@@ -920,7 +1025,20 @@ def export_build_pack(
         title=design.meta.name,
         documents=documents,
         provenance=None if prov is None else prov.as_dict(),
+        shape_groups=_group_lists(primitives, groups or {}),
     )
+
+
+def _group_lists(
+    primitives: Sequence[PrimitiveDesign], groups: dict[str, str]
+) -> dict[str, list[str]]:
+    """Members of every shape group, in the order of the primitives."""
+    out: dict[str, list[str]] = {}
+    for p in primitives:
+        group = groups.get(p.primitive.name)
+        if group:
+            out.setdefault(group, []).append(p.primitive.name)
+    return out
 
 
 @dataclass

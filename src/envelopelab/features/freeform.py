@@ -21,7 +21,9 @@ The clipped skin is cut along the half-planes through the axis at
 :math:`\phi_j = 2\pi j/M - \pi/M`, like the gores of a revolved shape. Every panel must
 be a disc bounded by the footprint, its two seams and the *pole*, where the axis leaves
 the mesh; shapes whose axis does not pass through their top are rejected (lean the
-placement or use more panels).
+placement or use more panels). A moved meeting point (``seam_centre``, ADR-0052) takes
+the half-planes, the pole and the cap about the line parallel to the axis through it
+instead, so the panels meet where that line leaves the mesh.
 
 Flattening
 ----------
@@ -56,6 +58,7 @@ References
 from __future__ import annotations
 
 import math
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -65,6 +68,7 @@ from scipy.sparse.linalg import splu
 from scipy.spatial import cKDTree
 
 from envelopelab.features.builder import DesignedSkin, FeatureBuildError, HostSurface, _mesh_disc
+from envelopelab.features.primitives import seam_angles
 from envelopelab.geometry.polygon import offset_polygon, signed_area
 from envelopelab.solvers.membrane import FloatArray, IntArray
 
@@ -479,6 +483,8 @@ class _MeshSkin:
 
     shape: FreeformShape
     surface: EnvelopeSurface
+    #: A point on the seam line (the axis, or parallel to it through a moved meeting
+    #: point): every angle round the shape is taken about it.
     base: FloatArray
     axis: FloatArray
     b1: FloatArray
@@ -491,7 +497,14 @@ class _MeshSkin:
     pole: FloatArray = field(default_factory=lambda: np.zeros(3))
     cap: _Panel | None = None
     cap_mask: np.ndarray = field(default_factory=lambda: np.zeros(0, dtype=bool))
+    #: The crown outline the cap was cut with (ADR-0054; None: a circle).
+    crown_outline: Any = None
     cap_floor: float = 0.0
+
+    @property
+    def equal(self) -> bool:
+        """True when every panel is equally wide round the axis."""
+        return not self.shape.panel_widths
 
     def phi_of(self, points: FloatArray) -> FloatArray:
         rel = np.asarray(points).reshape(-1, 3) - self.base
@@ -516,9 +529,12 @@ class _MeshSkin:
 
     def panel_of(self, phi: float) -> int:
         m = len(self.panels)
-        width = 2 * math.pi / m
         start = self.panels[0].phi_a
-        return int(((phi - start) % (2 * math.pi)) // width) % m
+        rel = (phi - start) % (2 * math.pi)
+        if self.equal:
+            return int(rel // (2 * math.pi / m)) % m
+        ends = np.array([p.phi_b - start for p in self.panels])
+        return min(int(np.searchsorted(ends, rel, side="right")), m - 1)
 
     def rim_flat(self, k: int, phi: FloatArray) -> FloatArray:
         """Flat rim points of panel ``k`` at angles ``phi`` (rad), m."""
@@ -559,6 +575,10 @@ def build_mesh_skin(
     name = shape.name
     local = np.asarray(shape.mesh.vertices, dtype=np.float64)
     world = base + local[:, :1] * b1 + local[:, 1:2] * b2 + local[:, 2:3] * axis
+    # The seams, the pole and the cap are taken about the seam line: parallel to the axis
+    # through the meeting point seen from above (on the axis unless it is moved).
+    cx, cy = (float(c) for c in shape.seam_centre)
+    centre = base + cx * b1 + cy * b2
 
     def refine(a: FloatArray, b: FloatArray, _s: FloatArray) -> FloatArray:
         """Crossings of edges ``ab`` with the envelope, by bisection (all at once)."""
@@ -602,21 +622,43 @@ def build_mesh_skin(
         )
     if not np.allclose(surface.signed_distance(x[loops[0]]), 0.0, atol=1e-5):
         raise FeatureBuildError(f"{name}: the mesh has holes above the envelope")
-    x, tri, pole_index = _insert_pole(x, tri, base, axis)
+    x, tri, pole_index = _insert_pole(x, tri, centre, axis)
     rim0 = set(loops[0])
 
     rc = float(shape.cap_radius)
     cap_tri = np.zeros(len(tri), dtype=bool)
     if rc > 0.0:
-        x, tri, cap_tri = _cut_cap(name, x, tri, pole_index, rim0, base, axis, rc, tol)
+        inside = None
+        if shape.crown is not None:
+            # A shaped crown (ADR-0054): the prism of its outline round the meeting point.
+            from envelopelab.features.crown import CrownOutlineError
+
+            def plan(p: FloatArray) -> FloatArray:
+                rel = np.asarray(p, float).reshape(-1, 3) - centre
+                return np.column_stack([-(rel @ b2), rel @ b1])
+
+            try:
+                outline = shape.crown.outline(plan(x[loops[0]]))
+            except CrownOutlineError as exc:
+                raise FeatureBuildError(f"{name}: {exc}") from exc
+
+            def inside(p: FloatArray) -> FloatArray:
+                q = plan(p)
+                out: FloatArray = outline.inside(q[:, 0], q[:, 1])
+                return out
+
+        x, tri, cap_tri = _cut_cap(
+            name, x, tri, pole_index, rim0, centre, axis, rc, tol, inside=inside
+        )
 
     # Cut along the seam half-planes (each ends at the pole, which lies on every plane).
     m = shape.panels
-    seams = 2.0 * math.pi * np.arange(m) / m - math.pi / m
+    full = seam_angles(shape)
+    seams = full[:-1]
     for ph in seams:
         d = math.cos(ph) * b1 + math.sin(ph) * b2
         n = -math.sin(ph) * b1 + math.cos(ph) * b2
-        f = (x - base) @ n
+        f = (x - centre) @ n
         f[pole_index] = 0.0
         parents: list[int] = []
         x, tri = _cut(
@@ -625,21 +667,23 @@ def build_mesh_skin(
             f,
             "both",
             tol,
-            accept=lambda p, d=d: (p - base) @ d > 0.0,
+            accept=lambda p, d=d: (p - centre) @ d > 0.0,
             parents=parents,
         )
         cap_tri = cap_tri[np.asarray(parents, dtype=np.int64)]
 
     rim = _boundary_loops(tri)[0]
-    rel = x - base
+    rel = x - centre
     phi = np.arctan2(rel @ b2, rel @ b1)
     turns = np.sum(np.diff(np.unwrap(np.append(phi[rim], phi[rim][0])))) / (2 * math.pi)
     if abs(abs(turns) - 1.0) > 1e-6:
         raise FeatureBuildError(f"{name}: the footprint must turn once round the shape's axis")
     if turns < 0:
         rim = rim[::-1]
-    skin = _MeshSkin(shape, surface, base, axis, b1, b2, x, tri, rim, phi[rim])
+    skin = _MeshSkin(shape, surface, centre, axis, b1, b2, x, tri, rim, phi[rim])
     skin.cap_mask = cap_tri
+    if rc > 0.0 and shape.crown is not None:
+        skin.crown_outline = outline
     # The panels end on the cap circle, or at the pole without a cap.
     on_top = np.zeros(len(x), dtype=bool)
     if rc > 0.0:
@@ -653,9 +697,12 @@ def build_mesh_skin(
     else:
         on_top[pole_index] = True
     # Assign the other triangles to panels by centroid angle.
-    cen = x[tri].mean(axis=1) - base
+    cen = x[tri].mean(axis=1) - centre
     cphi = np.mod(np.arctan2(cen @ b2, cen @ b1) - seams[0], 2 * math.pi)
-    which = np.minimum((cphi // (2 * math.pi / m)).astype(int), m - 1)
+    if shape.panel_widths:
+        which = np.minimum(np.searchsorted(full - full[0], cphi, side="right") - 1, m - 1)
+    else:
+        which = np.minimum((cphi // (2 * math.pi / m)).astype(int), m - 1)
     which[cap_tri] = -1
     on_rim = np.zeros(len(x), dtype=bool)
     on_rim[rim] = True
@@ -675,7 +722,7 @@ def build_mesh_skin(
                 "top (lean the placement) or use more panels"
             )
         loop = loops[0]
-        rel = px - base
+        rel = px - centre
         fa = rel @ (-math.sin(seams[k]) * b1 + math.cos(seams[k]) * b2)
         fb_phi = seams[(k + 1) % m]
         fb = rel @ (-math.sin(fb_phi) * b1 + math.cos(fb_phi) * b2)
@@ -737,14 +784,14 @@ def build_mesh_skin(
                 right,
                 left,
                 float(seams[k]),
-                float(seams[k]) + 2 * math.pi / m,
+                float(full[k + 1]) if shape.panel_widths else float(seams[k]) + 2 * math.pi / m,
                 top=top,
                 glob=used,
             )
         )
     skin.pole = x[pole_index]
     if rc > 0.0:
-        skin.cap = _flatten_cap(name, x, tri[cap_tri], base, b1, b2, axis, skin.panels[0])
+        skin.cap = _flatten_cap(name, x, tri[cap_tri], centre, b1, b2, axis, skin.panels[0])
         skin.cap_floor = float(((x[on_top] - base) @ axis).min())
     return skin
 
@@ -759,9 +806,11 @@ def _cut_cap(
     axis: FloatArray,
     radius: float,
     tol: float,
+    inside: Callable[[FloatArray], FloatArray] | None = None,
 ) -> tuple[FloatArray, IntArray, np.ndarray]:
     r"""Cut the cap off the top of a mesh skin: the part round the pole inside the cylinder
-    :math:`\rho = r_c` about the axis.
+    :math:`\rho = r_c` about the axis, or inside the prism of a crown outline (``inside``:
+    positive inside, m; ADR-0054).
 
     Only the region joined to the pole is cut (a narrow neck lower down stays whole).
     Crossings are placed on the cylinder by bisection along each edge (:math:`\rho` is
@@ -777,8 +826,14 @@ def _cut_cap(
         rel = np.asarray(p).reshape(-1, 3) - base
         return np.asarray(np.linalg.norm(rel - np.outer(rel @ axis, axis), axis=1))
 
-    r = rho(x)
-    inside = r < radius
+    def outside(p: FloatArray) -> FloatArray:
+        """Negative inside the cap, positive outside, m."""
+        if inside is None:
+            return rho(p) - radius
+        return -inside(p)
+
+    r = outside(x)
+    within = r < 0.0
     nbr: dict[int, set[int]] = {}
     for a, b in np.concatenate([tri[:, [0, 1]], tri[:, [1, 2]], tri[:, [2, 0]]]):
         nbr.setdefault(int(a), set()).add(int(b))
@@ -788,7 +843,7 @@ def _cut_cap(
     while stack:
         v = stack.pop()
         for w in nbr.get(v, ()):
-            if w not in comp and inside[w]:
+            if w not in comp and within[w]:
                 comp.add(w)
                 stack.append(w)
     if comp & rim:
@@ -797,14 +852,14 @@ def _cut_cap(
         )
     in_comp = np.zeros(len(x), dtype=bool)
     in_comp[list(comp)] = True
-    f = np.where(in_comp, r - radius, np.abs(r - radius))
+    f = np.where(in_comp, r, np.abs(r))
 
     def point(a: FloatArray, b: FloatArray, _s: FloatArray) -> FloatArray:
         lo, hi = np.zeros(len(a)), np.ones(len(a))
-        a_in = rho(a) < radius
+        a_in = outside(a) < 0.0
         for _ in range(60):
             mid = 0.5 * (lo + hi)
-            same = (rho(a + mid[:, None] * (b - a)) < radius) == a_in
+            same = (outside(a + mid[:, None] * (b - a)) < 0.0) == a_in
             lo = np.where(same, mid, lo)
             hi = np.where(same, hi, mid)
         out: FloatArray = a + (0.5 * (lo + hi))[:, None] * (b - a)
@@ -893,19 +948,26 @@ class _MeshFactory:
 
         design, skin = self.design, self.skin
         m = len(skin.panels)
-        width = 2 * math.pi / m
         start = skin.panels[0].phi_a
+        # Where each panel starts and ends round the axis from the first seam, rad (equal
+        # panels keep the arithmetic of a whole number of widths).
+        if skin.equal:
+            width = 2 * math.pi / m
+            a_rel, b_rel = width * np.arange(m), width * np.arange(1, m + 1)
+        else:
+            a_rel = np.array([p.phi_a - start for p in skin.panels])
+            b_rel = np.array([p.phi_b - start for p in skin.panels])
         world = _from_chart(design, rim_chart)
         phi_rel = np.mod(skin.phi_of(world) - start, 2 * math.pi)
         notes: list[str] = []
         seam_node = []
         for j in range(m):
-            gap = np.abs(np.mod(phi_rel - j * width + math.pi, 2 * math.pi) - math.pi)
+            gap = np.abs(np.mod(phi_rel - a_rel[j] + math.pi, 2 * math.pi) - math.pi)
             seam_node.append(int(np.argmin(gap)))
         if len(set(seam_node)) != m:
             raise FeatureBuildError(f"{design.primitive.name}: panels too narrow for the mesh size")
         for j, k in enumerate(seam_node):
-            phi_rel[k] = j * width
+            phi_rel[k] = a_rel[j]
         seam_set = set(seam_node)
         # Shared seam nodes: 3D points along each seam at about the mesh size.
         seam_frac = []
@@ -934,7 +996,7 @@ class _MeshFactory:
                 (
                     i
                     for i in range(len(rim_chart))
-                    if i not in seam_set and k * width <= phi_rel[i] < (k + 1) * width
+                    if i not in seam_set and a_rel[k] <= phi_rel[i] < b_rel[k]
                 ),
                 key=lambda i: float(phi_rel[i]),
             )

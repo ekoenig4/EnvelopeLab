@@ -39,6 +39,7 @@ from PySide6.QtGui import (
     QStandardItemModel,
 )
 from PySide6.QtWidgets import (
+    QApplication,
     QCheckBox,
     QComboBox,
     QFileDialog,
@@ -83,6 +84,7 @@ from envelopelab.project.shapes import (
     placement_at,
     shape_fabrics,
 )
+from envelopelab.project.symmetry import axis_gore_label, symmetry_lines
 from envelopelab.rigging.common import seam_azimuth
 from envelopelab.solvers.results import DEFAULT_REQUIRED_FOS, ResultField
 from envelopelab_app.camera import (
@@ -121,6 +123,7 @@ LAYER_COLORS = {
     "shape": "#e7298a",
     "shape-simulated": "#7570b3",
     "marks": "#2b8cbe",
+    "symmetry": "#00a087",
 }
 #: Line colours of the rigging layer, per element kind.
 RIGGING_COLORS = {
@@ -139,10 +142,11 @@ RIGGING_COLORS = {
     "feed_holes": "#ff00ff",
     "skin_seams": "#1a1a1a",
     "skin_rim": "#1a1a1a",
+    "symmetry_axes": "#00a087",
 }
 #: Groups of the layer tree, in order: title and the layer kinds it holds.
 LAYER_GROUPS = (
-    ("Design", ("design", "marks", "shape")),
+    ("Design", ("design", "marks", "symmetry", "shape")),
     ("Result", ("envelopelab-preview", "calculix", "shape-simulated", "rest")),
     ("Rigging", ("rigging",)),
     ("Reference", ("reference",)),
@@ -151,6 +155,7 @@ LAYER_GROUPS = (
 SHORT_NAMES = {
     "design": "Design surface",
     "marks": "Panel details",
+    "symmetry": "Symmetry axes",
     "rigging": "Rigging",
     "rest": "Rest mesh",
     "envelopelab-preview": "Preview result",
@@ -162,6 +167,10 @@ SMOOTH_KINDS = ("design", "shape")
 #: Colour and actor name of the footprint outline shown while dragging a shape.
 DRAG_COLOR = "#ff00ff"
 DRAG_ACTOR = "shape-drag-outline"
+#: Colour of the selected element's highlight (as the placement views' selection).
+SELECTION_COLOR = "#d6008f"
+#: Colour of the hint: where the value pointed at or edited acts (as the placement views').
+HINT_COLOR = "#ff8f00"
 #: Line widths of polyline kinds (pixels); default 2.
 LINE_WIDTHS = {
     "red_line": 4,
@@ -172,6 +181,7 @@ LINE_WIDTHS = {
     "feed_holes": 3,
     "skin_seams": 2,
     "skin_rim": 3,
+    "symmetry_axes": 5,
 }
 #: Brightness of every second gore, so that neighbouring gores are told apart.
 ALTERNATE_GORE_SHADE = 0.8
@@ -420,9 +430,15 @@ class View3DPanel(QWidget):
     rerunRequested(str)
         The banner's action asks for a solve with this solver (``envelopelab-preview``
         or ``calculix``).
+    nudged(float, float)
+        Nudge the selected special shape: (round the envelope, up the tape), m.
+    axisRequested()
+        Place a symmetry axis (the Special shapes mode's live placement).
     """
 
     rerunRequested = Signal(str)  # noqa: N815 (Qt naming)
+    nudged = Signal(float, float)
+    axisRequested = Signal()  # noqa: N815 (Qt naming)
 
     def __init__(
         self,
@@ -619,6 +635,7 @@ class View3DPanel(QWidget):
         camera_layout.setSpacing(2)
         camera_layout.addLayout(views)
         camera_layout.addLayout(places)
+        camera_layout.addLayout(self._selection_bar())
         #: Where saved viewpoints are kept (the main window's settings); None keeps them
         #: for this session only.
         self.settings: QSettings | None = None
@@ -722,6 +739,11 @@ class View3DPanel(QWidget):
         #: Fields of the chosen result run (key to field), and why others are missing.
         self.fields: dict[str, ResultField] = {}
         self.missing: dict[str, str] = {}
+        #: The selection highlighted (its key) and the one the view last turned to.
+        self._highlight: Any = None
+        self._faced: str | None = None
+        controller.selectionChanged.connect(lambda _t: self.show_selection())
+        controller.hintChanged.connect(self.show_hint)
         self.refresh()
 
     def load_renderer(self) -> bool:
@@ -805,6 +827,18 @@ class View3DPanel(QWidget):
                     np.zeros((0, 3), dtype=np.int64),
                     polylines=marks,
                 )
+            axes = session.state.symmetry_axes
+            if axes:
+                n = session.design.gores.count
+                self.layers["symmetry"] = Layer(
+                    "symmetry",
+                    "symmetry",
+                    "Symmetry axes (design, current): "
+                    + ", ".join(f"{a.name} ({axis_gore_label(a.line, n)})" for a in axes),
+                    np.zeros((0, 3)),
+                    np.zeros((0, 3), dtype=np.int64),
+                    polylines={"symmetry_axes": symmetry_lines(session.design, axes)},
+                )
             lines = self.controller.rigging_polylines()
             if lines:
                 parts = ", ".join(k.replace("_", " ") for k in lines)
@@ -883,9 +917,10 @@ class View3DPanel(QWidget):
         specs = {s.name: s for s in session.state.shapes} if session is not None else {}
         designed: dict[str, Any] = {}
         for name in service.keys:
-            result = service.result(name)
+            result = service.shown(name)  # the last placed design while it is updated
             if result is None or result.design is None:
                 continue
+            state = "updating" if service.updating(name) else "current"
             shown = designed_display(result.design)
             designed[name] = shown
             # Sit the shape and its feed holes on the drawn envelope (display only).
@@ -897,7 +932,7 @@ class View3DPanel(QWidget):
             layer = Layer(
                 f"shape:{name}",
                 "shape",
-                f"Special shape {name} (as designed, current)"
+                f"Special shape {name} (as designed, {state})"
                 + (f", {len(holes)} feed hole(s)" if holes else ""),
                 shown.points + shift,
                 shown.triangles,
@@ -907,7 +942,7 @@ class View3DPanel(QWidget):
             layer.visible = service.simulation_status(name) != "current"
             self.layers[layer.key] = layer
         for name, sim in service.simulations.items():
-            result = service.result(name)
+            result = service.shown(name)
             if name not in service.keys or result is None or result.design is None:
                 continue
             placed = result.design  # the shape as placed now (offset and fabric)
@@ -1603,6 +1638,179 @@ class View3DPanel(QWidget):
                 resolution=200,
                 interaction_event="end",
             )
+        self._add_selection_actor(plotter)
+        self._add_hint_actor(plotter)
+
+    # -- the selection ------------------------------------------------------------------
+
+    def _selection_bar(self) -> QHBoxLayout:
+        """The selection row: what is selected, Face selection, the nudge arrows and
+        step for a selected special shape, and Symmetry axis… (as the Special shapes'
+        On the balloon tab)."""
+        from envelopelab_app.placement_view import NUDGE_STEPS_MM
+
+        row = QHBoxLayout()
+        row.setSpacing(4)
+        row.addWidget(QLabel("Selected:"))
+        self.selection_label = QLabel("-")
+        self.selection_label.setObjectName("selectionLabel")
+        row.addWidget(self.selection_label)
+        face = QPushButton("Face selection")
+        face.setObjectName("face_selection")
+        face.setToolTip(
+            "Look straight at the selected element (a special shape, panel row, control "
+            "point or rigging component; highlighted in magenta). The view turns to a new "
+            "selection by itself."
+        )
+        face.clicked.connect(lambda: self.face_selection(force=True))
+        self.view_buttons["face_selection"] = face
+        row.addWidget(face)
+        row.addSpacing(12)
+        row.addWidget(QLabel("Nudge shape:"))
+        self.nudge_buttons: dict[str, QPushButton] = {}
+        for key, (text, tip, d) in {
+            "left": ("◀", "Round the envelope, towards lower gores", (-1.0, 0.0)),
+            "right": ("▶", "Round the envelope, towards higher gores", (1.0, 0.0)),
+            "up": ("▲", "Up the tape, towards the crown", (0.0, 1.0)),
+            "down": ("▼", "Down the tape, towards the mouth", (0.0, -1.0)),
+        }.items():
+            button = QPushButton(text)
+            button.setObjectName(f"view3d_nudge_{key}")
+            button.setToolTip(f"Nudge the selected special shape: {tip.lower()}")
+            button.setAutoRepeat(True)
+            button.setMaximumWidth(32)
+            button.clicked.connect(lambda _c=False, d=d: self.nudge(*d))
+            self.nudge_buttons[key] = button
+            row.addWidget(button)
+        self.nudge_step = QComboBox()
+        self.nudge_step.setObjectName("view3dNudgeStep")
+        for mm in NUDGE_STEPS_MM:
+            self.nudge_step.addItem(f"{mm} mm", mm / 1000.0)
+        self.nudge_step.setCurrentIndex(2)
+        row.addWidget(self.nudge_step)
+        row.addSpacing(12)
+        axis = QPushButton("Symmetry axis…")
+        axis.setObjectName("view3d_axis")
+        axis.setToolTip(
+            "Place a symmetry axis, seeing it and the mirror images it would make as you "
+            "point (opens the Special shapes mode's On the balloon tab)"
+        )
+        axis.clicked.connect(self.axisRequested)
+        row.addWidget(axis)
+        row.addStretch(1)
+        return row
+
+    def selected_shape(self) -> str | None:
+        """The special shape selected (from the workspace selection), or None."""
+        sel = self.controller.selection
+        return sel.removeprefix("shape:") if sel.startswith("shape:") else None
+
+    def nudge(self, d_hoop: float, d_tape: float) -> None:
+        """Nudge the selected special shape by the step (Shift held: five steps)."""
+        if self.selected_shape() is None:
+            return
+        step = float(self.nudge_step.currentData())
+        if QApplication.keyboardModifiers() & Qt.KeyboardModifier.ShiftModifier:
+            step *= 5.0
+        self.nudged.emit(d_hoop * step, d_tape * step)
+
+    def selection_highlight(self) -> Any:
+        """The selection as drawn on the balloon (:class:`~envelopelab.project.highlight.
+        Highlight`): a special shape's footprint, or the element's lines; None for
+        nothing to show."""
+        from envelopelab.project.highlight import Highlight, selection_highlight
+
+        c = self.controller
+        design = c.design
+        provider = c.placement_provider
+        if design is None or design.gores is None:
+            return None
+        sel = c.selection
+        name = self.selected_shape()
+        if name is not None:
+            data = provider() if provider is not None else None
+            shape = None if data is None else next((s for s in data.shapes if s.name == name), None)
+            if shape is None:
+                return None
+            loop = shape.footprint3d
+            lines = [] if loop is None else [np.vstack([loop, loop[:1]])]
+            return Highlight(f"special shape {name}", lines, shape.base3d, sel)
+        try:
+            rows = c.rows()
+        except ValueError:
+            rows = []
+        return selection_highlight(design, sel, rows=rows, rigging=c.rigging_polylines())
+
+    def show_selection(self) -> None:
+        """Highlight the selection and, when it is new, turn to face it."""
+        self._highlight = self.selection_highlight()
+        h = self._highlight
+        self.selection_label.setText("-" if h is None else h.label)
+        for button in self.nudge_buttons.values():
+            button.setEnabled(self.selected_shape() is not None)
+        if self.plotter is None:
+            return
+        self._add_selection_actor(self.plotter)
+        self.face_selection()
+        self.plotter.render()
+
+    def _add_selection_actor(self, plotter: Any) -> None:
+        h = self._highlight
+        if h is None or not h.lines:
+            plotter.remove_actor("selection-highlight")
+            return
+        plotter.add_mesh(
+            _merged_lines(h.lines),
+            color=SELECTION_COLOR,
+            line_width=5,
+            name="selection-highlight",
+            pickable=False,
+            reset_camera=False,
+        )
+
+    def show_hint(self) -> None:
+        """Draw where the value pointed at or edited acts (amber); a focused value's hint
+        also turns the view to face it."""
+        if self.plotter is None or (not self.isVisible() and self.controller.defer_hidden):
+            return
+        self._add_hint_actor(self.plotter)
+        h = self.controller.hint_highlight()
+        if self.controller.hint_focused and h is not None and h.focus is not None:
+            x, y = float(h.focus[0]), float(h.focus[1])
+            if math.hypot(x, y) > 1e-6 and h.key != self._faced:
+                self._faced = h.key
+                azimuth = math.atan2(y, x)
+                self._apply_pose(facing(tuple(self.plotter.bounds), azimuth, self._view_angle()))
+        self.plotter.render()
+
+    def _add_hint_actor(self, plotter: Any) -> None:
+        h = self.controller.hint_highlight()
+        if h is None or not h.lines:
+            plotter.remove_actor("hint-highlight")
+            return
+        plotter.add_mesh(
+            _merged_lines(h.lines),
+            color=HINT_COLOR,
+            line_width=4,
+            name="hint-highlight",
+            pickable=False,
+            reset_camera=False,
+        )
+
+    def face_selection(self, force: bool = False) -> None:
+        """Look straight at the selected element (only when it changed, unless
+        ``force``); mouth down, the azimuth of its focus point."""
+        h = self._highlight
+        if self.plotter is None or h is None or h.focus is None:
+            return
+        if not force and h.key == self._faced:
+            return
+        self._faced = h.key
+        x, y = float(h.focus[0]), float(h.focus[1])
+        if math.hypot(x, y) < 1e-6:
+            return  # on the axis: every side faces it
+        azimuth = math.atan2(y, x)
+        self._apply_pose(facing(tuple(self.plotter.bounds), azimuth, self._view_angle()))
 
     def _field_kwargs(self, mesh: Any, field: ResultField) -> dict[str, Any]:
         """``add_mesh`` arguments that colour ``mesh`` by ``field``, with its scalar bar.
@@ -1818,6 +2026,10 @@ class View3DPanel(QWidget):
         if spec is None or self.controller.envelope_surface() is None:
             return False
         self.drag = ShapeDrag(name, spec.placement, spec.placement)
+        if self.controller.selection != f"shape:{name}":
+            # The nudge arrows move it next; it is in view already, so the camera stays.
+            self._faced = f"shape:{name}"
+            self.controller.select(f"shape:{name}")
         self.info.setText(f"Moving {name}: drag over the envelope and release to place it")
         return True
 
@@ -1851,8 +2063,7 @@ class View3DPanel(QWidget):
         if (p.gore, p.tape_position, p.across) == (s.gore, s.tape_position, s.across):
             self.info.setText("")
             return False
-        values = {"gore": p.gore, "tape_position": p.tape_position, "across": p.across}
-        moved = bool(self.controller.edit("update_shape", drag.name, {"placement": values}))
+        moved = self.controller.place_shape(drag.name, p)
         self.info.setText(
             f"Moved {drag.name} to gore {p.gore}, {p.tape_position:.3f} m up the tape; it is "
             "being placed (see Special shapes)"

@@ -41,6 +41,7 @@ from envelopelab_app import layout as layout_state
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.dialogs import PreferencesDialog
 from envelopelab_app.gore_editor import GoreEditor
+from envelopelab_app.hints import HintTracker
 from envelopelab_app.layout import MODE_KEYS, MODES
 from envelopelab_app.panels.base import UNSAVED_MARK, Panel
 from envelopelab_app.panels.design_tree import DesignTreePanel
@@ -64,6 +65,8 @@ from envelopelab_app.simulation import CALCULIX, PREVIEW, SimulationManager
 from envelopelab_app.wizard import NewDesignWizard
 
 FILE_FILTER = f"EnvelopeLab projects (*{PROJECT_SUFFIX})"
+#: Pause after the last edit of a special shape before it is placed in full, ms.
+SHAPE_SETTLE_MS = 350
 
 
 class MainWindow(QMainWindow):
@@ -94,13 +97,20 @@ class MainWindow(QMainWindow):
         self.instance_id = uuid.uuid4().hex
         self.controller = WorkspaceController(self.prefs)
         self.controller.defer_hidden = interactive
+        # Scripted windows (tests) apply live edits at once, so a value set reads back.
+        self.controller.live_deferred = interactive
+        # Shape edits show as fast previews at once; the full placement (pieces, checks)
+        # waits until the edits pause (scripted windows place at once).
+        self.controller.shapes.settle_ms = SHAPE_SETTLE_MS if interactive else 0
         self.simulation = SimulationManager(self.controller)
         self.setWindowTitle("EnvelopeLab")
         self.resize(1500, 950)
 
-        self.gore_editor = GoreEditor(self.controller)
-        self.gore_editor.solved_shape.attach_simulation(self.simulation)
         use_3d = self.prefs.enable_3d if enable_3d is None else enable_3d
+        self.gore_editor = GoreEditor(self.controller, gpu=use_3d)
+        # Profile points dragged on the canvas edit the design as they move.
+        self.gore_editor.canvas.live = interactive
+        self.gore_editor.solved_shape.attach_simulation(self.simulation)
         self.design_tree = DesignTreePanel(self.controller)
         self.properties = PropertiesPanel(self.controller)
         self.validation = ValidationPanel(self.controller)
@@ -110,10 +120,16 @@ class MainWindow(QMainWindow):
             self.controller, enable_renderer=use_3d, defer_renderer=interactive
         )
         self.view3d.settings = settings  # saved 3D viewpoints, per project
-        self.patterns = PatternPanel(self.controller)
+        self.patterns = PatternPanel(self.controller, gpu=use_3d)
         self.history = HistoryPanel(self.controller)
-        self.rigging = RiggingPanel(self.controller)
-        self.shapes = ShapesPanel(self.controller)
+        self.rigging = RiggingPanel(self.controller, gpu=use_3d)
+        self.shapes = ShapesPanel(self.controller, enable_3d=use_3d)
+        # The 3D inlays of the design modes draw what the placement views draw.
+        self.controller.placement_provider = self.shapes.placement_data
+        # Pointing at or editing a number shows where on the balloon it acts.
+        self.controller.shape_hint = self.shapes.shape_hint
+        self.controller.hintChanged.connect(self.shapes.show_hint)
+        self.hints = HintTracker(self.controller)
         pattern_scope = artifact_inputs("patterns")
         self.panels: dict[str, Panel] = {
             "tree": Panel("Design Tree", self.controller, self.design_tree),
@@ -180,6 +196,8 @@ class MainWindow(QMainWindow):
         self.simulation.calculixChanged.connect(self._update_ccx_label)
         self.simulation.idle.connect(self._update_actions)
         self.view3d.rerunRequested.connect(self._run_requested)
+        self.view3d.nudged.connect(self._nudge_from_3d)
+        self.view3d.axisRequested.connect(self.place_axis)
 
         self.autosave_timer = QTimer(self)
         self.autosave_timer.timeout.connect(self.autosave)
@@ -448,9 +466,24 @@ class MainWindow(QMainWindow):
         )
 
     def _selection_mode(self, target: str) -> None:
-        """Show the Special shapes mode when a shape is selected (tree, warnings)."""
+        """Show the Special shapes mode when a shape is selected (tree, warnings), unless
+        the 3D / Simulation mode is showing it already (it highlights and faces it)."""
+        if MODE_KEYS[self.mode_tabs.currentIndex()] == "simulate":
+            return
         if target == "shapes" or target.startswith("shape:"):
             self.show_panel("shapes")
+
+    def _nudge_from_3d(self, d_hoop: float, d_tape: float) -> None:
+        """The 3D view's nudge arrows: move the selected special shape."""
+        self.shapes.placement_data()  # the gore map the nudge is measured on
+        self.shapes.nudge(d_hoop, d_tape)
+
+    def place_axis(self) -> None:
+        """Place a symmetry axis with its live preview, in the Special shapes mode's On
+        the balloon tab."""
+        self.show_panel("shapes")
+        self.shapes.result_tabs.setCurrentWidget(self.shapes.placement)
+        self.shapes.begin_add_axis()
 
     def _mode_changed(self, index: int) -> None:
         self.mode_stack.setCurrentIndex(index)
@@ -837,7 +870,7 @@ class MainWindow(QMainWindow):
             self.controller.editRejected.emit("a build pack needs a standard-gore design")
             return
         folder = str(self.settings.value("export/pack_folder", "") or "")
-        dialog = ExportPackDialog(self, folder)
+        dialog = ExportPackDialog(self, folder, self.prefs.print_roll_width)
         if dialog.exec():
             self.settings.setValue("export/pack_folder", str(dialog.path()))
             self.export_build_pack(dialog.path(), dialog.include(), dialog.roll_width())
@@ -859,9 +892,9 @@ class MainWindow(QMainWindow):
         include : frozenset of str, optional
             Document keys.
         roll_width : float, optional
-            Fabric roll width, m (default 60 in).
+            Fabric roll width, m (default: the *Print roll width* preference).
         """
-        from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH, PackExtras
+        from envelopelab.export.build_pack import PackExtras
         from envelopelab.export.documents import DOCUMENTS, provenance
         from envelopelab_app.pack_scene import scene_from_view, shape_scenes_from_view, status_line
 
@@ -890,7 +923,7 @@ class MainWindow(QMainWindow):
             status=status_line(self.view3d),
         )
         return self.shapes.export_pack(
-            out_dir, extras, DEFAULT_ROLL_WIDTH if roll_width is None else roll_width
+            out_dir, extras, self.prefs.print_roll_width if roll_width is None else roll_width
         )
 
     def reference_dialog(self) -> None:
@@ -910,6 +943,7 @@ class MainWindow(QMainWindow):
         for name, value in prefs.__dict__.items():
             setattr(self.prefs, name, value)
         save_preferences(self.settings, self.prefs)
+        self.controller.preferences_changed()
         self._apply_autosave_interval()
         self.simulation.detect_calculix()
 

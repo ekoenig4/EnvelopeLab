@@ -737,7 +737,15 @@ class ShapeFile:
 
 #: Lengths of a special shape (written with a unit, converted to m).
 SHAPE_LENGTHS = frozenset(
-    {"base_radius", "height", "tip_radius", "length", "feed_hole_radius", "seam_allowance"}
+    {
+        "base_radius",
+        "height",
+        "tip_radius",
+        "length",
+        "feed_hole_radius",
+        "seam_allowance",
+        "cap_shift",
+    }
 )
 SHAPE_KEYS = frozenset(
     {
@@ -759,6 +767,17 @@ SHAPE_KEYS = frozenset(
         "profile",
         "smooth",
         "mesh",
+        "seam_offset_deg",
+        "panel_widths",
+        "splits",
+        "crown_seam_offset_deg",
+        "crown_panel_widths",
+        "cap_shift",
+        "cap_direction_deg",
+        "cap_across",
+        "cap_up",
+        "crown_shape",
+        "group",
     }
 )
 
@@ -815,7 +834,7 @@ def _shape_data(
     for key, value in raw.items():
         if key in SHAPE_LENGTHS:
             data[key] = parse_quantity(value, "length", f"{where}.{key}")
-        elif key not in ("placement", "feed_holes", "zone", "profile", "mesh"):
+        elif key not in ("placement", "feed_holes", "zone", "profile", "mesh", "crown_shape"):
             data[key] = value
     placement = raw.get("placement")
     if not isinstance(placement, dict):
@@ -856,6 +875,8 @@ def _shape_data(
             data["profile"] = [(float(a) * factor, float(b) * factor) for a, b in profile["points"]]
         except (TypeError, ValueError) as exc:
             raise ShapeFileError(f"{where}.profile.points: [rho, zeta] pairs") from exc
+    if "crown_shape" in raw:
+        data["crown_shape"] = _crown_shape(raw["crown_shape"], f"{where}.crown_shape", base)
     if "mesh" in raw:
         mesh = raw["mesh"]
         if not isinstance(mesh, dict) or "file" not in mesh:
@@ -872,6 +893,46 @@ def _shape_data(
         data["triangles"] = [tuple(int(k) for k in t) for t in ref.triangles]
         data["source"] = str(mesh["file"])
     return data
+
+
+def _crown_shape(raw: Any, where: str, base: Path) -> dict[str, Any]:
+    """A ``crown_shape`` entry (ADR-0054): ``kind`` with ``width``/``length`` (lengths
+    with a unit), ``turn_deg``, polygon ``points`` with a ``unit``, ``smooth``, or an
+    outline ``file`` (DXF or SVG, relative to the shape file)."""
+    from envelopelab.io.outline_file import OutlineFileError, read_outline
+
+    if not isinstance(raw, dict) or "kind" not in raw:
+        raise ShapeFileError(f"{where}: {{kind: footprint|ellipse|polygon|outline, ...}}")
+    known = {"kind", "width", "length", "turn_deg", "points", "unit", "smooth", "file"}
+    unknown = sorted(set(raw) - known)
+    if unknown:
+        raise ShapeFileError(f"{where}: unknown key(s) {', '.join(unknown)}")
+    out: dict[str, Any] = {"kind": raw["kind"]}
+    for key in ("width", "length"):
+        if key in raw:
+            out[key] = parse_quantity(raw[key], "length", f"{where}.{key}")
+    for key in ("turn_deg", "smooth"):
+        if key in raw:
+            out[key] = raw[key]
+    if "points" in raw:
+        unit = str(raw.get("unit", "m"))
+        if unit not in LENGTH_UNITS:
+            raise ShapeFileError(f"{where}.unit: one of {', '.join(LENGTH_UNITS)}")
+        try:
+            out["points"] = [
+                (float(a) * LENGTH_UNITS[unit], float(b) * LENGTH_UNITS[unit])
+                for a, b in raw["points"]
+            ]
+        except (TypeError, ValueError) as exc:
+            raise ShapeFileError(f"{where}.points: [across, up] pairs") from exc
+    if "file" in raw:
+        try:
+            pts = read_outline(base / str(raw["file"]))
+        except OutlineFileError as exc:
+            raise ShapeFileError(f"{where}.file: {exc}") from exc
+        out["points"] = [(float(a), float(b)) for a, b in pts]
+        out["source"] = str(raw["file"])
+    return out
 
 
 def _require(raw: dict[str, Any], key: str, kind: type, where: str = "") -> Any:

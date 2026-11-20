@@ -100,7 +100,7 @@ def test_version_7_designs_keep_fabric_edge_tapes() -> None:
     raw["meta"]["content_hash"] = None
     raw["meta"]["content_hash"] = _raw_hash(raw)  # written by a version-7 EnvelopeLab
     loaded = load_design_document(json.dumps(raw))
-    assert loaded.schema_version == 8
+    assert loaded.schema_version == 9
     assert loaded.tapes.vertical_length == "fabric_edge"
 
 

@@ -6,8 +6,9 @@ footprint line the shape's rim is sewn on with short ticks on the shape's side, 
 numbered match marks naming their skin pieces, and the feed holes at their cut (dashed) and
 finished (solid) sizes. The sheets are laid out side by side on shelves that fill the view;
 the view first zooms to the marked area (the marks are close together round a small
-footprint), the mouse wheel zooms and a double click switches between the marked area and
-every whole panel.
+footprint), the mouse wheel zooms, a drag (left on empty space, or middle or right) pans at
+any zoom, **Fit** shows the marked area again and a double click switches between the
+marked area and every whole panel.
 
 Display only: the geometry comes from the export module, so what is shown is what the
 build pack prints.
@@ -19,7 +20,7 @@ from typing import Any
 
 import numpy as np
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtGui import QBrush, QColor, QMouseEvent, QPainter, QPainterPath, QPen, QPolygonF
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem,
     QGraphicsItem,
@@ -32,6 +33,7 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab_app.pattern_layout import shelf_layout
+from envelopelab_app.view_tools import FitButton
 
 #: Gap between sheets, m.
 GAP = 0.25
@@ -54,8 +56,16 @@ class MarkingView(QGraphicsView):
         self.setScene(QGraphicsScene(self))
         self.setRenderHint(QPainter.RenderHint.Antialiasing)
         self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        # Drags pan (they move the scroll bars, hidden: the scene has room on every side).
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
-        self.setToolTip("Mouse wheel: zoom; drag: pan; double click: marked area / whole panels")
+        self.setToolTip(
+            "Mouse wheel: zoom; drag (any button): pan; Fit: the marked area; double click: "
+            "marked area / whole panels"
+        )
+        self._pan_from: QPointF | None = None
+        self.fit_button = FitButton(self, self.fit, "Show the marked area again")
         self.sheets: list[Any] = []
         self.stale = False
         self._content = QRectF()
@@ -101,6 +111,44 @@ class MarkingView(QGraphicsView):
     def mouseDoubleClickEvent(self, _event: Any) -> None:  # noqa: N802 (Qt API)
         self.fit(whole=not self.showing_all)
 
+    # The middle and right buttons pan as the left one does (ScrollHandDrag).
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        if event.button() in (Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
+            self._pan_from = event.position()
+            self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        if self._pan_from is not None:
+            d = event.position() - self._pan_from
+            self._pan_from = event.position()
+            h, v = self.horizontalScrollBar(), self.verticalScrollBar()
+            h.setValue(h.value() - round(d.x()))
+            v.setValue(v.value() - round(d.y()))
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
+        if self._pan_from is not None:
+            self._pan_from = None
+            self.viewport().unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def _room(self) -> None:
+        """Let the view pan well past the drawing at any zoom: a scene rect with the
+        drawing's size again on every side (the scroll bars, which a drag moves, otherwise
+        stop at the drawing's edges, and do nothing once all of it is in view)."""
+        box = self._content
+        if box.isEmpty():
+            return
+        span = max(box.width(), box.height())
+        self.scene().setSceneRect(box.adjusted(-span, -span, span, span))
+
     def _draw(self) -> None:
         scene = self.scene()
         scene.clear()
@@ -121,6 +169,7 @@ class MarkingView(QGraphicsView):
             self._content = self._content.united(box.translated(container.pos()))
             if not marked.isEmpty():
                 self._marked = self._marked.united(marked.translated(container.pos()))
+        self._room()
 
     def _draw_sheet(self, sheet: Any, parent: QGraphicsItem) -> QRectF:
         """Draw one sheet in ``parent``; return the box of its markings (parent coords)."""

@@ -33,9 +33,44 @@ both come back when you change mode. The screen has three columns:
 * on the left, the list of special shapes with **Add shape**, **Duplicate**, **Remove**
   and the exports;
 * in the middle, the selected shape's editor in tabs: **Placement & size**, **Profile**
-  (revolved shapes only), **Feed holes & cap** and **Simulation**;
-* on the right, what the shape gives, in tabs: **Cut pieces** (a drawing and a table),
-  **Envelope panels** (where it is sewn on the envelope), **Checks** and **Attachment**.
+  (revolved shapes only), **Feed holes & cap**, **Panel layout** and **Simulation**;
+* on the right, in tabs: **On the balloon** (where the shapes sit, below; the tab that
+  opens), **Cut pieces** (a drawing and a table), **Envelope panels** (where it is sewn
+  on the envelope), **Checks** and **Attachment**.
+
+**On the balloon.** This tab shows a 3D view over a gore map (drag the bar between them
+to share the height): every shape, its footprint and feed holes, and the symmetry axes.
+Each shape is drawn by its cut panels: neighbouring gores or panels in alternating fabric
+shades, a flat tip disc in its own shade, and its seams and horizontal splits drawn over
+them, so the panel layout can be judged on the balloon. The selected shape's panels are
+tinted magenta with magenta seams; the axes are green.
+
+Changes show at once, as in a game engine's viewport: while you type, scroll or hold a
+value, every view of the balloon (this tab, the 3D views of the other modes and the 3D /
+Simulation view) draws a fast preview of the shape's skin, within a tenth of a second or
+so. When you stop for about a third of a second the shape is placed in full (its pieces
+flattened and checked) and the preview is replaced; until then the status line says
+*updating…*. The checks, cut pieces, markings, simulations and exports never use a
+preview, only the full placement. A shape imported from a mesh has no preview and
+updates when it is placed. The views follow every number you type
+in the editor next to them, and you can move the selected shape on either:
+
+* **Nudge**: the ◀ ▶ buttons move the selected shape round the envelope, ▲ ▼ up and down
+  the tape, by the step chosen next to them (10 to 250 mm, measured on the flat gore;
+  hold a button to repeat). With the 3D view or the gore map clicked, the arrow keys do
+  the same, and Shift+arrow takes five steps. Every nudge is one undo step; a grouped
+  shape takes its group, a mirror twin its original.
+* **3D**: the envelope with its gore and row seams and the shapes as designed. With the
+  3D View on (Preferences) it is drawn by the graphics card, like the 3D View; otherwise
+  a lighter drawing that needs no OpenGL stands in. Drag the background to turn it, use
+  the wheel to zoom; **drag a shape** over the envelope to move it there. It turns to
+  face a shape when you select it, and a double click faces the selected shape again.
+* **Gore map**: the gores side by side as they are cut, at their true flat width, gore
+  numbers along the top and row letters down the side; hover for the gore, row and tape
+  position under the pointer. **Click** a shape to select it; **drag** it to move it
+  (one undo step: a grouped shape takes its group, a mirror twin its original). The
+  wheel zooms; **drag empty space** (or drag with the middle or right button) to pan;
+  **Fit** in the corner, or a double click, shows the whole map again.
 
 1. **Add shape** ▸ **Dome**, **Tube** or **Revolved profile** adds a shape sized from your
    envelope on gore 1, about halfway up the tape. **Import mesh (OBJ/STL/PLY)…** adds a
@@ -57,21 +92,122 @@ both come back when you change mode. The screen has three columns:
    a 637 mm cap, a 16-panel one 509 mm), but at most half the shape's base diameter;
    untick it to type a diameter, or 0 to bring the pieces to a point. Every change is one
    undo step.
+
+   **Panel layout** decides how the skin is cut:
+
+   * **Seam turn** (degrees) turns every seam round the shape's axis. Gore or panel 1 is
+     centred this far round from the direction up the tape (0°), towards the previous
+     gore at 90° (−90° towards the next gore). Use it to keep a seam off a face, a
+     marking or a feed hole.
+   * **Panel widths**: one relative width per gore or panel, piece 1 first (2 is twice as
+     wide as 1); the second column shows the angle each piece spans. **Equal widths**
+     makes them all the same again. Changing the number of gores or panels keeps the
+     widths of the first ones (new ones get the last width).
+
+     Click a row to pick that gore or panel: it is shown in amber on the balloon (this
+     tab, the 3D views of the other modes), in the cut pieces (every tier of it) and in
+     the **Where the panels meet** circle, so you can see which piece the numbers act
+     on. Picking a row of the crown widths does the same. **Split panel in two** cuts the
+     picked piece into two of half its width: the shape gets one more gore or panel,
+     every other seam stays where it was (the seam turn is corrected when piece 1 is
+     split, as it is centred on it) and the crown's widths are split alike. Start from
+     equal panels, split the ones that are too wide for the print roll; one undo joins
+     them again.
+   * **Horizontal splits** cut every gore or panel across, in per cent of the profile's
+     length from the base circle (0) to the tip (100). **Add split** splits the tallest
+     tier in the middle; **Remove split** removes the selected one (or the top one). The
+     tiers are sewn edge to edge and the pieces are named with their tier letter, `A` at
+     the rim: `Ear-G3A`, `Ear-G3B`, … A split must lie above the footprint all round (a
+     leaning shape's footprint climbs up one side); the shape says so if it does not.
+     Splitting a large piece is the way to make it fit the print roll. Mesh shapes take
+     the seam turn and widths but cannot be split across.
+   * **Where the panels meet (crown)** sets where the pieces meet at the top.
+
+     **Where the panels meet** is the point every gore runs to (the centre of the cap).
+     The circle beside it is the shape seen from above, the cross its tip, with the
+     seams drawn from the point to where they leave the rim. Click or drag in the circle
+     to move the point, or type **Across** (towards the next gore) and **Up** (up the
+     tape) as fractions of the shape's widest radius: 0, 0 is the tip, 0.5, 0 is halfway
+     to the edge towards the next gore. The point keeps its place when the shape is
+     resized; the line under the numbers says how far down the skin the cap's centre
+     then is. **Back to the tip** (or a double click in the circle) centres it again.
+     On a **mesh** shape (for example an eye pod) the seams are cut straight from the
+     rim to the point, with or without a cap; the crown seam turn and widths stay as at
+     the rim. A mesh shape is placed again in full on every change (about a second for
+     an eye pod; it has no fast preview), so drag the point and let go, or type the
+     numbers. A dome or revolved shape needs a cap (**Feed holes & cap**): the panels
+     meet round the cap's edge. The cap stays a flat disc square to the skin there, the
+     same depth as before; the gores on that side end lower on a slant and those
+     opposite reach higher. The cap must still cover the tip, so the point moves by less
+     than the cap's radius; the shape says so if it does not.
+
+     **Cap shape** sets the cap's outline seen from above, round where the panels meet
+     (it needs a cap: set a cap diameter under **Feed holes & cap**):
+
+     * **Circle (cap diameter)**: the round cap as before;
+     * **Footprint, scaled to the cap diameter**: the shape's own footprint, small at the
+       top (its widest width is the cap diameter), with a **Turn**;
+     * **Ellipse**: its **width** across the gores and **length** up the tape, turned;
+     * **Polygon by points**: corner points in mm from where the panels meet (across, up),
+       with **Add point**, **Remove point** and **Smooth edges**; every direction from the
+       point must cross the outline once;
+     * **Imported outline (DXF or SVG)**: **Import outline…** reads the largest closed
+       outline of a drawing, centres it, scales its widest width to the cap diameter and
+       keeps it in the project (turn it with **Turn**).
+
+     The circle beside **Where the panels meet** draws the cap. The cap is cut from the
+     skin inside the outline and flattened, and the gores end on its edge; the balloon,
+     the cut pieces (TIP) and the build pack show it. A large cap on a strongly curved
+     top cannot lie quite flat: **Checks** reports the area distortion. An outline that
+     reaches the footprint or does not cover the tip is refused with the reason.
+
+     Tick **Own crown
+     layout** to give the crown its own **Crown seam turn** and **Crown widths**
+     (**Equal at crown**, or **As at the rim**): the seams leave the rim where the seam
+     turn and widths above put them and turn smoothly, above the footprint, to the crown
+     angles, so you can, for example, keep the rim's wide face panel and still meet the
+     cap with equal panels, or turn the seams off a marking near the top. Untick it to
+     go back to the rim's layout. Turned seams and a moved meeting point distort the
+     pieces more (see **Checks**); more gores reduce it.
+
+   Every 1:1 sheet says what each edge is sewn to (for an upper tier, *BOTTOM: sew to
+   G3A (its top)*), and the shape's assembly instructions sew each tier into a ring, then
+   ring onto ring. The same keys (`seam_offset_deg`, `panel_widths`, `splits`) can be
+   written in a [shape file](../formats/shape-file.md).
 3. The shape is placed in the background while you keep editing; the list says
    **being placed…** until it is done (usually under a second). The right-hand column then
    shows the **Cut pieces**: a drawing of every piece, named under it (finished line
    solid, cut line dashed, the rim sewn to the envelope in red; the mouse wheel zooms,
-   dragging pans, a double click fits them all again), and a table of their sizes and
+   dragging with any button pans, **Fit** or a double click shows them all again), and a
+   table of their sizes and
    areas; the **Envelope panels** the shape is sewn on; the **Checks** of the pattern;
    and the **Attachment** lines on each envelope panel.
+
+   **How the pieces go on the print roll.** The roll has a fixed width (**Print roll
+   width** in **Preferences**, default 60 in, also the starting roll width of the build
+   pack) and any length. Each piece's 1:1 page (its cut line plus a 20 mm margin) is laid
+   with its width across the roll: the piece is turned a quarter if its height fits
+   across (as panels are cut across the bolt), else printed upright, else turned to its
+   narrowest. The table's **Page on print roll** column says how much of the roll's width
+   the page takes and how the piece is turned (*1324 mm across, upright (its width across
+   the roll)*; hover for the length along the roll). Tick **Show as printed on the roll**
+   above the drawing to see the pieces one page after another down a strip of the roll
+   (the roll's width across the view, its edges in blue, the roll running down), each
+   turned as it is printed. The base envelope's panels have the same view in **Patterns**
+   (Layout ▸ *On the print roll*). A piece wider than the roll at any turn
+   says **LARGER THAN … ROLL**, is filled amber and labelled *▲ larger than roll*, gets a
+   **roll width** warning in **Checks** and is listed in **Validation / Warnings**.
+   Envelope panel rows larger than the roll are listed there too. Split the piece (more
+   panels, or a horizontal split) or plan to join paper.
 
    **Envelope panels** shows, for the selected shape only, every envelope panel it crosses
    or lies over, gore by gore (for example *GORE 3 ROW D: ear*), as on the build pack's
    marking sheets: the footprint line the shape's rim is sewn on, with short ticks on the
    shape's side; the numbered match marks, each naming the skin piece with the same
    number; and every feed hole, cut (dashed) and finished (solid), with its sizes. It opens
-   zoomed on the marked area; a double click switches to the whole panels and back, and
-   the mouse wheel zooms. Below it, each row says which of its gores are marked. Hover a
+   zoomed on the marked area; the mouse wheel zooms, dragging with any button pans at any
+   zoom, **Fit** goes back to the marked area, and a double click switches to the whole
+   panels and back. Below it, each row says which of its gores are marked. Hover a
    panel for the full sewing directions. While the patterns are STALE the panels are
    greyed and the tab says so. The **Patterns** view shows only the base envelope. The **3D View** shows the shape on the
    envelope as it is sewn: each gore or panel in the colour of the skin fabric (every
@@ -105,6 +241,51 @@ both come back when you change mode. The screen has three columns:
    centre panel) and every shape's pieces and marking sheets (DXF, PDF and `index.json`,
    section 4). **Export to Blender (OBJ)…** writes the
    envelope, every shape and every current shape simulation (section 5).
+7. **Groups: several shapes as one object.** A head with ears and a nose is several
+   shapes; give them the same **Group** (in **Placement & size**, type a name or pick
+   one; clear it to take a shape out). The list shows grouped shapes as
+   *Head ▸ Ear (Dome)*. Every shape keeps its own pieces, checks and simulation; the
+   group moves and mirrors them together, each in one undo step:
+   * **Move group…** turns every member round the envelope (in gores) and moves it up or
+     down the tape (in m), feed holes with it. A turn keeps the shapes exactly; a move
+     along the tape keeps each shape, but the gores narrow towards the mouth and the
+     crown, so the members end up a little closer or further apart. Dragging a grouped
+     shape in the 3D view moves its whole group.
+   * **Mirror group…** adds a linked mirror twin of every member across a symmetry axis,
+     placed or chosen as in step 8 with every member's mirror image shown while you
+     decide; shapes standing on the axis itself are left out.
+   * **Export group to Blender…** writes the envelope and that group's shapes only. The
+     build pack lists the groups in its `index.json`, and every skin sheet names its object.
+8. **Symmetry: axes and mirror twins.** A face's left and right ears are one shape and
+   its mirror image. Name the plane they are mirrored in once, then let EnvelopeLab keep
+   the two sides symmetric:
+   * **Placing an axis, seen as you go.** **Add axis…** (under the shape list) opens a
+     green-framed bar on the **On the balloon** tab. Move the pointer over the gore map or
+     the 3D view: a dotted green line shows where the axis would go, snapped to the
+     nearest gore centreline or seam (untick *Snap* to place it anywhere). **Click** to put
+     it there (or drag along, or type the gore line: 6 = the centreline of gore 6, 6.5 =
+     the seam between gores 6 and 7): it is drawn dashed, and the bar says where it lies
+     (*centre of gore 6*, *seam 6|7*). A dashed magenta outline shows where the selected
+     shape's mirror image would land. Name it and press **Place axis** (Escape or
+     **Cancel** leaves everything as it was).
+   * The list under the shapes shows each axis and how many twins use it; **Edit…** (or
+     a double click) moves or renames it the same way, with its twins' new places shown
+     dashed as it moves. You can also **drag an axis on the gore map**: its twins follow
+     when you let go (one undo step). **Remove** deletes an axis no twin uses. The 3D View
+     draws every axis as a green line from the mouth to the crown (layer *Symmetry axes*).
+   * **Mirror…** adds the selected shape's **mirror twin**: the same bar opens, and as you
+     move the pointer the dashed magenta outline shows where the mirror image would land
+     for an axis there. Click to place a new axis, or choose an existing one in the bar
+     (*Across Face centre*), and press **Mirror across it**: `Ear mirror` is added,
+     mirrored in everything: position, lean direction, feed holes, seam turn, panel
+     widths, a mesh's geometry, every size, and its group.
+   * The twin stays linked: **edit or drag either side and the other follows** as its
+     mirror image (one undo step). Moving an axis moves its twins; moving a group carries
+     the axes of the twins in it. The list marks linked shapes with ⇄ (*Ear mirror (Dome)
+     ⇄ mirror of Ear*), and the selected shape says what it mirrors or is mirrored by.
+   * **Unlink** makes a twin an ordinary shape again (it keeps its geometry). Removing the
+     original leaves its twin as an ordinary shape. A shape standing on an axis is its
+     own mirror image and cannot be mirrored across it.
 
 Nothing is hidden. A shape that cannot be placed (for example a base too large for the
 local curvature), a failed check, a simulation that did NOT converge, a factor of safety

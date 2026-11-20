@@ -76,7 +76,7 @@ def _index(pack: Path) -> dict:  # type: ignore[type-arg]
 def test_every_document_is_written_listed_and_passes_the_qa(pack: Path) -> None:
     assert check_pack(pack) == []
     index = _index(pack)
-    assert index["format"] == PACK_FORMAT == "envelopelab-build-pack/3"
+    assert index["format"] == PACK_FORMAT == "envelopelab-build-pack/4"
     files = {d["file"] for d in index["documents"]}
     expected = {f"documents-sample-{f}" for spec in DOCUMENTS.values() for f, _what in spec.files}
     expected |= {"documents-sample-ear.pdf", "documents-sample-ear-build.pdf"}  # appendages

@@ -1248,6 +1248,192 @@ def _next_letter(letters: Sequence[str]) -> str:
     raise ValueError("no free row letter")
 
 
+#: Most panel rows :func:`set_row_count` makes.
+MAX_ROWS = 52
+#: Row-level pattern settings a new row takes from the old row at its middle; the marks
+#: placed on a row (notches, tape paths, features, a manual outline) are not kept.
+ROW_SETTINGS = ("label_text", "grain_angle_deg", "zone", "seam_allowance")
+
+
+def row_letters(count: int) -> list[str]:
+    """Row letters from the mouth: A..Z, then AA, AB, ..."""
+    alphabet = [chr(ord("A") + i) for i in range(26)]
+    letters = [*alphabet, *(a + b for a in alphabet for b in alphabet)]
+    return letters[:count]
+
+
+def set_row_count(session: ProjectSession, count: int) -> bool:
+    r"""Divide every gore into ``count`` panel rows of equal length along the load tape.
+
+    Row :math:`k` (from 0, mouth first) runs from :math:`s = kL/n` to :math:`(k+1)L/n` on a
+    tape of length :math:`L` (heights stored to 0.1 mm, the top row taking the rounding).
+    The rows are lettered A, B, C ... from the mouth. What belonged to the old rows
+    follows by position along the tape:
+
+    * a new row takes the material zone, half-gore cut and row settings (label, grain,
+      seam allowance) of the old row at its middle;
+    * a turning vent covers the new rows over the old rows' stretch of seam, and a panel
+      zone (applique) the new rows over its old row (one zone per new row);
+    * crest-loft taper stations anchored to a row seam stay where they are, free;
+    * the marks placed on the old rows (notches, tape paths, feature marks, manual
+      outlines) are removed: their positions belong to the old panels. Undo restores them.
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit.
+    count : int
+        Number of panel rows, 1 to :data:`MAX_ROWS`.
+
+    Returns
+    -------
+    bool
+        Whether the design changed (False when it already has ``count`` equal rows).
+
+    Raises
+    ------
+    ValueError
+        For a count out of range, or a flat-chord design with measured seam bows (they
+        belong to the old seams: use the crest loft or straight seams first).
+    """
+    design = session.design
+    gores = design.gores
+    assert gores is not None
+    if not 1 <= int(count) <= MAX_ROWS:
+        raise ValueError(f"the number of panel rows must be between 1 and {MAX_ROWS}")
+    count = int(count)
+    if any(r.bow_bottom is not None for r in gores.panel_rows):
+        raise ValueError(
+            "the rows have measured seam bows, which belong to the old seams: use the crest "
+            "loft or straight seams first (Seam bows), then set the number of rows"
+        )
+    length = float(design_profile(design).meridian_length)
+    step = math.floor(length / count * 1e4) / 1e4
+    heights = [step] * (count - 1) + [length - step * (count - 1)]
+    old = gores.panel_rows
+    old_h = [r.finished_height for r in old]
+    old_h[-1] = length - sum(old_h[:-1])
+    old_edges = [0.0, *np.cumsum(old_h).tolist()]
+    new_edges = [0.0, *np.cumsum(heights).tolist()]
+    letters = row_letters(count)
+    if [r.letter for r in old] == letters and all(
+        abs(a - b) < 1e-4 for a, b in zip(old_h, heights, strict=True)
+    ):
+        return False
+
+    def old_at(s: float) -> int:
+        """Index of the old row over tape position ``s`` (m)."""
+        for j in range(len(old)):
+            if s < old_edges[j + 1]:
+                return j
+        return len(old) - 1
+
+    def new_over(lo: float, hi: float) -> list[str]:
+        """Letters of the new rows overlapping the stretch ``lo``..``hi`` of tape (m)."""
+        eps = 1e-6
+        return [
+            letters[i]
+            for i in range(count)
+            if new_edges[i] < hi - eps and new_edges[i + 1] > lo + eps
+        ]
+
+    source = [old_at(0.5 * (new_edges[i] + new_edges[i + 1])) for i in range(count)]
+    span = {r.letter: (old_edges[j], old_edges[j + 1]) for j, r in enumerate(old)}
+
+    def mutate(data: dict[str, Any], patterns: dict[str, Any]) -> None:
+        g = _gores(data)
+        old_rows = g["panel_rows"]
+        rows = []
+        for i, h in enumerate(heights):
+            parent = old_rows[source[i]]
+            row: dict[str, Any] = {"letter": letters[i], "finished_height": h}
+            if parent.get("zone") is not None:
+                row["zone"] = parent["zone"]
+            if parent.get("half_gore"):
+                row["half_gore"] = True
+            rows.append(row)
+        g["panel_rows"] = rows
+        old_patterns = patterns.get("rows", {})
+        new_patterns: dict[str, Any] = {}
+        for i, letter in enumerate(letters):
+            ann = old_patterns.get(old[source[i]].letter) or {}
+            kept = {k: ann[k] for k in ROW_SETTINGS if k in ann}
+            if kept:
+                new_patterns[letter] = kept
+        patterns["rows"] = new_patterns
+        for point in (g.get("crest_loft") or {}).get("taper") or []:
+            point["at_row"] = None  # stays at its station, free
+        zones = []
+        names = {z["name"] for z in g.get("panel_zones") or []}
+        for zone in g.get("panel_zones") or []:
+            targets = new_over(*span.get(zone["row"], (0.0, 0.0))) or [letters[0]]
+            for k, letter in enumerate(targets):
+                copy = dict(zone, row=letter)
+                if k:
+                    name = f"{zone['name']} {letter}"
+                    while name in names:
+                        name += "'"
+                    names.add(name)
+                    copy["name"] = name
+                zones.append(copy)
+        if g.get("panel_zones") is not None:
+            g["panel_zones"] = zones
+        for vent in data.get("turning_vents") or []:
+            stretch = [span[r] for r in vent.get("rows", []) if r in span]
+            if stretch:
+                vent["rows"] = new_over(min(a for a, _ in stretch), max(b for _, b in stretch))
+
+    return session.edit(f"Divide the gores into {count} equal panel rows", mutate)
+
+
+def set_half_gores(session: ProjectSession, letters: Sequence[str] | None, on: bool) -> bool:
+    """Cut panel rows as half gores (two halves sewn down the gore centreline) or whole.
+
+    The sewn envelope does not change (:func:`envelopelab.geometry.gore.half_panel`): the
+    patterns, build pack and mass estimate do; the rest mesh and simulations stay current.
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit.
+    letters : sequence of str or None
+        Rows to set; None: every row.
+    on : bool
+        Half gores (True) or whole panels (False).
+
+    Returns
+    -------
+    bool
+        Whether the design changed.
+
+    Raises
+    ------
+    KeyError
+        For a letter that is not a row of the design.
+    """
+    assert session.design.gores is not None
+    rows = session.design.gores.panel_rows
+    known = [r.letter for r in rows]
+    chosen = list(known) if letters is None else list(letters)
+    unknown = [x for x in chosen if x not in known]
+    if unknown:
+        raise KeyError(f"no panel row {', '.join(unknown)}")
+    if all(r.half_gore == on for r in rows if r.letter in chosen):
+        return False
+
+    def mutate(design: dict[str, Any], _patterns: dict[str, Any]) -> None:
+        for row in _gores(design)["panel_rows"]:
+            if row["letter"] in chosen:
+                row["half_gore"] = bool(on)
+
+    what = (
+        "every row"
+        if letters is None or len(chosen) == len(known)
+        else ("row " + ", ".join(chosen))
+    )
+    return session.edit(f"{'Half gores' if on else 'Whole panels'}: {what}", mutate)
+
+
 def split_row(session: ProjectSession, index: int) -> bool:
     """Split a panel row into two rows of half its height (a new letter for the upper)."""
     assert session.design.gores is not None
@@ -1266,6 +1452,8 @@ def split_row(session: ProjectSession, index: int) -> bool:
             "finished_height": h - row["finished_height"],
             "zone": row.get("zone"),
         }
+        if row.get("half_gore"):
+            upper["half_gore"] = True  # cut as the row was
         if row.get("bow_top") is not None:
             # Measured bows: the new seam inside the row is straight on both sides.
             upper["bow_bottom"], upper["bow_top"] = 0.0, row["bow_top"]
@@ -1725,6 +1913,12 @@ def update_shape(session: ProjectSession, name: str, values: dict[str, Any]) -> 
                 raise ValueError("the kind of a shape cannot be changed")
             else:
                 shape[key] = value
+        new_name = values.get("name", name)
+        if new_name != name:
+            for other in shapes:
+                link = other.get("mirror")
+                if link and link["of"] == name:
+                    link["of"] = new_name
 
     return session.edit_shapes(f"Edit shape {values.get('name', name)}", mutate)
 
@@ -1737,6 +1931,11 @@ def remove_shape(session: ProjectSession, name: str) -> bool:
         if index is None:
             raise KeyError(f"no special shape {name!r}")
         del shapes[index]
+        # Its mirror twins stay, as ordinary shapes.
+        for other in shapes:
+            link = other.get("mirror")
+            if link and link["of"] == name:
+                other["mirror"] = None
 
     return session.edit_shapes(f"Remove shape {name}", mutate)
 
@@ -1749,6 +1948,7 @@ def duplicate_shape(session: ProjectSession, name: str) -> str:
     new = unique_shape_name(session, f"{name} copy")
     data = spec.model_dump(mode="json")
     data["name"] = new
+    data["mirror"] = None  # a copy of a twin is an ordinary shape
     count = session.design.gores.count if session.design.gores is not None else 1
     data["placement"]["gore"] = data["placement"]["gore"] % count + 1
 
@@ -1757,6 +1957,341 @@ def duplicate_shape(session: ProjectSession, name: str) -> str:
 
     session.edit_shapes(f"Duplicate shape {name}", mutate)
     return new
+
+
+def _gore_frame(session: ProjectSession) -> tuple[int, float]:
+    """Gore count and load-tape length (m) shapes are placed with."""
+    from envelopelab.project.gore_design import design_profile
+
+    design = session.design
+    if design.gores is None:
+        raise ValueError("special shapes are placed on a standard-gore design")
+    return design.gores.count, float(design_profile(design).meridian_length)
+
+
+def set_shape_group(session: ProjectSession, names: Sequence[str], group: str | None) -> bool:
+    """Put shapes ``names`` in ``group`` (None: take them out of their group); one step.
+
+    Raises
+    ------
+    KeyError
+        For an unknown shape.
+    ValueError
+        For an invalid group name (nothing is changed).
+    """
+
+    def mutate(shapes: list[dict[str, Any]]) -> None:
+        known = {s["name"] for s in shapes}
+        for name in names:
+            if name not in known:
+                raise KeyError(f"no special shape {name!r}")
+        for shape in shapes:
+            if shape["name"] in names:
+                shape["group"] = group
+
+    what = f"Group {', '.join(names)} as {group}" if group else f"Ungroup {', '.join(names)}"
+    return session.edit_shapes(what, mutate)
+
+
+def rename_shape_group(session: ProjectSession, old: str, new: str) -> bool:
+    """Rename group ``old`` to ``new`` (every member; one step).
+
+    Raises
+    ------
+    KeyError
+        For an unknown group.
+    ValueError
+        When ``new`` is taken or invalid.
+    """
+
+    def mutate(shapes: list[dict[str, Any]]) -> None:
+        groups = {s.get("group") for s in shapes}
+        if old not in groups:
+            raise KeyError(f"no shape group {old!r}")
+        if new in groups:
+            raise ValueError(f"a shape group named {new!r} exists")
+        for shape in shapes:
+            if shape.get("group") == old:
+                shape["group"] = new
+
+    return session.edit_shapes(f"Rename shape group {old} to {new}", mutate)
+
+
+def move_shape_group(session: ProjectSession, group: str, d_gore: float, d_tape: float) -> bool:
+    """Move every shape of ``group`` ``d_gore`` gore widths round the envelope and
+    ``d_tape`` m up the tape, feed holes with them (one step;
+    :func:`envelopelab.project.shape_groups.moved`).
+
+    Raises
+    ------
+    KeyError
+        For an unknown group.
+    ValueError
+        When a shape or feed hole would leave the envelope (nothing is changed).
+    """
+    from envelopelab.project.shape_groups import group_members, moved
+
+    members = group_members(session.state.shapes, group)
+    if not members:
+        raise KeyError(f"no shape group {group!r}")
+    gores, length = _gore_frame(session)
+    new = {s.name: moved(s, d_gore, d_tape, gores, length) for s in members}
+    inside = set(new)
+    # The axes the group's twins are mirrored across turn with the group; a twin pair
+    # split between the group and other shapes, or an axis shared with other shapes,
+    # cannot move with it.
+    carried: set[str] = set()
+    for s in session.state.shapes:
+        if s.mirror is None:
+            continue
+        pair = {s.name, s.mirror.of}
+        if pair & inside and not pair <= inside:
+            raise ValueError(
+                f"{s.name} mirrors {s.mirror.of} across {s.mirror.axis}: put both in "
+                f"group {group} (or unlink them) to move it"
+            )
+        if pair <= inside:
+            carried.add(s.mirror.axis)
+    for s in session.state.shapes:
+        if s.mirror is not None and s.mirror.axis in carried and s.name not in inside:
+            raise ValueError(
+                f"axis {s.mirror.axis} also mirrors {s.mirror.of}, outside group {group}"
+            )
+
+    def mutate(shapes: list[dict[str, Any]], axes: list[dict[str, Any]]) -> None:
+        for i, shape in enumerate(shapes):
+            if shape["name"] in new:
+                shapes[i] = new[shape["name"]]
+        for axis in axes:
+            if axis["name"] in carried:
+                axis["line"] = round((axis["line"] + d_gore) % gores, 6)
+
+    return session.edit_symmetry(f"Move shape group {group}", mutate)
+
+
+def mirror_shape_group(
+    session: ProjectSession,
+    group: str,
+    line: float | None = None,
+    copy: bool = True,
+    axis: str | None = None,
+) -> list[str]:
+    """Mirror the shapes of ``group`` in the meridian plane at gore position ``line``
+    (gore widths from the first seam; :func:`envelopelab.project.shape_groups.mirrored`).
+
+    ``copy``: add a mirrored copy of every member whose base point is not on the line
+    (``<name> mirror``, in the same group); otherwise mirror the members in place. One
+    undo step either way.
+
+    Returns
+    -------
+    list of str
+        The names of the shapes added (empty when mirrored in place).
+
+    Raises
+    ------
+    KeyError
+        For an unknown group.
+    """
+    from envelopelab.project.shape_groups import group_members, mirrored, on_line
+
+    members = group_members(session.state.shapes, group)
+    if not members:
+        raise KeyError(f"no shape group {group!r}")
+    gores, _ = _gore_frame(session)
+    if axis is not None:
+        # Linked twins of every member that is not a twin and not on the axis.
+        twinned = {s.mirror.of for s in session.state.shapes if s.mirror is not None}
+        names = [
+            s.name
+            for s in members
+            if s.mirror is None
+            and s.name not in twinned
+            and not on_line(s, _axis_line(session, axis), gores)
+        ]
+        return _add_twins(session, names, axis, f"Mirror shape group {group} across {axis}")
+    if line is None:
+        raise ValueError("give a mirror line or an axis")
+    if not copy:
+        new = {s.name: mirrored(s, line, gores) for s in members}
+
+        def flip(shapes: list[dict[str, Any]]) -> None:
+            for i, shape in enumerate(shapes):
+                if shape["name"] in new:
+                    shapes[i] = new[shape["name"]]
+
+        session.edit_shapes(f"Mirror shape group {group}", flip)
+        return []
+    taken = {s.name for s in session.state.shapes}
+    added: list[dict[str, Any]] = []
+    for spec in members:
+        if on_line(spec, line, gores):
+            continue
+        data = mirrored(spec, line, gores)
+        base, k = f"{spec.name} mirror", 2
+        name = base
+        while name in taken:
+            name, k = f"{base} {k}", k + 1
+        taken.add(name)
+        data["name"] = name
+        data["mirror"] = None  # an independent copy, not a linked twin
+        added.append(data)
+
+    def append(shapes: list[dict[str, Any]]) -> None:
+        shapes.extend(added)
+
+    if added:
+        session.edit_shapes(f"Mirror copy of shape group {group}", append)
+    return [d["name"] for d in added]
+
+
+def _axis_line(session: ProjectSession, axis: str) -> float:
+    found = next((a for a in session.state.symmetry_axes if a.name == axis), None)
+    if found is None:
+        raise KeyError(f"no symmetry axis {axis!r}")
+    return float(found.line)
+
+
+def add_symmetry_axis(session: ProjectSession, name: str, line: float) -> bool:
+    """Add the symmetry axis ``name`` at gore position ``line`` (gore widths from the
+    first seam; gore n's centreline is n - 0.5).
+
+    Raises
+    ------
+    ValueError
+        When the name is taken or invalid.
+    """
+    gores, _ = _gore_frame(session)
+
+    def mutate(_shapes: list[dict[str, Any]], axes: list[dict[str, Any]]) -> None:
+        if any(a["name"] == name for a in axes):
+            raise ValueError(f"a symmetry axis named {name!r} exists")
+        axes.append({"name": name, "line": round(float(line) % gores, 6)})
+
+    return session.edit_symmetry(f"Add symmetry axis {name}", mutate)
+
+
+def update_symmetry_axis(
+    session: ProjectSession, name: str, line: float | None = None, new_name: str | None = None
+) -> bool:
+    """Move (``line``, gore position) or rename the symmetry axis ``name``; its mirror
+    twins follow (one step).
+
+    Raises
+    ------
+    KeyError
+        For an unknown axis.
+    ValueError
+        When the new name is taken or invalid.
+    """
+    gores, _ = _gore_frame(session)
+
+    def mutate(shapes: list[dict[str, Any]], axes: list[dict[str, Any]]) -> None:
+        axis = next((a for a in axes if a["name"] == name), None)
+        if axis is None:
+            raise KeyError(f"no symmetry axis {name!r}")
+        if line is not None:
+            axis["line"] = round(float(line) % gores, 6)
+        if new_name is not None and new_name != name:
+            if any(a["name"] == new_name for a in axes):
+                raise ValueError(f"a symmetry axis named {new_name!r} exists")
+            axis["name"] = new_name
+            for s in shapes:
+                link = s.get("mirror")
+                if link and link["axis"] == name:
+                    link["axis"] = new_name
+
+    return session.edit_symmetry(f"Edit symmetry axis {name}", mutate)
+
+
+def remove_symmetry_axis(session: ProjectSession, name: str) -> bool:
+    """Remove the symmetry axis ``name``.
+
+    Raises
+    ------
+    KeyError
+        For an unknown axis.
+    ValueError
+        While mirror twins are mirrored across it (unlink or remove them first).
+    """
+    users = [s.name for s in session.state.shapes if s.mirror and s.mirror.axis == name]
+    if users:
+        raise ValueError(
+            f"symmetry axis {name} mirrors {', '.join(users)}; unlink or remove them first"
+        )
+
+    def mutate(_shapes: list[dict[str, Any]], axes: list[dict[str, Any]]) -> None:
+        index = next((i for i, a in enumerate(axes) if a["name"] == name), None)
+        if index is None:
+            raise KeyError(f"no symmetry axis {name!r}")
+        del axes[index]
+
+    return session.edit_symmetry(f"Remove symmetry axis {name}", mutate)
+
+
+def _add_twins(session: ProjectSession, names: list[str], axis: str, what: str) -> list[str]:
+    """Add a linked mirror twin of every shape of ``names`` across ``axis``."""
+    from envelopelab.project.symmetry import mirrored_data
+
+    gores, _ = _gore_frame(session)
+    line = _axis_line(session, axis)
+    taken = {s.name for s in session.state.shapes}
+    added: list[dict[str, Any]] = []
+    for name in names:
+        spec = next(s for s in session.state.shapes if s.name == name)
+        base, k = f"{name} mirror", 2
+        new = base
+        while new in taken:
+            new, k = f"{base} {k}", k + 1
+        taken.add(new)
+        data = mirrored_data(spec.model_dump(mode="json"), line, gores)
+        data.update(name=new, mirror={"of": name, "axis": axis})
+        added.append(data)
+    if added:
+        session.edit_shapes(what, lambda shapes: shapes.extend(added))
+    return [d["name"] for d in added]
+
+
+def mirror_shape(session: ProjectSession, name: str, axis: str) -> str:
+    """Add a mirror twin of shape ``name`` across the symmetry axis ``axis``: named
+    ``<name> mirror``, kept the mirror image of ``name`` after every edit (either side
+    can be edited or dragged); returns its name.
+
+    Raises
+    ------
+    KeyError
+        For an unknown shape or axis.
+    ValueError
+        For a twin, a shape that already has a twin across that axis, or a shape whose
+        base point lies on the axis (it would be its own mirror image).
+    """
+    from envelopelab.project.shape_groups import on_line
+
+    spec = next((s for s in session.state.shapes if s.name == name), None)
+    if spec is None:
+        raise KeyError(f"no special shape {name!r}")
+    if spec.mirror is not None:
+        raise ValueError(f"{name} is already the mirror twin of {spec.mirror.of}")
+    if any(
+        s.mirror and s.mirror.of == name and s.mirror.axis == axis for s in session.state.shapes
+    ):
+        raise ValueError(f"{name} already has a mirror twin across {axis}")
+    gores, _ = _gore_frame(session)
+    if on_line(spec, _axis_line(session, axis), gores):
+        raise ValueError(f"{name} stands on axis {axis}: it is its own mirror image")
+    return _add_twins(session, [name], axis, f"Mirror shape {name} across {axis}")[0]
+
+
+def unlink_mirror(session: ProjectSession, name: str) -> bool:
+    """Make the mirror twin ``name`` an ordinary shape (it keeps its current geometry)."""
+
+    def mutate(shapes: list[dict[str, Any]]) -> None:
+        shape = next((s for s in shapes if s["name"] == name), None)
+        if shape is None:
+            raise KeyError(f"no special shape {name!r}")
+        shape["mirror"] = None
+
+    return session.edit_shapes(f"Unlink mirror twin {name}", mutate)
 
 
 def move_feed_holes_clear(

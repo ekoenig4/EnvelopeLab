@@ -15,7 +15,8 @@ JSON file that wraps one design document (unchanged, in the design schema) with
 * **constraint locks** of the standard-gore editor, and the **profile target** (the
   intended inflated tape line) while the profile is compensated for the solved shape;
 * the **special shapes** placed on the envelope (domes, tubes, revolved and mesh shapes,
-  :mod:`envelopelab.project.shapes`), part of the design state since version 2.
+  :mod:`envelopelab.project.shapes`), part of the design state since version 2, with
+  their panel layouts (seam turn, panel widths, horizontal splits) since version 4.
 
 Version 1 files (no shapes) are read as version 2 files with no shapes (ADR-0020).
 
@@ -35,11 +36,12 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from envelopelab.design.model import DesignDocument, load_design_document
 from envelopelab.project.shapes import ShapeSpec
+from envelopelab.project.symmetry import SymmetryAxis
 
 PROJECT_FORMAT: Literal["envelopelab.project"] = "envelopelab.project"
-PROJECT_FORMAT_VERSION: Literal[3] = 3
+PROJECT_FORMAT_VERSION: Literal[7] = 7
 #: Older versions :func:`load_project_text` still reads (see :func:`migrate_project_data`).
-READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3)
+READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7)
 PROJECT_SUFFIX = ".elproj"
 
 NotchEdge = Literal["left", "right", "bottom", "top"]
@@ -236,12 +238,19 @@ class DesignState(BaseModel):
     design: DesignDocument
     patterns: PatternSet = Field(default_factory=PatternSet)
     shapes: list[ShapeSpec] = Field(default_factory=list)
+    symmetry_axes: list[SymmetryAxis] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _unique_shape_names(self) -> DesignState:
         names = [s.name for s in self.shapes]
         if len(set(names)) != len(names):
             raise ValueError("special shape names must be unique")
+        axes = [a.name for a in self.symmetry_axes]
+        if len(set(axes)) != len(axes):
+            raise ValueError("symmetry axis names must be unique")
+        for s in self.shapes:
+            if s.mirror is not None and (s.mirror.of not in names or s.mirror.axis not in axes):
+                raise ValueError(f"{s.name}: mirror of an unknown shape or axis")
         return self
 
 
@@ -506,7 +515,7 @@ class Project(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     format: Literal["envelopelab.project"] = PROJECT_FORMAT
-    format_version: Literal[3] = PROJECT_FORMAT_VERSION
+    format_version: Literal[7] = PROJECT_FORMAT_VERSION
     state: DesignState
     locks: ConstraintLocks = Field(default_factory=ConstraintLocks)
     profile_target: ProfileTarget | None = None
@@ -524,6 +533,7 @@ def state_to_data(state: DesignState) -> dict[str, Any]:
         "design": state.design.with_updated_hash().model_dump(by_alias=True, mode="json"),
         "patterns": state.patterns.model_dump(mode="json"),
         "shapes": [s.model_dump(mode="json") for s in state.shapes],
+        "symmetry_axes": [a.model_dump(mode="json") for a in state.symmetry_axes],
     }
 
 
@@ -535,6 +545,7 @@ def state_from_data(data: dict[str, Any]) -> DesignState:
             "design": design,
             "patterns": PatternSet.model_validate(data["patterns"]),
             "shapes": data.get("shapes", []),
+            "symmetry_axes": data.get("symmetry_axes", []),
         }
     )
 
@@ -544,7 +555,15 @@ def migrate_project_data(raw: dict[str, Any]) -> dict[str, Any]:
 
     Version 1 states have no ``shapes``; they read as states without special shapes.
     Versions 1 and 2 have no ``shape_runs``; they read as projects without saved shape
-    simulations.
+    simulations. Versions 1 to 3 have no shape panel layouts (``seam_offset_deg``,
+    ``panel_widths``, ``splits``); their shapes read with equal, unturned, unsplit pieces
+    (ADR-0040), and no symmetry axes or mirror twins (ADR-0043). Versions 1 to 4 have no
+    crown layouts (``crown_seam_offset_deg``, ``crown_panel_widths``, ``cap_shift``,
+    ``cap_direction_deg``); their seams meet the crown as they leave the rim and their
+    caps are centred (ADR-0049). Versions 1 to 5 have no relative meeting points
+    (``cap_across``, ``cap_up``); their caps are placed by ``cap_shift`` as before
+    (ADR-0052). Versions 1 to 6 have no crown outlines (``crown_shape``); their caps are
+    circles (ADR-0054).
 
     Raises
     ------

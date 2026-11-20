@@ -56,6 +56,8 @@ class DesignTreePanel(QWidget):
                 controller.shapesChanged,
             ),
             defer_hidden=lambda: controller.defer_hidden,
+            # A summary: redrawn once a scrubbed value rests, not at every step.
+            delay=lambda: controller.live_deferred,
         )
         self.refresh()
 
@@ -129,7 +131,7 @@ class DesignTreePanel(QWidget):
                     else "CANNOT BE PLACED"
                     if result.design is None
                     else "placed"
-                    if result.design.ok
+                    if all(c.passed for c in self.controller.shape_checks(shape.name))
                     else "CHECKS FAILED"
                 )
                 child = self._add(

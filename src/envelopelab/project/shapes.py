@@ -10,17 +10,22 @@ the dependency graph.
 
 from __future__ import annotations
 
+import dataclasses
 import math
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from envelopelab.project.symmetry import MirrorLink, SymmetryAxis
 
 if TYPE_CHECKING:
     from envelopelab.design.model import DesignDocument
     from envelopelab.features.primitives import EnvelopeSurface, Primitive, PrimitiveDesign
     from envelopelab.project.model import PatternSet
     from envelopelab.solvers.membrane import FloatArray
+
+__all__ = ["MirrorLink", "SymmetryAxis"]
 
 ShapeKind = Literal["dome", "tube", "revolved", "mesh"]
 SHAPE_KINDS: tuple[ShapeKind, ...] = ("dome", "tube", "revolved", "mesh")
@@ -33,6 +38,8 @@ CAP_PANEL_TOP_WIDTH = 0.10
 #: An automatic cap's diameter is at most this fraction of the shape's base diameter
 #: (source: assumed; keeps the cap on the top of small shapes).
 CAP_MAX_FRACTION = 0.5
+#: Most horizontal splits of a shape (one tier letter each, A to Z).
+MAX_SPLITS = 25
 
 
 class ShapePlacement(BaseModel):
@@ -110,6 +117,50 @@ class _ShapeBase(BaseModel):
         would otherwise meet in a point (a dome, a revolved profile ending on the axis, a
         pointed tube, a mesh). None: automatic (:func:`cap_diameter`); 0: no cap, the
         pieces meet in a point.
+    seam_offset_deg : float
+        Turn of every seam round the shape's axis, deg: the first gore or panel is
+        centred this far round from the direction up the tape (0), towards the previous
+        gore (90; the shape's frame turns from up the tape towards the previous gore,
+        unlike the lean). Where the panels meet.
+    panel_widths : list of float
+        Relative width of every gore or panel round the axis, one per piece, piece 1
+        first (empty: all equal). ``[2, 1, 1]`` makes piece 1 half the shape.
+    splits : list of float
+        Horizontal splits: where every gore or panel is cut across, as fractions of the
+        profile's length from the base circle to the tip, increasing in (0, 1). The tiers
+        are sewn edge to edge; their pieces are labelled ``A`` (at the rim), ``B``, ...
+        Not for mesh shapes.
+    crown_seam_offset_deg : float or None
+        Where the seams meet the cap (or the tip) round the axis: the seam turn there, deg,
+        as ``seam_offset_deg`` at the rim (None: the same as at the rim). The seams turn
+        smoothly from the rim to the crown (ADR-0049). Not for mesh shapes.
+    crown_panel_widths : list of float
+        Relative widths of the gores or panels at the crown (empty: as at the rim).
+    cap_shift : float
+        Move the cap off the tip: its centre this far down the skin from the tip, m (0:
+        centred). It must still cover the tip. Domes and revolved shapes with a cap.
+    cap_direction_deg : float
+        Direction round the axis the cap moves towards, deg (0 up the tape, 90 towards
+        the previous gore, as the seam turn).
+    cap_across, cap_up : float
+        Where the panels meet (the cap's centre), seen from above the shape, as fractions
+        of its widest radius from the tip: across (towards the next gore) and up (up the
+        tape), each -1 to 1 with ``cap_across² + cap_up² <= 1`` (0, 0: the tip). They move
+        with the shape when it is resized (ADR-0052); use them or ``cap_shift``, not both.
+        A dome or revolved shape needs a cap (the panels meet round its edge); a mesh
+        shape's seams are cut about the line through the point instead (with or without
+        a cap). Not for tubes.
+    crown_shape : CrownShapeSpec or None
+        Shape of the cap seen from above round where the panels meet (ADR-0054; None: a
+        circle of ``cap_diameter``). Domes, revolved and mesh shapes with a cap.
+    group : str or None
+        Name of the object the shape belongs to (several shapes with the same group are
+        moved, mirrored and exported together, :mod:`envelopelab.project.shape_groups`;
+        None: on its own).
+    mirror : MirrorLink or None
+        For a mirror twin: the shape it mirrors and the symmetry axis it is mirrored
+        across (:mod:`envelopelab.project.symmetry`); the twin is kept the mirror image
+        of that shape after every edit. None: an ordinary shape.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -122,6 +173,108 @@ class _ShapeBase(BaseModel):
     seam_allowance: float = Field(default=0.0125, ge=0.0)
     fabric: str | None = None
     cap_diameter: float | None = Field(default=None, ge=0.0)
+    seam_offset_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
+    panel_widths: list[float] = Field(default_factory=list)
+    splits: list[float] = Field(default_factory=list, max_length=MAX_SPLITS)
+    crown_seam_offset_deg: float | None = Field(default=None, ge=-180.0, le=180.0)
+    crown_panel_widths: list[float] = Field(default_factory=list)
+    cap_shift: float = Field(default=0.0, ge=0.0)
+    cap_direction_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
+    cap_across: float = Field(default=0.0, ge=-1.0, le=1.0)
+    cap_up: float = Field(default=0.0, ge=-1.0, le=1.0)
+    crown_shape: CrownShapeSpec | None = None
+    group: str | None = Field(
+        default=None, min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_\- ]+$"
+    )
+    mirror: MirrorLink | None = None
+
+    @model_validator(mode="after")
+    def _layout(self) -> _ShapeBase:
+        count = piece_count(self)  # type: ignore[arg-type]
+        if self.panel_widths and len(self.panel_widths) != count:
+            raise ValueError(
+                f"panel_widths: {len(self.panel_widths)} widths for {count} gores or panels"
+            )
+        if any(not w > 0.0 for w in self.panel_widths):
+            raise ValueError("panel_widths: every width must be positive")
+        if any(not 0.0 < f < 1.0 for f in self.splits) or any(
+            b <= a for a, b in zip(self.splits, self.splits[1:], strict=False)
+        ):
+            raise ValueError("splits: fractions must increase within (0, 1)")
+        if self.splits and getattr(self, "kind", None) == "mesh":
+            raise ValueError("splits: a mesh shape's panels cannot be split across")
+        if self.crown_panel_widths and len(self.crown_panel_widths) != count:
+            raise ValueError(
+                f"crown_panel_widths: {len(self.crown_panel_widths)} widths for {count} gores "
+                "or panels"
+            )
+        if any(not w > 0.0 for w in self.crown_panel_widths):
+            raise ValueError("crown_panel_widths: every width must be positive")
+        if getattr(self, "kind", None) == "mesh" and (
+            self.crown_seam_offset_deg is not None or self.crown_panel_widths or self.cap_shift
+        ):
+            raise ValueError("a mesh shape's seams and cap cannot be moved at the crown")
+        if self.cap_shift and getattr(self, "kind", None) == "tube":
+            raise ValueError("cap_shift: a tube's tip disc cannot be moved off its axis")
+        if self.crown_shape is not None and getattr(self, "kind", None) == "tube":
+            raise ValueError("crown_shape: a tube's tip disc stays round")
+        relative = bool(self.cap_across or self.cap_up)
+        if relative:
+            if getattr(self, "kind", None) == "tube":
+                raise ValueError("cap_across, cap_up: a tube's panels meet on its axis")
+            if self.cap_shift:
+                raise ValueError(
+                    "cap_across, cap_up: set where the panels meet either as fractions or "
+                    "with cap_shift, not both"
+                )
+            if math.hypot(self.cap_across, self.cap_up) > 1.0 + 1e-9:
+                raise ValueError(
+                    "cap_across, cap_up: the meeting point must lie inside the shape seen "
+                    "from above (across² + up² at most 1)"
+                )
+        return self
+
+
+class CrownShapeSpec(BaseModel):
+    """Shape of a special shape's crown cap seen from above, round where its panels meet
+    (:mod:`envelopelab.features.crown`, ADR-0054). Lengths in m, angles in deg.
+
+    Attributes
+    ----------
+    kind : {"footprint", "ellipse", "polygon", "outline"}
+        The shape's footprint scaled to the cap's size; an ellipse; a polygon through
+        corner points; or an outline imported from a DXF or SVG file (its points kept here).
+    width, length : float
+        An ellipse's width across the gores and length up the tape, m.
+    turn_deg : float
+        Turn of an ellipse, footprint or imported outline, deg (from across towards up).
+    points : list of (float, float)
+        A polygon's corners, m (across towards the next gore, up the tape, from where the
+        panels meet); an imported outline's points in the drawing's units (scaled to the
+        cap's diameter, its widest width).
+    smooth : bool
+        A polygon's edges are a smooth curve through its corners.
+    source : str
+        The file an imported outline was read from (for information).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["footprint", "ellipse", "polygon", "outline"]
+    width: float = Field(default=0.0, ge=0.0)
+    length: float = Field(default=0.0, ge=0.0)
+    turn_deg: float = Field(default=0.0, ge=-180.0, le=180.0)
+    points: list[tuple[float, float]] = Field(default_factory=list)
+    smooth: bool = False
+    source: str = ""
+
+    @model_validator(mode="after")
+    def _complete(self) -> CrownShapeSpec:
+        if self.kind == "ellipse" and not (self.width > 0.0 and self.length > 0.0):
+            raise ValueError("crown_shape: an ellipse needs a positive width and length")
+        if self.kind in ("polygon", "outline") and len(self.points) < 3:
+            raise ValueError(f"crown_shape: a {self.kind} needs at least three points")
+        return self
 
 
 class DomeShape(_ShapeBase):
@@ -171,6 +324,99 @@ ShapeSpec = Annotated[
 ]
 
 
+def crown_view(spec: ShapeSpec, placed: Any = None) -> FloatArray | None:
+    """The cap's outline seen from above round where the panels meet, as fractions of the
+    shape's widest radius (the units of ``cap_across``/``cap_up``): an (n, 2) array of
+    (across, up) from the meeting point, for drawing (None: no cap, or not known yet).
+
+    A footprint outline needs the placed design (``placed``); the others are known from
+    ``spec`` alone. Without a crown shape the cap is its circle.
+    """
+    from envelopelab.features.crown import CrownOutlineError
+
+    prim: Any = to_primitive(spec)
+    if not prim.closed_tip or isinstance(spec, TubeShape):
+        return None
+    if isinstance(spec, MeshShape):
+        widest = float(prim.widest_radius)
+    else:
+        widest = float(np.max(dataclasses.replace(prim, cap_radius=0.0).meridian()[0]))
+    if widest <= 0.0:
+        return None
+    if spec.crown_shape is None:
+        t = np.linspace(0.0, 2.0 * math.pi, 72, endpoint=False)
+        circle: FloatArray = prim.cap_radius * np.column_stack([np.cos(t), np.sin(t)]) / widest
+        return circle
+    skin = None if placed is None else getattr(placed, "_skin", None)
+    if skin is not None and getattr(skin, "_crown", None) is not None:
+        outline = skin._crown.outline
+    elif skin is not None and getattr(skin, "crown_outline", None) is not None:
+        outline = skin.crown_outline
+    else:
+        try:
+            outline = crown_of(spec).outline()
+        except CrownOutlineError:
+            return None
+    out: FloatArray = np.asarray(outline.points, dtype=np.float64) / widest
+    return out
+
+
+def crown_of(spec: ShapeSpec) -> Any:
+    """The :class:`~envelopelab.features.crown.CrownShape` of ``spec``'s crown cap (None:
+    a circle); a footprint or imported outline is scaled to the cap's diameter."""
+    from envelopelab.features.crown import CrownShape
+
+    c = spec.crown_shape
+    if c is None:
+        return None
+    return CrownShape(
+        c.kind,
+        size=cap_diameter(spec),
+        width=c.width,
+        length=c.length,
+        turn_deg=c.turn_deg,
+        points=tuple((float(a), float(b)) for a, b in c.points),
+        smooth=c.smooth,
+    )
+
+
+def _meeting_point(spec: ShapeSpec, prim: Any) -> Primitive:
+    """``prim`` with its cap moved where ``spec``'s relative meeting point says
+    (``cap_across``, ``cap_up``; :func:`~envelopelab.features.primitives.
+    meeting_point_shift` on the pointed meridian); unchanged without one."""
+    from envelopelab.features.primitives import meeting_point_shift
+
+    if spec.crown_shape is not None:
+        prim = dataclasses.replace(prim, crown=crown_of(spec))
+    if not (spec.cap_across or spec.cap_up):
+        out: Primitive = prim
+        return out
+    rho, zeta = dataclasses.replace(prim, cap_radius=0.0).meridian()
+    # The shape's frame turns from up the tape towards the previous gore (b2 = axis x
+    # b1), so "towards the next gore" is -b2 there.
+    shift, direction = meeting_point_shift(rho, zeta, -spec.cap_across, spec.cap_up)
+    moved: Primitive = dataclasses.replace(prim, cap_shift=shift, cap_direction=direction)
+    return moved
+
+
+def meeting_point(spec: ShapeSpec) -> tuple[float, float]:
+    """Where ``spec``'s panels meet, seen from above, as plan fractions (across, up) of
+    its widest radius (ADR-0052): the relative values when set, else converted from
+    ``cap_shift``/``cap_direction_deg`` (0, 0 for a tube or mesh shape)."""
+    from envelopelab.features.primitives import meeting_point_plan
+
+    if spec.cap_across or spec.cap_up:
+        return float(spec.cap_across), float(spec.cap_up)
+    if not spec.cap_shift or not isinstance(spec, DomeShape | RevolvedShape):
+        return 0.0, 0.0
+    prim: Any = to_primitive(spec)
+    rho, zeta = dataclasses.replace(prim, cap_radius=0.0).meridian()
+    frame_across, up = meeting_point_plan(
+        rho, zeta, spec.cap_shift, math.radians(spec.cap_direction_deg)
+    )
+    return -frame_across, up  # the frame's across is towards the previous gore
+
+
 def to_primitive(spec: ShapeSpec) -> Primitive:
     """The primitive of :mod:`envelopelab.features.primitives` a specification describes."""
     from envelopelab.features.primitives import (
@@ -186,31 +432,161 @@ def to_primitive(spec: ShapeSpec) -> Primitive:
     placement = Placement(pl.gore, pl.tape_position, pl.across, pl.lean_deg, pl.lean_toward_deg)
     marks = spec.marks_per_piece
     rc = 0.5 * cap_diameter(spec)
+    layout = {
+        "seam_offset": math.radians(spec.seam_offset_deg),
+        "panel_widths": tuple(float(w) for w in spec.panel_widths),
+    }
+    # Where the panels meet at the crown (not for mesh shapes, ADR-0049).
+    crown: dict[str, object] = {
+        "crown_offset": None
+        if spec.crown_seam_offset_deg is None
+        else math.radians(spec.crown_seam_offset_deg),
+        "crown_widths": tuple(float(w) for w in spec.crown_panel_widths),
+    }
+    cap: dict[str, Any] = {
+        "cap_shift": float(spec.cap_shift),
+        "cap_direction": math.radians(spec.cap_direction_deg),
+    }
+    splits = tuple(float(f) for f in spec.splits)
     if isinstance(spec, DomeShape):
-        return Dome(spec.name, placement, spec.base_radius, spec.height, spec.gores, marks, rc)
+        return _meeting_point(
+            spec,
+            Dome(
+                spec.name,
+                placement,
+                spec.base_radius,
+                spec.height,
+                spec.gores,
+                marks,
+                rc,
+                splits=splits,
+                **layout,  # type: ignore[arg-type]
+                **crown,  # type: ignore[arg-type]
+                **cap,
+            ),
+        )
     if isinstance(spec, TubeShape):
         if rc > 0.0:  # a pointed tube cut off where it is as wide as the cap
             length = spec.length * (1.0 - rc / spec.base_radius)
-            return Tube(spec.name, placement, spec.base_radius, rc, length, spec.panels, marks)
+            return Tube(
+                spec.name,
+                placement,
+                spec.base_radius,
+                rc,
+                length,
+                spec.panels,
+                marks,
+                splits=splits,
+                **layout,  # type: ignore[arg-type]
+                **crown,  # type: ignore[arg-type]
+            )
         return Tube(
-            spec.name, placement, spec.base_radius, spec.tip_radius, spec.length, spec.panels, marks
-        )
-    if isinstance(spec, RevolvedShape):
-        return Revolved(
             spec.name,
             placement,
-            tuple((float(r), float(z)) for r, z in spec.profile),
-            spec.gores,
-            spec.smooth,
+            spec.base_radius,
+            spec.tip_radius,
+            spec.length,
+            spec.panels,
             marks,
-            rc,
+            splits=splits,
+            **layout,  # type: ignore[arg-type]
+            **crown,  # type: ignore[arg-type]
+        )
+    if isinstance(spec, RevolvedShape):
+        return _meeting_point(
+            spec,
+            Revolved(
+                spec.name,
+                placement,
+                tuple((float(r), float(z)) for r, z in spec.profile),
+                spec.gores,
+                spec.smooth,
+                marks,
+                rc,
+                splits=splits,
+                **layout,  # type: ignore[arg-type]
+                **crown,  # type: ignore[arg-type]
+                **cap,
+            ),
         )
     mesh = ReferenceMesh(
         np.asarray(spec.vertices, dtype=np.float64),
         np.asarray(spec.triangles, dtype=np.int64),
         spec.source,
     )
-    return FreeformShape(spec.name, placement, mesh, spec.panels, marks, rc)
+    shape = FreeformShape(spec.name, placement, mesh, spec.panels, marks, rc, **layout)  # type: ignore[arg-type]
+    if spec.crown_shape is not None:
+        shape = dataclasses.replace(shape, crown=crown_of(spec))
+    if spec.cap_across or spec.cap_up:
+        # Where the panels meet, seen from above: the seam line through it (ADR-0052).
+        widest = shape.widest_radius
+        shape = dataclasses.replace(
+            shape, seam_centre=(spec.cap_up * widest, -spec.cap_across * widest)
+        )
+    return shape
+
+
+#: Most gores or panels round a shape (the specification's limit).
+MAX_PIECES = 64
+
+
+def split_piece(spec: ShapeSpec, index: int) -> dict[str, Any]:
+    r"""The values that split gore or panel ``index`` (0-based) of ``spec`` in two equal
+    halves, every other seam staying where it is.
+
+    Piece :math:`k` of relative width :math:`w_k` becomes two of :math:`w_k/2` and the
+    count grows by one (``panel_widths`` is written out; equal pieces stay equal in angle
+    except the two halves). Piece 1 is centred on the seam turn (:func:`~envelopelab.
+    features.primitives.seam_angles`), so splitting it moves the turn back by a quarter
+    of its span, :math:`\phi_{off}' = \phi_{off} - \Delta_0/4`, which keeps its first
+    seam :math:`\phi_0 = \phi_{off} - \Delta_0/2` in place. The crown's widths and turn
+    (when set, ADR-0049) are split the same way.
+
+    Parameters
+    ----------
+    spec : ShapeSpec
+        Shape.
+    index : int
+        Piece to split, 0-based round the axis.
+
+    Returns
+    -------
+    dict
+        Field values for ``update_shape``: the count (``gores`` or ``panels``),
+        ``panel_widths``, and the seam turns and crown widths that change.
+
+    Raises
+    ------
+    ValueError
+        For an index out of range, or a shape at :data:`MAX_PIECES` pieces.
+    """
+    count = piece_count(spec)
+    if not 0 <= index < count:
+        raise ValueError(f"no gore or panel {index + 1}: the shape has {count}")
+    if count >= MAX_PIECES:
+        raise ValueError(f"a shape has at most {MAX_PIECES} gores or panels")
+
+    def halved(widths: list[float]) -> list[float]:
+        w = float(widths[index]) / 2.0
+        return [float(x) for x in widths[:index]] + [w, w] + [float(x) for x in widths[index + 1 :]]
+
+    def turned(offset: float, widths: list[float]) -> float:
+        if index != 0:
+            return offset
+        span = 360.0 * float(widths[0]) / float(sum(widths))
+        return ((offset - span / 4.0 + 180.0) % 360.0) - 180.0
+
+    rim = list(spec.panel_widths) or [1.0] * count
+    key = "gores" if isinstance(spec, DomeShape | RevolvedShape) else "panels"
+    values: dict[str, Any] = {key: count + 1, "panel_widths": halved(rim)}
+    if index == 0:
+        values["seam_offset_deg"] = round(turned(spec.seam_offset_deg, rim), 9)
+    if spec.crown_panel_widths:
+        values["crown_panel_widths"] = halved(list(spec.crown_panel_widths))
+    if spec.crown_seam_offset_deg is not None and index == 0:
+        crown = list(spec.crown_panel_widths) or rim
+        values["crown_seam_offset_deg"] = round(turned(spec.crown_seam_offset_deg, crown), 9)
+    return values
 
 
 def piece_count(spec: ShapeSpec) -> int:
@@ -233,10 +609,16 @@ def auto_cap_diameter(spec: ShapeSpec) -> float:
     r"""Automatic cap diameter of a pointed shape, m.
 
     Every one of the M pieces' tops is at least :data:`CAP_PANEL_TOP_WIDTH` wide, so
-    :math:`d = M\,w_{top}/\pi`, but at most :data:`CAP_MAX_FRACTION` of the base diameter
-    (both assumed). Rounded to 1 mm.
+    :math:`d = M\,w_{top}/\pi` for equal pieces, and
+    :math:`d = w_{top} \sum w / (\pi \min w)` for pieces of relative widths :math:`w`
+    (the narrowest top is then :math:`w_{top}`), but at most :data:`CAP_MAX_FRACTION` of
+    the base diameter (both assumed). Rounded to 1 mm.
     """
-    d = piece_count(spec) * CAP_PANEL_TOP_WIDTH / math.pi
+    if spec.panel_widths:
+        w = spec.panel_widths
+        d = CAP_PANEL_TOP_WIDTH * sum(w) / (math.pi * min(w))
+    else:
+        d = piece_count(spec) * CAP_PANEL_TOP_WIDTH / math.pi
     d = min(d, CAP_MAX_FRACTION * 2.0 * base_radius(spec))
     return round(d, 3)
 
@@ -280,6 +662,20 @@ def shape_design(
         ],
         seam_clearance=FEED_HOLE_SEAM_CLEARANCE if seam_clearance is None else seam_clearance,
     )
+
+
+def shape_preview(spec: ShapeSpec, surface: EnvelopeSurface) -> PrimitiveDesign:
+    """A shape's skin on the envelope for drawing while it is edited
+    (:func:`envelopelab.features.primitives.preview_primitive`; not a design result).
+
+    Raises
+    ------
+    PrimitiveError
+        When the shape does not fit, or it has no fast preview (a mesh shape).
+    """
+    from envelopelab.features.primitives import preview_primitive
+
+    return preview_primitive(to_primitive(spec), surface)
 
 
 def feed_hole_clearance(design: DesignDocument, patterns: PatternSet) -> float:
@@ -354,11 +750,14 @@ def clear_feed_holes(
     return spec.model_copy(update={"feed_holes": holes}), notes
 
 
-def envelope_surface(design: DesignDocument, patterns: PatternSet) -> EnvelopeSurface:
-    """The envelope shapes are placed on (the design's load-tape surface)."""
+def envelope_surface(
+    design: DesignDocument, patterns: PatternSet, rows: list[Any] | None = None
+) -> EnvelopeSurface:
+    """The envelope shapes are placed on (the design's load-tape surface); ``rows``: its
+    panel rows when already made."""
     from envelopelab.features.primitives import EnvelopeSurface
 
-    return EnvelopeSurface.from_design(design, patterns)
+    return EnvelopeSurface.from_design(design, patterns, rows)
 
 
 def default_shape(kind: ShapeKind, design: DesignDocument, name: str) -> ShapeSpec:

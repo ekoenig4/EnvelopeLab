@@ -11,6 +11,7 @@ can be replayed to any point. Artifact staleness is decided by fingerprints
 from __future__ import annotations
 
 import copy
+import time
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
@@ -62,6 +63,11 @@ Mutator = Callable[[dict[str, Any], dict[str, Any]], None]
 FabricLookup = Callable[[str], Mapping[str, Any] | None]
 
 
+#: Live edits of one value (``ProjectSession.merge_key``) less than this apart are one
+#: undo step, s (a held spin box or a scrubbed value; assumed).
+LIVE_MERGE_SECONDS = 2.0
+
+
 class StateCommand(Command):
     """Replace the design state; undo restores the previous one.
 
@@ -91,6 +97,13 @@ class StateCommand(Command):
         self._description = description
         self._provenance = provenance
 
+    def absorb(self, previous: Command) -> bool:
+        """Take an earlier state command in: undo then restores the state before it."""
+        if not isinstance(previous, StateCommand) or previous._session is not self._session:
+            return False
+        self._before = previous._before
+        return True
+
     @property
     def description(self) -> str:
         return self._description
@@ -118,12 +131,24 @@ def _shapes_data(state: DesignState) -> list[dict[str, Any]]:
     return [s.model_dump(mode="json") for s in state.shapes]
 
 
+def _axes_data(state: DesignState) -> list[dict[str, Any]]:
+    return [a.model_dump(mode="json") for a in state.symmetry_axes]
+
+
 def _state_from(
-    design: dict[str, Any], patterns: dict[str, Any], shapes: list[dict[str, Any]]
+    design: dict[str, Any],
+    patterns: dict[str, Any],
+    shapes: list[dict[str, Any]],
+    axes: list[dict[str, Any]] | None = None,
 ) -> DesignState:
     doc = DesignDocument.model_validate(design)
     return DesignState.model_validate(
-        {"design": doc, "patterns": PatternSet.model_validate(patterns), "shapes": shapes}
+        {
+            "design": doc,
+            "patterns": PatternSet.model_validate(patterns),
+            "shapes": shapes,
+            "symmetry_axes": axes or [],
+        }
     )
 
 
@@ -177,6 +202,11 @@ class ProjectSession:
         # Listeners hear about a state change only after the stack is updated, so that
         # the history they read includes the command that changed the state.
         self.stack.add_listener(lambda: self._emit(EVENT_STATE))
+        #: Set while a live edit is applied (a value scrubbed or spun, ``(key, time)`` of
+        #: the last one): edits of the same key within :data:`LIVE_MERGE_SECONDS` of
+        #: each other are one undo step.
+        self.merge_key: str | None = None
+        self._last_live: tuple[str, float, Command] | None = None
 
     # -- construction -------------------------------------------------------------------
 
@@ -334,14 +364,28 @@ class ProjectSession:
         design_a, patterns_a = _state_data(state)
         if stamp:
             design_b["meta"]["modified"] = design_a["meta"]["modified"] = None
-        same_shapes = _shapes_data(before) == _shapes_data(state)
+        same_shapes = _shapes_data(before) == _shapes_data(state) and _axes_data(
+            before
+        ) == _axes_data(state)
         if design_b == design_a and patterns_b == patterns_a and same_shapes:
             return False
         after = state.model_copy(deep=True)
         if stamp:
             after.design.meta.modified = utc_now()
         after.design.meta.content_hash = after.design.compute_content_hash()
-        self.stack.do(StateCommand(self, before, after, description, provenance))
+        key, now = self.merge_key, time.monotonic()
+        last = self._last_live
+        # Merge only into the live edit just made (not after an undo or another edit).
+        merge = (
+            key is not None
+            and last is not None
+            and last[0] == key
+            and now - last[1] < LIVE_MERGE_SECONDS
+            and self.stack.last is last[2]
+        )
+        command = StateCommand(self, before, after, description, provenance)
+        self.stack.do(command, merge=merge)
+        self._last_live = None if key is None else (key, now, command)
         return True
 
     def edit(
@@ -379,7 +423,17 @@ class ProjectSession:
         # Row-anchored crest-loft stations follow their rows through every edit.
         sync_taper_anchors(design)
         shapes = _shapes_data(self.project.state)
-        return self.apply_state(_state_from(design, patterns, shapes), description, provenance)
+        axes = _axes_data(self.project.state)
+        gores = design.get("gores") or {}
+        if axes and gores.get("count"):
+            # A gore count change moves the axes' azimuths: mirror the twins again.
+            from envelopelab.project.symmetry import sync_twins
+
+            shapes = copy.deepcopy(shapes)
+            sync_twins(shapes, shapes, axes, int(gores["count"]))
+        return self.apply_state(
+            _state_from(design, patterns, shapes, axes), description, provenance
+        )
 
     def edit_shapes(self, description: str, mutate: Callable[[list[dict[str, Any]]], None]) -> bool:
         """Edit a JSON copy of the special shapes, validate and apply (one undo step).
@@ -402,10 +456,34 @@ class ProjectSession:
         ValueError
             When the edited data is not a valid list of shapes (nothing is changed).
         """
+        return self.edit_symmetry(description, lambda shapes, _axes: mutate(shapes))
+
+    def edit_symmetry(
+        self,
+        description: str,
+        mutate: Callable[[list[dict[str, Any]], list[dict[str, Any]]], None],
+    ) -> bool:
+        """Edit JSON copies of the special shapes and the symmetry axes, keep every
+        mirror twin the mirror image of its source
+        (:func:`envelopelab.project.symmetry.sync_twins`), validate and apply (one undo
+        step).
+
+        Raises
+        ------
+        ValueError
+            When the edited data is not valid (nothing is changed).
+        """
+        from envelopelab.project.symmetry import sync_twins
+
         design, patterns = _state_data(self.project.state)
-        shapes = copy.deepcopy(_shapes_data(self.project.state))
-        mutate(shapes)
-        return self.apply_state(_state_from(design, patterns, shapes), description)
+        before = _shapes_data(self.project.state)
+        shapes = copy.deepcopy(before)
+        axes = copy.deepcopy(_axes_data(self.project.state))
+        mutate(shapes, axes)
+        gores = self.project.state.design.gores
+        if gores is not None:
+            sync_twins(before, shapes, axes, gores.count)
+        return self.apply_state(_state_from(design, patterns, shapes, axes), description)
 
     def set_design_value(
         self, path: Sequence[str | int], value: Any, description: str | None = None

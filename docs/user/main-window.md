@@ -66,11 +66,61 @@ A second row places the camera on a part of the envelope and keeps viewpoints:
   belong to the project file and are kept between sessions (in the application settings,
   not in the project).
 
+A third row follows the **selection** (the element selected in the Design Tree, a
+warning, or any mode): its name, **Face selection** (look straight at it; the view
+turns to a new selection by itself), and, for a selected special shape, the **nudge**
+arrows and step of the Special shapes' On the balloon tab (10-250 mm; Shift: five
+steps). With **Drag** on, pressing a shape also selects it, so the arrows move it next.
+The selection is drawn in magenta: a shape's footprint, a panel row's band, a control
+point's ring, a rigging component's lines. **Symmetry axis…** opens the Special shapes
+mode's On the balloon tab to place an axis, seeing it and the mirror images it would
+make as you point. Selecting a shape while in this mode keeps the 3D view.
+
+## The balloon in every mode
+
+The **Shape**, **Patterns** and **Rigging** modes show the balloon in 3D beside their
+editor (*On the balloon*), as the Special shapes mode does: the envelope with its seams,
+the special shapes and symmetry axes, and the selected element in magenta, the view
+turned to face it:
+
+* **Shape**: under the profile. A control point picked on the profile is its ring round
+  the envelope; a panel row picked in the table or the tree is its band, with one of its
+  panels outlined.
+* **Patterns**: beside the *Selected row* form; the selected row (the first one until
+  you pick another).
+* **Rigging**: beside the cards. Every rigging line is drawn grey; click a card (or edit
+  one of its values) to highlight that component: the parachute with its shroud and
+  centralizing lines, the flying wires, the red line, the turning vents, or the scoop's
+  edge on the mouth.
+
+Drag to turn, the wheel to zoom, double click to face the selection again. With the 3D
+View on (Preferences) these views are drawn by the graphics card. Drag the splitter
+handle to give a view more room.
+
 The number keys follow the numeric-keypad views of common 3D programs, and they work on
 the number row too. They act when the 3D view or its panel has the keyboard focus (click
 the view first). Stepping by gores keeps a seam or a gore centre in the same place on the
 screen, so the gores can be checked one by one. The chosen view stays when the scene
 changes, for example when a run finishes.
+
+## Where a number acts, and changing it live
+
+Point at any field that changes the design (in Properties, the gore editor, the rigging
+cards or a special shape's layout) and the 3D views draw in amber where it acts: the
+mouth for the mouth diameter, the band below the top for the seal overlap, a row's band
+for its height, every gore seam for the gore count, the whole envelope for operating
+conditions, a shape's seams, splits or cap for its layout values. The inlay caption names
+it (for example "▶ mouth diameter: the mouth"). Click into the field and the views also
+turn to face that place.
+
+Numbers change in real time:
+
+* in Properties, turn the mouse wheel over a number or press ↑/↓ to step it by one unit
+  of its second digit (hold Shift for ×10, Ctrl for ×0.1);
+* hold or scroll a spin box;
+* drag a control point on the profile.
+
+The views follow every step, and one continuous change is one undo step.
 
 ## Resizing
 

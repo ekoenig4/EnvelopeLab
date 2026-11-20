@@ -14,11 +14,12 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, TypeVar
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 from envelopelab.design.model import DesignDocument
+from envelopelab.export.templates import roll_checks, roll_fit
 from envelopelab.features.metrics import REQUIRED_FOS
-from envelopelab.features.primitives import EnvelopeSurface
+from envelopelab.features.primitives import DesignCheck, EnvelopeSurface
 from envelopelab.geometry.gore import PanelRow
 from envelopelab.materials.repository import (
     Fabric,
@@ -91,6 +92,8 @@ class WorkspaceController(QObject):
     snapshotsChanged = Signal()  # noqa: N815
     provenanceChanged = Signal()  # noqa: N815
     selectionChanged = Signal(str)  # noqa: N815
+    #: The hint shown (``set_hint``) changed.
+    hintChanged = Signal()  # noqa: N815
     editRejected = Signal(str)  # noqa: N815
     libraryChanged = Signal()  # noqa: N815
     shapesChanged = Signal()  # noqa: N815 (placed shapes or shape simulations changed)
@@ -115,9 +118,34 @@ class WorkspaceController(QObject):
         #: Change number: bumped once per burst of signals, so a panel connected to
         #: several of them refreshes once per change (``envelopelab_app.refresh``).
         self.revision = 0
+        #: Roll-width checks of each placed shape: (placed design id, roll), checks, and
+        #: the placed design (kept so its id is not reused while cached).
+        self._roll_cache: dict[str, tuple[tuple[int, float], list[Any], Any]] = {}
+        #: The shapes' envelope surface and the envelope-inputs hash it was built for.
+        self._surface: tuple[str | None, EnvelopeSurface | None] = (None, None)
+        #: The envelope rows' roll findings: ((roll, rows' cut outlines), findings, unused).
+        self._row_roll: tuple[Any, list[Any], Any] = (None, [], None)
         #: Hidden panels wait until they are shown before refreshing. On in the
         #: interactive application; off for scripted windows that read hidden panels.
         self.defer_hidden = False
+        #: The hint shown in the 3D views: where the number pointed at (or being edited)
+        #: acts on the balloon (:meth:`set_hint`), and whether it is being edited
+        #: (focused: the views turn to it) or only pointed at.
+        self.hint: str | None = None
+        self.hint_focused = False
+        #: Resolves the hints of the special shapes panel (``shape:<field>`` of the
+        #: selected shape); set by the main window.
+        self.shape_hint: Callable[[str], Any] | None = None
+        #: Live edits wait for the next turn of the event loop (:meth:`edit_live`); off for
+        #: scripted windows, which apply them at once (still one undo step per run).
+        self.live_deferred = False
+        self._live: dict[str, Callable[[], Any]] = {}
+        self._live_timer = QTimer(self)
+        self._live_timer.setSingleShot(True)
+        self._live_timer.timeout.connect(self.flush_live)
+        #: What the placement views draw (envelope sketch, shapes, axes), shared by the
+        #: 3D inlays of the design modes; set by the main window (None: nothing).
+        self.placement_provider: Callable[[], Any] | None = None
         self._derived: dict[str, tuple[int, Any]] = {}
         self.shapes = ShapeService()
         self.shapes.updated.connect(self._shapes_updated)
@@ -208,6 +236,8 @@ class WorkspaceController(QObject):
         self.session = session
         self.patterns_cache = None
         self.model_cache = None
+        self._surface = (None, None)
+        self._roll_cache = {}
         self.shapes.reset()
         if session is not None:
             session.set_fabric_lookup(self.fabric_lookup)
@@ -262,8 +292,67 @@ class WorkspaceController(QObject):
 
     # -- edits --------------------------------------------------------------------------
 
+    def set_hint(self, key: str | None, focused: bool = False) -> None:
+        """Show where the number ``key`` acts (a hint key of
+        :func:`envelopelab.project.highlight.hint_highlight`, or ``shape:<field>``);
+        None: nothing."""
+        if (key, focused) == (self.hint, self.hint_focused):
+            return
+        self.hint, self.hint_focused = key, focused
+        self.hintChanged.emit()
+
+    def hint_highlight(self) -> Any:
+        """The current hint as lines on the balloon (``Highlight``; None: nothing)."""
+        from envelopelab.project.highlight import hint_highlight
+
+        key, design = self.hint, self.design
+        if key is None or design is None or design.gores is None:
+            return None
+        if key.startswith("shape:"):
+            return None if self.shape_hint is None else self.shape_hint(key)
+        try:
+            rows = self.rows()
+        except ValueError:
+            rows = []
+        try:
+            return hint_highlight(design, key, rows=rows, rigging=self.rigging_polylines())
+        except (ValueError, IndexError, KeyError):
+            return None
+
+    def edit_live(self, key: str, apply: Callable[[], Any]) -> None:
+        """Apply an edit of a value being changed continuously (a spin box held, the
+        wheel turned, a value stepped with the arrow keys), in real time.
+
+        The edit runs at the next turn of the event loop, and only the newest edit of
+        ``key`` waiting then (the others are out of date): however fast the value moves,
+        the views redraw once per turn instead of falling behind. Successive live edits of
+        ``key`` are one undo step (``ProjectSession.merge_key``).
+        """
+        self._live[key] = apply
+        if not self.live_deferred:
+            self.flush_live()
+        elif not self._live_timer.isActive():
+            self._live_timer.start(0)
+
+    def flush_live(self) -> None:
+        """Apply the live edits waiting now (see :meth:`edit_live`)."""
+        self._live_timer.stop()
+        pending, self._live = self._live, {}
+        session = self.session
+        for key, apply in pending.items():
+            if session is None:
+                break
+            session.merge_key = key
+            try:
+                apply()
+            finally:
+                session.merge_key = None
+
     def attempt(self, action: Callable[..., T], *args: Any, **kwargs: Any) -> T | None:
-        """Run an edit; a refused edit is reported (``editRejected``) and returns None."""
+        """Run an edit; a refused edit is reported (``editRejected``) and returns None.
+        A live edit still waiting is applied first, so edits keep their order."""
+        if self._live:
+            self.flush_live()
         try:
             return action(*args, **kwargs)
         except (ValueError, KeyError, IndexError) as exc:  # includes LockError, ValidationError
@@ -336,18 +425,21 @@ class WorkspaceController(QObject):
 
     def envelope_surface(self) -> EnvelopeSurface | None:
         """Surface the special shapes are placed on (None: no gore design or not buildable),
-        built once per change."""
+        built again only when the envelope inputs the shapes read change
+        (:meth:`shape_host_hash`), not on every edit of a shape."""
         s = self.session
         if s is None or s.design.gores is None:
             return None
-
-        def build() -> EnvelopeSurface | None:
+        key = self.shape_host_hash()
+        if self._surface[0] != key:
             try:
-                return envelope_surface(s.design, s.patterns)
+                surface: EnvelopeSurface | None = envelope_surface(
+                    s.design, s.patterns, self.rows()
+                )
             except ValueError:  # includes PrimitiveError
-                return None
-
-        return self._cached("envelope_surface", build)
+                surface = None
+            self._surface = (key, surface)
+        return self._surface[1]
 
     def sync_shapes(self) -> None:
         """Start placing the shapes whose specification or envelope changed (worker)."""
@@ -400,6 +492,101 @@ class WorkspaceController(QObject):
             self.session.add_shape_run(sim.record, sim.arrays)
             sim.arrays = None
 
+    def place_shape(self, name: str, placement: Any) -> bool:
+        """Move shape ``name``'s base point to ``placement``'s gore, tape position and
+        fraction across (its lean kept) in one undo step; a grouped shape takes its whole
+        group with it (and a mirror twin its source, :mod:`envelopelab.project.symmetry`).
+        True when it moved."""
+        session, design = self.session, self.design
+        spec = (
+            None
+            if session is None
+            else next((x for x in session.state.shapes if x.name == name), None)
+        )
+        if spec is None or design is None or design.gores is None:
+            return False
+        p, s = placement, spec.placement
+        if (p.gore, p.tape_position, p.across) == (s.gore, s.tape_position, s.across):
+            return False
+        if spec.group:
+            n = design.gores.count
+            d_gore = (p.gore + p.across) - (s.gore + s.across)
+            d_gore = (d_gore + 0.5 * n) % n - 0.5 * n
+            d_tape = p.tape_position - s.tape_position
+            return bool(self.edit("move_shape_group", spec.group, d_gore, d_tape))
+        values = {"gore": p.gore, "tape_position": p.tape_position, "across": p.across}
+        return bool(self.edit("update_shape", name, {"placement": values}))
+
+    def preferences_changed(self) -> None:
+        """The preferences changed: recompute what depends on them (the roll width
+        checks of the shapes and the envelope panels)."""
+        self.bump()
+        self.shapesChanged.emit()
+
+    def shape_checks(self, name: str) -> list[DesignCheck]:
+        """Pattern checks of placed shape ``name`` and whether each piece's page fits the
+        print roll (:func:`envelopelab.export.templates.roll_checks`); empty when it is
+        not placed."""
+        result = self.shapes.result(name)
+        if result is None or result.design is None:
+            return []
+        key = (id(result.design), self.prefs.print_roll_width)
+        hit = self._roll_cache.get(name)
+        if hit is None or hit[0] != key:
+            pieces = [(p.label, p.cut) for p in result.design.pieces]
+            hit = (key, roll_checks(pieces, self.prefs.print_roll_width), result.design)
+            self._roll_cache[name] = hit
+        return list(result.design.checks) + list(hit[1])
+
+    def envelope_piece_fits(self) -> list[Any]:
+        """Every envelope row piece (whole panels, or the halves of rows cut as half
+        gores) on the print roll (:class:`envelopelab.project.roll_advice.PieceFit`);
+        empty when the rows cannot be made."""
+        from envelopelab.project.gore_design import row_pieces
+        from envelopelab.project.roll_advice import PieceFit
+
+        session = self.session
+        try:
+            rows = self.rows() if session is not None else None
+        except ValueError:
+            rows = None
+        if session is None or rows is None:
+            self._row_roll = (None, [], [])
+            return []
+        roll = self.prefs.print_roll_width
+        # One fit per change of the design (and of the roll width).
+        key = (roll, self.revision)
+        if self._row_roll[0] == key:
+            return list(self._row_roll[2])
+        pieces = row_pieces(session.design, session.patterns, rows)
+        fits = []
+        for p in pieces:
+            fit = roll_fit(p.cut, roll)
+            fits.append(
+                PieceFit(p.name, p.row.label, fit.across, fit.along, fit.fits, fit.describe())
+            )
+        out = [
+            DesignFinding(
+                "roll width",
+                "warning",
+                f"{f.name}: panel is {f.across * 1000:.0f} mm across the roll at its "
+                f"narrowest ({f.turn}), LARGER THAN THE {roll * 1000:.0f} mm print roll; "
+                "use more gores or half gores, add a panel row, or join paper (Shape mode, "
+                "Panels and print roll)",
+                f"row:{f.row}",
+            )
+            for f in fits
+            if not f.fits
+        ]
+        self._row_roll = (key, out, fits)
+        return list(fits)
+
+    def envelope_roll_findings(self) -> list[DesignFinding]:
+        """A warning per envelope row piece whose 1:1 page is wider than the print roll
+        however it is turned (:func:`envelopelab.export.templates.roll_fit`)."""
+        self.envelope_piece_fits()
+        return list(self._row_roll[1])
+
     def shape_findings(self) -> list[DesignFinding]:
         """Findings of the special shapes: placement errors, pattern checks, simulations."""
         s = self.session
@@ -419,7 +606,7 @@ class WorkspaceController(QObject):
                     )
                 )
             else:
-                for check in result.design.checks:
+                for check in self.shape_checks(spec.name):
                     if check.severity != "info":
                         out.append(
                             DesignFinding(
@@ -584,6 +771,7 @@ class WorkspaceController(QObject):
                 rows = []
             if rows:
                 out += seam_mismatches(rows, s.patterns)
+                out += self.envelope_roll_findings()
             try:
                 for text in check_locks(s.design, s.project.locks):
                     out.append(DesignFinding("lock", "error", f"lock not met: {text}", "locks"))

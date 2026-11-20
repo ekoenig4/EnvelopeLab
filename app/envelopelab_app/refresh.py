@@ -11,7 +11,10 @@ panels in other workflow modes redrew although nobody could see them. A
   interactive application; see ``WorkspaceController.defer_hidden``).
 
 The refresh still runs synchronously for a visible widget, so what a panel shows is
-current as soon as the edit returns.
+current as soon as the edit returns, except for a widget given a ``delay``: lists that
+summarise the design (warnings, the design tree, the history) refresh that long after the
+last change, so a value scrubbed in real time redraws the drawings at every step but those
+lists once it rests (``delay_live`` with the controller's live edits).
 """
 
 from __future__ import annotations
@@ -19,7 +22,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import Any
 
-from PySide6.QtCore import QEvent, QObject, SignalInstance
+from PySide6.QtCore import QEvent, QObject, QTimer, SignalInstance
 from PySide6.QtWidgets import QWidget
 
 
@@ -40,6 +43,11 @@ class Refresher(QObject):
         Postpone the refresh of a hidden widget until it is shown (a callable is asked
         on every request; the interactive application defers, scripted windows whose
         callers read hidden panels directly do not).
+    delay : callable, optional
+        When it returns True, a request refreshes ``delay_ms`` after the last request
+        instead of at once (summary lists while a value is scrubbed; module docstring).
+    delay_ms : int
+        That delay, ms.
     """
 
     def __init__(
@@ -49,12 +57,20 @@ class Refresher(QObject):
         revision: Callable[[], int],
         signals: Iterable[SignalInstance] = (),
         defer_hidden: bool | Callable[[], bool] = True,
+        delay: Callable[[], bool] | None = None,
+        delay_ms: int = 150,
     ) -> None:
         super().__init__(widget)
         self.widget = widget
         self.action = action
         self.revision = revision
         self.defer_hidden = defer_hidden
+        #: When ``delay()`` is true, a request refreshes ``delay_ms`` after the last one.
+        self.delay = delay
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(delay_ms)
+        self._timer.timeout.connect(self._later)
         self.done: int | None = None
         self.dirty = False
         #: Refreshes run and requests skipped (for profiling and tests).
@@ -75,10 +91,23 @@ class Refresher(QObject):
             self.dirty = True
             self.skipped += 1
             return
+        if self.delay is not None and self.delay():
+            self.dirty = True
+            self._timer.start()
+            return
         self.run()
+
+    def _later(self) -> None:
+        if self.dirty and (self.widget.isVisible() or not self._deferring()):
+            self.run()
+
+    def _deferring(self) -> bool:
+        defer = self.defer_hidden
+        return bool(defer() if callable(defer) else defer)
 
     def run(self) -> None:
         """Refresh now."""
+        self._timer.stop()
         self.dirty = False
         self.done = self.revision()
         self.runs += 1
