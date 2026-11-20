@@ -84,7 +84,9 @@ KEYS: tuple[tuple[str, str], ...] = (
         "`outline` (`circle`, `ellipse`, `rectangle`, `polygon` or `outline`), `width` and "
         "`height` (m), `turn_deg`, `points` (polygon corners in m about the centre, or an "
         "imported outline in its own units), `smooth`, `source` (imported file name), "
-        "`hem` (m turned under) and `fabric` (null: as the panel under its centre). Written "
+        "`hem` (m turned under), `fabric` (null: as the panel under its centre) and "
+        "`symmetry` (a polygon's mirror axes through its centre, 0: none; with k axes "
+        "`points` are the corners of one slice between the first two axes). Written "
         "only when there are any; older files read as having none.",
     ),
     ("`snapshots`", "Named copies of `state` with their design content hash."),

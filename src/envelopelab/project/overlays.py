@@ -48,6 +48,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
+from numpy.typing import ArrayLike
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from envelopelab.project.shapes import ShapePlacement
@@ -68,6 +69,11 @@ DEFAULT_HEM = 0.012
 #: Difference between the outline's length on the piece and on the panels above which a
 #: warning is given, as a fraction of the outline (source: assumed, fabric give ~1 %).
 EASE_WARNING = 0.01
+#: A polygon corner closer than this to a mirror axis lies on it, m (the editor keeps
+#: corners to the millimetre; source: assumed).
+AXIS_SNAP = 0.001
+#: Most mirror axes a polygon overlay may have.
+MAX_AXES = 12
 #: Tier key of an overlay's single piece in the panel colours (``PanelColours.shapes``).
 OVERLAY_PIECE = ("A", 1)
 
@@ -99,6 +105,10 @@ class OverlaySpec(BaseModel):
         Cloth turned under round the outline, m (the cut piece is that much larger).
     fabric : str or None
         Fabric of the patch (None: as the panel under its centre).
+    symmetry : int
+        Mirror axes of a polygon through its centre (0: none). With :math:`k` axes,
+        ``points`` are only the corners of one slice between two neighbouring axes and
+        the outline is generated from them (:func:`symmetric_polygon`).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -114,10 +124,18 @@ class OverlaySpec(BaseModel):
     source: str = ""
     hem: float = Field(default=DEFAULT_HEM, ge=0.0)
     fabric: str | None = None
+    symmetry: int = Field(default=0, ge=0, le=MAX_AXES)
 
     @model_validator(mode="after")
     def _points(self) -> OverlaySpec:
-        if self.outline in ("polygon", "outline") and len(self.points) < 3:
+        if self.outline == "polygon" and self.symmetry:
+            need = 2 if self.symmetry == 1 else 1
+            if len(self.points) < need:
+                raise ValueError(
+                    f"overlay {self.name}: a symmetric polygon needs at least {need} "
+                    "corner(s) between its axes"
+                )
+        elif self.outline in ("polygon", "outline") and len(self.points) < 3:
             raise ValueError(f"overlay {self.name}: a {self.outline} needs at least 3 points")
         return self
 
@@ -167,6 +185,106 @@ def _self_intersects(p: FloatArray) -> bool:
     return False
 
 
+def _rotation(deg: float) -> FloatArray:
+    """Matrix turning row vectors anticlockwise by ``deg`` degrees (``p @ M``)."""
+    c, s = math.cos(math.radians(deg)), math.sin(math.radians(deg))
+    out: FloatArray = np.array([[c, s], [-s, c]])
+    return out
+
+
+def _reflection(deg: float) -> FloatArray:
+    """Matrix reflecting row vectors in the line through the origin at ``deg`` degrees."""
+    c, s = math.cos(math.radians(2 * deg)), math.sin(math.radians(2 * deg))
+    out: FloatArray = np.array([[c, s], [s, -c]])
+    return out
+
+
+def axis_angles(axes: int) -> list[float]:
+    """Directions of the mirror axes of a polygon with ``axes`` axes, degrees from the
+    across direction (the first is up the tape, 90 degrees; the others every
+    180/``axes`` degrees after it), before the overlay's turn."""
+    return [90.0 + j * 180.0 / axes for j in range(axes)]
+
+
+def symmetric_polygon(
+    chain: ArrayLike, axes: int
+) -> tuple[FloatArray, list[tuple[int, FloatArray]]]:
+    r"""The outline of a polygon with ``axes`` mirror axes from the corners of one slice.
+
+    The slice lies between the first axis (up the tape, 90 degrees) and the next one
+    anticlockwise (:math:`90 + 180 / k` degrees); its corners ``chain`` run from the first
+    axis to the second. The outline is, for :math:`m = 0 \dots k - 1`, the chain and its
+    mirror image in the second axis (reversed), turned by :math:`360 m / k` degrees: the
+    dihedral group :math:`D_k`. A corner on an axis (within :data:`AXIS_SNAP`, then
+    moved onto it) appears once.
+
+    Parameters
+    ----------
+    chain : sequence of (float, float)
+        Corners of the slice about the centre, m.
+    axes : int
+        Number of mirror axes :math:`k` (at least 1).
+
+    Returns
+    -------
+    outline : ndarray, shape (n, 2)
+        Corners of the whole polygon, anticlockwise, m.
+    owners : list of (int, ndarray)
+        For every corner of ``outline``: the chain corner it is an image of and the
+        orthogonal matrix ``T`` that makes it (``outline[i] = chain[g] @ T``).
+    """
+    c = np.asarray(chain, dtype=np.float64).reshape(-1, 2).copy()
+    # A corner within AXIS_SNAP of a mirror axis lies on it (so it and its mirror image
+    # are one corner, not two a rounding error apart).
+    for angle in (90.0, 90.0 + 180.0 / axes):
+        d = np.array([math.cos(math.radians(angle)), math.sin(math.radians(angle))])
+        along = c @ d
+        near = np.abs(c[:, 0] * d[1] - c[:, 1] * d[0]) < AXIS_SNAP
+        c[near] = along[near, None] * d
+    mirror = _reflection(90.0 + 180.0 / axes)
+    pts: list[FloatArray] = []
+    owners: list[tuple[int, FloatArray]] = []
+    for m in range(axes):
+        turn = _rotation(360.0 * m / axes)
+        for g in range(len(c)):
+            pts.append(c[g] @ turn)
+            owners.append((g, turn))
+        for g in reversed(range(len(c))):
+            t = mirror @ turn
+            pts.append(c[g] @ t)
+            owners.append((g, t))
+    keep: list[int] = []
+    for i, p in enumerate(pts):
+        if keep and float(np.linalg.norm(p - pts[keep[-1]])) < 1e-9:
+            continue
+        keep.append(i)
+    while len(keep) > 1 and float(np.linalg.norm(pts[keep[0]] - pts[keep[-1]])) < 1e-9:
+        keep.pop()
+    outline = np.asarray([pts[i] for i in keep], dtype=np.float64)
+    return outline, [owners[i] for i in keep]
+
+
+def slice_corners(outline: ArrayLike, axes: int) -> FloatArray:
+    """The corners of ``outline`` (m about the centre) in the slice between the first two
+    mirror axes (:func:`symmetric_polygon`), from the first axis to the second; when too
+    few lie there, a star: a point on the first axis and a corner 0.45 as far out on the
+    second (one axis: a diamond's left half)."""
+    p = np.asarray(outline, dtype=np.float64).reshape(-1, 2)
+    lo, width = 90.0, 180.0 / axes
+    angle = (np.degrees(np.arctan2(p[:, 1], p[:, 0])) - lo) % 360.0
+    inside = (angle <= width + 1e-9) & (np.hypot(p[:, 0], p[:, 1]) > 1e-9)
+    chain = p[inside][np.argsort(angle[inside])]
+    need = 2 if axes == 1 else 1
+    if len(chain) >= need:
+        return chain
+    r = float(np.max(np.hypot(p[:, 0], p[:, 1]))) if len(p) else 0.5
+    if axes == 1:
+        return np.array([[0.0, r], [-r, 0.0], [0.0, -r]])
+    # The inner corner on the second axis: a classic star of 2 k corners.
+    inner = math.radians(lo + width)
+    return np.array([[0.0, r], [0.45 * r * math.cos(inner), 0.45 * r * math.sin(inner)]])
+
+
 def densify(points: FloatArray, step: float = SEGMENT) -> FloatArray:
     """A closed polygon (m) with no edge longer than ``step`` (m)."""
     p = np.asarray(points, dtype=np.float64)
@@ -196,6 +314,10 @@ def outline_points(spec: OverlaySpec) -> FloatArray:
         p = 0.5 * np.column_stack([w * np.cos(t), h * np.sin(t)])
     elif spec.outline == "rectangle":
         p = 0.5 * np.array([[-w, -h], [w, -h], [w, h], [-w, h]], dtype=np.float64)
+    elif spec.outline == "polygon" and spec.symmetry:
+        p = symmetric_polygon(spec.points, spec.symmetry)[0]
+        if spec.smooth:
+            p = _closed_spline(p)
     else:
         p = np.asarray(spec.points, dtype=np.float64)
         if spec.outline == "outline":
@@ -564,6 +686,7 @@ def default_overlay(name: str, gore: int, tape_position: float) -> OverlaySpec:
 
 __all__ = [
     "DEFAULT_HEM",
+    "MAX_AXES",
     "EASE_WARNING",
     "OUTLINE_KINDS",
     "OVERLAY_PIECE",
@@ -571,6 +694,9 @@ __all__ = [
     "OverlayLayout",
     "OverlayRun",
     "OverlaySpec",
+    "axis_angles",
+    "slice_corners",
+    "symmetric_polygon",
     "clip_strip",
     "cloth_half_width",
     "default_overlay",

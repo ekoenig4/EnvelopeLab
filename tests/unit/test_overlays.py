@@ -252,3 +252,48 @@ def test_overlay_fabric_defaults_to_the_row_under_it(
     row_fabric = next(s["fabric"] for s in index["sheets"] if s["kind"] == "envelope panel")
     assert by["sun overlay"] == row_fabric and by["tag overlay"] == "red ripstop"
     assert math.isfinite(len(index["seam_pairs"]))
+
+
+# -- symmetry ------------------------------------------------------------------------------
+
+
+def test_symmetric_polygon_shapes() -> None:
+    from envelopelab.project.overlays import slice_corners, symmetric_polygon
+
+    diamond, _ = symmetric_polygon([(0, 1), (-1, 0), (0, -1)], 1)
+    assert np.allclose(diamond, [[0, 1], [-1, 0], [0, -1], [1, 0]])  # on-axis corners once
+    star = slice_corners(np.zeros((0, 2)), 5)
+    assert len(symmetric_polygon(star, 5)[0]) == 10  # a classic five-pointed star
+    square = [[-0.4, -0.4], [0.4, -0.4], [0.4, 0.4], [-0.4, 0.4]]
+    chain = slice_corners(square, 2)
+    assert np.allclose(chain, [[-0.4, 0.4]])
+    whole, _ = symmetric_polygon(chain, 2)
+    assert sorted(map(tuple, np.round(whole, 9))) == sorted(map(tuple, square))
+
+
+def test_a_symmetric_overlay_spec_lays_a_symmetric_outline(session: ProjectSession) -> None:
+    inner = math.radians(90.0 + 36.0)  # on the second axis: a classic star
+    points = [(0.0, 0.6), (0.25 * math.cos(inner), 0.25 * math.sin(inner))]
+    spec = _spec(outline="polygon", symmetry=5, points=points, s=5.0)
+    outline = outline_points(spec)
+    assert len(outline) == 10
+    mirrored = outline * np.array([-1.0, 1.0])  # the first axis is up the tape
+    assert all(np.min(np.linalg.norm(outline - q, axis=1)) < 1e-9 for q in mirrored)
+    edits.add_overlay(session, spec)
+    assert session.state.overlays[0].symmetry == 5
+    with pytest.raises(ValueError, match="between its axes"):
+        _spec(outline="polygon", symmetry=1, points=[(0.0, 0.6)])
+
+
+def test_a_corner_within_a_millimetre_of_an_axis_lies_on_it() -> None:
+    """Regression: the editor rounds corners to 0.1 mm (dragging: 1 mm), which moved a
+    star's inner corner just off its axis and made it and its mirror image two corners
+    0.1 mm apart, refused as a self-crossing outline."""
+    from envelopelab.project.overlays import _self_intersects, slice_corners, symmetric_polygon
+
+    star = np.round(slice_corners(np.zeros((0, 2)), 5) * 1.5, 4)
+    outline, _owners = symmetric_polygon(star, 5)
+    assert len(outline) == 10 and not _self_intersects(outline)
+    off = np.array([[0.0008, 0.7], [-0.3, 0.2]])  # 0.8 mm right of the first (up) axis
+    outline, _owners = symmetric_polygon(off, 2)
+    assert np.allclose(outline[0], [0.0, 0.7])

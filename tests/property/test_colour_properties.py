@@ -1,4 +1,5 @@
-"""Panel colours (ADR-0055): JSON round trips are lossless and painting is reversible."""
+"""Panel colours (ADR-0055): JSON round trips are lossless and painting is reversible;
+overlay symmetry (ADR-0056): a symmetric polygon is its own mirror image in every axis."""
 
 from __future__ import annotations
 
@@ -61,3 +62,33 @@ def test_a_repeat_visits_each_gore_once(count: int, data: st.DataObject) -> None
     assert all(1 <= g <= count for g in out)
     if 0 < every < count:
         assert all((b - a) % count == every % count for a, b in zip(out, out[1:], strict=False))
+
+
+# -- overlay symmetry (ADR-0056) ------------------------------------------------------------
+
+POINT = st.tuples(st.floats(-2.0, 2.0), st.floats(-2.0, 2.0))
+
+
+@settings(max_examples=80, deadline=None)
+@given(axes=st.integers(1, 8), chain=st.lists(POINT, min_size=2, max_size=6))
+def test_a_symmetric_polygon_is_its_own_mirror_image_in_every_axis(
+    axes: int, chain: list[tuple[float, float]]
+) -> None:
+    import math
+
+    import numpy as np
+
+    from envelopelab.project.overlays import axis_angles, symmetric_polygon
+
+    outline, owners = symmetric_polygon(chain, axes)
+    for angle in axis_angles(axes):
+        c, s = math.cos(math.radians(2 * angle)), math.sin(math.radians(2 * angle))
+        image = outline @ np.array([[c, s], [s, -c]])
+        for q in image:
+            assert float(np.min(np.linalg.norm(outline - q, axis=1))) < 1e-7
+    # Every corner is the image of its owner by its matrix (the owner moved onto an axis
+    # when it lies within AXIS_SNAP of one).
+    from envelopelab.project.overlays import AXIS_SNAP
+
+    for corner, (g, t) in zip(outline, owners, strict=True):
+        assert np.allclose(np.asarray(chain[g], float) @ t, corner, atol=AXIS_SNAP)

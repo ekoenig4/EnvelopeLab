@@ -9,7 +9,9 @@ crosses seams) with what it covers and how well it fits the curved envelope.
 
 A polygon is shaped in that drawing (:class:`PiecePreview`): drag a corner to move it,
 double click an edge to add a corner, double click or right click a corner to remove it;
-the corner table (folded away) is for typing exact values.
+the corner table (folded away) is for typing exact values. **Symmetry** gives it mirror
+axes (shape one slice, the rest follows) and the **Scale** dial beside the drawing scales
+the whole shape about its centre.
 
 The editor computes nothing: it shows the overlay and its layout
 (:func:`envelopelab.project.overlays.overlay_layout`) it is given, and reports every
@@ -27,6 +29,7 @@ from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPainterPath, QPen, QPo
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDial,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -43,6 +46,20 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab.project.overlays import OUTLINE_KINDS
+
+#: Symmetry choices: mirror axes and their text.
+SYMMETRIES: tuple[tuple[int, str], ...] = (
+    (0, "None"),
+    (1, "1 axis (left/right)"),
+    (2, "2 axes (left/right, up/down)"),
+    (3, "3 axes"),
+    (4, "4 axes"),
+    (5, "5 axes (star)"),
+    (6, "6 axes"),
+    (8, "8 axes"),
+)
+#: Dial steps each way: a full turn either way scales by 2 (or 1/2).
+SCALE_STEPS = 100
 
 KIND_TEXT = {
     "circle": "Circle",
@@ -62,6 +79,16 @@ def _turn(points: np.ndarray, deg: float) -> np.ndarray:
     c, s = math.cos(math.radians(deg)), math.sin(math.radians(deg))
     out: np.ndarray = np.asarray(points, dtype=np.float64) @ np.array([[c, s], [-s, c]])
     return out
+
+
+def _slice_angle(point: np.ndarray) -> float:
+    """Angle of a corner from the first mirror axis (up), anticlockwise, degrees."""
+    return (math.degrees(math.atan2(float(point[1]), float(point[0]))) - 90.0) % 360.0
+
+
+def _in_slice(point: np.ndarray, axes: int) -> bool:
+    """Whether a corner lies in the slice between the first two mirror axes."""
+    return _slice_angle(point) <= 180.0 / axes + 1e-9
 
 
 class PiecePreview(QWidget):
@@ -89,8 +116,16 @@ class PiecePreview(QWidget):
         self.cut: np.ndarray | None = None
         self.marks: list[tuple[float, float, str]] = []
         self.colour: str | None = None
-        #: Polygon corners about the centre before the turn, m (None: not a polygon).
+        #: Polygon corners about the centre before the turn, m (None: not a polygon): the
+        #: whole outline, generated from ``chain`` when it has mirror axes.
         self.corners: np.ndarray | None = None
+        #: The corners stored (one slice between two axes when ``axes`` > 0), m.
+        self.chain: np.ndarray | None = None
+        #: Mirror axes (0: none) and, per corner of ``corners``, the chain corner it is an
+        #: image of and the matrix making it (:func:`envelopelab.project.overlays.
+        #: symmetric_polygon`).
+        self.axes = 0
+        self._owners: list[tuple[int, np.ndarray]] = []
         self.turn_deg = 0.0
         #: Returns "" for corners that make a valid outline, else why not.
         self.validate: Any = lambda _corners: ""
@@ -110,12 +145,14 @@ class PiecePreview(QWidget):
         self.finished, self.cut, self.marks, self.colour = finished, cut, marks, colour
         self.update()
 
-    def set_corners(self, corners: Any, turn_deg: float) -> None:
-        """Make the polygon ``corners`` (m about the centre) draggable (None: none)."""
+    def set_corners(self, corners: Any, turn_deg: float, axes: int = 0) -> None:
+        """Make the polygon ``corners`` (m about the centre; with ``axes`` mirror axes the
+        corners of one slice) draggable (None: none)."""
         if self._drag is not None:
             return  # the corners being dragged are ours
-        self.corners = None if corners is None else np.asarray(corners, dtype=np.float64)
+        self.axes = axes
         self.turn_deg = turn_deg
+        self._set_chain(None if corners is None else np.asarray(corners, dtype=np.float64))
         self._invalid = False
         self.setCursor(Qt.CursorShape.ArrowCursor)
         self.update()
@@ -143,6 +180,18 @@ class PiecePreview(QWidget):
     def to_cloth(self, p: QPointF) -> tuple[float, float]:
         k, cx, cy = self.frame()
         return cx + (p.x() - self.width() / 2) / k, cy - (p.y() - self.height() / 2) / k
+
+    def _set_chain(self, chain: np.ndarray | None) -> None:
+        from envelopelab.project.overlays import symmetric_polygon
+
+        self.chain = chain
+        if chain is None:
+            self.corners, self._owners = None, []
+        elif self.axes:
+            self.corners, self._owners = symmetric_polygon(chain, self.axes)
+        else:
+            identity = np.eye(2)
+            self.corners, self._owners = chain, [(i, identity) for i in range(len(chain))]
 
     def _turned(self) -> np.ndarray | None:
         return None if self.corners is None else _turn(self.corners, self.turn_deg)
@@ -184,12 +233,14 @@ class PiecePreview(QWidget):
         out: np.ndarray = np.round(point, 3)
         return out
 
-    def _report(self, corners: np.ndarray, live: bool) -> None:
-        reason = self.validate(corners.tolist())
+    def _report(self, chain: np.ndarray, live: bool) -> None:
+        """Show ``chain`` (the corners stored) and report it when it is valid."""
+        self._set_chain(chain)
+        reason = self.validate(chain.tolist())
         self._invalid = bool(reason)
         self.setToolTip(reason)
         if not reason:
-            self.cornersChanged.emit(corners.tolist(), live)
+            self.cornersChanged.emit(chain.tolist(), live)
         self.update()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
@@ -211,10 +262,13 @@ class PiecePreview(QWidget):
             over = self.corner_at(event.position()) is not None
             self.setCursor(Qt.CursorShape.OpenHandCursor if over else Qt.CursorShape.ArrowCursor)
             return
-        corners = self.corners.copy()
-        corners[self._drag] = self._unturned(event.position())
-        self.corners = corners
-        self._report(corners, live=True)
+        assert self.chain is not None
+        # The corner dragged is an image of a chain corner: move that one (every image
+        # follows; T is orthogonal, so its inverse is its transpose).
+        g, t = self._owners[self._drag]
+        chain = self.chain.copy()
+        chain[g] = np.round(self._unturned(event.position()) @ t.T, 3)
+        self._report(chain, live=True)
 
     def mouseReleaseEvent(self, _event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
         if self._drag is None:
@@ -237,19 +291,39 @@ class PiecePreview(QWidget):
 
     def add_corner(self, edge: int, at: QPointF) -> None:
         """Add a corner at widget point ``at`` on the edge after corner ``edge``."""
-        if self.corners is None:
+        if self.corners is None or self.chain is None:
             return
-        corners = np.insert(self.corners, edge + 1, self._unturned(at), axis=0)
-        self.corners = corners
-        self._report(corners, live=False)
+        n = len(self.corners)
+        (ga, ta), (gb, tb) = self._owners[edge], self._owners[(edge + 1) % n]
+        q = self._unturned(at)
+        if not self.axes:
+            index, point = edge + 1, q
+        elif np.allclose(ta, tb):
+            # Between two corners of the same image of the slice.
+            index, point = max(ga, gb), q @ ta.T
+        else:
+            # The edge crosses an axis: take the click back into the slice through the
+            # image it lands in, and add it at that end of the slice.
+            g, t = next(
+                ((g, t) for g, t in ((ga, ta), (gb, tb)) if _in_slice(q @ t.T, self.axes)),
+                (ga, ta),
+            )
+            point = q @ t.T
+            index = 0 if g == 0 and len(self.chain) > 1 else len(self.chain)
+            if g == 0 and len(self.chain) == 1:
+                # One corner: before it if the click is nearer the first axis.
+                index = 0 if _slice_angle(point) < _slice_angle(self.chain[0]) else 1
+        self._report(np.insert(self.chain, index, np.round(point, 3), axis=0), live=False)
 
     def remove_corner(self, i: int) -> None:
         """Remove corner ``i`` (a polygon keeps at least three)."""
-        if self.corners is None or len(self.corners) <= 3:
+        if self.chain is None:
             return
-        corners = np.delete(self.corners, i, axis=0)
-        self.corners = corners
-        self._report(corners, live=False)
+        least = 3 if not self.axes else (2 if self.axes == 1 else 1)
+        if len(self.chain) <= least:
+            return
+        g = self._owners[i][0]
+        self._report(np.delete(self.chain, g, axis=0), live=False)
 
     # -- drawing ------------------------------------------------------------------------
 
@@ -283,6 +357,18 @@ class PiecePreview(QWidget):
         turned = self._turned()
         if turned is None:
             return
+        # The mirror axes through the centre, turned with the overlay.
+        if self.axes:
+            from envelopelab.project.overlays import axis_angles
+
+            reach = 0.6 * float(np.max(np.ptp(self.cut, axis=0)))
+            axis_pen = QPen(QColor("#2e7d32"), 1.0)
+            axis_pen.setStyle(Qt.PenStyle.DashDotLine)
+            p.setPen(axis_pen)
+            for angle in axis_angles(self.axes):
+                a = math.radians(angle + self.turn_deg)
+                d = reach * np.array([math.cos(a), math.sin(a)])
+                p.drawLine(self.to_screen(*map(float, -d)), self.to_screen(*map(float, d)))
         # The corners: their polygon (red while it would cross itself) and a handle each.
         line = QPen(QColor("#c62828" if self._invalid else "#1565c0"), 1.0)
         line.setStyle(Qt.PenStyle.DashLine)
@@ -380,11 +466,22 @@ class OverlayEditor(QWidget):
         row = QHBoxLayout()
         self.smooth = QCheckBox("Smooth curve through the corners")
         self.smooth.toggled.connect(lambda on: self._emit({"smooth": on}))
+        self.symmetry = QComboBox()
+        self.symmetry.setObjectName("overlaySymmetry")
+        self.symmetry.setToolTip(
+            "Mirror axes through the centre: shape one slice between two axes and the "
+            "rest follows (dashed green lines in the drawing)"
+        )
+        for axes, text in SYMMETRIES:
+            self.symmetry.addItem(text, axes)
+        self.symmetry.currentIndexChanged.connect(self._symmetry_chosen)
         self.table_button = QToolButton()
         self.table_button.setObjectName("overlayTableToggle")
         self.table_button.setText("Corner table (mm) ▸")
         self.table_button.setCheckable(True)
         self.table_button.setToolTip("Type exact corner positions instead of dragging them")
+        row.addWidget(QLabel("Symmetry"))
+        row.addWidget(self.symmetry)
         row.addWidget(self.smooth)
         row.addStretch(1)
         row.addWidget(self.table_button)
@@ -392,7 +489,8 @@ class OverlayEditor(QWidget):
         self.table_box = QWidget()
         table_layout = QVBoxLayout(self.table_box)
         table_layout.setContentsMargins(0, 0, 0, 0)
-        table_layout.addWidget(QLabel("Corners about the centre (mm): across, up"))
+        self.table_label = QLabel("Corners about the centre (mm): across, up")
+        table_layout.addWidget(self.table_label)
         self.points = QTableWidget(0, 2)
         self.points.setObjectName("overlayPoints")
         self.points.setHorizontalHeaderLabels(["across", "up"])
@@ -426,7 +524,31 @@ class OverlayEditor(QWidget):
         self.preview.cornersChanged.connect(
             lambda corners, live: self._emit({"points": corners}, live=live)
         )
-        layout.addWidget(self.preview, 1)
+        # The drawing with the scale dial beside it.
+        drawing = QHBoxLayout()
+        drawing.addWidget(self.preview, 1)
+        dial_box = QVBoxLayout()
+        dial_box.addWidget(QLabel("Scale"), 0, Qt.AlignmentFlag.AlignHCenter)
+        self.scale_dial = QDial()
+        self.scale_dial.setObjectName("overlayScale")
+        self.scale_dial.setRange(-SCALE_STEPS, SCALE_STEPS)
+        self.scale_dial.setNotchesVisible(True)
+        self.scale_dial.setFixedSize(72, 72)
+        self.scale_dial.setToolTip(
+            "Turn to scale the whole shape about its centre (×0.5 to ×2 per turn; one undo "
+            "step per turn)"
+        )
+        self.scale_dial.valueChanged.connect(self._scale_turned)
+        self.scale_dial.sliderReleased.connect(self._scale_done)
+        self.scale_label = QLabel("×1.00")
+        self.scale_label.setObjectName("overlayScaleLabel")
+        dial_box.addWidget(self.scale_dial)
+        dial_box.addWidget(self.scale_label, 0, Qt.AlignmentFlag.AlignHCenter)
+        dial_box.addStretch(1)
+        drawing.addLayout(dial_box)
+        layout.addLayout(drawing, 1)
+        #: What the dial scales from: the corners, or width and height (None: idle).
+        self._scale_base: dict[str, Any] | None = None
         self.info = QLabel()
         self.info.setObjectName("overlayInfo")
         self.info.setWordWrap(True)
@@ -482,7 +604,20 @@ class OverlayEditor(QWidget):
             )
         finally:
             self._filling = False
-        self.preview.set_corners(spec.points if spec.outline == "polygon" else None, spec.turn_deg)
+        polygon = spec.outline == "polygon"
+        self.preview.set_corners(spec.points if polygon else None, spec.turn_deg, spec.symmetry)
+        self._filling = True
+        try:
+            self.symmetry.setCurrentIndex(
+                next((i for i, (a, _t) in enumerate(SYMMETRIES) if a == spec.symmetry), 0)
+            )
+        finally:
+            self._filling = False
+        self.table_label.setText(
+            "Corners of one slice between the first two axes (mm): across, up"
+            if spec.symmetry
+            else "Corners about the centre (mm): across, up"
+        )
         if layout is None:
             self.preview.set_piece(None, None, [], colour)
             self.info.setText(f"<span style='color:#b00020'>{error}</span>")
@@ -512,6 +647,74 @@ class OverlayEditor(QWidget):
         self.info.setText(text)
 
     # -- edits ------------------------------------------------------------------------
+
+    def _symmetry_chosen(self, index: int) -> None:
+        """Give the polygon ``axes`` mirror axes, keeping its shape where it can: the
+        corners in the first slice become the corners stored (none: the whole outline)."""
+        from envelopelab.project.overlays import slice_corners, symmetric_polygon
+
+        axes = int(self.symmetry.itemData(index))
+        spec = self.spec
+        if self._filling or spec is None or axes == spec.symmetry:
+            return
+        if spec.outline == "polygon" and spec.points:
+            whole = (
+                symmetric_polygon(spec.points, spec.symmetry)[0]
+                if spec.symmetry
+                else np.asarray(spec.points, dtype=np.float64)
+            )
+        elif spec.outline in ("circle", "ellipse") and axes:
+            # A finely sampled curve would give a corner every few degrees: start from a
+            # star (one axis: a diamond) as large instead. With no corners given,
+            # slice_corners returns one 0.5 m out.
+            r = 0.5 * max(spec.width, spec.height)
+            star = slice_corners(np.zeros((0, 2)), axes) * (r / 0.5)
+            self._emit(
+                {"outline": "polygon", "symmetry": axes, "points": np.round(star, 4).tolist()}
+            )
+            return
+        else:  # a rectangle or an imported outline: keep its corners
+            from envelopelab.project.overlays import outline_points
+
+            whole = _turn(outline_points(spec), -spec.turn_deg)
+        points = slice_corners(whole, axes) if axes else whole
+        self._emit(
+            {
+                "outline": "polygon",
+                "symmetry": axes,
+                "points": np.round(points, 4).tolist(),
+            }
+        )
+
+    def _scale_turned(self, value: int) -> None:
+        """Scale the shape by the dial's turn from where it was when the turn began."""
+        spec = self.spec
+        if self._filling or spec is None:
+            return
+        factor = 2.0 ** (value / SCALE_STEPS)
+        self.scale_label.setText(f"×{factor:.2f}")
+        if self._scale_base is None:
+            self._scale_base = {
+                "points": [list(p) for p in spec.points],
+                "width": spec.width,
+                "height": spec.height,
+            }
+        base = self._scale_base
+        if spec.outline == "polygon":
+            values: dict[str, Any] = {
+                "points": np.round(np.asarray(base["points"]) * factor, 4).tolist()
+            }
+        else:
+            values = {"width": base["width"] * factor, "height": base["height"] * factor}
+        self._emit(values, live=True)
+
+    def _scale_done(self) -> None:
+        """The dial is let go: the next turn scales from the new size."""
+        self._scale_base = None
+        self.scale_dial.blockSignals(True)
+        self.scale_dial.setValue(0)
+        self.scale_dial.blockSignals(False)
+        self.scale_label.setText("×1.00")
 
     def _show_table(self, on: bool) -> None:
         self.table_box.setVisible(on)

@@ -20,6 +20,16 @@ gore 1, half way up, and the overlay editor opens:
   drawn red and not applied. Tick *Smooth curve* for a rounded shape through the corners;
   **Corner table (mm)** unfolds a table to type exact corner positions about the centre.
   A polygon's size is its corners, so *Width* and *Height* are greyed out.
+* **Symmetry** (polygons): *1 axis* mirrors left and right, *2 axes* also up and down,
+  *5 axes* makes a five-pointed star, and so on up to 8. The axes are drawn as dashed
+  green lines through the centre (they turn with the overlay). You shape one slice
+  between two neighbouring axes: dragging any corner moves its mirror images too, and a
+  corner added or removed is added or removed in every slice (on an axis it is its own
+  mirror image). Choosing a symmetry keeps the corners already in the first slice;
+  *None* keeps the whole shape as plain corners.
+* **Scale** dial (beside the drawing): turn it to scale the whole shape about its
+  centre, ×0.5 to ×2 per turn; one turn of the dial is one undo step. A polygon's corners
+  are scaled; any other outline's width and height.
 * **Width**, **Height**, **Turn**: its size across and up the tape, and its turn.
 * **Hem turned under**: cloth added round the outline for the hem (12 mm by default).
 * **Fabric** (default: as the panel under its centre) and **Colour**.

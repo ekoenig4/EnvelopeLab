@@ -6,7 +6,8 @@ All notable changes to this project will be documented in this file.
 - Added: **overlays** (appliqués) sewn on top of the envelope, anywhere and across seams
   (ADR-0056, project format 8). In Special shapes, **Add shape ▸ Overlay (appliqué)**:
   a circle, ellipse, rectangle, polygon (its corners dragged, added and removed in the
-  drawing of the piece) or an outline imported from DXF/SVG, placed,
+  drawing of the piece, with optional mirror axes so it stays symmetric, and a dial to
+  scale it) or an outline imported from DXF/SVG, placed,
   dragged and nudged like a shape, coloured like a panel. The build pack cuts each one
   (1:1 template, cut once) and marks the line to sew it on every panel it crosses, with
   numbered marks at the seams; the fit on the curved envelope is reported (warning above

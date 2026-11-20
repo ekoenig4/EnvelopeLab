@@ -122,3 +122,51 @@ def test_a_drag_that_crosses_the_outline_is_not_applied(gore_window: MainWindow)
     assert "crosses itself" in preview.toolTip()
     QTest.mouseRelease(preview, left, none, across)
     assert list(session.state.overlays[0].points) == before
+
+
+def test_symmetry_axes_and_the_scale_dial(gore_window: MainWindow) -> None:
+    import numpy as np
+
+    from envelopelab.project.overlays import outline_points
+
+    panel, preview = _polygon_overlay(gore_window)
+    session = gore_window.controller.session
+    assert session is not None
+    editor = panel.overlay_editor
+    # Two axes: the square keeps its shape, stored as one slice (a single corner).
+    editor.symmetry.setCurrentIndex(2)
+    spec = session.state.overlays[0]
+    assert spec.symmetry == 2 and spec.points == [(-0.4, 0.4)]
+    assert preview.corners is not None and len(preview.corners) == 4
+    # Drag one corner: all four follow (their images), in one undo step.
+    depth = session.stack.index
+    left, none = Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier
+    corner = preview.to_screen(0.4, -0.4).toPoint()  # an image of the stored corner
+    target = preview.to_screen(0.5, -0.3).toPoint()
+    QTest.mousePress(preview, left, none, corner)
+    QTest.mouseMove(preview, target)
+    QTest.mouseRelease(preview, left, none, target)
+    spec = session.state.overlays[0]
+    assert spec.points[0] == pytest.approx((-0.5, 0.3), abs=0.01)
+    assert session.stack.index == depth + 1
+    outline = outline_points(spec)
+    assert np.allclose(
+        np.sort(np.abs(outline), axis=0), np.sort(np.abs(outline[:1]).repeat(4, 0), axis=0)
+    )
+    # Double click an edge off the axes: a corner is added in every slice (4); on an
+    # axis it is its own mirror image (2 more).
+    edge = preview.to_screen(-0.25, 0.3).toPoint()
+    QTest.mouseDClick(preview, left, none, edge)
+    assert len(outline_points(session.state.overlays[0])) == 8
+    # The dial scales the whole shape: a turn of +100 steps doubles it, one undo step.
+    before = np.asarray(session.state.overlays[0].points)
+    depth = session.stack.index
+    editor.scale_dial.setValue(100)
+    editor._scale_done()
+    after = np.asarray(session.state.overlays[0].points)
+    assert np.allclose(after, 2.0 * before, atol=1e-4)
+    assert session.stack.index == depth + 1 and editor.scale_dial.value() == 0
+    # Back to no symmetry: the whole outline becomes the corners.
+    editor.symmetry.setCurrentIndex(0)
+    spec = session.state.overlays[0]
+    assert spec.symmetry == 0 and len(spec.points) == 8
