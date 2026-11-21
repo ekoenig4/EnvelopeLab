@@ -2116,6 +2116,37 @@ class ShapesPanel(QWidget):
         self.placement.data.hint, self.placement.data.hint_face = hint, face
         self.placement.view3d.set_hint(hint, face)  # type: ignore[attr-defined]
 
+    def _overlay_hint(self, key: str) -> Any:
+        """Where a value of the selected overlay (``shape:overlay.<field>``) acts: its
+        outline on the balloon, faced at its centre (``Highlight``; None: not laid)."""
+        from envelopelab.project.gore_design import display_points
+        from envelopelab.project.highlight import Highlight
+
+        overlay = self.overlay()
+        session = self.controller.session
+        _surface, layout, _error = self.overlay_layout()
+        if overlay is None or layout is None or session is None or session.design.gores is None:
+            return None
+        n = session.design.gores.count
+        g, s = layout.gs[:, 0], layout.gs[:, 1]
+        line = np.asarray(display_points(session.design, s, 2.0 * math.pi * g / n), float)
+        pl = overlay.placement
+        centre = np.asarray(
+            display_points(
+                session.design,
+                np.array([pl.tape_position]),
+                np.array([2.0 * math.pi * (pl.gore - 0.5 + pl.across) / n]),
+            ),
+            float,
+        )[0]
+        field = key.removeprefix("shape:overlay.")
+        what = "where it sits" if field.startswith("placement") else "its outline"
+        if field == "hem":
+            what = "its outline (the hem is added round it on the cut piece)"
+        words = field.split(".")[-1].replace("_deg", "").replace("_", " ")
+        closed = np.vstack([line, line[:1]])
+        return Highlight(f"{overlay.name} {words}: {what}", [closed], centre, key)
+
     def shape_hint(self, key: str) -> Any:
         """Where a value of the selected shape (``shape:<field path>``) acts, as lines on
         the balloon (``Highlight``; None: the shape is not placed)."""
@@ -2124,6 +2155,8 @@ class ShapesPanel(QWidget):
         from envelopelab.project.shapes import display_offset
 
         field = key.removeprefix("shape:")
+        if field.startswith("overlay."):
+            return self._overlay_hint(key)
         spec = self.spec()
         result = None if spec is None else self.controller.shapes.shown(spec.name)
         placed = None if result is None else result.design

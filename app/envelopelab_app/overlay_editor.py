@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab.project.overlays import OUTLINE_KINDS
+from envelopelab_app.hints import set_hint
 
 #: Symmetry choices: mirror axes and their text.
 SYMMETRIES: tuple[tuple[int, str], ...] = (
@@ -470,6 +471,18 @@ class OverlayEditor(QWidget):
         self.export_button.clicked.connect(lambda _c=False: self.exportRequested.emit())
         form.addRow("Pattern", self.export_button)
         layout.addLayout(form)
+        # Pointing at a number shows where it acts on the balloon (ADR-0050): the
+        # overlay's outline, resolved by the Special shapes panel (``shape:`` keys).
+        for box, key in (
+            (self.gore, "placement.gore"),
+            (self.tape, "placement.tape_position"),
+            (self.across, "placement.across"),
+            (self.width_box, "width"),
+            (self.height_box, "height"),
+            (self.turn, "turn_deg"),
+            (self.hem, "hem"),
+        ):
+            set_hint(box, f"shape:overlay.{key}")
 
         # Polygon: the corners are dragged in the drawing below; the table (folded away)
         # is for typing exact values.

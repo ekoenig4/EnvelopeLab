@@ -207,3 +207,18 @@ def test_an_overlay_shows_and_exports_its_own_pattern(
     for k, (_w, _h, content) in enumerate(_page_boxes(pdf), 1):
         assert "%CAL" in content and _check_cal_pdf(pdf.name, k, content) == []
     assert _read_dxf(tmp_path / f"{name}-overlay.dxf")["units"] == 4
+
+
+def test_pointing_at_an_overlay_number_shows_its_outline(gore_window: MainWindow) -> None:
+    from PySide6.QtCore import QEvent
+    from PySide6.QtWidgets import QApplication
+
+    gore_window.set_mode("shapes")
+    panel = gore_window.shapes
+    name = panel.add_overlay()
+    controller = gore_window.controller
+    QApplication.sendEvent(panel.overlay_editor.width_box, QEvent(QEvent.Type.Enter))
+    assert controller.hint == "shape:overlay.width"
+    h = controller.hint_highlight()
+    assert h is not None and h.label.startswith(f"{name} width") and h.lines
+    assert h.focus is not None
