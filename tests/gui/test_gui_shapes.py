@@ -1281,3 +1281,56 @@ def test_profile_is_edited_by_dragging_points_and_splits(gore_window: MainWindow
     _placed(gore_window)
     assert spec().splits[0] > 0.6
     assert view.split_at(QPointF(-1000.0, -1000.0)) is None
+
+
+def test_convert_a_round_mesh_to_a_revolved_profile(
+    gore_window: MainWindow, tmp_path: Path
+) -> None:
+    from envelopelab.project.shapes import MeshShape, RevolvedShape
+    from envelopelab.validation.primitives import revolved_mesh
+
+    antenna = [(0.18, 0.0), (0.12, 0.48), (0.12, 0.62), (0.22, 0.74), (0.24, 0.86), (0.0, 1.08)]
+    mesh = revolved_mesh(antenna, sink=0.02)
+    path = write_obj_scene(
+        tmp_path / "antenna.obj", [MeshObject("antenna", mesh.vertices, mesh.triangles)]
+    )
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    assert panel.import_mesh(path) == "antenna"
+    _placed(gore_window)
+    before = panel.spec()
+    assert isinstance(before, MeshShape)
+
+    fit = panel.fit_mesh(16)
+    assert fit is not None and fit.round
+    summary = panel.fit_summary(fit)
+    assert "Largest deviation" in summary and "WARNING" not in summary
+    assert panel.convert_mesh(fit)
+    _placed(gore_window)
+    spec = panel.spec()
+    assert isinstance(spec, RevolvedShape) and spec.name == "antenna"
+    assert panel.editor_tabs.isTabVisible(1) and panel.editor_tabs.currentIndex() == 1
+    assert len(panel.profile_view.profile) == 16
+    assert panel.placed("antenna") is not None, panel.status.text()
+    # Now the stalk and the ball can be cut as two tiers.
+    assert panel.set_value(("splits",), [0.5])
+    _placed(gore_window)
+    assert len(panel.profile_view.splits) == 1
+    gore_window.undo()
+    gore_window.undo()
+    _placed(gore_window)
+    assert panel.spec() == before
+
+
+def test_a_mesh_that_is_not_round_is_warned_before_converting(
+    gore_window: MainWindow, tmp_path: Path
+) -> None:
+    ear = ellipsoid_mesh(0.3, 0.1, 0.25, -0.05, rings=16, segments=32)
+    path = write_obj_scene(tmp_path / "ear.obj", [MeshObject("ear", ear.vertices, ear.triangles)])
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    assert panel.import_mesh(path) == "ear"
+    _placed(gore_window)
+    fit = panel.fit_mesh()
+    assert fit is not None and not fit.round
+    assert "WARNING: this mesh is not round" in panel.fit_summary(fit)

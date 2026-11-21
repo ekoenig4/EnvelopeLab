@@ -74,6 +74,7 @@ from PySide6.QtWidgets import (
 
 from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH, PackExtras
 from envelopelab.export.templates import MARGIN, roll_fit, turn_points
+from envelopelab.features.mesh_profile import ROUND_TOLERANCE, ProfileFit, fit_profile
 from envelopelab.features.metrics import REQUIRED_FOS
 from envelopelab.features.primitives import CutPiece, PrimitiveDesign, PrimitiveError
 from envelopelab.project.model import SOLVER_LABELS
@@ -1695,6 +1696,15 @@ class ShapesPanel(QWidget):
             size_row.addWidget(self.mesh_size_label, 1)
             size_row.addWidget(resize)
             self.form.addRow("Size", size_row)
+            convert = QPushButton("Convert to revolved…")
+            convert.setObjectName("shapeConvertRevolved")
+            convert.setToolTip(
+                "Replace a mesh that is round about its axis (a mast, a knob, a ball) by a "
+                "revolved profile: exact gores, horizontal splits and the visual profile "
+                "editor. Shows how far the mesh is from round first; undo brings it back."
+            )
+            convert.clicked.connect(self._convert_dialog)
+            self.form.addRow("", convert)
         gores = self.controller.design.gores.count if self.controller.is_gore else 999  # type: ignore[union-attr]
         for field in (*PLACEMENT_FIELDS, *KIND_FIELDS[spec.kind], *COMMON_FIELDS):
             box: QSpinBox | QDoubleSpinBox
@@ -2294,6 +2304,60 @@ class ShapesPanel(QWidget):
         dialog = ResizeMeshDialog(self, mesh_size(spec))
         if dialog.exec():
             self.resize_mesh(*dialog.factors())
+
+    def fit_mesh(self, points: int = 16) -> ProfileFit | None:
+        """A revolved profile fitted to the selected mesh shape (None: not a mesh, or
+        no fit; the reason is reported)."""
+        spec = self.spec()
+        if not isinstance(spec, MeshShape):
+            return None
+        try:
+            return fit_profile(np.asarray(spec.vertices), np.asarray(spec.triangles), points)
+        except ValueError as exc:
+            self.controller.editRejected.emit(f"{spec.name}: {exc}")
+            return None
+
+    @staticmethod
+    def fit_summary(fit: ProfileFit) -> str:
+        """How far the mesh is from the fitted profile, for the user to judge."""
+        text = (
+            f"Largest deviation {1000 * fit.max_deviation:.0f} mm "
+            f"({100 * fit.relative_deviation:.1f} % of the widest radius, "
+            f"{1000 * fit.widest_radius:.0f} mm) at {fit.deviation_height:.2f} m up; "
+            f"RMS {1000 * fit.rms_deviation:.0f} mm; {len(fit.profile)} profile points."
+        )
+        if not fit.round:
+            text += (
+                "\n\nWARNING: this mesh is not round about its axis (more than "
+                f"{100 * ROUND_TOLERANCE:.0f} % off). Converting it changes its shape."
+            )
+        return text
+
+    def convert_mesh(self, fit: ProfileFit) -> bool:
+        """Replace the selected mesh shape by the revolved profile ``fit`` (one undo
+        step) and show its Profile tab."""
+        if self.selected is None:
+            return False
+        ok = bool(
+            self.controller.edit("convert_mesh_to_revolved", self.selected, fit.profile, fit.smooth)
+        )
+        if ok:
+            self.editor_tabs.setCurrentIndex(1)
+        return ok
+
+    def _convert_dialog(self) -> None:
+        answer = _ask(self, "Convert to revolved profile", [("Profile points", 3, 64, 16, 0)])
+        if answer is None:
+            return
+        fit = self.fit_mesh(int(answer[0]))
+        if fit is None:
+            return
+        icon = QMessageBox.Icon.Information if fit.round else QMessageBox.Icon.Warning
+        box = QMessageBox(icon, "Convert to revolved profile", self.fit_summary(fit), parent=self)
+        box.setInformativeText("Convert this shape? Undo brings the mesh back.")
+        box.setStandardButtons(QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+        if box.exec() == QMessageBox.StandardButton.Ok:
+            self.convert_mesh(fit)
 
     def _mirror_dialog(self) -> None:
         self.begin_mirror()

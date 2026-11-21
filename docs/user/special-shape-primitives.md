@@ -86,6 +86,16 @@ in the editor next to them, and you can move the selected shape on either:
    the shape one way only (a taller antenna, a wider ear). The mesh is scaled about its
    base point and cut again (one undo step; a linked mirror twin follows). Feed holes,
    the cap and the placement are kept, so check them after a large change.
+   **Convert to revolved…** replaces a mesh that is round about its axis, such as an
+   antenna or a ball, by a revolved profile. It asks how many profile points to use (16
+   by default; more follow the mesh more closely), fits them to the mesh and shows how
+   far the mesh is from the result: the largest deviation in mm and as a share of the
+   widest radius, where it is, and the RMS deviation. A mesh more than 5 % off is
+   flagged as not round, because converting it would change its shape. After converting,
+   the shape keeps its name, placement, fabric, feed holes, cap and group; its panels
+   become gores, and it can be split across (a stalk and a ball as two tiers), edited on
+   the **Profile** tab and scaled there. Undo brings the mesh back
+   ([theory](../theory/mesh-to-profile.md)).
    **Profile**: a revolved shape's outline, drawn with its mirror image, the axis
    (dotted) and the base (solid). Drag a point to reshape it (Ctrl+click selects
    several, which move together; **Soft radius** lets the neighbours follow).
@@ -567,7 +577,7 @@ default.
 ## Limitations
 
 * Revolved shapes are symmetric about their axis. Use a Blender mesh for anything
-  else.
+  else. A round mesh can be converted to a revolved shape (**Convert to revolved…**).
 * A free-form shape's axis must leave the mesh through its top, and each panel must be
   a single piece. A strongly curved horn may need a leaned placement, or more panels.
 * A free-form shape rests in its flattened panels exactly as the mesh describes it. Use

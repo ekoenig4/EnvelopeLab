@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: **Convert to revolved…** for mesh shapes that are round about their axis (an
+  antenna, a ball). A revolved profile is fitted to the mesh (plane sections, resampled
+  points) and its largest and RMS deviation from the mesh are shown before converting; a
+  mesh more than 5 % off its widest radius is flagged as not round. The converted shape
+  keeps its name, placement, fabric, feed holes, cap and group, and can then be split
+  across and edited in the profile editor. One undo step; no file-format change.
 - Added: visual profile editor for revolved shapes (Profile tab). Drag points (with soft
   selection), double-click to add, Delete to remove, **Scale…** the whole shape or the
   selected points, and drag horizontal splits along the outline; tier letters are shown.

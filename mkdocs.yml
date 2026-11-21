@@ -27,6 +27,7 @@ nav:
       - CalculiX verification solver: theory/verification-solver.md
       - Appendage pressure and load paths: theory/appendage-pressure-and-load-paths.md
       - Special-shape primitives: theory/special-shape-primitives.md
+      - Mesh shape to revolved profile: theory/mesh-to-profile.md
       - Design editing and staleness: theory/design-editing.md
       - Profile editing, segments and simplify: theory/profile-editing.md
       - Solved shape vs drawn profile: theory/profile-matching.md

@@ -136,6 +136,59 @@ def ellipsoid_mesh(
     return ReferenceMesh(np.array(v), np.array(f, dtype=np.int64), "generic ellipsoid")
 
 
+def revolved_mesh(
+    profile: list[tuple[float, float]],
+    segments: int = 48,
+    rings: int = 160,
+    sink: float = 0.05,
+) -> ReferenceMesh:
+    """Closed mesh of a profile spun about the :math:`z` axis, for free-form tests.
+
+    Parameters
+    ----------
+    profile : list of (float, float)
+        Profile points :math:`(\\rho, z)`, m, base first (at :math:`z = 0`), ending on the
+        axis; joined by straight segments.
+    segments : int
+        Divisions round the axis.
+    rings : int
+        Points along the profile (equally spaced in arc length).
+    sink : float
+        The base circle is continued this far straight down into the envelope, m.
+
+    Returns
+    -------
+    ReferenceMesh
+        Outward-oriented triangles, m, with a pole at the top and a flat bottom.
+    """
+    pts = np.asarray(profile, dtype=np.float64)
+    pts = np.vstack([[pts[0, 0], -sink], pts])
+    arc = np.concatenate([[0.0], np.cumsum(np.linalg.norm(np.diff(pts, axis=0), axis=1))])
+    s = np.linspace(0.0, arc[-1], rings)
+    r = np.interp(s, arc, pts[:, 0])
+    z = np.interp(s, arc, pts[:, 1])
+    phi = 2.0 * np.pi * np.arange(segments) / segments
+    ring_r, ring_z = r[:-1], z[:-1]  # the last point is the pole
+    v = [
+        (float(a * math.cos(p)), float(a * math.sin(p)), float(b))
+        for a, b in zip(ring_r, ring_z, strict=True)
+        for p in phi
+    ]
+    bottom, pole = len(v), len(v) + 1
+    v += [(0.0, 0.0, float(z[0])), (0.0, 0.0, float(z[-1]))]
+    f: list[list[int]] = []
+    n = len(ring_r)
+    for i in range(n - 1):
+        for j in range(segments):
+            a, b = i * segments + j, i * segments + (j + 1) % segments
+            f += [[a, b, b + segments], [a, b + segments, a + segments]]
+    last = (n - 1) * segments
+    for j in range(segments):
+        f.append([bottom, (j + 1) % segments, j])
+        f.append([last + j, last + (j + 1) % segments, pole])
+    return ReferenceMesh(np.array(v), np.array(f, dtype=np.int64), "generic revolved")
+
+
 def _equator(surface: EnvelopeSurface) -> float:
     return 0.5 * math.pi * SPHERE_RADIUS - SPHERE_SPAN[0] * math.pi * SPHERE_RADIUS
 
