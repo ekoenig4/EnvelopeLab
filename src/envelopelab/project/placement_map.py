@@ -248,11 +248,27 @@ class Sketch:
         Triangles, normals pointing out.
     seams : list of ndarray
         Gore seams (mouth to crown) and row seams (round the envelope).
+    face_gore : ndarray of int, shape (t,)
+        Gore number (from 1) of every triangle.
+    face_row : ndarray of int, shape (t,)
+        Panel row (index into ``row_letters``, mouth first) of every triangle.
+    row_letters : tuple of str
+        Row letters, mouth first.
+    face_half : ndarray of int, shape (t,)
+        Half of every triangle within its gore: 0 left (towards the previous gore),
+        1 right.
+    halved : tuple of str
+        Rows cut as half gores.
     """
 
     points: FloatArray
     triangles: IntArray
     seams: list[FloatArray]
+    face_gore: IntArray = field(default_factory=lambda: np.zeros(0, dtype=np.int64))
+    face_row: IntArray = field(default_factory=lambda: np.zeros(0, dtype=np.int64))
+    row_letters: tuple[str, ...] = ()
+    face_half: IntArray = field(default_factory=lambda: np.zeros(0, dtype=np.int64))
+    halved: tuple[str, ...] = ()
 
 
 def envelope_sketch(design: Any, per_gore: int = 4, rings: int = 30) -> Sketch:
@@ -261,7 +277,13 @@ def envelope_sketch(design: Any, per_gore: int = 4, rings: int = 30) -> Sketch:
 
     n = design.gores.count
     length = float(design_profile(design).meridian_length)
-    s = np.linspace(0.0, length, rings)
+    # The row seams lie at the rows' cumulative heights up the tape (as panel_rows cuts
+    # them), the top row taking the rounding; they are rings of the grid, so every
+    # triangle lies in one row.
+    heights = [r.finished_height for r in design.gores.panel_rows]
+    tops = [t for t in (np.cumsum(heights)[:-1].tolist() if heights else []) if 0 < t < length]
+    s = np.unique(np.concatenate([np.linspace(0.0, length, rings), tops]))
+    rings = len(s)
     cols = n * per_gore
     theta = 2.0 * math.pi * np.arange(cols) / cols
     ss, tt = np.meshgrid(s, theta, indexing="ij")
@@ -277,10 +299,22 @@ def envelope_sketch(design: Any, per_gore: int = 4, rings: int = 30) -> Sketch:
     for k in range(n):
         seams.append(display_points(design, dense, np.full(len(dense), 2.0 * math.pi * k / n)))
     around = np.linspace(0.0, 2.0 * math.pi, n * 12 + 1)
-    # The row seams lie at the rows' cumulative heights up the tape (as panel_rows cuts
-    # them), the top row taking the rounding.
-    heights = [r.finished_height for r in design.gores.panel_rows]
-    tops = np.cumsum(heights)[:-1].tolist() if heights else []
     for top in tops:
         seams.append(display_points(design, np.full(len(around), top), around))
-    return Sketch(np.asarray(pts, float), np.asarray(tri, dtype=np.int64), seams)
+    # Triangles are written ring by ring, two per column (gore k spans its per_gore
+    # columns from azimuth 2 pi (k - 1) / N, as azimuth_position).
+    ring = np.repeat(np.arange(rings - 1), 2 * cols)
+    column = np.tile(np.repeat(np.arange(cols), 2), rings - 1)
+    middle = 0.5 * (s[:-1] + s[1:])
+    face_row = np.searchsorted(np.asarray(tops, float), middle, side="right")[ring]
+    return Sketch(
+        np.asarray(pts, float),
+        np.asarray(tri, dtype=np.int64),
+        seams,
+        np.asarray(column // per_gore + 1, dtype=np.int64),
+        np.asarray(face_row, dtype=np.int64),
+        tuple(r.letter for r in design.gores.panel_rows),
+        # Each gore is per_gore columns: the first half of them is its left half.
+        np.asarray(2 * (column % per_gore) >= per_gore, dtype=np.int64),
+        tuple(r.letter for r in design.gores.panel_rows if r.half_gore),
+    )

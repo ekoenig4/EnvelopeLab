@@ -67,6 +67,28 @@ KEYS: tuple[tuple[str, str], ...] = (
         "of the meridian plane (gore widths from the first seam; gore n's centreline is "
         "n - 0.5). Mirror twins are mirrored across them. Older files read as having none.",
     ),
+    (
+        "`state.colours`",
+        "Panel colours (version 8, ADR-0055; a visual layer that no result reads): "
+        "`envelope` maps a row letter to gore numbers (from 1) to sRGB `#rrggbb` colours, "
+        "`shapes` maps a special shape's name to its tier letter (`A` at the rim) or "
+        "`cap` to piece numbers (from 1) to colours, and `halves` maps a row cut as half "
+        "gores to gore numbers to `left` (towards the previous gore) or `right` to a "
+        "half's own colour, over the panel's. Written only when some panel is "
+        "coloured; older files read as uncoloured.",
+    ),
+    (
+        "`state.overlays`",
+        "Overlays: appliqués sewn on top of the envelope (version 8, ADR-0056): unique "
+        "`name`, `placement` (gore from 1, tape position m, fraction across the gore), "
+        "`outline` (`circle`, `ellipse`, `rectangle`, `polygon` or `outline`), `width` and "
+        "`height` (m), `turn_deg`, `points` (polygon corners in m about the centre, or an "
+        "imported outline in its own units), `smooth`, `source` (imported file name), "
+        "`hem` (m turned under), `fabric` (null: as the panel under its centre) and "
+        "`symmetry` (a polygon's mirror axes through its centre, 0: none; with k axes "
+        "`points` are the corners of one slice between the first two axes). Written "
+        "only when there are any; older files read as having none.",
+    ),
     ("`snapshots`", "Named copies of `state` with their design content hash."),
     ("`versions`", "Committed design versions (`version_id`, `parent_id`, message, state)."),
     ("`provenance`", "Append-only log of flagged edits (manual overrides and their undo)."),

@@ -44,6 +44,7 @@ if TYPE_CHECKING:
     from envelopelab.export.build_pack import SeamPair, Sheet
     from envelopelab.export.templates import TemplateFile
     from envelopelab.features.primitives import PrimitiveDesign
+    from envelopelab.project.colours import PanelColours
     from envelopelab.project.gore_design import GoreOutputs
 
 A3_LANDSCAPE = (1190.55, 841.89)  # points
@@ -136,6 +137,8 @@ class PackContext:
         The structural result in one line ("" for none).
     slug : str
         File-name prefix.
+    colours : PanelColours, optional
+        Panel colours (ADR-0055; None: none chosen).
     """
 
     design: DesignDocument
@@ -150,6 +153,9 @@ class PackContext:
     status: str = ""
     slug: str = "design"
     files: list[FileEntry] = field(default_factory=list)
+    colours: PanelColours | None = None
+    #: Overlays laid on the envelope (``OverlayLayout``, ADR-0056).
+    overlays: list[Any] = field(default_factory=list)
 
     def shape_pieces(self, shape: str) -> str:
         """The template files of a special shape's skin pieces, as a range in words."""
@@ -283,6 +289,20 @@ def features(ctx: PackContext) -> list[tuple[str, str]]:
         if holes:
             text = "; ".join(f"gore {h.gore} panel {h.row} O{mm(2 * h.radius)}" for h in holes)
             out.append((f"{p.primitive.name} feed holes", f"ENVELOPE panels, finished: {text}"))
+    for layout in ctx.overlays:
+        spec = layout.spec
+        gores = sorted({g for g, _r in layout.covered})
+        rows = sorted({r for _g, r in layout.covered})
+        span = layout.outline.max(axis=0) - layout.outline.min(axis=0)
+        w, h = float(span[0]), float(span[1])
+        out.append(
+            (
+                spec.name,
+                f"appliqué ({spec.outline}) {mm(w)} x {mm(h)} on gores {_range(gores)}, rows "
+                f"{_range(rows)} - cut 1, sewn on over {len(layout.crossings)} seam "
+                "crossing(s) (numbered marks)",
+            )
+        )
     for v in d.turning_vents:
         out.append(("Turning vent", f"{v.name} at seam {v.seam}"))
     if d.scoop is not None:
@@ -378,6 +398,31 @@ def build_order(ctx: PackContext) -> list[tuple[str, str]]:
         if holes:
             text = "; ".join(f"gore {h.gore} panel {h.row} O{mm(2 * h.radius)}" for h in holes)
             steps.append((f"{name.upper()} FEED HOLES", f"Cut and hem the feed holes: {text}."))
+    single = [o for o in ctx.overlays if not o.crossings]
+    across = [o for o in ctx.overlays if o.crossings]
+    if ctx.overlays:
+        files = ", ".join(
+            ctx.template_for(f"{o.spec.name}-overlay") or o.spec.name for o in ctx.overlays
+        )
+        steps.append(
+            (
+                "CUT OVERLAYS",
+                f"Cut the {len(ctx.overlays)} appliqué(s) 1:1 from {files}; turn the hem "
+                "under along the sew line.",
+            )
+        )
+    if single:
+        steps.append(
+            (
+                "SEW OVERLAYS",
+                "Sew "
+                + ", ".join(
+                    f"{o.spec.name} on panel {o.covered[0][1]} of gore {o.covered[0][0]}"
+                    for o in single
+                )
+                + " along the marked line, before the panels are joined.",
+            )
+        )
     first = rows[0].piece.removeprefix("row ") if rows else "A"
     steps.append(
         (
@@ -392,6 +437,20 @@ def build_order(ctx: PackContext) -> list[tuple[str, str]]:
             f"Join gores 1-{g.count} over the vertical load tapes ({d.tapes.vertical.tape_class}).",
         )
     )
+    if across:
+        steps.append(
+            (
+                "SEW OVERLAYS ACROSS SEAMS",
+                "Sew "
+                + ", ".join(
+                    f"{o.spec.name} (gores {_range(sorted({g for g, _r in o.covered}))})"
+                    for o in across
+                )
+                + " along the line marked on the panels it crosses, now that their seams "
+                "are sewn; match each numbered mark on the piece to the same number on the "
+                "panels.",
+            )
+        )
     if d.turning_vents:
         steps.append(
             (

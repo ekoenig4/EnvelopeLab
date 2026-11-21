@@ -3,6 +3,31 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: **overlays** (appliqués) sewn on top of the envelope, anywhere and across seams
+  (ADR-0056, project format 8). In Special shapes, **Add shape ▸ Overlay (appliqué)**:
+  a circle, ellipse, rectangle, polygon (its corners dragged, added and removed in the
+  drawing of the piece, with optional mirror axes so it stays symmetric, and a dial to
+  scale it) or an outline imported from DXF/SVG, placed,
+  dragged and nudged like a shape, coloured like a panel. The build pack cuts each one
+  (1:1 template, cut once) and marks the line to sew it on every panel it crosses, with
+  numbered marks at the seams; the fit on the curved envelope is reported (warning above
+  1 % ease). Each overlay's own pattern is shown in the Cut pieces, Checks and Envelope
+  panels tabs and can be exported alone (1:1 PDF + DXF); the build pack's index lists
+  the overlays and its build order cuts and sews them. No existing result changes.
+- Added: a **Colours** mode to colour every panel of the envelope and of the special
+  shapes (ADR-0055, project format 8). It shows the panels as a flat grid with a colour
+  picker like office and image-editing programs (theme colours with tints and shades,
+  standard and recent colours, the colours in the design, a hex code field, More
+  colours…), and tools to paint, fill a row or a gore, take a colour with the eyedropper
+  and repeat every N gores. Colours are for display only: they change no fabric, mass,
+  pattern or simulation result, and make only a written build pack stale. The colours are drawn on the
+  balloon in every 3D view (the balloon beside the grid, the mode inlays, On the
+  balloon, 3D / Simulation), toggled by **Show on the 3D views**. The build pack
+  carries them: each panel template and DXF says how many to cut in each colour and for
+  which gores (each skin piece its colour), `cad/index.json` lists them, the planning
+  documents add a colour plan and the cloth per colour, the 3D view shows them and the
+  output QA checks them. Uncoloured designs export as before. On rows cut as half
+  gores each half can have its own colour (grid, 3D views, half templates, colour plan).
 - Added: shape a special shape's crown cap (ADR-0054, project format 7). **Cap shape**
   (Panel layout, under Where the panels meet) offers the footprint scaled to the cap
   diameter, an ellipse, a polygon by points (straight or smooth) or an outline imported
