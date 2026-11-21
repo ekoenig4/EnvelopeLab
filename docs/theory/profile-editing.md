@@ -36,6 +36,33 @@ modelling tools. Measuring \(d\) along the profile, not straight across, keeps a
 one side of a narrow neck from moving the other side. A soft radius below 1 µm is no
 soft selection.
 
+## Special-shape profiles
+
+Module: `envelopelab.project.shape_profile`. A revolved special shape's profile
+\(p_k = (\rho_k, \zeta_k)\) (m, base first) is edited with the same moves and soft
+selection, then kept a profile the shape accepts:
+
+* the base point stays on the base circle, \(\zeta_0 = 0\);
+* a profile ending on the axis keeps its last point there, \(\rho_{n-1} = 0\);
+* every other point keeps \(\rho_k \ge \rho_{min} = 1\) mm (assumed), so a dragged point
+  never closes the skin on the axis.
+
+*Scale* with no points selected scales the whole shape about the centre of its base,
+\(\rho' = s_\rho\,\rho,\ \zeta' = s_\zeta\,\zeta\), so it stays on its base point. With a
+selection, the selected points scale about their centroid (the soft selection applies),
+e.g. a larger ball on top of a stalk.
+
+A horizontal split lies at the fraction \(f\) of the skin meridian's arc length \(S\)
+from the base circle to the tip (or the edge of a centred cap): at arc length \(f S\).
+Dragging a split in the editor snaps it to the drawn outline. When it is let go, the
+fraction of the meridian point nearest it is used, kept at least 2 % (assumed) of
+\(S\) from the base, the tip and its neighbouring splits, so the splits stay in order and
+every tier remains a band that can be sewn.
+
+The drawn outline is the shape's own meridian (a cubic spline through the points in their
+chord length, or the control polygon for straight segments), so what is shown is what is
+cut. Tests: `tests/unit/test_shape_profile.py`, `tests/gui/test_gui_shapes.py`.
+
 ## Straight sections
 
 *Straighten* between points \(i < j\) puts every point \(i < k < j\) on the segment

@@ -18,6 +18,7 @@ VIEW_ONLY = {
     "axisLine",  # where a symmetry axis is drawn before it is added
     "faceNumber",  # which seam the 3D view turns to
     "shapeMeshSize",  # the preview solver's mesh size
+    "shapeProfileSoft",  # how far a profile drag pulls its neighbours (an editing aid)
 }
 
 

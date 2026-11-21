@@ -23,7 +23,7 @@ listed in the Validation panel. Lengths are shown in m, angles in degrees.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -79,6 +79,15 @@ from envelopelab.features.primitives import CutPiece, PrimitiveDesign, Primitive
 from envelopelab.project.model import SOLVER_LABELS
 from envelopelab.project.placement_map import snap
 from envelopelab.project.shape_groups import group_names
+from envelopelab.project.shape_profile import (
+    insert_profile_point,
+    move_split,
+    profile_curve,
+    remove_profile_point,
+    split_fraction_at,
+    split_points,
+)
+from envelopelab.project.shape_profile import scale_profile as scaled_profile
 from envelopelab.project.shapes import (
     CAP_PANEL_TOP_WIDTH,
     MAX_PIECES,
@@ -110,6 +119,7 @@ from envelopelab_app.placement_view import (
     PlacementView,
 )
 from envelopelab_app.refresh import Refresher
+from envelopelab_app.shape_profile_view import ShapeProfileView
 from envelopelab_app.view_tools import FitButton
 
 FAIL_COLOR = "#b00020"
@@ -778,6 +788,37 @@ class ShapesPanel(QWidget):
         self.profile_table.itemChanged.connect(self._profile_edited)
         self.profile_box = QWidget()
         profile_layout = QVBoxLayout(self.profile_box)
+        self.profile_view = ShapeProfileView()
+        self.profile_view.pointsDropped.connect(self._profile_dropped)
+        self.profile_view.splitDropped.connect(self._split_dropped)
+        self.profile_view.insertRequested.connect(self._insert_profile_at)
+        self.profile_view.removeRequested.connect(self._remove_profile_points)
+        self.profile_view.selectionChanged.connect(self._profile_selection_changed)
+        profile_layout.addWidget(self.profile_view, 3)
+        tools = QHBoxLayout()
+        tools.addWidget(QLabel("Soft radius (m)"))
+        self.profile_soft = QDoubleSpinBox()
+        self.profile_soft.setObjectName("shapeProfileSoft")
+        self.profile_soft.setRange(0.0, 50.0)
+        self.profile_soft.setDecimals(2)
+        self.profile_soft.setSingleStep(0.05)
+        self.profile_soft.setToolTip(
+            "Dragged points pull their neighbours within this distance along the outline "
+            "(0: only the selected points move)"
+        )
+        self.profile_soft.valueChanged.connect(
+            lambda v: setattr(self.profile_view, "soft_radius", float(v))
+        )
+        tools.addWidget(self.profile_soft)
+        self.profile_scale_button = QPushButton("Scale…")
+        self.profile_scale_button.setObjectName("shapeProfileScale")
+        self.profile_scale_button.setToolTip(
+            "Make the whole shape, or the selected points, larger or smaller (one undo step)"
+        )
+        self.profile_scale_button.clicked.connect(self._scale_profile_dialog)
+        tools.addWidget(self.profile_scale_button)
+        tools.addStretch(1)
+        profile_layout.addLayout(tools)
         profile_layout.addWidget(QLabel("Profile points, base first, axis last (m)"))
         profile_layout.addWidget(self.profile_table, 1)
         row_buttons = QHBoxLayout()
@@ -1593,6 +1634,16 @@ class ShapesPanel(QWidget):
                 self.profile_table.setItem(i, 0, QTableWidgetItem(f"{rho:.4f}"))
                 self.profile_table.setItem(i, 1, QTableWidgetItem(f"{zeta:.4f}"))
             self.profile_table.blockSignals(False)
+            self._show_profile(spec)
+
+    def _show_profile(self, spec: RevolvedShape) -> None:
+        """Draw ``spec``'s profile, outline and splits in the visual editor."""
+        try:
+            curve = profile_curve(spec.profile, spec.smooth)
+            splits = split_points(spec)
+        except (ValueError, PrimitiveError):
+            curve, splits = np.asarray(spec.profile, dtype=np.float64), np.zeros((0, 2))
+        self.profile_view.set_shape(spec.profile, spec.smooth, curve, splits)
 
     def _build_form(self, spec: ShapeSpec | None) -> None:
         for form in (self.form, self.holes_form):
@@ -3116,6 +3167,89 @@ class ShapesPanel(QWidget):
             base = getattr(spec, "base_radius", None)
             radius = round(0.4 * base, 3) if base else 0.1
         self.set_value(("feed_hole_radius",), radius)
+
+    def _set_profile(self, profile: Sequence[tuple[float, float]]) -> bool:
+        """Make ``profile`` (m) the selected revolved shape's profile (one undo step)."""
+        ok = self.set_value(("profile",), [[float(r), float(z)] for r, z in profile])
+        if not ok:
+            self._update_form(self.spec())
+        return ok
+
+    def _profile_dropped(self, profile: Sequence[tuple[float, float]]) -> None:
+        self._set_profile(profile)
+
+    def _split_dropped(self, index: int, rho: float, zeta: float) -> None:
+        spec = self.spec()
+        if not isinstance(spec, RevolvedShape):
+            return
+        splits = move_split(spec.splits, index, split_fraction_at(spec, rho, zeta))
+        if not self.set_value(("splits",), splits):
+            self._update_form(self.spec())
+
+    def _insert_profile_at(self, rho: float, zeta: float) -> None:
+        spec = self.spec()
+        if not isinstance(spec, RevolvedShape):
+            return
+        profile, index = insert_profile_point(spec.profile, rho, zeta)
+        if self._set_profile(profile):
+            self.profile_view.select([index])
+
+    def _remove_profile_points(self, indices: Sequence[int]) -> None:
+        spec = self.spec()
+        if not isinstance(spec, RevolvedShape):
+            return
+        profile: list[tuple[float, float]] = list(spec.profile)
+        try:
+            for index in sorted(indices, reverse=True):
+                profile = remove_profile_point(profile, index)
+        except ValueError as exc:
+            self.controller.editRejected.emit(str(exc))
+            return
+        if self._set_profile(profile):
+            self.profile_view.select([])
+
+    def _profile_selection_changed(self) -> None:
+        chosen = self.profile_view.selected
+        self.profile_table.blockSignals(True)
+        self.profile_table.clearSelection()
+        if chosen:
+            self.profile_table.setCurrentCell(chosen[0], 0)
+        self.profile_table.blockSignals(False)
+        what = "selected points" if chosen else "whole shape"
+        self.profile_scale_button.setText(f"Scale {what}…")
+
+    def scale_profile(self, factor_rho: float, factor_zeta: float) -> bool:
+        """Scale the selected revolved shape's profile by these factors across and up
+        (dimensionless): the selected points about their centroid, or with none
+        selected the whole shape about its base (one undo step)."""
+        spec = self.spec()
+        if not isinstance(spec, RevolvedShape):
+            return False
+        try:
+            profile = scaled_profile(
+                spec.profile,
+                factor_rho,
+                factor_zeta,
+                self.profile_view.selected,
+                self.profile_view.soft_radius,
+            )
+        except ValueError as exc:
+            self.controller.editRejected.emit(str(exc))
+            return False
+        return self._set_profile(profile)
+
+    def _scale_profile_dialog(self) -> None:
+        what = "selected points" if self.profile_view.selected else "whole shape"
+        answer = _ask(
+            self,
+            f"Scale {what}",
+            [
+                ("Radius × (across)", 0.05, 20.0, 1.0, 3),
+                ("Height × (up)", 0.05, 20.0, 1.0, 3),
+            ],
+        )
+        if answer is not None:
+            self.scale_profile(answer[0], answer[1])
 
     def _profile_points(self) -> list[list[float]] | None:
         points = []

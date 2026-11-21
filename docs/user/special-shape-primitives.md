@@ -86,8 +86,18 @@ in the editor next to them, and you can move the selected shape on either:
    the shape one way only (a taller antenna, a wider ear). The mesh is scaled about its
    base point and cut again (one undo step; a linked mirror twin follows). Feed holes,
    the cap and the placement are kept, so check them after a large change.
-   **Profile**: a revolved shape's profile points (radius and height in m, base first,
-   axis last). **Feed holes & cap**: an optional feed hole in the envelope under the base
+   **Profile**: a revolved shape's outline, drawn with its mirror image, the axis
+   (dotted) and the base (solid). Drag a point to reshape it (Ctrl+click selects
+   several, which move together; **Soft radius** lets the neighbours follow).
+   Double-click the outline to add a point, press Delete to remove the selected ones.
+   **Scale whole shape…** grows or shrinks the shape about its base (radius and height
+   factors); with points selected it reads **Scale selected points…** and scales only
+   them, about their middle, for example a bigger ball on top of a stalk. Horizontal
+   splits are drawn as green lines with the tier letters between them: drag a split's
+   dot along the outline to put the seam where you want it, such as at the neck between
+   a stalk and a ball. The base point stays on the base and a pointed tip stays on the
+   axis. Every drag is one undo step. The table below lists the same points (radius and
+   height in m, base first, axis last) for typing exact values. **Feed holes & cap**: an optional feed hole in the envelope under the base
    point, the cap, and *More feed holes*, extra holes inside the footprint (gore, tape
    position from the mouth in m, position across the gore, radius in m). *Add feed
    hole* puts one at the base point to edit; *Remove feed hole* deletes the selected

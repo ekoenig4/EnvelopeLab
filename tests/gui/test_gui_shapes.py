@@ -1178,3 +1178,106 @@ def test_resize_a_mesh_shape_in_proportion_or_one_way(
     _placed(gore_window)
     back = panel.spec()
     assert isinstance(back, MeshShape) and mesh_size(back) == pytest.approx(size)
+
+
+def _mouse(view: Any, kind: Any, at: Any, modifiers: Any = None) -> None:
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    button = Qt.MouseButton.LeftButton
+    event = QMouseEvent(
+        kind,
+        QPointF(at),
+        QPointF(at),
+        button,
+        Qt.MouseButton.NoButton if kind == QMouseEvent.Type.MouseButtonRelease else button,
+        modifiers or Qt.KeyboardModifier.NoModifier,
+    )
+    {
+        QMouseEvent.Type.MouseButtonPress: view.mousePressEvent,
+        QMouseEvent.Type.MouseMove: view.mouseMoveEvent,
+        QMouseEvent.Type.MouseButtonRelease: view.mouseReleaseEvent,
+        QMouseEvent.Type.MouseButtonDblClick: view.mouseDoubleClickEvent,
+    }[kind](event)
+
+
+def _at(view: Any, rho: float, zeta: float) -> Any:
+    from PySide6.QtCore import QPointF
+
+    return QPointF(view.mapFromScene(QPointF(rho, -zeta)))
+
+
+def _drag(view: Any, start: Any, end: Any) -> None:
+    from PySide6.QtGui import QMouseEvent
+
+    _mouse(view, QMouseEvent.Type.MouseButtonPress, start)
+    _mouse(view, QMouseEvent.Type.MouseMove, end)
+    _mouse(view, QMouseEvent.Type.MouseButtonRelease, end)
+
+
+def test_profile_is_edited_by_dragging_points_and_splits(gore_window: MainWindow) -> None:
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QKeyEvent, QMouseEvent
+
+    from envelopelab.project.shapes import RevolvedShape
+
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("revolved")
+    _placed(gore_window)
+    panel.editor_tabs.setCurrentIndex(1)
+    view = panel.profile_view
+    view.resize(400, 400)
+    view.set_shape(view.profile, view.smooth, view.curve, np.asarray(view.splits))
+
+    def spec() -> RevolvedShape:
+        s = panel.spec()
+        assert isinstance(s, RevolvedShape)
+        return s
+
+    start = spec().profile
+    assert view.profile == [tuple(p) for p in start] and len(view.curve) > 10
+
+    # Drag the second point up by about 0.1 m: one edit, the curve follows.
+    k = 1
+    r, z = start[k]
+    _drag(view, _at(view, r, z), _at(view, r, z + 0.1))
+    _placed(gore_window)
+    moved = spec().profile
+    assert moved[k][1] == pytest.approx(z + 0.1, abs=0.02)
+    assert moved[0] == start[0] and view.profile[k] == pytest.approx(moved[k])
+    gore_window.undo()
+    _placed(gore_window)
+    assert spec().profile == start
+
+    # Scale the whole shape (no selection) about its base.
+    view.select([])
+    assert panel.scale_profile(1.5, 1.5)
+    _placed(gore_window)
+    assert np.asarray(spec().profile) == pytest.approx(1.5 * np.asarray(start))
+    assert "placed" in panel.status.text(), panel.status.text()
+    gore_window.undo()
+    _placed(gore_window)
+
+    # Double-click the outline: a point is added there; Delete removes it again.
+    n = len(start)
+    mid = view.curve[len(view.curve) // 3]
+    _mouse(view, QMouseEvent.Type.MouseButtonDblClick, _at(view, *mid))
+    _placed(gore_window)
+    assert len(spec().profile) == n + 1 and len(view.selected) == 1
+    view.keyPressEvent(
+        QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier)
+    )
+    _placed(gore_window)
+    assert len(spec().profile) == n
+
+    # A split drawn on the outline is dragged along it.
+    assert panel.set_value(("splits",), [0.5])
+    _placed(gore_window)
+    assert len(view.splits) == 1
+    sr, sz = view.splits[0]
+    target = view.curve[int(0.75 * len(view.curve))]
+    _drag(view, _at(view, sr, sz), _at(view, *target))
+    _placed(gore_window)
+    assert spec().splits[0] > 0.6
+    assert view.split_at(QPointF(-1000.0, -1000.0)) is None

@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: visual profile editor for revolved shapes (Profile tab). Drag points (with soft
+  selection), double-click to add, Delete to remove, **Scale…** the whole shape or the
+  selected points, and drag horizontal splits along the outline; tier letters are shown.
+  Each drag is one undo step. The point table stays for exact values. Existing shapes'
+  results are unchanged.
 - Added: **Resize…** for mesh (free-form) shapes in Placement & size. The form shows the
   mesh's size (up the tape, across, height, m); the dialog scales it about its base point,
   in proportion or one direction only, as one undo step, and a linked mirror twin follows.
