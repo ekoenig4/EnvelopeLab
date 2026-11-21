@@ -43,6 +43,8 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -91,6 +93,7 @@ from envelopelab.project.shapes import (
     cap_diameter,
     default_shape,
     mesh_shape,
+    mesh_size,
     piece_count,
     placement_at,
     pointed,
@@ -201,6 +204,69 @@ def _values(path: tuple[str, ...], value: Any) -> dict[str, Any]:
     return {path[0]: {path[1]: value}}
 
 
+class ResizeMeshDialog(QDialog):
+    """Asks for a mesh shape's new size, m (length up the tape, width across, height);
+    with *Keep proportions* ticked, changing one size changes the others alike."""
+
+    def __init__(self, parent: QWidget | None, size: tuple[float, float, float]) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Resize shape")
+        self.setObjectName("resizeMeshDialog")
+        self.old = size
+        form = QFormLayout(self)
+        note = QLabel(
+            "The shape is scaled about its base point and cut again. Its feed holes, cap "
+            "and placement are kept: check them after a large change."
+        )
+        note.setWordWrap(True)
+        form.addRow(note)
+        self.boxes: list[QDoubleSpinBox] = []
+        for label, value, name in zip(
+            ("Length up the tape (m)", "Width across the gores (m)", "Height (m)"),
+            size,
+            ("resizeAlong", "resizeAcross", "resizeHeight"),
+            strict=True,
+        ):
+            box = QDoubleSpinBox()
+            box.setObjectName(name)
+            box.setDecimals(3)
+            box.setRange(0.001, 1000.0)
+            box.setSingleStep(0.05)
+            box.setValue(value)
+            box.setKeyboardTracking(False)
+            box.valueChanged.connect(lambda _v, b=box: self._changed(b))
+            form.addRow(label, box)
+            self.boxes.append(box)
+        self.keep = QCheckBox("Keep proportions")
+        self.keep.setObjectName("resizeKeep")
+        self.keep.setChecked(True)
+        form.addRow(self.keep)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+    def _changed(self, box: QDoubleSpinBox) -> None:
+        if not self.keep.isChecked():
+            return
+        i = self.boxes.index(box)
+        factor = box.value() / self.old[i]
+        for j, other in enumerate(self.boxes):
+            if j != i:
+                other.blockSignals(True)
+                other.setValue(self.old[j] * factor)
+                other.blockSignals(False)
+
+    def factors(self) -> tuple[float, float, float]:
+        """Scale factors up the tape, across and in height (new size / old size)."""
+        along, across, height = (
+            b.value() / old for b, old in zip(self.boxes, self.old, strict=True)
+        )
+        return along, across, height
+
+
 def _ask(
     parent: QWidget,
     title: str,
@@ -209,8 +275,6 @@ def _ask(
 ) -> list[float] | None:
     """A small dialog of numbers (label, minimum, maximum, value, decimals) and an
     optional tick box (its state comes last, 1 or 0); None when cancelled."""
-    from PySide6.QtWidgets import QDialog, QDialogButtonBox
-
     dialog = QDialog(parent)
     dialog.setWindowTitle(title)
     form = QFormLayout(dialog)
@@ -1468,6 +1532,11 @@ class ShapesPanel(QWidget):
         if spec is None:
             return
         self.name_edit.setText(spec.name)  # also undoes a refused rename
+        if isinstance(spec, MeshShape):
+            along, across, height = mesh_size(spec)
+            self.mesh_size_label.setText(
+                f"{along:.3f} up × {across:.3f} across × {height:.3f} high (m)"
+            )
         self.group_combo.blockSignals(True)
         self.group_combo.clear()
         self.group_combo.addItems(["", *group_names(self.specs())])
@@ -1562,6 +1631,19 @@ class ShapesPanel(QWidget):
             )
             mesh_label.setWordWrap(True)
             self.form.addRow("Mesh", mesh_label)
+            self.mesh_size_label = QLabel()
+            self.mesh_size_label.setObjectName("shapeMeshSizeLabel")
+            resize = QPushButton("Resize…")
+            resize.setObjectName("shapeResize")
+            resize.setToolTip(
+                "Make the shape larger or smaller, in proportion or in one direction "
+                "(one undo step)"
+            )
+            resize.clicked.connect(self._resize_dialog)
+            size_row = QHBoxLayout()
+            size_row.addWidget(self.mesh_size_label, 1)
+            size_row.addWidget(resize)
+            self.form.addRow("Size", size_row)
         gores = self.controller.design.gores.count if self.controller.is_gore else 999  # type: ignore[union-attr]
         for field in (*PLACEMENT_FIELDS, *KIND_FIELDS[spec.kind], *COMMON_FIELDS):
             box: QSpinBox | QDoubleSpinBox
@@ -2146,6 +2228,21 @@ class ShapesPanel(QWidget):
         axis = self._chosen_axis()
         if axis is not None:
             self.controller.edit("remove_symmetry_axis", axis.name)
+
+    def resize_mesh(self, along: float, across: float, height: float) -> bool:
+        """Scale the selected mesh shape by these factors up the tape, across the gores and
+        in height (one undo step); whether it changed."""
+        if self.selected is None:
+            return False
+        return bool(self.controller.edit("scale_mesh_shape", self.selected, along, across, height))
+
+    def _resize_dialog(self) -> None:
+        spec = self.spec()
+        if not isinstance(spec, MeshShape):
+            return
+        dialog = ResizeMeshDialog(self, mesh_size(spec))
+        if dialog.exec():
+            self.resize_mesh(*dialog.factors())
 
     def _mirror_dialog(self) -> None:
         self.begin_mirror()

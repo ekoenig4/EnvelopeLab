@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 from hypothesis import given, settings
 from hypothesis import strategies as st
 
 from envelopelab.io.shape_file import load_shape_file
+from envelopelab.project.shapes import scaled_mesh_vertices
+from envelopelab.validation.primitives import ellipsoid_mesh
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "smalley_90k" / "shape.yaml"
 SHAPE_FILE = load_shape_file(FIXTURE)
@@ -41,3 +44,20 @@ def test_held_volume_and_mouth_are_both_met(volume_ratio: float, mouth: float) -
     assert solution.converged, solution.message
     assert abs(solution.values["nominal_volume"] / volume - 1.0) <= 1e-3
     assert abs(solution.values["mouth_diameter"] - hold["mouth_diameter"]) <= 1e-3
+
+
+_FACTOR = st.floats(min_value=0.05, max_value=20.0)
+
+
+@settings(max_examples=50, deadline=None)
+@given(along=_FACTOR, across=_FACTOR, height=_FACTOR)
+def test_mesh_resize_is_undone_by_the_inverse_factors(
+    along: float, across: float, height: float
+) -> None:
+    """Scaling a mesh and scaling back returns it, and the base point stays fixed."""
+    v = ellipsoid_mesh(0.3, 0.2, 0.4, -0.1, rings=6, segments=8).vertices
+    scaled = scaled_mesh_vertices(v, along, across, height)
+    back = scaled_mesh_vertices(scaled, 1.0 / along, 1.0 / across, 1.0 / height)
+    assert np.allclose(back, v, rtol=1e-12, atol=1e-15)
+    origin = scaled_mesh_vertices(np.zeros((1, 3)), along, across, height)
+    assert np.array_equal(origin, np.zeros((1, 3)))

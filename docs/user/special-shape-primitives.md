@@ -80,6 +80,12 @@ in the editor next to them, and you can move the selected shape on either:
    mouth in m, position across the gore, lean and lean direction in degrees), sizes in m,
    the number of skin gores or panels, match marks per piece, seam allowance and the
    skin fabric (by default the fabric of the envelope row the shape sits on).
+   A mesh shape shows its **Size** instead (length up the tape, width across the gores
+   and height above the base point, m). **Resize…** asks for a new size: with *Keep
+   proportions* ticked, changing one size changes the others alike; untick it to stretch
+   the shape one way only (a taller antenna, a wider ear). The mesh is scaled about its
+   base point and cut again (one undo step; a linked mirror twin follows). Feed holes,
+   the cap and the placement are kept, so check them after a large change.
    **Profile**: a revolved shape's profile points (radius and height in m, base first,
    axis last). **Feed holes & cap**: an optional feed hole in the envelope under the base
    point, the cap, and *More feed holes*, extra holes inside the footprint (gore, tape

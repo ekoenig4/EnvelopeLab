@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGraphicsPolygonItem, QGraphicsRectItem
+from PySide6.QtWidgets import QGraphicsPolygonItem, QGraphicsRectItem, QLabel
 from pytestqt.qtbot import QtBot
 
 from envelopelab.export.qa import check_pack
@@ -1134,3 +1134,47 @@ def test_patterns_show_the_print_roll_like_the_special_shapes(gore_window: MainW
             if isinstance(cut, QGraphicsPolygonItem):
                 drawn = cut.sceneBoundingRect()
                 assert drawn.left() > -0.01 and drawn.right() < 3.7 + 0.01
+
+
+def test_resize_a_mesh_shape_in_proportion_or_one_way(
+    gore_window: MainWindow, tmp_path: Path
+) -> None:
+    from envelopelab.project.shapes import MeshShape, mesh_size
+    from envelopelab_app.panels.shapes import ResizeMeshDialog
+
+    gore_window.show_panel("shapes")
+    mesh = ellipsoid_mesh(0.25, 0.2, 0.3, -0.05, rings=10, segments=16)
+    path = write_obj_scene(
+        tmp_path / "antenna.obj", [MeshObject("antenna", mesh.vertices, mesh.triangles)]
+    )
+    panel = gore_window.shapes
+    assert panel.import_mesh(path) == "antenna"
+    _placed(gore_window)
+    spec = panel.spec()
+    assert isinstance(spec, MeshShape)
+    size = mesh_size(spec)
+    label = panel.findChild(QLabel, "shapeMeshSizeLabel")
+    assert label is not None and f"{size[2]:.3f} high" in label.text()
+
+    # Keep proportions: a new height scales the other two sizes alike.
+    dialog = ResizeMeshDialog(panel, size)
+    dialog.boxes[2].setValue(size[2] * 1.5)
+    assert dialog.boxes[0].value() == pytest.approx(size[0] * 1.5, abs=1e-3)
+    assert dialog.factors() == pytest.approx((1.5, 1.5, 1.5), rel=1e-2)
+    # Without: only the height changes.
+    dialog = ResizeMeshDialog(panel, size)
+    dialog.keep.setChecked(False)
+    dialog.boxes[2].setValue(size[2] * 2.0)
+    assert dialog.factors() == pytest.approx((1.0, 1.0, 2.0), rel=1e-2)
+
+    assert panel.resize_mesh(*dialog.factors())
+    _placed(gore_window)
+    resized = panel.spec()
+    assert isinstance(resized, MeshShape)
+    assert mesh_size(resized)[2] == pytest.approx(2.0 * size[2], rel=1e-2)
+    assert f"{mesh_size(resized)[2]:.3f} high" in label.text()
+    assert panel.placed("antenna") is not None, panel.status.text()
+    gore_window.undo()
+    _placed(gore_window)
+    back = panel.spec()
+    assert isinstance(back, MeshShape) and mesh_size(back) == pytest.approx(size)

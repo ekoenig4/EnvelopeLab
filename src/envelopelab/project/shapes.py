@@ -885,6 +885,61 @@ def base_radius(spec: ShapeSpec) -> float:
     return float(np.hypot(v[:, 0], v[:, 1]).max())
 
 
+def mesh_size(spec: MeshShape) -> tuple[float, float, float]:
+    """Size of a mesh shape in its own frame, m.
+
+    Parameters
+    ----------
+    spec : MeshShape
+        The shape (vertices in m, :math:`x` up the tape, :math:`y` across the gores,
+        :math:`z` out of the envelope, origin at the base point).
+
+    Returns
+    -------
+    tuple of float
+        Length up the tape (extent in :math:`x`), width across the gores (extent in
+        :math:`y`) and height above the base point (largest :math:`z`), m.
+    """
+    v = np.asarray(spec.vertices, dtype=np.float64)
+    extent = v.max(axis=0) - v.min(axis=0)
+    return float(extent[0]), float(extent[1]), float(v[:, 2].max())
+
+
+def scaled_mesh_vertices(
+    vertices: FloatArray, along: float, across: float, height: float
+) -> FloatArray:
+    """A mesh's vertices scaled about the base point (the frame's origin).
+
+    Each coordinate is multiplied by its factor, :math:`x' = s_x x`, :math:`y' = s_y y`,
+    :math:`z' = s_z z`, so the base point stays on the envelope and the part sunk below
+    :math:`z = 0` (cut away at the envelope) scales with the rest. A non-uniform scale
+    changes the shape, not only its size; the cut pieces are flattened again from it.
+
+    Parameters
+    ----------
+    vertices : ndarray of shape (n, 3)
+        Vertices in the shape's frame, m.
+    along, across, height : float
+        Scale factors up the tape (:math:`x`), across the gores (:math:`y`) and out of
+        the envelope (:math:`z`), dimensionless, each finite and positive.
+
+    Returns
+    -------
+    ndarray of shape (n, 3)
+        Scaled vertices, m.
+
+    Raises
+    ------
+    ValueError
+        For a factor that is not finite and positive.
+    """
+    factors = np.array([along, across, height], dtype=np.float64)
+    if not np.all(np.isfinite(factors)) or np.any(factors <= 0.0):
+        raise ValueError("scale factors must be finite and positive")
+    out: FloatArray = np.asarray(vertices, dtype=np.float64) * factors
+    return out
+
+
 def footprint_preview(
     surface: EnvelopeSurface, placement: ShapePlacement, radius: float, samples: int = 64
 ) -> FloatArray:

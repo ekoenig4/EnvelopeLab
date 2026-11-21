@@ -1923,6 +1923,51 @@ def update_shape(session: ProjectSession, name: str, values: dict[str, Any]) -> 
     return session.edit_shapes(f"Edit shape {values.get('name', name)}", mutate)
 
 
+def scale_mesh_shape(
+    session: ProjectSession, name: str, along: float, across: float, height: float
+) -> bool:
+    """Resize mesh shape ``name`` about its base point (one undo step).
+
+    The stored vertices are scaled (:func:`envelopelab.project.shapes.
+    scaled_mesh_vertices`); a linked mirror twin follows.
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit.
+    name : str
+        Mesh shape to resize.
+    along, across, height : float
+        Scale factors up the tape, across the gores and out of the envelope,
+        dimensionless (1: unchanged).
+
+    Returns
+    -------
+    bool
+        Whether the shape changed (False when every factor is 1).
+
+    Raises
+    ------
+    KeyError
+        For an unknown shape.
+    ValueError
+        For a shape that is not a mesh, or a factor that is not finite and positive
+        (nothing is changed).
+    """
+    from envelopelab.project.shapes import scaled_mesh_vertices
+
+    def mutate(shapes: list[dict[str, Any]]) -> None:
+        shape = next((s for s in shapes if s["name"] == name), None)
+        if shape is None:
+            raise KeyError(f"no special shape {name!r}")
+        if shape["kind"] != "mesh":
+            raise ValueError(f"{name!r} is not a mesh shape")
+        scaled = scaled_mesh_vertices(np.asarray(shape["vertices"]), along, across, height)
+        shape["vertices"] = [[float(c) for c in v] for v in scaled]
+
+    return session.edit_shapes(f"Resize shape {name}", mutate)
+
+
 def remove_shape(session: ProjectSession, name: str) -> bool:
     """Remove shape ``name`` (``KeyError`` if unknown)."""
 

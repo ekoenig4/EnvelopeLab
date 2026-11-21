@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: **Resize…** for mesh (free-form) shapes in Placement & size. The form shows the
+  mesh's size (up the tape, across, height, m); the dialog scales it about its base point,
+  in proportion or one direction only, as one undo step, and a linked mirror twin follows.
+  Results of shapes that are not resized are unchanged.
 - Changed: EnvelopeLab now needs **Python 3.12** (ADR-0055); Python 3.11 is no longer
   supported or tested. CI runs Python 3.12 on Linux, macOS, Windows and WSL 2 Ubuntu
   24.04, and the install scripts stop with a message on Python 3.11. No numerical results
