@@ -2,10 +2,11 @@
 
 PySide6 6.12.0 decrements the reference count of ``None`` once on every call of a Qt
 method that returns nothing (``QPainterPath.moveTo``, ``QGraphicsPathItem.setPath``, ...).
-On Python 3.11, where ``None`` is not immortal, the GUI then aborts with "Fatal Python
+On Python 3.11, where ``None`` is not immortal, the GUI then aborted with "Fatal Python
 error: none_dealloc" after enough calls: the test run died at a different GUI test on
 each machine. ``pyproject.toml`` excludes that release; this test names the cause if a
-binding with the bug is installed again.
+binding with the bug is installed again. EnvelopeLab now needs Python 3.12 (ADR-0055), where
+``None`` is immortal, but a binding that miscounts references is still a bug worth naming.
 """
 
 from __future__ import annotations
@@ -29,5 +30,5 @@ def test_void_qt_calls_keep_the_reference_count_of_none(qtbot: QtBot) -> None:
     # Other code may take or drop a few references meanwhile; the bug loses one per call.
     assert lost < calls // 10, (
         f"the Qt binding dropped {lost} references to None in {3 * calls} calls; this "
-        "PySide6 release has a reference-count bug (6.12.0 does) and aborts Python 3.11"
+        "PySide6 release has a reference-count bug (6.12.0 does; it aborted Python 3.11)"
     )

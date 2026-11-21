@@ -7,7 +7,7 @@ name = "envelopelab"
 version = "0.1.0"
 description = "Envelope design schema and material library"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 license = {text = "GPL-3.0-only"}
 authors = [{name = "EnvelopeLab Contributors"}]
 dependencies = [
@@ -33,8 +33,9 @@ dev = [
 ]
 # Desktop application (app/envelopelab_app). See ADR-0007.
 gui = [
-  # 6.12.0 drops a reference to None on every void Qt call, which aborts Python 3.11
-  # (tests/gui/test_gui_qt_binding.py); allow 6.12 again once a release fixes it.
+  # 6.12.0 drops a reference to None on every void Qt call, which aborted Python 3.11
+  # (tests/gui/test_gui_qt_binding.py). Python 3.12+ makes None immortal, so the cap can
+  # be lifted once the GUI suite is checked on 6.12 (ADR-0055).
   "PySide6>=6.6,<6.12",
   "pyvista>=0.43",
   "pyvistaqt>=0.11",
@@ -74,7 +75,7 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "N"]
@@ -84,9 +85,8 @@ select = ["E", "F", "I", "UP", "B", "N"]
 known-first-party = ["envelopelab", "calculix_adapter", "envelopelab_app"]
 
 [tool.mypy]
-# No python_version pin: each CI job checks against its own interpreter. Pinning 3.11 made
-# mypy parse numpy >= 2.5 stubs (3.12-only `type` statements) as 3.11 code on 3.12 runners.
-# The 3.11 job and ruff's target-version still enforce 3.11 compatibility.
+# No python_version pin: mypy checks against the interpreter it runs on (3.12 in CI, ADR-0055),
+# so newer numpy stubs are parsed with the syntax of the Python that installed them.
 strict = true
 packages = ["envelopelab", "calculix_adapter", "envelopelab_app"]
 

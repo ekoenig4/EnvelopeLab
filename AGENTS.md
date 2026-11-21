@@ -16,7 +16,7 @@ never hidden. The builder is responsible for airworthiness.
 ## 2. Hard rules
 - Use only free/open-source dependencies. Add each one to `LICENSES.md` in the same commit
   that introduces it.
-- Python 3.11+. `envelopelab/` contains pure, typed, tested functions. `app/` (GUI) never
+- Python 3.12 (ADR-0055). `envelopelab/` contains pure, typed, tested functions. `app/` (GUI) never
   contains engineering math.
 - Use SI units internally (m, N, Pa, kg, K). Convert only at input/output boundaries.
 - Never hard-code a specific design. Reference designs live only in `tests/fixtures/`.

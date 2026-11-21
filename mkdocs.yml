@@ -105,6 +105,7 @@ nav:
       - ADR-0052: adr/ADR-0052-relative-meeting-point.md
       - ADR-0053: adr/ADR-0053-mesh-meeting-point.md
       - ADR-0054: adr/ADR-0054-crown-cap-shapes.md
+      - ADR-0055: adr/ADR-0055-python-3-12-only.md
 theme:
   name: material
 markdown_extensions:

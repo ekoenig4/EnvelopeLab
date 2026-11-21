@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: EnvelopeLab now needs **Python 3.12** (ADR-0055); Python 3.11 is no longer
+  supported or tested. CI runs Python 3.12 on Linux, macOS, Windows and WSL 2 Ubuntu
+  24.04, and the install scripts stop with a message on Python 3.11. No numerical results
+  change.
 - Added: shape a special shape's crown cap (ADR-0054, project format 7). **Cap shape**
   (Panel layout, under Where the panels meet) offers the footprint scaled to the cap
   diameter, an ellipse, a polygon by points (straight or smooth) or an outline imported

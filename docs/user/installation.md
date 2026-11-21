@@ -1,13 +1,13 @@
 # Installation
 
-EnvelopeLab needs **Python 3.11 or newer**. The Python dependencies are installed with
+EnvelopeLab needs **Python 3.12** (newer versions install but are not tested). The Python dependencies are installed with
 `pip`; on Linux a few system libraries are needed as well (the Qt, VTK and Gmsh wheels
 link against them). The CalculiX verification solver is an optional separate program.
 
 ## Quick install on Windows
 
 Windows needs no system libraries. You need [Git](https://git-scm.com/download/win), and
-Python 3.11 or newer (the script can install Python 3.12 for you). In a command prompt or
+Python 3.12 (the script can install it for you). In a command prompt or
 PowerShell:
 
 ```bat
@@ -21,7 +21,7 @@ You can also double-click `scripts\install_env.cmd` in Explorer. It runs
 it works where PowerShell reports *"running scripts is disabled on this system"*; nothing is
 changed permanently. The script
 
-1. finds Python 3.11 or newer (the `py` launcher first, preferring 3.12 and 3.13), or, with
+1. finds Python 3.12 or newer (the `py` launcher first, preferring 3.12), or, with
    `-InstallPython`, installs Python 3.12 for your user with `winget`;
 2. creates the virtualenv `.venv` and runs `pip install -e ".[gui,fast]"`;
 3. checks that the library and Gmsh import, reports whether CalculiX (`ccx`) was found, and
