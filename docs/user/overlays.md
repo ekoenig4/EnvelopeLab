@@ -8,7 +8,8 @@ marks where to sew it on every panel it crosses.
 In **Special shapes**, choose **Add shape ▸ Overlay (appliqué)**. A 1 m circle appears on
 gore 1, half way up, and the overlay editor opens:
 
-* **Gore**, **Tape position from mouth**, **Across gore**: where its centre lies. You can
+* **Gore**, **Across** and **Up the tape** (or **Panel row** with the fraction up it, in
+  [balloon coordinates](positions.md)): where its centre lies. You can
   also drag it on the gore map or in 3D, or nudge it with the arrow buttons or keys, as
   a shape.
 * **Outline**: circle, ellipse, rectangle, **polygon** or an **imported outline** (the

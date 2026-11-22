@@ -841,7 +841,10 @@ class View3DPanel(QWidget):
                     "symmetry",
                     "symmetry",
                     "Symmetry axes (design, current): "
-                    + ", ".join(f"{a.name} ({axis_gore_label(a.line, n)})" for a in axes),
+                    + ", ".join(
+                        f"{a.name} ({axis_gore_label(a.line, n, self.controller.position_units)})"
+                        for a in axes
+                    ),
                     np.zeros((0, 3)),
                     np.zeros((0, 3), dtype=np.int64),
                     polylines={"symmetry_axes": symmetry_lines(session.design, axes)},
@@ -2121,10 +2124,8 @@ class View3DPanel(QWidget):
         drag.placement = placement_at(surface, point, drag.placement)
         drag.outline = footprint_preview(surface, drag.placement, base_radius(spec))
         p = drag.placement
-        self.info.setText(
-            f"Moving {drag.name}: gore {p.gore}, {p.tape_position:.3f} m up the tape from "
-            f"the mouth, {p.across:+.2f} of the gore width across; release to place it"
-        )
+        where = self.controller.describe_position(p.gore, p.across, p.tape_position)
+        self.info.setText(f"Moving {drag.name}: {where}; release to place it")
         self._draw_drag_outline()
         return drag.placement
 
@@ -2139,9 +2140,9 @@ class View3DPanel(QWidget):
             self.info.setText("")
             return False
         moved = self.controller.place_shape(drag.name, p)
+        where = self.controller.describe_position(p.gore, p.across, p.tape_position)
         self.info.setText(
-            f"Moved {drag.name} to gore {p.gore}, {p.tape_position:.3f} m up the tape; it is "
-            "being placed (see Special shapes)"
+            f"Moved {drag.name} to {where}; it is being placed (see Special shapes)"
             if moved
             else ""
         )

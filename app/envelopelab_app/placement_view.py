@@ -401,6 +401,9 @@ class GoreMapView(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.data = PlacementData()
+        #: Describes the point under the pointer (gore position, tape position m) in the
+        #: preferred units; None: gore, row and metres up the tape.
+        self.describe_point: Callable[[float, float], str] | None = None
         #: Placing an axis: the pointer places it instead of picking shapes.
         self.axis_mode = False
         self.preview: AxisPreview | None = None
@@ -594,9 +597,15 @@ class GoreMapView(QWidget):
         if m is not None:
             x, y = self.to_world(event.position())
             if 0.0 <= y <= m.length and 0.0 <= x <= m.gores * m.column:
-                k = int(min(x // m.column, m.gores - 1))
-                row = next((r for r, lo, hi in m.rows if lo <= y <= hi), "")
-                self.setToolTip(f"gore {k + 1}, row {row}, {y:.2f} m up the tape from the mouth")
+                g = self.gore_at(event.position())
+                if self.describe_point is not None and g is not None:
+                    self.setToolTip(self.describe_point(g, y))
+                else:
+                    k = int(min(x // m.column, m.gores - 1))
+                    row = next((r for r, lo, hi in m.rows if lo <= y <= hi), "")
+                    self.setToolTip(
+                        f"gore {k + 1}, row {row}, {y:.2f} m up the tape from the mouth"
+                    )
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802 (Qt API)
         if self._pan_from is not None:

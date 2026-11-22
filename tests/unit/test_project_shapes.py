@@ -451,3 +451,13 @@ def test_a_mirror_twin_follows_a_resize(session: ProjectSession) -> None:
     eye, mirror = shapes["Eye"], shapes[twin]
     assert isinstance(eye, MeshShape) and isinstance(mirror, MeshShape)
     assert mesh_size(mirror) == pytest.approx(mesh_size(eye), rel=1e-12)
+
+
+def test_widest_radius_of_every_kind(session: ProjectSession) -> None:
+    from envelopelab.project.shapes import widest_radius
+
+    tube = default_shape("tube", session.design, "Mast")
+    assert isinstance(tube, TubeShape)
+    assert widest_radius(tube) == pytest.approx(max(tube.base_radius, tube.tip_radius))
+    dome = _dome(session)
+    assert widest_radius(dome) == pytest.approx(dome.base_radius, rel=1e-6)

@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: **Preferences ▸ Positions shown in**: metres (default) or balloon coordinates,
+  gore + fraction across it (0 at one seam, 1 at the other) and panel row + fraction up
+  it. The shape placement form, feed-hole table, overlay editor, gore-map pointer, 3D drag
+  messages and symmetry-axis labels follow it. On a special shape, positions use the
+  shape's own frame: horizontal splits in m along the skin or % of the profile, where the
+  panels meet in m or fractions of the widest radius (the default, metres, changes how
+  these two were shown). Display only: projects store the same values and no result
+  changes.
 - Added: **Convert to revolved…** for mesh shapes that are round about their axis (an
   antenna, a ball). A revolved profile is fitted to the mesh (plane sections, resampled
   points) and its largest and RMS deviation from the mesh are shown before converting; a

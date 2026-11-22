@@ -324,6 +324,19 @@ ShapeSpec = Annotated[
 ]
 
 
+def widest_radius(spec: ShapeSpec, prim: Any = None) -> float:
+    """The shape's widest radius seen from above, m: the unit of the plan fractions
+    ``cap_across``/``cap_up`` (ADR-0052). For a mesh, its largest distance from the axis;
+    otherwise the largest radius of its pointed meridian (without a cap). ``prim``: the
+    shape's primitive when already made."""
+    prim = to_primitive(spec) if prim is None else prim
+    if isinstance(spec, MeshShape):
+        return float(prim.widest_radius)
+    if isinstance(spec, TubeShape):  # a tube has no cap: its own meridian
+        return float(np.max(prim.meridian()[0]))
+    return float(np.max(dataclasses.replace(prim, cap_radius=0.0).meridian()[0]))
+
+
 def crown_view(spec: ShapeSpec, placed: Any = None) -> FloatArray | None:
     """The cap's outline seen from above round where the panels meet, as fractions of the
     shape's widest radius (the units of ``cap_across``/``cap_up``): an (n, 2) array of
@@ -337,10 +350,7 @@ def crown_view(spec: ShapeSpec, placed: Any = None) -> FloatArray | None:
     prim: Any = to_primitive(spec)
     if not prim.closed_tip or isinstance(spec, TubeShape):
         return None
-    if isinstance(spec, MeshShape):
-        widest = float(prim.widest_radius)
-    else:
-        widest = float(np.max(dataclasses.replace(prim, cap_radius=0.0).meridian()[0]))
+    widest = widest_radius(spec, prim)
     if widest <= 0.0:
         return None
     if spec.crown_shape is None:

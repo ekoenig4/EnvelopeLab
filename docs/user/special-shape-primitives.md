@@ -76,8 +76,9 @@ in the editor next to them, and you can move the selected shape on either:
    envelope on gore 1, about halfway up the tape. **Import mesh (OBJ/STL/PLY)…** adds a
    free-form shape modelled in Blender (metres, Y up for OBJ as Blender exports it; Z up
    for STL and PLY). The mesh is stored in the project, so the file is no longer needed.
-2. Edit the shape. **Placement & size**: placement (gore, tape position from the
-   mouth in m, position across the gore, lean and lean direction in degrees), sizes in m,
+2. Edit the shape. **Placement & size**: placement (gore, position across the
+   gore and up the tape, in metres or [balloon coordinates](positions.md); lean and lean
+   direction in degrees), sizes in m,
    the number of skin gores or panels, match marks per piece, seam allowance and the
    skin fabric (by default the fabric of the envelope row the shape sits on).
    A mesh shape shows its **Size** instead (length up the tape, width across the gores

@@ -15,6 +15,7 @@ nav:
       - Special shapes on a standard envelope: user/special-shape-primitives.md
       - Colouring the panels: user/panel-colours.md
       - Overlays (appliqués): user/overlays.md
+      - "Positions: metres or balloon coordinates": user/positions.md
       - Parachute and rigging: user/rigging.md
       - Exporting a build pack: user/build-pack.md
   - Developer:
@@ -31,6 +32,7 @@ nav:
       - Special-shape primitives: theory/special-shape-primitives.md
       - Mesh shape to revolved profile: theory/mesh-to-profile.md
       - Overlays (appliqués): theory/overlays.md
+      - Balloon coordinates: theory/balloon-coordinates.md
       - Design editing and staleness: theory/design-editing.md
       - Profile editing, segments and simplify: theory/profile-editing.md
       - Solved shape vs drawn profile: theory/profile-matching.md
