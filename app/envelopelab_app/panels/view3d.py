@@ -58,6 +58,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from envelopelab.assembly.spec import parse_instance_id
 from envelopelab.project.colours import (
     envelope_face_colours,
     face_halves,
@@ -91,6 +92,7 @@ from envelopelab.project.shapes import (
 )
 from envelopelab.project.symmetry import axis_gore_label, symmetry_lines
 from envelopelab.rigging.common import seam_azimuth
+from envelopelab.solvers.model import seam_segments
 from envelopelab.solvers.results import DEFAULT_REQUIRED_FOS, ResultField
 from envelopelab_app.camera import (
     CameraPose,
@@ -166,9 +168,11 @@ SHORT_NAMES = {
     "envelopelab-preview": "Preview result",
     "calculix": "CalculiX result",
 }
-#: Layers drawn without mesh edges: display meshes (the design surface and the designed
-#: shapes, whose dense grids would render as solid black with edges), not solver meshes.
-SMOOTH_KINDS = ("design", "shape")
+#: Layers drawn without mesh edges unless the display asks for them: the design surface
+#: and the designed shapes (dense display grids), and the solved envelope and shapes,
+#: drawn in the design's style so the inflated balloon compares with it. An unconverged
+#: result keeps its red mesh edges.
+SMOOTH_KINDS = ("design", "shape", "envelopelab-preview", "calculix", "shape-simulated")
 #: Colour and actor name of the footprint outline shown while dragging a shape.
 DRAG_COLOR = "#ff00ff"
 DRAG_ACTOR = "shape-drag-outline"
@@ -374,6 +378,12 @@ SHORT_TITLES = {
 }
 #: Kinds of layers that are solver results (the toolbar's Run list).
 RESULT_KINDS = ("envelopelab-preview", "calculix")
+#: The Show choices of the toolbar: the balloon as designed, as inflated, or both.
+SHOW_MODES: tuple[tuple[str, str], ...] = (
+    ("Designed and inflated", "both"),
+    ("Designed", "designed"),
+    ("Inflated", "inflated"),
+)
 
 
 def _tool_button(text: str, tip: str, checkable: bool = True) -> QToolButton:
@@ -502,9 +512,19 @@ class View3DPanel(QWidget):
         self.field_choice.setObjectName("fieldChoice")
         self.field_choice.setToolTip("Colour the chosen result by a field")
         self.field_choice.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToContents)
-        self.field_choice.activated.connect(lambda _i: self._result_changed())
+        self.field_choice.activated.connect(lambda _i: self._field_chosen())
         # Any change of field (chosen or set in code) shows or hides the design for it.
         self.field_choice.currentIndexChanged.connect(lambda _i: self._design_for_field())
+        self.show_choice = QComboBox()
+        self.show_choice.setObjectName("showChoice")
+        for text, mode in SHOW_MODES:
+            self.show_choice.addItem(text, mode)
+        self.show_choice.setToolTip(
+            "Show the balloon as designed, as inflated by the chosen run (envelope and the "
+            "special shapes solved with it), or both together. Both are drawn in the "
+            "panel colours with their seams when Colour by is Layer colour."
+        )
+        self.show_choice.activated.connect(lambda _i: self.set_show(self.show_choice.currentData()))
         self.display_mode = QComboBox()
         self.display_mode.setObjectName("displayMode")
         self.display_mode.addItems(DISPLAY_MODES)
@@ -518,6 +538,7 @@ class View3DPanel(QWidget):
         bar = QHBoxLayout(toolbar)
         bar.setContentsMargins(8, 4, 8, 4)
         for text, choice in (
+            ("Show:", self.show_choice),
             ("Run:", self.run_choice),
             ("Colour by:", self.field_choice),
             ("Display:", self.display_mode),
@@ -742,6 +763,8 @@ class View3DPanel(QWidget):
         self.part_fields: dict[str, dict[str, ResultField]] = {}
         #: The field the design visibility was last set for (see _design_for_field).
         self._last_field: str | None = None
+        #: The user chose Layer colour in Colour by (kept when the list is refilled).
+        self._layer_colour = False
         self.part_missing: dict[str, dict[str, str]] = {}
         #: Fields of the chosen result run (key to field), and why others are missing.
         self.fields: dict[str, ResultField] = {}
@@ -893,6 +916,11 @@ class View3DPanel(QWidget):
                     label += " [NOT CONVERGED]"
                 if stale:
                     label += " [STALE]"
+                face_colors, seams = (
+                    (None, {})
+                    if stale
+                    else self._result_style(arrays["positions"], arrays["triangles"])
+                )
                 self.layers[solver] = Layer(
                     solver,
                     solver,
@@ -901,6 +929,8 @@ class View3DPanel(QWidget):
                     arrays["triangles"],
                     stale,
                     converged,
+                    polylines=seams,
+                    face_colors=face_colors,
                 )
                 self._records[solver] = record
         if self._reference_path is not None:
@@ -912,7 +942,56 @@ class View3DPanel(QWidget):
         self._fill_results()
         self.seam_number.setMaximum(self._gore_count())
         self._fill_saved()
+        self._apply_show()
         self.redraw()
+
+    # -- designed or inflated -----------------------------------------------------------
+
+    def _designed_keys(self) -> list[str]:
+        return [k for k in self.layers if k == "design" or k.startswith("shape:")]
+
+    def _inflated_keys(self) -> list[str]:
+        return [k for k in self.layers if k in RESULT_KINDS or k.startswith("shape-sim:")]
+
+    def set_show(self, mode: object) -> bool:
+        """Show the balloon ``designed``, ``inflated`` (the chosen run's envelope and the
+        special shapes solved with it) or ``both``; False (nothing changes) when there is
+        nothing inflated to show yet."""
+        mode = mode if mode in {m for _, m in SHOW_MODES} else "both"
+        if mode != "designed" and not self.parts():
+            if mode == "inflated":
+                self.info.setText("No inflated result to show yet: run a simulation (Run Preview).")
+                self.show_choice.setCurrentIndex(self.show_choice.findData("designed"))
+                return False
+        self.show_choice.setCurrentIndex(self.show_choice.findData(mode))
+        if mode == "both":
+            for key in [*self._designed_keys(), *self.parts()]:
+                self.layers[key].visible = True
+                self._chosen_visibility[key] = True
+        self._apply_show()
+        self.redraw()
+        return True
+
+    def _apply_show(self) -> None:
+        """Make the layers follow the Show choice (``both``: the user's own ticks)."""
+        mode = self.show_choice.currentData()
+        if mode not in ("designed", "inflated"):
+            return
+        inflated = set(self.parts()) if mode == "inflated" else set()
+        if mode == "inflated" and not inflated:
+            mode = "designed"  # the run went away: show the design rather than nothing
+            self.show_choice.setCurrentIndex(self.show_choice.findData(mode))
+        for key in self._designed_keys():
+            self.layers[key].visible = mode == "designed"
+            self._chosen_visibility[key] = mode == "designed"
+        for key in self._inflated_keys():
+            self.layers[key].visible = key in inflated
+            self._chosen_visibility[key] = key in inflated
+        if "rest" in self.layers:
+            # The as-sewn starting mesh is neither: it would cover the comparison.
+            self.layers["rest"].visible = False
+            self._chosen_visibility["rest"] = False
+        self._fill_list()
 
     def _overlay_layers(self) -> None:
         """Every overlay (appliqué, ADR-0056) as a patch on the design surface, in its
@@ -1063,16 +1142,66 @@ class View3DPanel(QWidget):
         return None if colours.is_empty() else colours
 
     def _face_colors(self, surface: DisplaySurface) -> np.ndarray:
+        """Colour per triangle of the design surface (:meth:`_panel_rgb`)."""
+        return self._panel_rgb(
+            surface.row_letters, surface.face_row, surface.face_gore, surface.points, surface.faces
+        )
+
+    def _result_style(
+        self, positions: np.ndarray, triangles: np.ndarray
+    ) -> tuple[np.ndarray | None, dict[str, list[np.ndarray]]]:
+        """Panel colours per triangle and the seams of a solved envelope, so it is drawn
+        like the design: each triangle in its panel's colour (the panel it was cut from,
+        :func:`envelopelab.assembly.spec.parse_instance_id`) and the sewn seams as dark
+        lines on the solved positions. (None, {}) when the solved mesh is not the current
+        rest mesh's (a stale run: it keeps its grey)."""
+        model = self._current_model()
+        cache = self.controller.model_cache
+        session = self.controller.session
+        if model is None or cache is None or session is None or session.design.gores is None:
+            return None, {}
+        mesh = cache.built.build.mesh
+        if mesh is None:
+            return None, {}
+        if len(mesh.tri_instance) != len(triangles) or len(positions) != len(model.positions):
+            return None, {}
+        letters = [r.letter for r in session.design.gores.panel_rows]
+        index = {letter: i for i, letter in enumerate(letters)}
+        panels = [parse_instance_id(i) for i in mesh.instance_ids]
+        inst_row = np.array([-1 if p is None else index.get(p[1], -1) for p in panels])
+        inst_gore = np.array([0 if p is None else p[2] for p in panels])
+        face_row = inst_row[mesh.tri_instance]
+        face_gore = inst_gore[mesh.tri_instance]
+        known = (face_row >= 0) & (face_gore >= 1)
+        rgb = np.tile(np.array([0xD9, 0xE7, 0xF5], dtype=np.uint8), (len(triangles), 1))
+        if np.any(known):
+            rgb[known] = self._panel_rgb(
+                letters,
+                face_row[known],
+                face_gore[known],
+                np.asarray(positions),
+                np.asarray(triangles)[known],
+            )
+        return rgb, seam_segments(model.seams, positions)
+
+    def _panel_rgb(
+        self,
+        row_letters: list[str],
+        face_row: np.ndarray,
+        face_gore: np.ndarray,
+        points: np.ndarray,
+        faces: np.ndarray,
+    ) -> np.ndarray:
         """Colour per triangle: the panel's colour (ADR-0055) where one is set, else its
         fabric's: the panel's zone (a panel zone, else its row's), every second gore
-        darker (display only)."""
+        darker (display only). ``face_row`` indexes ``row_letters``; ``face_gore`` from 1."""
         session = self.controller.session
         assert session is not None
         design = session.design
         assert design.gores is not None
         n = design.gores.count
-        palette = np.zeros((len(surface.row_letters), n, 3))
-        for i, letter in enumerate(surface.row_letters):
+        palette = np.zeros((len(row_letters), n, 3))
+        for i, letter in enumerate(row_letters):
             for g in range(1, n + 1):
                 zone = panel_zone(design, session.patterns, letter, g)
                 fabric_id = design.zones.get(zone, "")
@@ -1081,16 +1210,16 @@ class View3DPanel(QWidget):
                 if not color.isValid():
                     color = QColor("#d9e7f5")
                 palette[i, g - 1] = (color.red(), color.green(), color.blue())
-        rgb = palette[surface.face_row, surface.face_gore - 1]
-        rgb[surface.face_gore % 2 == 0] *= ALTERNATE_GORE_SHADE
+        rgb = palette[face_row, face_gore - 1]
+        rgb[face_gore % 2 == 0] *= ALTERNATE_GORE_SHADE
         colours = self._panel_colours()
         if colours is not None:
             painted, mask = envelope_face_colours(
                 colours,
-                surface.row_letters,
-                surface.face_row,
-                surface.face_gore,
-                face_halves(surface.points, surface.faces, n),
+                row_letters,
+                face_row,
+                face_gore,
+                face_halves(points, faces, n),
                 [r.letter for r in design.gores.panel_rows if r.half_gore],
             )
             rgb[mask] = painted[mask] * 255.0
@@ -1304,6 +1433,12 @@ class View3DPanel(QWidget):
             key = inflated
         self.zoom_to_layer(key)
 
+    def _field_chosen(self) -> None:
+        """The user chose a field: Layer colour, once chosen, is kept when the list is
+        filled again (a new result still opens on a safety field until then)."""
+        self._layer_colour = self.field_choice.currentData() is None
+        self._result_changed()
+
     def _result_changed(self) -> None:
         self._update_fields()
         self.redraw()
@@ -1373,6 +1508,8 @@ class View3DPanel(QWidget):
                     if item is not None:
                         item.setEnabled(False)
         index = self.field_choice.findData(chosen) if chosen in available else -1
+        if chosen is None and self._layer_colour:
+            index = 0  # Layer colour, as chosen
         if index < 0:
             first = next((f for f in SAFETY_FIELDS if f in available), None)
             index = self.field_choice.findData(first) if first else 0
@@ -1389,6 +1526,9 @@ class View3DPanel(QWidget):
         name = self.field_choice.currentData()
         if name == self._last_field:
             return
+        if self.show_choice.currentData() != "both":
+            self._last_field = name if isinstance(name, str) else None
+            return  # the Show choice decides what is drawn
         self._last_field = name if isinstance(name, str) else None
         if not isinstance(name, str) or not self.parts():
             return
@@ -1651,13 +1791,17 @@ class View3DPanel(QWidget):
             coloured = self.part_field(layer.key) is not None
             if layer.face_colors is not None and not layer.stale and not coloured:
                 mesh.cell_data["rgb"] = layer.face_colors
+                rgb_kwargs: dict[str, Any] = {"show_edges": with_edges}
+                if not layer.converged:
+                    # Never drawn like a normal result: red mesh edges over its colours.
+                    rgb_kwargs = {"show_edges": True, "edge_color": "#b42318"}
                 plotter.add_mesh(
                     mesh,
                     scalars="rgb",
                     rgb=True,
                     name=layer.key,
-                    show_edges=with_edges,
                     style=style,
+                    **rgb_kwargs,
                 )
                 legend.append([layer.legend_name, layer.color])
                 continue

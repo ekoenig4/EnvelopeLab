@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: **Show** in the 3D view: *Designed*, *Inflated* or *Designed and inflated* (the
+  envelope and the special shapes together; the rest mesh is hidden in the first two).
+- Changed: the inflated envelope is drawn like the design with *Colour by: Layer colour*
+  (panel and fabric colours, darker alternate gores, seam lines, no solver mesh edges in
+  *Shaded*). Unconverged runs keep their red mesh edges.
+- Fixed: choosing *Layer colour* in *Colour by* was immediately replaced by the factor of
+  safety, so a result could not be shown in its own colours.
 - Added: **Preferences ▸ Positions shown in**: metres (default) or balloon coordinates,
   gore + fraction across it (0 at one seam, 1 at the other) and panel row + fraction up
   it. The shape placement form, feed-hole table, overlay editor, gore-map pointer, 3D drag

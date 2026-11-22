@@ -60,6 +60,11 @@ the status bar says so. The envelope's own solve does not include the shapes.
 
 The 3D view's toolbar chooses what it shows:
 
+* **Show**: *Designed*, *Inflated* or *Designed and inflated* (the default). *Designed*
+  shows the design surface and the designed special shapes; *Inflated* shows the chosen
+  run's envelope and the shapes solved with it. Both hide the rest mesh (the as-sewn
+  starting shape) so the two compare cleanly. With *Designed and inflated* your own ticks
+  in the layer tree decide. *Inflated* needs a run; until then it stays on the design.
 * **Run**: the solve the colours, the banner and the run details describe: the latest
   preview or CalculiX run, each **the whole balloon**, the envelope and every special shape
   solved with it ("Preview run · envelope + 2 shapes").
@@ -71,6 +76,13 @@ The 3D view's toolbar chooses what it shows:
   "CalculiX does not report warp/weft resultants", or a run from an older version that
   has to be run again).
 * **Display**: *Shaded*, *Shaded + mesh edges* or *Wireframe*.
+
+With *Colour by: Layer colour*, the inflated envelope is drawn like the design: every
+triangle in the colour of the panel it was cut from (fabric or Colours-mode colour, every
+second gore darker) with the sewn seams as dark lines, and without the solver's mesh
+edges (choose *Shaded + mesh edges* to see them). Layer colour stays chosen when you pick
+it; a new result still opens on the factor of safety, so failures are seen first. A run
+that did not converge always keeps its red mesh edges, and a stale run is drawn grey.
 
 The factor of safety is coloured in bands of the required factor (5 by default, tagged
 *assumed*): everything **below the limit is orange and labelled FAIL** on the colour
