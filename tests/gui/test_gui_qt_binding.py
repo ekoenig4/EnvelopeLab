@@ -5,7 +5,7 @@ method that returns nothing (``QPainterPath.moveTo``, ``QGraphicsPathItem.setPat
 On Python 3.11, where ``None`` is not immortal, the GUI then aborted with "Fatal Python
 error: none_dealloc" after enough calls: the test run died at a different GUI test on
 each machine. ``pyproject.toml`` excludes that release; this test names the cause if a
-binding with the bug is installed again. EnvelopeLab now needs Python 3.12 (ADR-0055), where
+binding with the bug is installed again. EnvelopeLab now needs Python 3.12 (ADR-0057), where
 ``None`` is immortal, but a binding that miscounts references is still a bug worth naming.
 """
 

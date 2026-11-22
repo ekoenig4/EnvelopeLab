@@ -35,7 +35,7 @@ dev = [
 gui = [
   # 6.12.0 drops a reference to None on every void Qt call, which aborted Python 3.11
   # (tests/gui/test_gui_qt_binding.py). Python 3.12+ makes None immortal, so the cap can
-  # be lifted once the GUI suite is checked on 6.12 (ADR-0055).
+  # be lifted once the GUI suite is checked on 6.12 (ADR-0057).
   "PySide6>=6.6,<6.12",
   "pyvista>=0.43",
   "pyvistaqt>=0.11",
@@ -85,7 +85,7 @@ select = ["E", "F", "I", "UP", "B", "N"]
 known-first-party = ["envelopelab", "calculix_adapter", "envelopelab_app"]
 
 [tool.mypy]
-# No python_version pin: mypy checks against the interpreter it runs on (3.12 in CI, ADR-0055),
+# No python_version pin: mypy checks against the interpreter it runs on (3.12 in CI, ADR-0057),
 # so newer numpy stubs are parsed with the syntax of the Python that installed them.
 strict = true
 packages = ["envelopelab", "calculix_adapter", "envelopelab_app"]

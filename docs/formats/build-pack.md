@@ -15,6 +15,7 @@ one page each** (ADR-0038):
 | `<slug>-panel-<R>-gore-<g>.pdf` | The panel `R` of gore `g` when a shape is sewn on it or a feed hole is cut in it: the same panel with that panel's footprint lines, side ticks, numbered match marks and feed holes (every shape's marks on that panel), *mark only* (ADR-0039) |
 | `<slug>-parachute-panel.pdf`, `<slug>-parachute-centre.pdf` | The parachute radial panel and centre panel |
 | `<slug>-<shape>-<piece>.pdf` | Every skin piece of every special shape (e.g. `<slug>-eye-G1.pdf`, `<slug>-horn-TIP.pdf`) |
+| `<slug>-<overlay>-overlay.pdf` | Every overlay (appliqué, ADR-0056), cut once; its outline is marked on the panel pages of every panel it crosses (`<slug>-panel-<R>-gore-<g>.pdf`) |
 
 The page is the piece's cut outline plus 20 mm, so the **whole piece is on one page,
 never split**. From format 4 (ADR-0042) the page is in the print roll's frame: **the page
@@ -46,6 +47,8 @@ at 1:1, ticks every T mm`, `along: …`) is generated from the same values.
 | `cad/<shape>-G<k>.dxf`, `cad/<shape>-P<k>.dxf` | Skin gore or panel `k` of a special shape; with horizontal splits each tier's piece has its letter, `A` at the rim (`cad/<shape>-G<k>A.dxf`, `-G<k>B.dxf`, …) and an upper tier's piece has a `bottom` edge, paired with the `top` of the piece below it in `seam_pairs` |
 | `cad/<shape>-TIP.dxf` | Flat tip disc of a tube or revolved shape |
 | `cad/<shape>-mark-G<g>-<R>.dxf` | Marking sheet: envelope panel (gore `g`, row `R`) with the shape's footprint line, match marks and feed hole |
+| `cad/<overlay>-overlay.dxf` | Overlay piece (kind `overlay`, cut 1): the finished outline (`SEW`, edge `outline`), the hem turned under (`CUT`) and a numbered match mark at every seam it crosses |
+| `cad/<overlay>-mark-G<g>-<R>.dxf` | Marking sheet of an overlay: the panel with the part of the overlay's outline on it (`ATTACH`) and the same numbered marks; seam pair: the piece's `outline` against every `attach<k>` line, with the planned ease |
 | `cad/index.json` | The index (below); it lists every other file of the pack |
 
 Formats 1 and 2 had the DXFs and `index.json` at the top and `pattern.pdf` (every sheet
@@ -124,7 +127,7 @@ towards the tip for skin pieces).
 | `HOLE_CUT` | Feed hole as cut: the finished radius less the hem, by default a double fold over the design's hole tape (twice its width) |
 | `NOTES` | Sewing directions placed on the piece: the feed-hole sizes and hem; on a skin piece what each edge is sewn to (`RIM: sew to the envelope, marks a-b`, `sew to P4 (its left side)`, `TOP: sew to the tip disc`, `APEX of …`) |
 | `GRAIN` | Warp direction arrow |
-| `LABEL` | Header: `piece \| kind \| cut N \| fabric F \| finished W x H mm` (the first `LABEL` text, which the QA reads), then notes: on a marking sheet how to sew the shape there, or that the panel lies under it; on a skin piece where its rim marks lie on the envelope; on an envelope row which gores of that row carry a shape's marking sheet or feed hole |
+| `LABEL` | Header: `piece \| kind \| cut N \| fabric F \| finished W x H mm` (the first `LABEL` text, which the QA reads), then, when the design has panel colours (ADR-0055), the colour line generated from the sheet's colours (`colours: cut 3 in #c00000 (gores 1, 5, 9), 9 with no colour (gores …)` on an envelope row; `colour #7030a0` or `colour: none chosen` on a skin piece; the second `LABEL` text, checked by the QA), then notes: on a marking sheet how to sew the shape there, or that the panel lies under it; on a skin piece where its rim marks lie on the envelope; on an envelope row which gores of that row carry a shape's marking sheet or feed hole |
 | `CAL` | Calibration line with ticks and its label `must measure L mm at 1:1, ticks every T mm` |
 
 The header and the calibration label are generated from the values that draw the
@@ -153,7 +156,13 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
   ],
   "sheets": [
     {"file": "cad/ear-G1.dxf", "piece": "ear-G1", "kind": "skin piece", "cut_count": 1,
-     "fabric": "ripstop red", "finished_width_mm": 392.1, "finished_height_mm": 1855.0}
+     "fabric": "ripstop red", "finished_width_mm": 392.1, "finished_height_mm": 1855.0,
+     "colours": [{"colour": "#7030a0", "count": 1, "numbers": [1]}]},
+    {"file": "cad/envelope-row-A.dxf", "piece": "row A", "kind": "envelope panel",
+     "cut_count": 12, "fabric": "ripstop", "finished_width_mm": 1440.2,
+     "finished_height_mm": 2693.7,
+     "colours": [{"colour": "#c00000", "count": 3, "numbers": [1, 5, 9]},
+                 {"colour": null, "count": 9, "numbers": [2, 3, 4, 6, 7, 8, 10, 11, 12]}]}
   ],
   "shape_groups": {"Head": ["face", "ear", "ear mirror"]},
   "seam_pairs": [
@@ -167,11 +176,24 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
 }
 ```
 
+`colours` (only when the design has panel colours, ADR-0055) lists the pieces a sheet
+cuts in each colour: `colour` (`#rrggbb`, or `null` for no colour chosen), `count` and
+`numbers`, the gores (envelope rows; both halves of a half-gore row alike) or the piece
+number round the shape (skin pieces; a tip or cap is piece 1). Each half of a half-gore
+row lists its own half's colours (the half's own colour, else the panel's). Marking and parachute
+sheets have none. A template page drawn for one panel (a marking page) records its
+`gore` in `templates[].pages[]`. The planning documents then add
+`<slug>-colour-plan.pdf` (the gores and the shapes' pieces in their colours, and the
+cloth per colour) and `<slug>-colour-cloth.csv` (`colour`, `pieces`, `finished_area_m2`,
+`cut_area_m2`; `no colour chosen` last, the parachute included, so the totals equal the
+fabric totals).
+
 `shape_groups` lists the special shapes of every group (one object made of several
 shapes, ADR-0041) by name; it is empty when no shape is grouped, and each grouped shape's
 skin sheets name the object.
 
-`kind` is `envelope panel`, `parachute panel`, `skin piece` or `marking` (cut count 0). A
+`kind` is `envelope panel`, `parachute panel`, `skin piece`, `overlay` or `marking` (cut
+count 0). A
 seam pair lists the finished edges sewn together, with lengths summed on each side (all
 of a tube's panel tops against its tip disc, or the `top` of the parachute radial panel
 once per radial panel against the centre panel's `rim`, for example). `ease_mm` is the planned length of side `a`
@@ -188,7 +210,10 @@ label says; every piece is on one page of its own file, never split, listed with
 sheet, no wider than the roll across it (format 4: the page width; format 3: one side)
 or with the red larger-than-the-roll note
 (formats 1 and 2: every `pattern.pdf` page is as wide as the roll); every sheet is drawn
-exactly once (a marking sheet over its row's panel); every header matches the index and the drawn `SEW` outline; every
+exactly once (a marking sheet over its row's panel); every header matches the index and the drawn `SEW` outline; a sheet's colours account
+for every piece it cuts (counts add up to the cut count, each gore or piece once) and its
+DXF label and every template page of it (`%COLOURS <line>` in the page stream) print the
+colour line generated from the index; every
 document opens (PDFs have pages, HTML pages load nothing from outside themselves, combined
 DXFs are in mm, previews are PNG images), the
 panel dimensions list every envelope panel with the index's cut count and fabric, and the

@@ -62,6 +62,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSpinBox,
     QSplitter,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -113,6 +114,7 @@ from envelopelab.project.symmetry import axis_gore_label
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.hints import set_hint
 from envelopelab_app.marking_view import MarkingView
+from envelopelab_app.overlay_editor import OverlayEditor
 from envelopelab_app.placement_view import (
     AxisPreview,
     PlacedShape,
@@ -744,7 +746,7 @@ class ShapesPanel(QWidget):
         self.edited_piece: int | None = None
         self.mesh_mm = DEFAULT_MESH_MM
         self._form_key: tuple[str, str, int] | None = None
-        self._placement_key: str | None = None
+        self._placement_key: tuple[str, tuple[str, ...]] | None = None
         self._placement_shown: tuple[int, str | None] | None = None
         #: Each placed shape's drawing: (placed design, gore map, 3D points, triangles,
         #: footprint on the map, base point), rebuilt when the shape is placed again.
@@ -762,7 +764,16 @@ class ShapesPanel(QWidget):
         for kind in ("dome", "tube", "revolved"):
             menu.addAction(KIND_LABELS[kind], self._adder(kind))
         menu.addAction("Import mesh (OBJ/STL/PLY)…", self._import_mesh_dialog)
+        menu.addSeparator()
+        # An appliqué sewn on the envelope (ADR-0056), listed and placed like a shape.
+        menu.addAction("Overlay (appliqué)", self.add_overlay)
         self.add_button.setMenu(menu)
+        self.overlay_editor = OverlayEditor()
+        self.overlay_editor.changed.connect(self._overlay_changed)
+        self.overlay_editor.colourRequested.connect(self._overlay_colour)
+        self.overlay_editor.exportRequested.connect(lambda: self.export_overlay_pattern())
+        #: Each overlay's layout on the envelope: name -> (spec, surface, layout, error).
+        self._overlay_layouts: dict[str, tuple[Any, Any, Any, str]] = {}
         self.duplicate_button = QPushButton("Duplicate")
         self.duplicate_button.clicked.connect(self.duplicate_selected)
         self.remove_button = QPushButton("Remove")
@@ -1073,7 +1084,11 @@ class ShapesPanel(QWidget):
         mirror_row.addWidget(self.mirror_label, 1)
         mirror_row.addWidget(self.unlink_button)
         middle_layout.addLayout(mirror_row)
-        middle_layout.addWidget(self.editor_tabs, 1)
+        # The shape editor, or the overlay editor when an overlay is selected.
+        self.editor_stack = QStackedWidget()
+        self.editor_stack.addWidget(self.editor_tabs)
+        self.editor_stack.addWidget(_scrolled(self.overlay_editor))
+        middle_layout.addWidget(self.editor_stack, 1)
 
         # Column 3: what is derived from it, in tabs.
         self.result_tabs = QTabWidget()
@@ -1107,9 +1122,7 @@ class ShapesPanel(QWidget):
         # Where the shapes sit on the balloon: the first tab, shown by default.
         self.placement = PlacementView(gpu=enable_3d)
         self.placement.map.shapeClicked.connect(self.select)
-        self.placement.shapeMoved.connect(
-            lambda name, placement: self.controller.place_shape(name, placement)
-        )
+        self.placement.shapeMoved.connect(self.move_object)
         self.placement.nudged.connect(self.nudge)
         self._axis: _AxisSession | None = None
         self.placement.axisPointed.connect(self._axis_pointed)
@@ -1194,6 +1207,210 @@ class ShapesPanel(QWidget):
         result = None if name is None else self.controller.shapes.result(name)
         return None if result is None else result.design
 
+    def overlays(self) -> list[Any]:
+        """The project's overlays (appliqués, ADR-0056)."""
+        session = self.controller.session
+        return [] if session is None else list(session.state.overlays)
+
+    def overlay(self, name: str | None = None) -> Any:
+        """Overlay ``name`` (default: the selected one; None: not an overlay)."""
+        name = self.selected if name is None else name
+        return next((o for o in self.overlays() if o.name == name), None)
+
+    def overlay_layout(self, name: str | None = None) -> tuple[Any, Any, str]:
+        """(surface, layout, error) of overlay ``name``: its layout on the envelope
+        (:func:`envelopelab.project.overlays.overlay_layout`; None when it cannot be laid,
+        ``error`` says why), cached until the overlay or the envelope changes."""
+        from envelopelab.project.overlays import overlay_layout
+
+        spec = self.overlay(name)
+        surface = self.controller.envelope_surface()
+        if spec is None or surface is None:
+            return surface, None, "no standard-gore envelope"
+        hit = self._overlay_layouts.get(spec.name)
+        if hit is not None and hit[0] == spec and hit[1] is surface:
+            return surface, hit[2], hit[3]
+        try:
+            layout, error = overlay_layout(spec, surface), ""
+        except ValueError as exc:
+            layout, error = None, str(exc)
+        self._overlay_layouts[spec.name] = (spec, surface, layout, error)
+        return surface, layout, error
+
+    def move_object(self, name: str, placement: Any) -> bool:
+        """Move shape or overlay ``name`` to ``placement`` (dragged or nudged; one step)."""
+        if self.overlay(name) is not None:
+            values = {
+                "gore": placement.gore,
+                "tape_position": placement.tape_position,
+                "across": placement.across,
+            }
+            return bool(self.controller.edit("update_overlay", name, {"placement": values}))
+        return bool(self.controller.place_shape(name, placement))
+
+    def add_overlay(self) -> str | None:
+        """Add a 1 m circle overlay on gore 1, half way up the envelope; returns its name."""
+        from envelopelab.project.edits import unique_name
+        from envelopelab.project.overlays import default_overlay
+
+        session = self.controller.session
+        surface = self.controller.envelope_surface()
+        if session is None or surface is None:
+            return None
+        name = unique_name(session, "overlay")
+        spec = default_overlay(name, 1, 0.5 * float(surface.profile.meridian_length))
+        if not self.controller.edit("add_overlay", spec):
+            return None
+        self.select(name)
+        return name
+
+    def _overlay_changed(self, values: dict[str, Any], live: bool) -> None:
+        name = self.selected
+        if name is None or self.overlay(name) is None:
+            return
+        if "name" in values:
+            self.selected = str(values["name"])
+        if live:
+            self.controller.edit_live(
+                f"overlay:{name}:{','.join(values)}",
+                lambda: self.controller.edit("update_overlay", name, values),
+            )
+            return
+        if not self.controller.edit("update_overlay", name, values):
+            self.selected = name
+            self._show_selected()
+
+    def _show_overlay_result(self, layout: Any) -> None:
+        """The selected overlay's pattern in the result tabs: its cut piece (Cut pieces,
+        with how its 1:1 page lies on the print roll), its checks (fit on the envelope,
+        on the roll), the line marked on each panel it crosses (Envelope panels) and the
+        length of that line per panel (Attachment)."""
+        from envelopelab.export.overlays import overlay_checks, overlay_cut_piece, overlay_sheets
+
+        if layout is None:
+            return
+        roll = self.controller.prefs.print_roll_width
+        piece = overlay_cut_piece(layout)
+        fit = roll_fit(piece.cut, roll)
+        w, h = piece.size
+        on_roll = (
+            f"LARGER THAN {roll * 1000:.0f} mm ROLL"
+            if fit.oversize
+            else f"{fit.across * 1000:.0f} mm across, {fit.describe()}"
+        )
+        item = QTreeWidgetItem(
+            [
+                piece.label,
+                str(piece.cut_count),
+                f"{w:.3f} × {h:.3f}",
+                f"{piece.flat_area:.4f}",
+                f"{piece.surface_area:.4f}",
+                on_roll,
+            ]
+        )
+        if fit.oversize:
+            item.setForeground(5, QBrush(QColor(WARN_COLOR)))
+        self.pieces.addTopLevelItem(item)
+        for check in overlay_checks(layout, roll):
+            row = QTreeWidgetItem(
+                [
+                    check.name,
+                    f"{check.value:.4g} {check.unit}",
+                    f"{check.limit:.4g} {check.unit}",
+                    "passed" if check.passed else check.severity.upper(),
+                ]
+            )
+            row.setToolTip(0, check.message)
+            row.setForeground(3, QBrush(QColor(SEVERITY_COLORS[check.severity])))
+            self.checks.addTopLevelItem(row)
+        for run in layout.runs:
+            length = float(np.linalg.norm(np.diff(run.panel, axis=0), axis=1).sum())
+            self.attachment.addTopLevelItem(
+                QTreeWidgetItem([f"gore {run.gore}, row {run.row}", f"{length:.3f}"])
+            )
+        for tree in (self.pieces, self.checks, self.attachment):
+            for column in range(tree.columnCount()):
+                tree.resizeColumnToContents(column)
+        self.preview.set_pieces([piece], frozenset({piece.label} if fit.oversize else ()), roll)
+        surface = self.controller.envelope_surface()
+        if surface is None:
+            return
+        sheets, _pairs = overlay_sheets(layout, surface, "envelope")
+        markings = [s for s in sheets if s.kind == "marking"]
+        stale = self.controller.artifact_status("patterns") == "stale"
+        self.markings.set_sheets(markings, stale)
+        lines = [
+            f"{len(markings)} envelope panel(s) to mark: "
+            + ", ".join(s.piece for s in markings)
+            + "; match each numbered mark to the same number on the piece."
+        ]
+        if stale:
+            lines.append("Patterns are STALE: regenerate them before marking (shown greyed).")
+        self.marking_notes.setText("\n".join(lines))
+
+    def export_overlay_pattern(self, out_dir: str | Path | None = None) -> list[Path]:
+        """Write the selected overlay's own cutting pattern (its 1:1 template PDF and the
+        DXFs of the piece and of every panel marking) into ``out_dir`` (asked for when
+        None); returns the files written (empty when refused or cancelled)."""
+        from PySide6.QtWidgets import QFileDialog
+
+        from envelopelab.export.overlays import write_overlay_pattern
+        from envelopelab.project.colours import PanelRef
+
+        overlay = self.overlay()
+        session = self.controller.session
+        surface, layout, error = self.overlay_layout()
+        if overlay is None or session is None or surface is None:
+            return []
+        if layout is None:
+            self.controller.editRejected.emit(f"pattern not written: {error}")
+            return []
+        if out_dir is None:
+            chosen = QFileDialog.getExistingDirectory(self, f"Export the pattern of {overlay.name}")
+            if not chosen:
+                return []
+            out_dir = chosen
+        fabric = overlay.fabric
+        if not fabric:
+            row = surface.rows[
+                int(surface.row_index(np.array([overlay.placement.tape_position]))[0])
+            ]
+            from envelopelab.project.gore_design import row_zone
+
+            zone = row_zone(session.design, session.patterns, row.label)
+            fabric = session.design.zones.get(zone, zone)
+        colour = session.state.colours.colour_of(PanelRef(overlay.name, "A", 1))
+        files = self.controller.attempt(
+            write_overlay_pattern,
+            layout,
+            surface,
+            fabric,
+            out_dir,
+            self.controller.prefs.print_roll_width,
+            session.design.meta.name,
+            colour,
+        )
+        if files:
+            self.controller.message.emit(
+                f"Pattern of {overlay.name} written to {out_dir} ({len(files)} files)"
+            )
+        return list(files or [])
+
+    def _overlay_colour(self) -> None:
+        from PySide6.QtWidgets import QColorDialog
+
+        from envelopelab.project.colours import PanelRef
+
+        name = self.selected
+        session = self.controller.session
+        if name is None or session is None:
+            return
+        ref = PanelRef(name, "A", 1)
+        current = session.state.colours.colour_of(ref) or "#ffffff"
+        chosen = QColorDialog.getColor(QColor(current), self, f"Colour of {name}")
+        if chosen.isValid():
+            self.controller.edit("paint_panels", [ref], chosen.name())
+
     # -- edits --------------------------------------------------------------------------
 
     def select(self, name: str | None) -> None:
@@ -1254,17 +1471,23 @@ class ShapesPanel(QWidget):
         return name
 
     def duplicate_selected(self) -> str | None:
-        """Copy the selected shape one gore further round."""
+        """Copy the selected shape (or overlay) one gore further round."""
         if self.selected is None:
             return None
+        if self.overlay() is not None:
+            copy = self.controller.edit("duplicate_overlay", self.selected)
+            if copy:
+                self.select(copy)
+            return copy  # type: ignore[no-any-return]
         new = self.controller.edit("duplicate_shape", self.selected)
         if new:
             self.select(new)
         return new  # type: ignore[no-any-return]
 
     def remove_selected(self) -> None:
-        """Remove the selected shape."""
-        if self.selected is not None and self.controller.edit("remove_shape", self.selected):
+        """Remove the selected shape (or overlay)."""
+        edit = "remove_overlay" if self.overlay() is not None else "remove_shape"
+        if self.selected is not None and self.controller.edit(edit, self.selected):
             self.selected = None
             self.refresh()
 
@@ -1273,7 +1496,7 @@ class ShapesPanel(QWidget):
         held: :meth:`WorkspaceController.edit_live`; the newest value wins, one undo
         step)."""
         name = self.selected
-        if name is None:
+        if name is None or self.overlay(name) is not None:
             return
         self.controller.edit_live(
             f"shape:{name}:{'.'.join(path)}", lambda: self._set_value_of(name, path, value)
@@ -1285,7 +1508,7 @@ class ShapesPanel(QWidget):
 
     def set_value(self, path: tuple[str, ...], value: Any) -> bool:
         """Change one value of the selected shape (undoable)."""
-        if self.selected is None:
+        if self.selected is None or self.overlay() is not None:
             return False
         spec = self.spec()
         if spec is not None and _get(spec.model_dump(mode="json"), path) == value:
@@ -1375,6 +1598,8 @@ class ShapesPanel(QWidget):
             roll_width=roll_width,
             extras=extras,
             groups=groups,
+            colours=session.state.colours,
+            overlays=session.state.overlays,
         )
         if index is not None:
             self.controller.message.emit(f"Build pack written to {out_dir}")
@@ -1429,7 +1654,7 @@ class ShapesPanel(QWidget):
             QMessageBox.warning(self, "Shape simulation", message)
 
     def _request_drag(self) -> None:
-        if self.selected is not None:
+        if self.selected is not None and self.overlay() is None:
             self.dragRequested.emit(self.selected)
 
     def _selection(self, target: str) -> None:
@@ -1444,7 +1669,8 @@ class ShapesPanel(QWidget):
     def refresh(self) -> None:
         """Rebuild the list and the selected shape's view."""
         specs = self.specs()
-        names = [s.name for s in specs]
+        overlays = self.overlays()
+        names = [s.name for s in specs] + [o.name for o in overlays]
         if self.selected not in names:
             self.selected = names[0] if names else None
         self.list.blockSignals(True)
@@ -1466,6 +1692,14 @@ class ShapesPanel(QWidget):
                 item.setForeground(QBrush(QColor(colour)))
             self.list.addItem(item)
             if spec.name == self.selected:
+                self.list.setCurrentItem(item)
+        for overlay in overlays:
+            item = QListWidgetItem(f"{overlay.name}  (overlay)")
+            item.setData(Qt.ItemDataRole.UserRole, overlay.name)
+            if self.overlay_layout(overlay.name)[1] is None:
+                item.setForeground(QBrush(QColor(FAIL_COLOR)))
+            self.list.addItem(item)
+            if overlay.name == self.selected:
                 self.list.setCurrentItem(item)
         self.list.blockSignals(False)
         self._fill_axes()
@@ -1491,6 +1725,8 @@ class ShapesPanel(QWidget):
             self._show_selected()
 
     def _result_tab_shown(self, _index: int) -> None:
+        if self.overlay() is not None:
+            return  # an overlay's results are filled when it is shown (they are quick)
         if self._results_stale and self.result_tabs.currentWidget() is not self.placement:
             self._show_result(self.spec())
 
@@ -1507,10 +1743,30 @@ class ShapesPanel(QWidget):
             self.placement.set_data(data)
             if self._axis is not None:
                 self._update_axis_preview()  # the mirror images follow the new data
+        overlay = self.overlay()
+        self.editor_stack.setCurrentIndex(0 if overlay is None else 1)
+        if overlay is not None:
+            session = self.controller.session
+            _surface, layout, error = self.overlay_layout()
+            colour = None
+            if session is not None:
+                from envelopelab.project.colours import PanelRef
+
+                colour = session.state.colours.colour_of(PanelRef(overlay.name, "A", 1))
+            gores = session.design.gores.count if session and session.design.gores else 1
+            self.overlay_editor.set_overlay(overlay, layout, error, colour, gores)
         self._update_form(spec)
         self._show_result(spec)
         self._show_simulation(spec)
         self._update_buttons()
+        if overlay is not None:
+            self._show_overlay_result(layout)
+            self.status.setText(
+                f"{overlay.name}: overlay (appliqué)"
+                + ("" if layout is not None else f" - CANNOT BE LAID: {error}")
+            )
+            self.duplicate_button.setEnabled(True)
+            self.remove_button.setEnabled(True)
 
     def _update_buttons(self) -> None:
         has = self.spec() is not None
@@ -1847,7 +2103,9 @@ class ShapesPanel(QWidget):
         if session is None or surface is None or session.design.gores is None:
             return PlacementData()
         design = session.design
-        key = self.controller.shape_host_hash()  # the envelope inputs only
+        # The envelope inputs only (and the half-gore rows the sketch colours by halves).
+        halved = tuple(r.letter for r in session.design.gores.panel_rows if r.half_gore)
+        key = (self.controller.shape_host_hash(), halved)
         if self._placement_key != key:
             self._placement_cache = (pm.gore_map(surface), pm.envelope_sketch(design))
             self._placement_key = key
@@ -1888,18 +2146,30 @@ class ShapesPanel(QWidget):
                         np.asarray(shown.piece),
                         shown.pieces,
                         [np.asarray(seam, float) + shift for seam in shown.seams],
+                        None if shown.tier is None else np.asarray(shown.tier),
                     )
                     self._drawn[spec.name] = cached
-                (_p, _m, points, triangles, footprint, base3d, gs, fp3d, piece, pieces, seams) = (
-                    cached
-                )
+                (
+                    _p,
+                    _m,
+                    points,
+                    triangles,
+                    footprint,
+                    base3d,
+                    gs,
+                    fp3d,
+                    piece,
+                    pieces,
+                    seams,
+                    tier,
+                ) = cached
             else:
                 theta = surface.theta_at(spec.placement.gore, spec.placement.across)
                 base3d = display_points(design, np.array([s]), np.array([theta]))[0]
                 points, triangles = np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64)
                 footprint = []
                 gs, fp3d = None, None
-                piece, pieces, seams = None, 0, []
+                piece, pieces, seams, tier = None, 0, [], None
             shapes.append(
                 PlacedShape(
                     spec.name,
@@ -1915,16 +2185,70 @@ class ShapesPanel(QWidget):
                     piece,
                     pieces,
                     seams,
+                    tier,
                 )
             )
-        specs = {s.name: s for s in session.state.shapes}
+        shapes += self._placed_overlays(design, gore_map)
+        specs: dict[str, Any] = {s.name: s for s in session.state.shapes}
+        specs.update({o.name: o for o in session.state.overlays})
 
         def place_at(name: str, point: np.ndarray) -> Any:
             return placement_at(surface, point, specs[name].placement)
 
         data = PlacementData(gore_map, sketch, axes, shapes, self.selected, place_at)
         data.edited_piece = self.edited_piece
+        if self.controller.show_panel_colours and not session.state.colours.is_empty():
+            data.colours = session.state.colours
         return data
+
+    def _placed_overlays(self, design: Any, gore_map: Any) -> list[PlacedShape]:
+        """Every overlay as the views draw it: its outline on the gore map (broken at the
+        seams), and a patch on the envelope (3D) coloured as one piece."""
+        from envelopelab.project.gore_design import display_points
+        from envelopelab.project.overlays import map_polygons, overlay_mesh
+
+        out = []
+        n = gore_map.gores
+
+        def on_map(gore: int, g: np.ndarray, s: np.ndarray) -> np.ndarray:
+            half = np.asarray(gore_map.half_width(s), float)
+            x = (gore - 0.5) * gore_map.column + 2.0 * (g - (gore - 1) - 0.5) * half
+            return np.column_stack([x, s])
+
+        def to_3d(g: np.ndarray, s: np.ndarray) -> np.ndarray:
+            pts = np.asarray(display_points(design, s, 2.0 * math.pi * g / n), float)
+            r = np.hypot(pts[:, 0], pts[:, 1])[:, None]
+            # Just outside the drawn envelope so the patch is not hidden by it.
+            pts[:, :2] *= (r + 0.01) / np.maximum(r, 1e-9)
+            return pts
+
+        for spec in self.overlays():
+            surface, layout, _error = self.overlay_layout(spec.name)
+            pl = spec.placement
+            g0, s0 = pl.gore - 0.5 + pl.across, pl.tape_position
+            base = on_map(pl.gore, np.array([g0]), np.array([s0]))[0]
+            base3d = to_3d(np.array([g0]), np.array([s0]))[0]
+            footprint: list[np.ndarray] = []
+            points, triangles = np.zeros((0, 3)), np.zeros((0, 3), dtype=np.int64)
+            if layout is not None:
+                footprint = [poly for _gore, poly in map_polygons(layout, gore_map)]
+                points, triangles = overlay_mesh(layout, surface, to_3d)
+            out.append(
+                PlacedShape(
+                    spec.name,
+                    footprint,
+                    [],
+                    base,
+                    points,
+                    triangles,
+                    base3d,
+                    spec.placement,
+                    piece=np.zeros(len(triangles), dtype=np.int64),
+                    pieces=1,
+                    tier=np.zeros(len(triangles), dtype=np.int64),
+                )
+            )
+        return out
 
     def show_hint(self) -> None:
         """Draw the controller's hint on the On the balloon tab (amber, no redraw of the
@@ -1935,6 +2259,37 @@ class ShapesPanel(QWidget):
         self.placement.data.hint, self.placement.data.hint_face = hint, face
         self.placement.view3d.set_hint(hint, face)  # type: ignore[attr-defined]
 
+    def _overlay_hint(self, key: str) -> Any:
+        """Where a value of the selected overlay (``shape:overlay.<field>``) acts: its
+        outline on the balloon, faced at its centre (``Highlight``; None: not laid)."""
+        from envelopelab.project.gore_design import display_points
+        from envelopelab.project.highlight import Highlight
+
+        overlay = self.overlay()
+        session = self.controller.session
+        _surface, layout, _error = self.overlay_layout()
+        if overlay is None or layout is None or session is None or session.design.gores is None:
+            return None
+        n = session.design.gores.count
+        g, s = layout.gs[:, 0], layout.gs[:, 1]
+        line = np.asarray(display_points(session.design, s, 2.0 * math.pi * g / n), float)
+        pl = overlay.placement
+        centre = np.asarray(
+            display_points(
+                session.design,
+                np.array([pl.tape_position]),
+                np.array([2.0 * math.pi * (pl.gore - 0.5 + pl.across) / n]),
+            ),
+            float,
+        )[0]
+        field = key.removeprefix("shape:overlay.")
+        what = "where it sits" if field.startswith("placement") else "its outline"
+        if field == "hem":
+            what = "its outline (the hem is added round it on the cut piece)"
+        words = field.split(".")[-1].replace("_deg", "").replace("_", " ")
+        closed = np.vstack([line, line[:1]])
+        return Highlight(f"{overlay.name} {words}: {what}", [closed], centre, key)
+
     def shape_hint(self, key: str) -> Any:
         """Where a value of the selected shape (``shape:<field path>``) acts, as lines on
         the balloon (``Highlight``; None: the shape is not placed)."""
@@ -1943,6 +2298,8 @@ class ShapesPanel(QWidget):
         from envelopelab.project.shapes import display_offset
 
         field = key.removeprefix("shape:")
+        if field.startswith("overlay."):
+            return self._overlay_hint(key)
         spec = self.spec()
         result = None if spec is None else self.controller.shapes.shown(spec.name)
         placed = None if result is None else result.design
@@ -1998,13 +2355,11 @@ class ShapesPanel(QWidget):
         one undo step. True when it moved."""
         from envelopelab.project.placement_map import nudged
 
-        spec = self.spec()
+        spec = self.spec() or self.overlay()
         gore_map = self._placement_cache[0]
         if spec is None or gore_map is None:
             return False
-        return self.controller.place_shape(
-            spec.name, nudged(gore_map, spec.placement, d_hoop, d_tape)
-        )
+        return self.move_object(spec.name, nudged(gore_map, spec.placement, d_hoop, d_tape))
 
     # -- symmetry axes and mirror twins ----------------------------------------------
 

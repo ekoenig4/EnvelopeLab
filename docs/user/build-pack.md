@@ -47,6 +47,7 @@ it never leaves a shape out without saying so.
 | `cad/` | One DXF per piece (mm) and `index.json`, for CAD programs and the automatic checks |
 | `<name>-layout-diagram.html` | The whole envelope as a gore x row grid in its fabric colours, with every feature located |
 | `<name>-panel-map.html` / `.csv` | Which panel of which gore carries which feature |
+| `<name>-colour-plan.pdf`, `<name>-colour-cloth.csv` | When you have [coloured the panels](panel-colours.md): every gore side by side in its panel colours and each special shape's pieces, then the cloth per colour (pieces, finished and cut area) for ordering fabric |
 | `<name>-gore-layout.pdf` | Every gore drawn to scale with its features, then one page per gore |
 | `<name>-panel-dimensions.html` / `.csv` | Finished and cut size of every panel, how it lies on the bolt and the table, the spare, and the fabric totals |
 | `<name>-panel-loft.html` / `.csv` | Every panel's width at 0, 25, 50, 75 and 100 % of its height, for checking cut panels |
@@ -56,6 +57,13 @@ it never leaves a shape out without saying so.
 | `<name>-parachute.pdf`, `<name>-scoop.pdf` | Making the lines: parachute data and every rigging length; the scoop and the flying wires, each wire's length; factors of safety (**FAILS** when below the requirement) |
 | `<name>-3d.html` | Looking at it: open it in any browser, offline |
 
+
+**Panel colours.** When the design has [panel colours](panel-colours.md), every envelope
+panel PDF says under its header how many to cut in each colour and for which gores
+(`colours: cut 3 in #c00000 (gores 1, 5, 9), 9 with no colour (gores 2, 3, …)`, with a
+swatch per colour), a marking page names the colour of its one panel, and every special
+shape's skin piece names its colour. The DXFs carry the same line under their header and
+`cad/index.json` lists the colours of every sheet. The 3D view shows the colours.
 
 **Before cutting**, print every 1:1 file at 100 % (never *fit to page*) and measure both
 calibration lines on every page (across and along): each must measure what its label

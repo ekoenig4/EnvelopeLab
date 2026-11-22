@@ -1,4 +1,4 @@
-# ADR-0055: Python 3.12 only, on Linux, macOS, Windows and WSL 2
+# ADR-0057: Python 3.12 only, on Linux, macOS, Windows and WSL 2
 
 - Status: Accepted
 - Date: 2026-11-21

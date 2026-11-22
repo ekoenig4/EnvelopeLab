@@ -21,6 +21,13 @@ import numpy as np
 
 from envelopelab.commands import Command, CommandStack
 from envelopelab.design.model import DesignDocument, sync_taper_anchors
+from envelopelab.project.colours import (
+    PanelColours,
+    overlay_grid,
+    pruned,
+    renamed,
+    shape_grid,
+)
 from envelopelab.project.dependencies import (
     ArtifactStatus,
     ArtifactTracker,
@@ -140,6 +147,8 @@ def _state_from(
     patterns: dict[str, Any],
     shapes: list[dict[str, Any]],
     axes: list[dict[str, Any]] | None = None,
+    colours: PanelColours | None = None,
+    overlays: list[dict[str, Any]] | None = None,
 ) -> DesignState:
     doc = DesignDocument.model_validate(design)
     return DesignState.model_validate(
@@ -148,8 +157,18 @@ def _state_from(
             "patterns": PatternSet.model_validate(patterns),
             "shapes": shapes,
             "symmetry_axes": axes or [],
+            "colours": colours if colours is not None else PanelColours(),
+            "overlays": overlays or [],
         }
     )
+
+
+def _overlays_data(state: DesignState) -> list[dict[str, Any]]:
+    return [o.model_dump(mode="json") for o in state.overlays]
+
+
+def _row_letters(design: dict[str, Any]) -> list[str]:
+    return [str(r.get("letter")) for r in (design.get("gores") or {}).get("panel_rows") or []]
 
 
 def _set_path(data: Any, path: Sequence[str | int], value: Any) -> None:
@@ -286,7 +305,9 @@ class ProjectSession:
     def _refresh_hashes(self) -> None:
         design, patterns = _state_data(self.project.state)
         shapes = _shapes_data(self.project.state)
-        self._hashes = group_hashes(input_groups(design, patterns, shapes))
+        colours = self.project.state.colours.to_data()
+        overlays = _overlays_data(self.project.state)
+        self._hashes = group_hashes(input_groups(design, patterns, shapes, colours, overlays))
         # Library values are not part of the file, so they only enter the fingerprints,
         # never the saved/unsaved comparison of ``_hashes``.
         self._fingerprints = fingerprints({**self._hashes, **self._external_hashes()})
@@ -367,7 +388,9 @@ class ProjectSession:
         same_shapes = _shapes_data(before) == _shapes_data(state) and _axes_data(
             before
         ) == _axes_data(state)
-        if design_b == design_a and patterns_b == patterns_a and same_shapes:
+        same_colours = before.colours == state.colours
+        same_colours &= _overlays_data(before) == _overlays_data(state)
+        if design_b == design_a and patterns_b == patterns_a and same_shapes and same_colours:
             return False
         after = state.model_copy(deep=True)
         if stamp:
@@ -418,6 +441,7 @@ class ProjectSession:
             When the edited data is not a valid design (nothing is changed).
         """
         design, patterns = _state_data(self.project.state)
+        letters = _row_letters(design)
         design, patterns = copy.deepcopy(design), copy.deepcopy(patterns)
         mutate(design, patterns)
         # Row-anchored crest-loft stations follow their rows through every edit.
@@ -431,8 +455,13 @@ class ProjectSession:
 
             shapes = copy.deepcopy(shapes)
             sync_twins(shapes, shapes, axes, int(gores["count"]))
+        # A renamed row keeps its panel colours.
+        colours = renamed(self.project.state.colours, letters, _row_letters(design), shapes=False)
+        overlays = _overlays_data(self.project.state)
         return self.apply_state(
-            _state_from(design, patterns, shapes, axes), description, provenance
+            _state_from(design, patterns, shapes, axes, colours, overlays),
+            description,
+            provenance,
         )
 
     def edit_shapes(self, description: str, mutate: Callable[[list[dict[str, Any]]], None]) -> bool:
@@ -483,7 +512,89 @@ class ProjectSession:
         gores = self.project.state.design.gores
         if gores is not None:
             sync_twins(before, shapes, axes, gores.count)
-        return self.apply_state(_state_from(design, patterns, shapes, axes), description)
+        # A renamed shape keeps its piece colours.
+        colours = renamed(
+            self.project.state.colours,
+            [str(s.get("name")) for s in before],
+            [str(s.get("name")) for s in shapes],
+            shapes=True,
+        )
+        overlays = _overlays_data(self.project.state)
+        return self.apply_state(
+            _state_from(design, patterns, shapes, axes, colours, overlays), description
+        )
+
+    def edit_overlays(
+        self, description: str, mutate: Callable[[list[dict[str, Any]]], None]
+    ) -> bool:
+        """Edit a JSON copy of the overlays (appliqués), validate and apply (one undo
+        step); a renamed overlay keeps its colour.
+
+        Parameters
+        ----------
+        description : str
+            History text.
+        mutate : callable
+            ``mutate(overlays_data)`` changes the list of overlay dictionaries in place
+            (lengths in m, angles in degrees; :class:`envelopelab.project.overlays.
+            OverlaySpec`).
+
+        Raises
+        ------
+        ValueError
+            When the edited data is not valid (nothing is changed).
+        """
+        state = self.project.state
+        design, patterns = _state_data(state)
+        before = _overlays_data(state)
+        overlays = copy.deepcopy(before)
+        mutate(overlays)
+        colours = renamed(
+            state.colours,
+            [str(o.get("name")) for o in before],
+            [str(o.get("name")) for o in overlays],
+            shapes=True,
+        )
+        return self.apply_state(
+            _state_from(
+                design,
+                patterns,
+                _shapes_data(state),
+                _axes_data(state),
+                colours,
+                overlays,
+            ),
+            description,
+        )
+
+    def edit_colours(
+        self, description: str, change: Callable[[PanelColours], PanelColours]
+    ) -> bool:
+        """Change the panel colours (one undo step); colours of panels no longer in the
+        design are dropped (:func:`envelopelab.project.colours.pruned`).
+
+        Parameters
+        ----------
+        description : str
+            History text.
+        change : callable
+            ``change(colours)`` returns the new colours (:mod:`envelopelab.project.colours`).
+
+        Returns
+        -------
+        bool
+            Whether the state changed.
+        """
+        state = self.project.state
+        gores = state.design.gores
+        rows = [r.letter for r in gores.panel_rows] if gores is not None else []
+        halved = [r.letter for r in gores.panel_rows if r.half_gore] if gores is not None else []
+        count = gores.count if gores is not None else 0
+        grids = [shape_grid(s) for s in state.shapes]
+        grids += [overlay_grid(o.name) for o in state.overlays]
+        colours = pruned(change(state.colours), rows, count, grids, halved)
+        after = state.model_copy(update={"colours": colours})
+        return self.apply_state(after, description)
 
     def set_design_value(
         self, path: Sequence[str | int], value: Any, description: str | None = None

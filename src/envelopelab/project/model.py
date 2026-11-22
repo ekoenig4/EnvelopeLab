@@ -16,7 +16,11 @@ JSON file that wraps one design document (unchanged, in the design schema) with
   intended inflated tape line) while the profile is compensated for the solved shape;
 * the **special shapes** placed on the envelope (domes, tubes, revolved and mesh shapes,
   :mod:`envelopelab.project.shapes`), part of the design state since version 2, with
-  their panel layouts (seam turn, panel widths, horizontal splits) since version 4.
+  their panel layouts (seam turn, panel widths, horizontal splits) since version 4;
+* the **panel colours** (a visual layer: the display colour of envelope panels and
+  special-shape pieces, :mod:`envelopelab.project.colours`) and the **overlays**
+  (appliqué patches sewn on top of the envelope, :mod:`envelopelab.project.overlays`)
+  since version 8.
 
 Version 1 files (no shapes) are read as version 2 files with no shapes (ADR-0020).
 
@@ -35,13 +39,15 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from envelopelab.design.model import DesignDocument, load_design_document
+from envelopelab.project.colours import PanelColours
+from envelopelab.project.overlays import OverlaySpec
 from envelopelab.project.shapes import ShapeSpec
 from envelopelab.project.symmetry import SymmetryAxis
 
 PROJECT_FORMAT: Literal["envelopelab.project"] = "envelopelab.project"
-PROJECT_FORMAT_VERSION: Literal[7] = 7
+PROJECT_FORMAT_VERSION: Literal[8] = 8
 #: Older versions :func:`load_project_text` still reads (see :func:`migrate_project_data`).
-READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7)
+READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 8)
 PROJECT_SUFFIX = ".elproj"
 
 NotchEdge = Literal["left", "right", "bottom", "top"]
@@ -230,8 +236,9 @@ class ProfileTarget(BaseModel):
 
 
 class DesignState(BaseModel):
-    """Everything that is edited: the design document, its pattern annotations and the
-    special shapes placed on it."""
+    """Everything that is edited: the design document, its pattern annotations, the
+    special shapes placed on it, the symmetry axes, the panel colours and the overlays
+    (appliqués sewn on the envelope)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -239,12 +246,17 @@ class DesignState(BaseModel):
     patterns: PatternSet = Field(default_factory=PatternSet)
     shapes: list[ShapeSpec] = Field(default_factory=list)
     symmetry_axes: list[SymmetryAxis] = Field(default_factory=list)
+    colours: PanelColours = Field(default_factory=PanelColours)
+    overlays: list[OverlaySpec] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _unique_shape_names(self) -> DesignState:
         names = [s.name for s in self.shapes]
         if len(set(names)) != len(names):
             raise ValueError("special shape names must be unique")
+        every = names + [o.name for o in self.overlays]
+        if len(set(every)) != len(every):
+            raise ValueError("special shape and overlay names must be unique")
         axes = [a.name for a in self.symmetry_axes]
         if len(set(axes)) != len(axes):
             raise ValueError("symmetry axis names must be unique")
@@ -515,7 +527,7 @@ class Project(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     format: Literal["envelopelab.project"] = PROJECT_FORMAT
-    format_version: Literal[7] = PROJECT_FORMAT_VERSION
+    format_version: Literal[8] = PROJECT_FORMAT_VERSION
     state: DesignState
     locks: ConstraintLocks = Field(default_factory=ConstraintLocks)
     profile_target: ProfileTarget | None = None
@@ -528,13 +540,19 @@ class Project(BaseModel):
 
 
 def state_to_data(state: DesignState) -> dict[str, Any]:
-    """JSON data of a design state (design with its content hash)."""
-    return {
+    """JSON data of a design state (design with its content hash); the panel colours
+    only when some panel is coloured."""
+    data: dict[str, Any] = {
         "design": state.design.with_updated_hash().model_dump(by_alias=True, mode="json"),
         "patterns": state.patterns.model_dump(mode="json"),
         "shapes": [s.model_dump(mode="json") for s in state.shapes],
         "symmetry_axes": [a.model_dump(mode="json") for a in state.symmetry_axes],
     }
+    if not state.colours.is_empty():
+        data["colours"] = state.colours.to_data()
+    if state.overlays:
+        data["overlays"] = [o.model_dump(mode="json") for o in state.overlays]
+    return data
 
 
 def state_from_data(data: dict[str, Any]) -> DesignState:
@@ -546,6 +564,8 @@ def state_from_data(data: dict[str, Any]) -> DesignState:
             "patterns": PatternSet.model_validate(data["patterns"]),
             "shapes": data.get("shapes", []),
             "symmetry_axes": data.get("symmetry_axes", []),
+            "colours": data.get("colours") or {},
+            "overlays": data.get("overlays") or [],
         }
     )
 
@@ -563,7 +583,8 @@ def migrate_project_data(raw: dict[str, Any]) -> dict[str, Any]:
     caps are centred (ADR-0049). Versions 1 to 5 have no relative meeting points
     (``cap_across``, ``cap_up``); their caps are placed by ``cap_shift`` as before
     (ADR-0052). Versions 1 to 6 have no crown outlines (``crown_shape``); their caps are
-    circles (ADR-0054).
+    circles (ADR-0054). Versions 1 to 7 have no panel colours (``colours``); their panels
+    read as uncoloured (ADR-0055), and no overlays (ADR-0056).
 
     Raises
     ------

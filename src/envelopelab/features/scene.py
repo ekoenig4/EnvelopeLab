@@ -143,6 +143,10 @@ class ShapeDisplay:
         every horizontal split, and the tip seam of a tip disc.
     rim : ndarray, shape (r, 3)
         The rim, sewn to the envelope along the footprint (closed: first point repeated), m.
+    tier : ndarray of int, shape (t,) or None
+        Tier of every triangle from the rim, from 0, by the meridian position of its
+        centre and the horizontal splits (display only: a triangle that straddles a split
+        takes the tier of its centre); None: every triangle in the first tier.
     """
 
     points: FloatArray
@@ -151,6 +155,7 @@ class ShapeDisplay:
     pieces: int
     seams: list[FloatArray] = field(default_factory=list)
     rim: FloatArray = field(default_factory=lambda: np.zeros((0, 3)))
+    tier: IntArray | None = None
 
 
 def _piece_of(
@@ -247,6 +252,12 @@ def designed_display(design: PrimitiveDesign, rows: int = 60, per_piece: int = 1
     # _grid writes two triangles per quad, row by row, column by column.
     column = np.repeat(np.tile(np.arange(cols), rows - 1), 2)
     piece = (column // per_piece).astype(np.int64)
+    heights = split_heights(prim, skin.total)
+    if len(heights):
+        u = np.asarray(skin.u_of(tt.ravel(), pp.ravel()), dtype=np.float64)
+        tier = np.searchsorted(heights, u[tri].mean(axis=1), side="right").astype(np.int64)
+    else:
+        tier = np.zeros(len(tri), dtype=np.int64)
     seams = [skin.at(t, np.full(rows, float(p))) for p in seams_phi[:-1]]
     # Horizontal splits: circles round the skin at their meridian arc lengths.
     around = seams_phi[0] + np.linspace(0.0, 2.0 * math.pi, cols + 1)
@@ -258,6 +269,7 @@ def designed_display(design: PrimitiveDesign, rows: int = 60, per_piece: int = 1
         pts = np.vstack([pts, cx])
         tri = np.vstack([tri, ctri + c])
         piece = np.concatenate([piece, np.full(len(ctri), m, dtype=np.int64)])
+        tier = np.concatenate([tier, np.full(len(ctri), len(heights), dtype=np.int64)])
         ring = seams_phi[0] + np.linspace(0.0, 2.0 * math.pi, cols + 1)
         seams.append(skin.at(np.ones(len(ring)), ring))
     elif prim.closed_tip:
@@ -268,9 +280,10 @@ def designed_display(design: PrimitiveDesign, rows: int = 60, per_piece: int = 1
         fan = np.asarray([[top + (j + 1) % cols, top + j, c] for j in range(cols)], dtype=np.int64)
         tri = np.vstack([tri, fan[:, ::-1]])
         piece = np.concatenate([piece, np.full(cols, m, dtype=np.int64)])
+        tier = np.concatenate([tier, np.full(cols, len(heights), dtype=np.int64)])
         ring = seams_phi[0] + np.linspace(0.0, 2.0 * math.pi, cols + 1)
         seams.append(skin.at(np.ones(len(ring)), ring))
-    return ShapeDisplay(pts, tri, piece, m, seams, rim)
+    return ShapeDisplay(pts, tri, piece, m, seams, rim, tier)
 
 
 def _chains(edges: IntArray) -> list[list[int]]:

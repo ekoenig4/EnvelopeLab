@@ -119,7 +119,7 @@ def test_kept_shape_run_survives_save_and_reopen(
     assert [r.run_id for r in s.project.shape_runs] == [newer.run_id]
     path = s.save(tmp_path / "p.elproj")
     raw = json.loads(path.read_text(encoding="utf-8"))
-    assert raw["format_version"] == PROJECT_FORMAT_VERSION == 7
+    assert raw["format_version"] == PROJECT_FORMAT_VERSION == 8
     assert raw["shape_runs"][0]["result_file"].endswith(f"{newer.run_id}.npz")
     reopened = ProjectSession.open(path)
     kept = reopened.shape_run("pod")
@@ -135,9 +135,9 @@ def test_version_2_file_reads_without_shape_runs() -> None:
     data["format_version"] = 2
     del data["shape_runs"]
     project = load_project_text(json.dumps(data))
-    assert project.format_version == 7 and project.shape_runs == []
+    assert project.format_version == 8 and project.shape_runs == []
     with pytest.raises(ValueError, match="version"):
-        load_project_text(json.dumps({**data, "format_version": 8}))
+        load_project_text(json.dumps({**data, "format_version": 9}))
 
 
 def test_shape_runs_keep_skin_results_for_colour_maps(

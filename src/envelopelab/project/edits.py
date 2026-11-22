@@ -30,6 +30,13 @@ from envelopelab.geometry.profile_segments import (
     split_segment,
 )
 from envelopelab.materials.repository import FabricCatalog, FabricLibraryRepository
+from envelopelab.project.colours import (
+    PanelColours,
+    PanelRef,
+    normalise_colour,
+    painted,
+    replaced,
+)
 from envelopelab.project.dependencies import canonical_hash
 from envelopelab.project.gore_design import (
     DEFAULT_CREST_LOFT,
@@ -55,6 +62,7 @@ from envelopelab.project.model import (
     ProfileTarget,
     utc_now,
 )
+from envelopelab.project.overlays import OverlaySpec
 from envelopelab.project.profile_match import (
     FIT_TOLERANCE,
     MAX_CONTROL_POINTS,
@@ -2450,3 +2458,161 @@ def move_feed_holes_clear(
 
         session.edit_shapes("Move feed holes clear of seams", mutate)
     return notes
+
+
+# -- panel colours (a visual layer, ADR-0055) ---------------------------------------------
+
+
+def paint_panels(
+    session: ProjectSession,
+    refs: Sequence[PanelRef],
+    colour: str | None,
+    description: str | None = None,
+) -> bool:
+    """Set the display colour of the panels ``refs`` (one undo step).
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Open project.
+    refs : sequence of PanelRef
+        Envelope panels and special-shape pieces (:mod:`envelopelab.project.colours`).
+    colour : str or None
+        sRGB ``#rrggbb`` (or ``#rgb``); None clears the colour.
+    description : str, optional
+        History text (default: says what was painted).
+
+    Returns
+    -------
+    bool
+        Whether the state changed.
+
+    Raises
+    ------
+    ValueError
+        For a malformed colour (nothing is changed).
+    """
+    value = None if colour is None else normalise_colour(colour)
+    if description is None:
+        what = refs[0].label() if len(refs) == 1 else f"{len(refs)} panels"
+        description = f"Clear colour of {what}" if value is None else f"Paint {what} {value}"
+    return session.edit_colours(description, lambda c: painted(c, refs, value))
+
+
+def replace_colour(session: ProjectSession, old: str, new: str | None) -> bool:
+    """Repaint every panel of colour ``old`` with ``new`` (None: clear them; one step).
+
+    Raises
+    ------
+    ValueError
+        For a malformed colour.
+    """
+    old = normalise_colour(old)
+    value = None if new is None else normalise_colour(new)
+    text = f"Replace colour {old} with {value}" if value else f"Clear colour {old}"
+    return session.edit_colours(text, lambda c: replaced(c, old, value))
+
+
+def clear_colours(session: ProjectSession) -> bool:
+    """Clear every panel colour (one step)."""
+    return session.edit_colours("Clear all panel colours", lambda _c: PanelColours())
+
+
+# -- overlays: appliqués sewn on the envelope (ADR-0056) ---------------------------------
+
+
+def unique_name(session: ProjectSession, base: str) -> str:
+    """``base`` or ``base 2``, ``base 3``, ... : a name no special shape or overlay has."""
+    taken = {s.name for s in session.state.shapes} | {o.name for o in session.state.overlays}
+    if base not in taken:
+        return base
+    k = 2
+    while f"{base} {k}" in taken:
+        k += 1
+    return f"{base} {k}"
+
+
+def add_overlay(session: ProjectSession, spec: OverlaySpec) -> bool:
+    """Add an overlay (one step).
+
+    Raises
+    ------
+    ValueError
+        When a special shape or overlay of that name exists, or the overlay does not fit
+        on the envelope (nothing is changed).
+    """
+    _check_overlay(session, spec)
+    data = spec.model_dump(mode="json")
+
+    def mutate(overlays: list[dict[str, Any]]) -> None:
+        overlays.append(data)
+
+    return session.edit_overlays(f"Add overlay {spec.name}", mutate)
+
+
+def _check_overlay(session: ProjectSession, spec: OverlaySpec) -> None:
+    """Refuse an overlay that cannot be laid on the envelope (ValueError)."""
+    from envelopelab.project.overlays import overlay_layout
+    from envelopelab.project.shapes import envelope_surface
+
+    if session.design.gores is None:
+        raise ValueError("overlays are placed on a standard-gore design")
+    overlay_layout(spec, envelope_surface(session.design, session.patterns))
+
+
+def update_overlay(session: ProjectSession, name: str, values: dict[str, Any]) -> bool:
+    """Change fields of overlay ``name`` (JSON values: m, deg; ``placement`` merges; one
+    step).
+
+    Raises
+    ------
+    KeyError
+        For an unknown overlay.
+    ValueError
+        For invalid values, a name that is taken, or an overlay that would not fit on the
+        envelope (nothing is changed).
+    """
+    from envelopelab.project.overlays import OverlaySpec as Spec
+
+    current = next((o for o in session.state.overlays if o.name == name), None)
+    if current is None:
+        raise KeyError(f"no overlay {name!r}")
+    data = current.model_dump(mode="json")
+    for key, value in values.items():
+        if key == "placement":
+            data["placement"].update(value)
+        else:
+            data[key] = value
+    spec = Spec.model_validate(data)
+    _check_overlay(session, spec)
+
+    def mutate(overlays: list[dict[str, Any]]) -> None:
+        for i, o in enumerate(overlays):
+            if o["name"] == name:
+                overlays[i] = spec.model_dump(mode="json")
+
+    return session.edit_overlays(f"Edit overlay {spec.name}", mutate)
+
+
+def remove_overlay(session: ProjectSession, name: str) -> bool:
+    """Remove overlay ``name`` (``KeyError`` if unknown; one step)."""
+
+    def mutate(overlays: list[dict[str, Any]]) -> None:
+        kept = [o for o in overlays if o["name"] != name]
+        if len(kept) == len(overlays):
+            raise KeyError(f"no overlay {name!r}")
+        overlays[:] = kept
+
+    return session.edit_overlays(f"Remove overlay {name}", mutate)
+
+
+def duplicate_overlay(session: ProjectSession, name: str) -> str:
+    """Copy overlay ``name`` one gore round the envelope; returns the copy's name."""
+    current = next((o for o in session.state.overlays if o.name == name), None)
+    if current is None:
+        raise KeyError(f"no overlay {name!r}")
+    gores = session.design.gores.count if session.design.gores else 1
+    placement = current.placement.model_copy(update={"gore": current.placement.gore % gores + 1})
+    copy = current.model_copy(update={"name": unique_name(session, name), "placement": placement})
+    add_overlay(session, copy)
+    return copy.name

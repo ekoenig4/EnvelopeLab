@@ -1,6 +1,6 @@
 # ADR-0001: Stack choice
 
-- Status: Accepted; the Python version is superseded by ADR-0055 (Python 3.12)
+- Status: Accepted; the Python version is superseded by ADR-0057 (Python 3.12)
 - Date: 2026-09-28
 
 ## Context

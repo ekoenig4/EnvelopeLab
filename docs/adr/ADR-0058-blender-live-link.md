@@ -1,4 +1,4 @@
-# ADR-0056: Live link with Blender through an EnvelopeLab add-on
+# ADR-0058: Live link with Blender through an EnvelopeLab add-on
 
 - Status: Proposed
 - Date: 2026-11-21

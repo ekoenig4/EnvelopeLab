@@ -89,7 +89,7 @@ function Find-Python {
         if (-not $found) { throw "$Python is not Python 3.12 or newer" }
         return $found
     }
-    # 3.12 first: the only version CI tests (ADR-0055); every dependency has wheels for 3.13 too.
+    # 3.12 first: the only version CI tests (ADR-0057); every dependency has wheels for 3.13 too.
     foreach ($v in "3.12", "3.13") {
         $found = Test-Python "py" @("-$v")
         if ($found) { return $found }

@@ -19,7 +19,7 @@ depends on a set of *input groups* (slices of the design state, e.g. ``geometry`
     operating, materials, fabric_properties, tapes, seam_construction ──► simulation
     geometry, manual_outlines ──► flattening
     materials, fabric_properties ──► nesting
-    meta, rigging, turning_vents, scale_variants ──► export
+    meta, rigging, turning_vents, scale_variants, colours, overlays ──► export
     geometry, row_zones, materials, shapes ──► shapes
 
 The *fingerprint* of an artifact is the SHA-256 of its own input slices and the
@@ -72,6 +72,8 @@ INPUT_GROUPS: tuple[str, ...] = (
     "vent_openings",
     "scoop",
     "shapes",
+    "colours",
+    "overlays",
 )
 
 #: Input groups supplied from outside the project file (see module docstring).
@@ -79,7 +81,7 @@ EXTERNAL_GROUPS: tuple[str, ...] = ("fabric_properties",)
 
 #: Input groups left out of the fingerprints while empty, so designs that do not use them
 #: keep the fingerprints they had before the group existed (no stale artifacts on open).
-OPTIONAL_GROUPS: tuple[str, ...] = ("piece_split",)
+OPTIONAL_GROUPS: tuple[str, ...] = ("piece_split", "colours", "overlays")
 
 
 @dataclass(frozen=True)
@@ -147,7 +149,11 @@ ARTIFACTS: tuple[ArtifactSpec, ...] = (
     ArtifactSpec("flattening", "Flattening", ("geometry", "manual_outlines")),
     ArtifactSpec("nesting", "Nesting", ("materials", "fabric_properties"), ("patterns",)),
     ArtifactSpec(
-        "export", "Export", ("meta", "rigging", "turning_vents", "scale_variants"), ("nesting",)
+        "export",
+        "Export",
+        # The build pack prints the panel colours (ADR-0055); nothing else reads them.
+        ("meta", "rigging", "turning_vents", "scale_variants", "colours", "overlays"),
+        ("nesting",),
     ),
     ArtifactSpec(
         "shapes",
@@ -174,6 +180,8 @@ def input_groups(
     design: Mapping[str, Any],
     patterns: Mapping[str, Any],
     shapes: Sequence[Mapping[str, Any]] = (),
+    colours: Mapping[str, Any] | None = None,
+    overlays: Sequence[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     """Split a design state into its input groups.
 
@@ -186,6 +194,12 @@ def input_groups(
         Pattern annotations as JSON data (``PatternSet.model_dump(mode="json")``).
     shapes : sequence of mapping
         Special shapes as JSON data (``ShapeSpec.model_dump(mode="json")``); m, deg.
+    colours : mapping, optional
+        Panel colours as JSON data (``PanelColours.to_data()``, sRGB ``#rrggbb``). Only
+        the export reads them (the build pack prints them; ADR-0055).
+    overlays : sequence of mapping
+        Overlays (appliqués) as JSON data (``OverlaySpec.model_dump(mode="json")``); m,
+        deg. Only the export reads them (their cut pieces and markings; ADR-0056).
 
     Returns
     -------
@@ -281,6 +295,10 @@ def input_groups(
             if v.get("simulate_open")
         ],
         "shapes": [dict(s) for s in shapes],
+        # Panel colours: only the build pack prints them (the export), so painting never
+        # makes patterns, meshes or simulations stale.
+        "colours": {k: v for k, v in (colours or {}).items() if v},
+        "overlays": [dict(o) for o in overlays],
     }
 
 
