@@ -3333,12 +3333,22 @@ class EnvelopeHost(HostSurface):
         return d.surface.signed_distance(p @ self._rotation())
 
 
+#: Below this turn of the meridian per unit length, 1/m, the envelope round a shape is
+#: taken as straight (a cone, :math:`R_1 = \infty`; source: assumed, rounding level).
+STRAIGHT_CURVATURE = 1e-9
+
+
 def host_surface_at(design: PrimitiveDesign, window: float = 0.25) -> EnvelopeHost:
     r"""Host of a primitive's sub-model: the true envelope round the base point.
 
     The local radii (for the far-field prestress only) are :math:`R_1`, the meridian
     radius of curvature from the tangent-angle change over ``base_s +- window``, and
-    :math:`R_2 = r/\cos\beta`.
+    :math:`R_2 = r/\cos\beta`. Where the meridian is straight there (a turn below
+    :data:`STRAIGHT_CURVATURE` per m, e.g. between the control points of a profile of
+    straight segments) the envelope is locally a cone and :math:`R_1 = \infty`: the
+    prestress is then the exact membrane state of a pressurised cone,
+    :math:`N_\theta = p R_2`, :math:`N_m = p R_2 / 2`
+    (:func:`~envelopelab.features.builder.shell_prestress`).
 
     Parameters
     ----------
@@ -3351,6 +3361,12 @@ def host_surface_at(design: PrimitiveDesign, window: float = 0.25) -> EnvelopeHo
     -------
     EnvelopeHost
         Host with its chart origin at the base point.
+
+    Raises
+    ------
+    PrimitiveError
+        Where the envelope curves inward (toward its axis) round the base point: the
+        membrane would not be taut there in this model.
     """
     surface, s0 = design.surface, design.base_s
     prof = surface.profile
@@ -3359,14 +3375,17 @@ def host_surface_at(design: PrimitiveDesign, window: float = 0.25) -> EnvelopeHo
     dz = np.interp([lo, s0, hi], prof.s, surface._dz)
     ang = np.unwrap(np.arctan2(dz, dr))
     curvature = float(ang[2] - ang[0]) / max(hi - lo, 1e-12)
-    if curvature <= 1e-9:
+    if curvature < -STRAIGHT_CURVATURE:
         raise PrimitiveError(
-            f"{design.primitive.name}: the envelope is not convex round the feature"
+            f"{design.primitive.name}: the envelope curves inward under the shape "
+            f"({s0:.2f} m up the tape); a shape needs a part of the envelope that is "
+            "curved outward or straight"
         )
     beta = math.atan2(-float(dr[1]), float(dz[1]))
     r0, z0 = surface.radius_height(np.array([s0]))
     return EnvelopeHost(
-        meridian_radius=1.0 / curvature,
+        # A straight stretch (a cone) has an infinite meridian radius.
+        meridian_radius=math.inf if curvature <= STRAIGHT_CURVATURE else 1.0 / curvature,
         hoop_radius=float(r0[0]) / math.cos(beta),
         normal_elevation=beta,
         centre_height=float(z0[0]),

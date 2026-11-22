@@ -477,6 +477,12 @@ and the host footprint therefore have the same length. The load tapes on the gor
 and optionally the row seams, cross the patch. The far-field prestress of the patch uses
 the local radii at the base point (\(R_1\) from the meridian's curvature over
 \( \pm 0.25 \) m, \( R_2 = r/\cos\beta \)) in the membrane theory of shells of revolution.
+Where the meridian is straight over that window (a turn below \(10^{-9}\) per m, assumed;
+for example between the control points of a profile of straight segments) the envelope
+is locally a cone and \(R_1 = \infty\): the prestress is then the exact membrane state
+of a pressurised cone, \(N_\theta = p R_2\), \(N_m = p R_2/2\) (benchmarked on a conical
+flank in [the validation page](../validation/special-shape-primitives.md)). Only an
+envelope that curves inward round the base point is refused.
 
 **Footprint nodes on the designed footprint.** The skin rim and the host footprint share
 their nodes, and every rim node rests on its piece's flat rim at the point of the designed
@@ -561,8 +567,8 @@ tangent plane, its hoop extent divided by \(2w(s)\) at each height.
 
 ## Valid range
 
-The footprint must stay on the convex part of the envelope between the mouth and the
-crown, and be star-shaped about the base point. Bases larger than about a quarter of the
+The footprint must stay on a part of the envelope that curves outward or is straight (a
+cone) between the mouth and the crown, and be star-shaped about the base point. Bases larger than about a quarter of the
 local envelope radius, and leans that make the skin touch the envelope again, are
 rejected. Leans are limited to 75°.
 

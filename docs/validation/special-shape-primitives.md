@@ -30,6 +30,8 @@ Primitives on a generic sphere of radius 8 m with 24 gores, axis along the envel
 | Free-form sphere mesh r=1 m (48 x 96), 12 panels: rim length | 0 | 0 | m | < 1e-06 m | 1 mm | pass |
 | Free-form sphere mesh r=1 m (48 x 96), 12 panels: skin seam sides | 1.11022e-15 | 0 | m | < 1e-06 m | 1 mm | pass |
 | Dome on load tape and row seam (4 panel runs): attachment marks off the footprint | 1.03143e-06 | 0 | m | 0.001 mm | 1 mm | pass |
+| Dome on a conical flank (r=2.5 m, R2=2.795 m, p=100 Pa): hoop prestress p R2 | 279.508 | 279.508 | N/m | < 1e-06 | 0.02 | pass |
+| Dome on a conical flank (r=2.5 m, R2=2.795 m, p=100 Pa): meridional prestress p R2/2 | 139.754 | 139.754 | N/m | < 1e-06 | 0.02 | pass |
 
 ## Inflated dome, preview solver
 

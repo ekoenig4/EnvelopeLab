@@ -109,6 +109,9 @@ Woinowsky-Krieger, *Theory of Plates and Shells*, sec. 105):
 N_v = \frac{p R_2}{2}, \qquad N_u = p R_2\left(1 - \frac{R_2}{2R_1}\right) \ (\ge 0).
 \]
 
+A straight meridian (a cone) has \(R_1 = \infty\) and \(N_u = p R_2\): the exact
+membrane state of a pressurised cone.
+
 **Skin.** Either the flat as-cut pattern (rim nodes placed by the match-point
 correspondence), a skin sewn from several cut pieces each meshed in its own flat
 coordinates (`designed`, used by the

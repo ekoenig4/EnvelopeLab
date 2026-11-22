@@ -13,7 +13,10 @@ forms:
   :math:`(r_b + e\sin\gamma)^2 + (R - e\cos\gamma)^2 = R^2`, and its tip edge develops to
   an arc of length :math:`2\pi r_t/M`;
 * a hemispherical dome of radius :math:`a` stands :math:`a` above the envelope at its
-  apex and its footprint is the circle :math:`2\pi a`.
+  apex and its footprint is the circle :math:`2\pi a`;
+* on a generic envelope with a straight conical flank (:func:`cone_envelope`), a shape's
+  host is a cone, :math:`R_1 = \infty`, whose membrane prestress is exact:
+  :math:`N_\theta = p R_2`, :math:`N_m = p R_2/2` with :math:`R_2 = r/\cos\beta`.
 
 The solver study inflates a 16-gore dome on the same envelope with the preview solver at
 three mesh sizes, against the same model whose skin rests in the designed shape (no
@@ -29,7 +32,7 @@ from typing import Any
 import numpy as np
 
 from envelopelab.atmosphere import celsius_to_kelvin
-from envelopelab.features.builder import build_appendage
+from envelopelab.features.builder import build_appendage, shell_prestress
 from envelopelab.features.metrics import appendage_metrics
 from envelopelab.features.primitives import (
     AREA_DISTORTION_LIMIT,
@@ -41,6 +44,7 @@ from envelopelab.features.primitives import (
     RowBand,
     Tube,
     design_primitive,
+    host_surface_at,
     primitive_appendage,
 )
 from envelopelab.geometry.gore import MeridianProfile
@@ -58,6 +62,9 @@ SPHERE_SPAN = (0.15, 0.97)
 GEOMETRY_TOLERANCE = 1e-3  # m (AGENTS.md geometry default)
 LENGTH_TOLERANCE = 1e-3  # relative (AGENTS.md default 0.1 %)
 STUDY_MESH_SIZES = (0.3, 0.2, 0.15)  # m
+STRESS_TOLERANCE = 0.02  # relative (AGENTS.md analytic stress default 2 %)
+#: Cone envelope: mouth radius, flank top radius and height, crown cap radius, m.
+CONE_MOUTH, CONE_TOP, CONE_HEIGHT = 1.0, 4.0, 6.0
 STUDY_GORES = 16
 #: How far a fresh study may differ from the committed one, per column: ("rel", fraction)
 #: or ("abs", value in the column's unit). Physical results use the platform tolerance of
@@ -89,6 +96,20 @@ def sphere_envelope(rows: int = 4) -> EnvelopeSurface:
         for k, (a, b) in enumerate(zip(edges[:-1], edges[1:], strict=True))
     ]
     return EnvelopeSurface(profile, SPHERE_GORES, rows=bands)
+
+
+def cone_envelope(gores: int = 12) -> EnvelopeSurface:
+    """Generic envelope with a straight conical flank: radius :data:`CONE_MOUTH` at the
+    mouth widening linearly to :data:`CONE_TOP` at :data:`CONE_HEIGHT` m up, then a
+    quarter circle of radius :data:`CONE_TOP` to the crown (one row)."""
+    t = np.linspace(0.0, 1.0, 600)
+    flank_r = CONE_MOUTH + (CONE_TOP - CONE_MOUTH) * t
+    flank_z = CONE_HEIGHT * t
+    phi = np.linspace(0.0, 0.5 * math.pi, 800)[1:]
+    r = np.r_[flank_r, CONE_TOP * np.cos(phi)]
+    z = np.r_[flank_z, CONE_HEIGHT + CONE_TOP * np.sin(phi)]
+    profile = MeridianProfile.from_points(r, z)
+    return EnvelopeSurface(profile, gores, rows=[RowBand("A", 0.0, profile.meridian_length)])
 
 
 def ellipsoid_mesh(
@@ -414,6 +435,33 @@ def geometry_benchmarks() -> list[BenchmarkResult]:
             GEOMETRY_TOLERANCE,
         )
     )
+
+    # A dome on a straight flank: its host is a cone (R1 infinite), exact prestress.
+    cone_surface = cone_envelope()
+    flank = math.hypot(CONE_TOP - CONE_MOUTH, CONE_HEIGHT)
+    s_mid = 0.5 * flank
+    r_mid = 0.5 * (CONE_MOUTH + CONE_TOP)
+    beta = -math.atan2(CONE_TOP - CONE_MOUTH, CONE_HEIGHT)  # outward normal points down
+    r2 = r_mid / math.cos(beta)
+    pressure = 100.0  # Pa, generic
+    host = host_surface_at(
+        design_primitive(Dome("flank", Placement(1, s_mid), 0.3, 0.3), cone_surface)
+    )
+    n_u, n_v = shell_prestress(pressure, host)
+    tag = f"Dome on a conical flank (r={r_mid:g} m, R2={r2:.3f} m, p={pressure:g} Pa)"
+    out += [
+        BenchmarkResult(
+            f"{tag}: hoop prestress p R2", n_u, pressure * r2, "N/m", "relative", STRESS_TOLERANCE
+        ),
+        BenchmarkResult(
+            f"{tag}: meridional prestress p R2/2",
+            n_v,
+            0.5 * pressure * r2,
+            "N/m",
+            "relative",
+            STRESS_TOLERANCE,
+        ),
+    ]
     return out
 
 

@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: a special shape on a straight stretch of the envelope (for example between the
+  control points of a profile of straight segments) was refused as "the envelope is not
+  convex round the feature". A straight stretch is now a cone (meridian radius infinite),
+  whose starting stresses are exact (hoop p R2, meridional p R2/2; new benchmark rows);
+  only an envelope curving inward is refused, with a message naming where. Results of
+  shapes on curved parts of the envelope are unchanged.
 - Added: **Show** in the 3D view: *Designed*, *Inflated* or *Designed and inflated* (the
   envelope and the special shapes together; the rest mesh is hidden in the first two).
 - Changed: the inflated envelope is drawn like the design with *Colour by: Layer colour*
