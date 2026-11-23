@@ -60,8 +60,9 @@ A second row places the camera on a part of the envelope and keeps viewpoints:
   seam *k*, or at the centre of gore *k*, mouth down, with it running up the middle of
   the view. Seams and gores are numbered as in the Rigging panel (gore *k* lies between
   seams *k − 1* and *k*).
-* **Zoom to layer**: fit the view to the layer selected in the layer list (the design
-  surface, a run's result, the rest mesh, …), keeping the viewing direction.
+* **Zoom to layer**: fit the view to the object selected in the Objects list (the
+  envelope, a special shape, the rest mesh, …) as it is drawn, keeping the viewing
+  direction.
 * **Views**: *Save view* remembers the current viewpoint and projection under a name.
   Choose it in the list to go back there, or *Delete view* to forget it. Saved views
   belong to the project file and are kept between sessions (in the application settings,

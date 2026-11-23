@@ -29,7 +29,6 @@ from typing import Any
 import numpy as np
 from PySide6.QtCore import QEvent, QKeyCombination, QObject, QSettings, Qt, Signal
 from PySide6.QtGui import (
-    QBrush,
     QColor,
     QIcon,
     QKeyEvent,
@@ -276,7 +275,9 @@ class Layer:
         if name is not None:
             return name
         if self.key.startswith("shape-sim:"):
-            return f"{self.key.removeprefix('shape-sim:')} (inflated)"
+            solver = state_of(self.key)
+            extra = "" if solver == PREVIEW_SOLVER else ", CalculiX"
+            return f"{shape_name(self.key)} (inflated{extra})"
         if self.key.startswith("shape:"):
             return f"{self.key.removeprefix('shape:')} (designed)"
         if self.key.startswith("overlay:"):
@@ -378,12 +379,51 @@ SHORT_TITLES = {
 }
 #: Kinds of layers that are solver results (the toolbar's Run list).
 RESULT_KINDS = ("envelopelab-preview", "calculix")
-#: The Show choices of the toolbar: the balloon as designed, as inflated, or both.
-SHOW_MODES: tuple[tuple[str, str], ...] = (
-    ("Designed and inflated", "both"),
-    ("Designed", "designed"),
-    ("Inflated", "inflated"),
+#: What the balloon is drawn as (the toolbar's Shape choice): every object as designed,
+#: or as inflated by the latest preview or CalculiX run.
+SHAPE_STATES: tuple[tuple[str, str], ...] = (
+    ("Designed", "design"),
+    ("Inflated (preview)", "envelopelab-preview"),
+    ("Inflated (CalculiX)", "calculix"),
 )
+PREVIEW_SOLVER = "envelopelab-preview"
+
+
+def sim_key(name: str, solver: str) -> str:
+    """Layer key of special shape ``name`` inflated by ``solver``."""
+    return f"shape-sim:{name}" if solver == PREVIEW_SOLVER else f"shape-sim:{name}@{solver}"
+
+
+def shape_name(key: str) -> str:
+    """The special shape (or overlay) of a ``shape:``, ``shape-sim:`` or ``overlay:`` key."""
+    for prefix in ("shape-sim:", "shape:", "overlay:"):
+        if key.startswith(prefix):
+            name = key.removeprefix(prefix)
+            return name.rsplit("@", 1)[0] if prefix == "shape-sim:" and "@" in name else name
+    return key
+
+
+def object_of(key: str) -> str:
+    """The object on the balloon a layer draws (the Objects list's rows): ``envelope``,
+    ``shape:<name>``, ``overlay:<name>``, or the layer itself (rigging, symmetry axes,
+    the reference mesh, the rest mesh)."""
+    if key in ("design", "marks", *RESULT_KINDS):
+        return "envelope"
+    if key.startswith(("shape:", "shape-sim:")):
+        return "shape:" + shape_name(key)
+    return key
+
+
+def state_of(key: str) -> str | None:
+    """The Shape state a layer belongs to (``design`` or a solver; None: every state)."""
+    if key in RESULT_KINDS:
+        return key
+    if key.startswith("shape-sim:"):
+        name = key.removeprefix("shape-sim:")
+        return name.rsplit("@", 1)[1] if "@" in name else PREVIEW_SOLVER
+    if key in ("reference", "rest"):
+        return None
+    return "design"
 
 
 def _tool_button(text: str, tip: str, checkable: bool = True) -> QToolButton:
@@ -466,8 +506,12 @@ class View3DPanel(QWidget):
         super().__init__()
         self.controller = controller
         self.layers: dict[str, Layer] = {}
-        #: Layer visibility the user set in the list (kept when the layers are rebuilt).
-        self._chosen_visibility: dict[str, bool] = {}
+        #: Objects the user ticked in the Objects list (kept when the layers are rebuilt;
+        #: unlisted objects are shown, the rest mesh is not).
+        self.objects_checked: dict[str, bool] = {"rest": False}
+        #: The latest run of each solver last seen (a new one switches the Shape to it).
+        self._seen_runs: dict[str, str] | None = None
+        self._seen_session: int | None = None
         self.plotter: Any = None
         self.layer_list = QTreeWidget()
         self.layer_list.setObjectName("layerList")
@@ -515,16 +559,21 @@ class View3DPanel(QWidget):
         self.field_choice.activated.connect(lambda _i: self._field_chosen())
         # Any change of field (chosen or set in code) shows or hides the design for it.
         self.field_choice.currentIndexChanged.connect(lambda _i: self._design_for_field())
-        self.show_choice = QComboBox()
-        self.show_choice.setObjectName("showChoice")
-        for text, mode in SHOW_MODES:
-            self.show_choice.addItem(text, mode)
-        self.show_choice.setToolTip(
-            "Show the balloon as designed, as inflated by the chosen run (envelope and the "
-            "special shapes solved with it), or both together. Both are drawn in the "
-            "panel colours with their seams when Colour by is Layer colour."
+        self.state_choice = QComboBox()
+        self.state_choice.setObjectName("stateChoice")
+        for text, state in SHAPE_STATES:
+            self.state_choice.addItem(text, state)
+        self.state_choice.setToolTip(
+            "Draw every object as designed, or as inflated by the latest preview or "
+            "CalculiX run (an object that run did not solve is drawn as designed, and its "
+            "row says so). Tick the objects to draw in the Objects list."
         )
-        self.show_choice.activated.connect(lambda _i: self.set_show(self.show_choice.currentData()))
+        self.state_choice.activated.connect(
+            lambda _i: self.set_state(self.state_choice.currentData())
+        )
+        # The run whose results the colours, banner and details describe: the Shape's
+        # solver (kept as a hidden list, chosen through the Shape).
+        self.run_choice.setVisible(False)
         self.display_mode = QComboBox()
         self.display_mode.setObjectName("displayMode")
         self.display_mode.addItems(DISPLAY_MODES)
@@ -538,8 +587,7 @@ class View3DPanel(QWidget):
         bar = QHBoxLayout(toolbar)
         bar.setContentsMargins(8, 4, 8, 4)
         for text, choice in (
-            ("Show:", self.show_choice),
-            ("Run:", self.run_choice),
+            ("Shape:", self.state_choice),
             ("Colour by:", self.field_choice),
             ("Display:", self.display_mode),
         ):
@@ -683,7 +731,7 @@ class View3DPanel(QWidget):
         side.setMinimumWidth(280)
         side_layout = QVBoxLayout(side)
         side_layout.setContentsMargins(8, 8, 8, 8)
-        side_title = QLabel("Layers")
+        side_title = QLabel("Objects")
         side_title.setObjectName("cardTitle")
         side_layout.addWidget(side_title)
         self.layer_list.setMinimumHeight(120)
@@ -805,7 +853,6 @@ class View3DPanel(QWidget):
     def refresh(self) -> None:
         """Rebuild the layers from the session (the visibility the user chose is kept; other
         layers take their default)."""
-        visible = dict(self._chosen_visibility)
         self.layers = {}
         #: Run record of each result layer (key to record; shape simulations too).
         self._records: dict[str, Any] = {}
@@ -935,63 +982,135 @@ class View3DPanel(QWidget):
                 self._records[solver] = record
         if self._reference_path is not None:
             self._load_reference(self._reference_path)
-        for key, value in visible.items():
-            if key in self.layers:
-                self.layers[key].visible = value
-        self._fill_list()
+        self._follow_new_runs()
         self._fill_results()
+        if self.state() != "design":  # the colours describe the Shape's run
+            index = self.run_choice.findData(self.state())
+            if index >= 0 and self.run_choice.currentIndex() != index:
+                self.run_choice.setCurrentIndex(index)
+                self._update_fields()
+        self._fill_states()
+        self._apply_state()
+        self._fill_list()
         self.seam_number.setMaximum(self._gore_count())
         self._fill_saved()
-        self._apply_show()
         self.redraw()
 
-    # -- designed or inflated -----------------------------------------------------------
+    # -- what each object is drawn as ----------------------------------------------------
 
-    def _designed_keys(self) -> list[str]:
-        return [k for k in self.layers if k == "design" or k.startswith("shape:")]
+    def state(self) -> str:
+        """The Shape choice: ``design`` or a solver."""
+        data = self.state_choice.currentData()
+        return data if isinstance(data, str) else "design"
 
-    def _inflated_keys(self) -> list[str]:
-        return [k for k in self.layers if k in RESULT_KINDS or k.startswith("shape-sim:")]
+    def _has_state(self, state: str) -> bool:
+        """Some object has a result of ``state`` (``design`` always)."""
+        return state == "design" or any(state_of(k) == state for k in self.layers if k != "rest")
 
-    def set_show(self, mode: object) -> bool:
-        """Show the balloon ``designed``, ``inflated`` (the chosen run's envelope and the
-        special shapes solved with it) or ``both``; False (nothing changes) when there is
-        nothing inflated to show yet."""
-        mode = mode if mode in {m for _, m in SHOW_MODES} else "both"
-        if mode != "designed" and not self.parts():
-            if mode == "inflated":
-                self.info.setText("No inflated result to show yet: run a simulation (Run Preview).")
-                self.show_choice.setCurrentIndex(self.show_choice.findData("designed"))
-                return False
-        self.show_choice.setCurrentIndex(self.show_choice.findData(mode))
-        if mode == "both":
-            for key in [*self._designed_keys(), *self.parts()]:
-                self.layers[key].visible = True
-                self._chosen_visibility[key] = True
-        self._apply_show()
+    def set_state(self, state: object) -> bool:
+        """Draw every object ``design``, or inflated by solver ``state``'s latest run;
+        False (nothing changes) when there is no such result yet."""
+        state = state if state in {s for _, s in SHAPE_STATES} else "design"
+        if not self._has_state(str(state)):
+            label = dict((s, t) for t, s in SHAPE_STATES)[str(state)]
+            self.info.setText(f"No result for {label} yet: run that solver first.")
+            self.state_choice.setCurrentIndex(self.state_choice.findData(self.state()))
+            return False
+        self.state_choice.setCurrentIndex(self.state_choice.findData(state))
+        if state != "design":
+            index = self.run_choice.findData(state)
+            if index >= 0 and self.run_choice.currentIndex() != index:
+                self.run_choice.setCurrentIndex(index)
+                self._update_fields()
+        self._apply_state()
+        self._fill_list()
         self.redraw()
         return True
 
-    def _apply_show(self) -> None:
-        """Make the layers follow the Show choice (``both``: the user's own ticks)."""
-        mode = self.show_choice.currentData()
-        if mode not in ("designed", "inflated"):
+    def object_layers(self, obj: str, state: str | None = None) -> list[str]:
+        """Layers that draw object ``obj`` in ``state`` (default: the Shape choice): its
+        layers of that state, else (not solved by that run) its designed ones; with a
+        field drawn on the design (the deviation) its designed layers too."""
+        state = self.state() if state is None else state
+        members = [k for k in self.layers if object_of(k) == obj]
+        stateful = [k for k in members if state_of(k) is not None]
+        if not stateful:
+            return members
+        own = [k for k in members if state_of(k) == state]
+        designed = [k for k in members if state_of(k) == "design"]
+        if not own:
+            return designed
+        if state != "design" and self.field_choice.currentData() in DIVERGING_FIELDS:
+            return own + designed  # the deviation is drawn on the design surface
+        return own
+
+    def objects(self) -> list[str]:
+        """Every object with a layer, in the Objects list's order."""
+        out: list[str] = []
+        for key in self.layers:
+            obj = object_of(key)
+            if obj not in out:
+                out.append(obj)
+        rank = {"envelope": 0, "rigging": 3, "symmetry": 4, "reference": 5, "rest": 6}
+
+        def order(obj: str) -> int:
+            if obj.startswith("shape:"):
+                return 1
+            if obj.startswith("overlay:"):
+                return 2
+            return rank.get(obj, 7)
+
+        return sorted(out, key=order)
+
+    def _apply_state(self) -> None:
+        """Every layer's visibility from the ticked objects and the Shape choice."""
+        for layer in self.layers.values():
+            layer.visible = False
+        for obj in self.objects():
+            if self.objects_checked.get(obj, True):
+                for key in self.object_layers(obj):
+                    self.layers[key].visible = True
+        self.field_choice.setEnabled(self.state() != "design" and self.field_choice.count() > 1)
+
+    def _fill_states(self) -> None:
+        """Grey out the Shape choices without a result, saying why."""
+        items = self.state_choice.model()
+        for i, (text, state) in enumerate(SHAPE_STATES):
+            ok = self._has_state(state)
+            if isinstance(items, QStandardItemModel):
+                item = items.item(i)
+                if item is not None:
+                    item.setEnabled(ok)
+                    item.setToolTip(
+                        "" if ok else f"No result yet: run {text.split('(')[-1].rstrip(')')} first"
+                    )
+
+    def _follow_new_runs(self) -> None:
+        """A new run (of either solver, of the envelope or of a shape on its own) since the
+        last refresh shows the balloon as it inflated it, coloured by its factor of safety:
+        its failures are seen at once. Opening a project starts on the design."""
+        session = self.controller.session
+        # Envelope runs, and shape simulations (a shape simulated on its own too).
+        latest = {
+            k: str(r.run_id)
+            for k, r in self._records.items()
+            if k in RESULT_KINDS or k.startswith("shape-sim:")
+        }
+        if session is None or id(session) != self._seen_session:
+            self._seen_session = None if session is None else id(session)
+            self._seen_runs = latest
+            self.state_choice.setCurrentIndex(self.state_choice.findData("design"))
             return
-        inflated = set(self.parts()) if mode == "inflated" else set()
-        if mode == "inflated" and not inflated:
-            mode = "designed"  # the run went away: show the design rather than nothing
-            self.show_choice.setCurrentIndex(self.show_choice.findData(mode))
-        for key in self._designed_keys():
-            self.layers[key].visible = mode == "designed"
-            self._chosen_visibility[key] = mode == "designed"
-        for key in self._inflated_keys():
-            self.layers[key].visible = key in inflated
-            self._chosen_visibility[key] = key in inflated
-        if "rest" in self.layers:
-            # The as-sewn starting mesh is neither: it would cover the comparison.
-            self.layers["rest"].visible = False
-            self._chosen_visibility["rest"] = False
-        self._fill_list()
+        new = [k for k, run in latest.items() if (self._seen_runs or {}).get(k) != run]
+        self._seen_runs = latest
+        if new:
+            solver = state_of(new[-1]) or "design"
+            self.state_choice.setCurrentIndex(self.state_choice.findData(solver))
+            index = self.run_choice.findData(solver)
+            if index >= 0:
+                self.run_choice.setCurrentIndex(index)
+        elif not self._has_state(self.state()):
+            self.state_choice.setCurrentIndex(self.state_choice.findData("design"))
 
     def _overlay_layers(self) -> None:
         """Every overlay (appliqué, ADR-0056) as a patch on the design surface, in its
@@ -1069,16 +1188,15 @@ class View3DPanel(QWidget):
                 polylines=lines,
                 face_colors=self._piece_colors(shown, specs.get(name), result.design),
             )
-            layer.visible = service.simulation_status(name) != "current"
             self.layers[layer.key] = layer
-        for name, sim in service.simulations.items():
+        for (name, solver_key), sim in service.solver_simulations.items():
             result = service.shown(name)
             if name not in service.keys or result is None or result.design is None:
                 continue
             placed = result.design  # the shape as placed now (offset and fabric)
             shown = sim.display
             shift = display_offset(host, placed) if host else np.zeros(3)
-            stale = service.simulation_status(name) != "current"
+            stale = sim.key != service.current_simulation_key(name)
             converged = bool(sim.record.converged)
             solver = SOLVER_LABELS.get(sim.record.solver, sim.record.solver)
             label = f"Special shape {name} as sewn and inflated ({solver})"
@@ -1086,7 +1204,7 @@ class View3DPanel(QWidget):
                 label += " [NOT CONVERGED]"
             if stale:
                 label += " [STALE]"
-            key = f"shape-sim:{name}"
+            key = sim_key(name, solver_key)
             self._records[key] = sim.record
             self._shape_runs[key] = (sim, designed.get(name) or designed_display(placed))
             self.layers[key] = Layer(
@@ -1225,40 +1343,80 @@ class View3DPanel(QWidget):
             rgb[mask] = painted[mask] * 255.0
         return np.asarray(np.round(rgb).astype(np.uint8))
 
+    def _object_name(self, obj: str) -> str:
+        if obj == "envelope":
+            return "Envelope"
+        if obj.startswith("shape:"):
+            return obj.removeprefix("shape:")
+        if obj.startswith("overlay:"):
+            return obj.removeprefix("overlay:")
+        return SHORT_NAMES.get(obj) or (self.layers[obj].short if obj in self.layers else obj)
+
+    def _object_row(self, obj: str) -> tuple[str, str, str]:
+        """Text, tooltip and colour of object ``obj``'s row: its name and the status of
+        what it is drawn as now (an unconverged or stale result says so on the row; an
+        object the chosen run did not solve says it is drawn as designed)."""
+        keys = self.object_layers(obj)
+        name = self._object_name(obj)
+        state = self.state()
+        own = [k for k in keys if state_of(k) == state]
+        shown = own[0] if own else (keys[0] if keys else None)
+        if shown is None:
+            return name, name, LAYER_COLORS["design"]
+        layer = self.layers[shown]
+        status = layer.display_name.removeprefix(layer.short)
+        text = name + status
+        if state != "design" and state_of(shown) == "design" and not own:
+            solver = dict((s, t) for t, s in SHAPE_STATES)[state]
+            text += f"  · designed (not in {solver.lower()})"
+        tip = "\n".join(self.layers[k].label for k in keys)
+        return text, tip, layer.color
+
     def _fill_list(self) -> None:
-        """The layer tree: one group per role (:data:`LAYER_GROUPS`), each with its
-        layers; a group's check box shows or hides all of them."""
+        """The Objects list: the envelope, the special shapes, the overlays, then the
+        rigging, symmetry axes, reference and rest meshes, each with a check box (a
+        group's box ticks all its objects). What they are drawn as is the Shape choice."""
         self.layer_list.blockSignals(True)
         self.layer_list.clear()
-        for title, kinds in LAYER_GROUPS:
-            members = [(k, layer) for k, layer in self.layers.items() if layer.kind in kinds]
-            if not members:
+        groups: dict[str, QTreeWidgetItem] = {}
+        for obj in self.objects():
+            text, tip, colour = self._object_row(obj)
+            item = QTreeWidgetItem([text])
+            item.setToolTip(0, tip)
+            item.setData(0, Qt.ItemDataRole.UserRole, obj)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            checked = self.objects_checked.get(obj, True)
+            item.setCheckState(0, Qt.CheckState.Checked if checked else Qt.CheckState.Unchecked)
+            item.setIcon(0, _swatch(colour))
+            title = (
+                "Special shapes"
+                if obj.startswith("shape:")
+                else "Overlays"
+                if obj.startswith("overlay:")
+                else None
+            )
+            if title is None:
+                self.layer_list.addTopLevelItem(item)
                 continue
-            group = QTreeWidgetItem([title])
-            group.setData(0, Qt.ItemDataRole.UserRole, None)
-            group.setFlags(group.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            font = group.font(0)
-            font.setBold(True)
-            group.setFont(0, font)
-            self.layer_list.addTopLevelItem(group)
-            for key, layer in members:
-                item = QTreeWidgetItem([layer.display_name])
-                item.setToolTip(0, layer.label)
-                item.setData(0, Qt.ItemDataRole.UserRole, key)
-                item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-                item.setCheckState(
-                    0, Qt.CheckState.Checked if layer.visible else Qt.CheckState.Unchecked
-                )
-                item.setForeground(0, QBrush(QColor(layer.color).darker(130)))
-                item.setIcon(0, _swatch(layer.color))
-                group.addChild(item)
+            group = groups.get(title)
+            if group is None:
+                group = QTreeWidgetItem([title])
+                group.setData(0, Qt.ItemDataRole.UserRole, None)
+                group.setFlags(group.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                font = group.font(0)
+                font.setBold(True)
+                group.setFont(0, font)
+                self.layer_list.addTopLevelItem(group)
+                groups[title] = group
+            group.addChild(item)
+        for group in groups.values():
             self._sync_group(group)
             group.setExpanded(True)
         self.layer_list.blockSignals(False)
 
     @staticmethod
     def _sync_group(group: QTreeWidgetItem) -> None:
-        """A group's check box from its layers: all, none or some shown."""
+        """A group's check box from its objects: all, none or some shown."""
         children = [group.child(i) for i in range(group.childCount())]
         states = {c.checkState(0) for c in children if c is not None}
         if states == {Qt.CheckState.Checked}:
@@ -1268,23 +1426,36 @@ class View3DPanel(QWidget):
         else:
             group.setCheckState(0, Qt.CheckState.PartiallyChecked)
 
-    def layer_item(self, key: str) -> QTreeWidgetItem | None:
-        """The tree row of layer ``key`` (None when it is not shown)."""
-        for i in range(self.layer_list.topLevelItemCount()):
-            group = self.layer_list.topLevelItem(i)
-            if group is None:
-                continue
-            for j in range(group.childCount()):
-                item = group.child(j)
-                if item is not None and item.data(0, Qt.ItemDataRole.UserRole) == key:
-                    return item
+    def object_item(self, obj: str) -> QTreeWidgetItem | None:
+        """The Objects list row of object ``obj`` (None when it is not listed)."""
+        found = self.layer_list.findItems(
+            "", Qt.MatchFlag.MatchContains | Qt.MatchFlag.MatchRecursive
+        )
+        for item in found:
+            if item.data(0, Qt.ItemDataRole.UserRole) == obj:
+                return item
         return None
 
+    def layer_item(self, key: str) -> QTreeWidgetItem | None:
+        """The Objects list row of the object layer ``key`` draws."""
+        return self.object_item(object_of(key))
+
     def select_layer(self, key: str) -> None:
-        """Make layer ``key`` the selected row (as a click on it would)."""
+        """Make the row of layer ``key``'s object the selected row."""
         item = self.layer_item(key)
         if item is not None:
             self.layer_list.setCurrentItem(item)
+
+    def set_object_visible(self, obj: str, on: bool) -> None:
+        """Tick or untick object ``obj`` (as its check box does)."""
+        self.objects_checked[obj] = on
+        self._apply_state()
+        self._fill_list()
+        self.redraw()
+
+    def sim_key_for(self, name: str) -> str:
+        """Layer key of special shape ``name`` inflated by the chosen run's solver."""
+        return sim_key(name, self._result_key() or PREVIEW_SOLVER)
 
     def labels(self) -> dict[str, str]:
         """Layer key to label (as shown)."""
@@ -1313,35 +1484,30 @@ class View3DPanel(QWidget):
         )
 
     def _visibility_changed(self, item: QTreeWidgetItem, _column: int = 0) -> None:
-        key = item.data(0, Qt.ItemDataRole.UserRole)
+        # Update the rows in place: rebuilding the list here would delete the row whose
+        # signal is being delivered (a crash).
+        obj = item.data(0, Qt.ItemDataRole.UserRole)
+        state = item.checkState(0)
+        on = state == Qt.CheckState.Checked
         self.layer_list.blockSignals(True)
         try:
-            if key is None:  # a group: all its layers
-                state = item.checkState(0)
+            if obj is None:  # a group: all its objects
                 if state == Qt.CheckState.PartiallyChecked:
                     return
                 for i in range(item.childCount()):
                     child = item.child(i)
-                    if child is None:
-                        continue
-                    child.setCheckState(0, state)
-                    child_key = child.data(0, Qt.ItemDataRole.UserRole)
-                    if child_key in self.layers:
-                        self.layers[child_key].visible = state == Qt.CheckState.Checked
-                        self._chosen_visibility[child_key] = self.layers[child_key].visible
-            elif key in self.layers:
-                self.layers[key].visible = item.checkState(0) == Qt.CheckState.Checked
-                self._chosen_visibility[key] = self.layers[key].visible
+                    if child is not None:
+                        child.setCheckState(0, state)
+                        self.objects_checked[str(child.data(0, Qt.ItemDataRole.UserRole))] = on
+            else:
+                self.objects_checked[str(obj)] = on
                 parent = item.parent()
                 if parent is not None:
                     self._sync_group(parent)
-            else:
-                return
         finally:
             self.layer_list.blockSignals(False)
+        self._apply_state()
         self.redraw()
-
-    # -- results: run, field, banner and run details ------------------------------------
 
     def _result_key(self) -> str | None:
         """Key of the result layer chosen in the toolbar (None without results)."""
@@ -1374,7 +1540,7 @@ class View3DPanel(QWidget):
 
     def part_name(self, key: str) -> str:
         """``Envelope`` or the special shape's name."""
-        return key.removeprefix("shape-sim:") if key.startswith("shape-sim:") else "Envelope"
+        return shape_name(key) if key.startswith("shape-sim:") else "Envelope"
 
     def _fill_results(self) -> None:
         """Fill the Run list (one entry per solve: the envelope and the shapes solved with
@@ -1428,7 +1594,7 @@ class View3DPanel(QWidget):
         key = self.part_choice.itemData(index)
         if not isinstance(key, str):
             return
-        inflated = "shape-sim:" + key.removeprefix("shape:")
+        inflated = self.sim_key_for(key.removeprefix("shape:"))
         if key.startswith("shape:") and inflated in self.layers and self.layers[inflated].visible:
             key = inflated
         self.zoom_to_layer(key)
@@ -1519,24 +1685,13 @@ class View3DPanel(QWidget):
         self._update_status()
 
     def _design_for_field(self) -> None:
-        """When the field changes, show the design where the colours need it: a result
-        field hides the design surfaces (they lie in the same place as the result and
-        would cover it); the deviation shows them (it is drawn on them). The user can
-        tick them back in the tree; this happens only when the field changes."""
+        """When the field changes, show the design where the colours need it: the
+        deviation is drawn on the design surfaces (:meth:`object_layers`)."""
         name = self.field_choice.currentData()
         if name == self._last_field:
             return
-        if self.show_choice.currentData() != "both":
-            self._last_field = name if isinstance(name, str) else None
-            return  # the Show choice decides what is drawn
         self._last_field = name if isinstance(name, str) else None
-        if not isinstance(name, str) or not self.parts():
-            return
-        show = name in DIVERGING_FIELDS
-        for key, layer in self.layers.items():
-            if key == "design" or key.startswith("shape:"):
-                layer.visible = show
-                self._chosen_visibility[key] = show
+        self._apply_state()
         self._fill_list()
 
     def shown_field(self) -> ResultField | None:
@@ -2092,7 +2247,7 @@ class View3DPanel(QWidget):
         """The layer of a part's design: the envelope's design surface, or a special
         shape's designed skin."""
         if part.startswith("shape-sim:"):
-            return "shape:" + part.removeprefix("shape-sim:")
+            return "shape:" + shape_name(part)
         return "design"
 
     def _on_design(self, part: str) -> bool:

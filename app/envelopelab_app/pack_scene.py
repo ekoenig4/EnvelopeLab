@@ -291,7 +291,7 @@ def shape_scenes_from_view(view: View3DPanel) -> dict[str, Scene]:
             scene.lines.append(
                 SceneLines(f"{key}:seams", "Seams (designed)", "Design", seams, role="design")
             )
-        sim_key = f"shape-sim:{name}"
+        sim_key = view.sim_key_for(name)
         sim = view.layers.get(sim_key)
         if sim is None:
             scene.status = SceneStatus(

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from PySide6.QtCore import Qt
 from pytestqt.qtbot import QtBot
 
 from envelopelab.assembly.spec import parse_instance_id
@@ -13,13 +14,22 @@ from envelopelab_app.main_window import MainWindow
 RESULT = "envelopelab-preview"
 
 
-def test_show_inflated_needs_a_run(gore_window: MainWindow) -> None:
+def test_an_inflated_shape_needs_a_run(gore_window: MainWindow) -> None:
     view = gore_window.view3d
     view.refresh()
-    assert not view.set_show("inflated")
-    assert view.show_choice.currentData() == "designed"
-    assert "run a simulation" in view.info.text()
-    assert view.set_show("both") and view.layers["design"].visible
+    assert view.state() == "design" and view.layers["design"].visible
+    assert not view.set_state("envelopelab-preview")
+    assert not view.set_state("calculix")
+    assert view.state() == "design"
+    assert "run that solver first" in view.info.text()
+    # The Objects list: the envelope, ticked.
+    item = view.object_item("envelope")
+    assert item is not None and item.text(0) == "Envelope"
+    assert item.checkState(0) == Qt.CheckState.Checked
+    view.set_object_visible("envelope", False)
+    assert not view.layers["design"].visible
+    view.set_object_visible("envelope", True)
+    assert view.layers["design"].visible
 
 
 @pytest.mark.slow
@@ -71,13 +81,17 @@ def test_the_inflated_envelope_is_drawn_like_the_design(
     view.refresh()
     assert view.field_choice.currentData() is None and view.part_field(RESULT) is None
 
-    # Show: designed, inflated, both.
-    assert view.set_show("designed")
+    # Shape: designed or inflated by the preview run; no CalculiX run yet.
+    assert view.set_state("design")
     assert view.layers["design"].visible and not view.layers[RESULT].visible
-    assert view.set_show("inflated")
+    assert view.set_state(RESULT)
     assert view.layers[RESULT].visible and not view.layers["design"].visible
-    assert not view.layers["rest"].visible  # the starting mesh would cover the comparison
+    assert not view.layers["rest"].visible  # the starting mesh is off unless ticked
     view.refresh()  # kept when the view is rebuilt
-    assert view.layers[RESULT].visible and not view.layers["design"].visible
-    assert view.set_show("both")
-    assert view.layers["design"].visible and view.layers[RESULT].visible
+    assert view.state() == RESULT and view.layers[RESULT].visible
+    assert not view.set_state("calculix") and view.state() == RESULT
+    # Ticking the rest mesh shows it with either Shape; unticking the envelope hides it.
+    view.set_object_visible("rest", True)
+    assert view.layers["rest"].visible
+    view.set_object_visible("envelope", False)
+    assert not view.layers[RESULT].visible and not view.layers["design"].visible

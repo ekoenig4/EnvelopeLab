@@ -29,8 +29,12 @@ All notable changes to this project will be documented in this file.
   whose starting stresses are exact (hoop p R2, meridional p R2/2; new benchmark rows);
   only an envelope curving inward is refused, with a message naming where. Results of
   shapes on curved parts of the envelope are unchanged.
-- Added: **Show** in the 3D view: *Designed*, *Inflated* or *Designed and inflated* (the
-  envelope and the special shapes together; the rest mesh is hidden in the first two).
+- Changed: the 3D view's layer tree is now an **Objects** list (the envelope, each
+  special shape and overlay, rigging, symmetry axes, reference and rest meshes, each with
+  a check box), and a **Shape** choice draws them *Designed*, *Inflated (preview)* or
+  *Inflated (CalculiX)*; it replaces the *Run* list. Special shapes keep their latest
+  simulation by each solver, so their CalculiX result can be shown next to the preview's.
+  A finished run switches to its inflated shape.
 - Changed: the inflated envelope is drawn like the design with *Colour by: Layer colour*
   (panel and fabric colours, darker alternate gores, seam lines, no solver mesh edges in
   *Shaded*). Unconverged runs keep their red mesh edges.

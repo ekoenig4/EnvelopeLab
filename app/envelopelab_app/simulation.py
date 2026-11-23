@@ -448,7 +448,7 @@ class SimulationManager(QObject):
         session, c = self.controller.session, self.controller
         if session is None or session is not self._session or sim.name not in c.shapes.keys:
             return  # the project was closed or the shape removed meanwhile
-        c.shapes.simulations[sim.name] = sim
+        c.shapes.add_simulation(sim)
         if sim.arrays is not None:
             session.add_shape_run(sim.record, sim.arrays)
             sim.arrays = None

@@ -124,19 +124,20 @@ def test_preview_run_colours_by_fos_and_goes_grey_when_stale(
     assert requested == [PREVIEW]
 
 
-def test_layer_list_shows_short_names_with_the_full_label_as_tooltip(
+def test_objects_list_shows_short_names_with_the_full_label_as_tooltip(
     gore_window: MainWindow,
 ) -> None:
     from envelopelab_app.panels.view3d import Layer
     from envelopelab_app.theme import STATUS_STYLES
 
     view = gore_window.view3d
+    # The Objects list names the object; its tooltip has the full description of what
+    # it is drawn as.
     item = view.layer_item("design")
-    assert item is not None and item.text(0) == "Design surface"
-    assert item.toolTip(0) == view.labels()["design"]  # the full description
+    assert item is not None and item.text(0) == "Envelope"
+    assert view.labels()["design"] in item.toolTip(0)
     assert len(item.text(0)) < len(item.toolTip(0))
-    group = item.parent()
-    assert group is not None and group.text(0) == "Design"
+    assert item.parent() is None
     empty = np.zeros((0, 3))
     stale = Layer("envelopelab-preview", "envelopelab-preview", "long [STALE]", empty, empty)
     stale.stale = True

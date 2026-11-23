@@ -263,12 +263,19 @@ def test_3d_view_draws_shapes_as_sewn_pieces(gore_window: MainWindow) -> None:
     assert sewn.visible and not view.layers["shape:Dome"].visible
     assert sewn.face_colors is not None and len(np.unique(sewn.face_colors, axis=0)) == 2
     assert len(sewn.polylines["skin_seams"]) == 16 + 1
-    # The user's choice is kept when the layers are rebuilt.
+    # The finished simulation switched the Shape to the preview's inflated shape; the
+    # envelope, not solved by it, is drawn as designed and its row says so.
+    assert view.state() == "envelopelab-preview" and view.layers["design"].visible
+    envelope = view.object_item("envelope")
+    assert envelope is not None and "designed (not in" in envelope.text(0)
+    # Designed again, and the user's choices are kept when the layers are rebuilt.
+    assert view.set_state("design")
+    assert view.layers["shape:Dome"].visible and not sewn.visible
     item = view.layer_item("shape:Dome")
     assert item is not None
-    item.setCheckState(0, Qt.CheckState.Checked)
+    item.setCheckState(0, Qt.CheckState.Unchecked)
     view.refresh()
-    assert view.layers["shape:Dome"].visible
+    assert view.state() == "design" and not view.layers["shape:Dome"].visible
 
 
 def test_cap_diameter_is_automatic_or_chosen_in_the_form(gore_window: MainWindow) -> None:
@@ -590,10 +597,13 @@ def test_one_run_colours_the_envelope_and_its_shapes_together(
     details = view.run_details.text()
     assert ">Envelope<" in details and ">Dome<" in details
     assert view.banner.kind in ("info", "fail", "error")
-    # The tree groups the layers; the Result group holds the envelope and the dome.
+    # The Objects list: the dome under Special shapes; the run switched the Shape to
+    # its inflated balloon, the envelope and the dome both inflated.
     item = view.layer_item("shape-sim:Dome")
     group = None if item is None else item.parent()
-    assert group is not None and group.text(0) == "Result"
+    assert group is not None and group.text(0) == "Special shapes"
+    assert view.state() == PREVIEW
+    assert view.layers[PREVIEW].visible and view.layers["shape-sim:Dome"].visible
     # The Probe names the part it hit.
     on_dome = view.layers["shape-sim:Dome"].points[0]
     assert view.part_at(on_dome) == "shape-sim:Dome"

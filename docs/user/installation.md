@@ -221,7 +221,7 @@ up to date (`wsl --update` in Windows PowerShell, then `wsl --shutdown`) also he
 
 **The window opens but the 3D view is blank or crashes** (remote desktop, no OpenGL):
 start with `envelopelab --no-3d`, or turn the 3D view off in **File ▸ Preferences**. The
-layer list still shows every result and which solver it came from.
+Objects list still shows every object and the status of every result.
 
 **`ModuleNotFoundError: PySide6`.** The application is an optional extra: install it with
 `pip install -e ".[gui]"`.

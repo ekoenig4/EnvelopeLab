@@ -185,6 +185,8 @@ class ShapeService(QObject):
         self.results: dict[str, ShapeResult] = {}
         self.keys: dict[str, str] = {}
         self.simulations: dict[str, ShapeSimulation] = {}
+        #: The latest simulation of each shape by each solver: (shape, solver) -> it.
+        self.solver_simulations: dict[tuple[str, str], ShapeSimulation] = {}
         self.simulation_fingerprint = ""
         self._worker: _DesignWorker | None = None
         self._queued: _Batch | None = None
@@ -215,6 +217,7 @@ class ShapeService(QObject):
     def reset(self) -> None:
         """Forget every result and simulation (another project was opened)."""
         self.keys, self.results, self.simulations = {}, {}, {}
+        self.solver_simulations = {}
         self._queued = self._pending = self._preview_queued = None
         self._settle.stop()
         self._latest, self._order = {}, {}
@@ -229,9 +232,20 @@ class ShapeService(QObject):
             arrays = session.run_arrays(record.run_id)
             if arrays is None:
                 continue
-            self.simulations[record.shape] = ShapeSimulation(
-                record.shape, record.simulation_key, record, display_from_arrays(arrays)
+            self.add_simulation(
+                ShapeSimulation(
+                    record.shape, record.simulation_key, record, display_from_arrays(arrays)
+                )
             )
+
+    def add_simulation(self, sim: ShapeSimulation) -> None:
+        """Keep ``sim`` as its shape's latest simulation, and its solver's."""
+        self.simulations[sim.name] = sim
+        self.solver_simulations[(sim.name, sim.record.solver)] = sim
+
+    def simulation_by(self, name: str, solver: str) -> ShapeSimulation | None:
+        """Shape ``name``'s latest simulation by ``solver`` (None: none)."""
+        return self.solver_simulations.get((name, solver))
 
     def sync(
         self,
@@ -702,7 +716,7 @@ class ShapeSimulator(QObject):
             worker.deleteLater()
         sim, self._solved_sim = self._solved_sim, None
         if sim is not None and sim.name in self.service.keys:  # not removed meanwhile
-            self.service.simulations[sim.name] = sim
+            self.service.add_simulation(sim)
             self.finished.emit(sim.name)
             self.service.updated.emit()
         if self._next is not None:
