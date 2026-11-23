@@ -312,13 +312,93 @@ def _chains(edges: IntArray) -> list[list[int]]:
     return out
 
 
+def _point_triangle_distance(
+    p: FloatArray, a: FloatArray, b: FloatArray, c: FloatArray
+) -> FloatArray:
+    """Distance of points ``p`` from triangles ``(a, b, c)`` (row by row), m."""
+    ab, ac, ap = b - a, c - a, p - a
+    normal = np.cross(ab, ac)
+    area2 = np.einsum("ij,ij->i", normal, normal)
+    unit = normal / np.sqrt(np.maximum(area2, 1e-300))[:, None]
+    height = np.einsum("ij,ij->i", ap, unit)
+    q = p - height[:, None] * unit  # projection onto the plane
+    # Barycentric coordinates of the projection.
+    v0, v1, v2 = ab, ac, q - a
+    d00 = np.einsum("ij,ij->i", v0, v0)
+    d01 = np.einsum("ij,ij->i", v0, v1)
+    d11 = np.einsum("ij,ij->i", v1, v1)
+    d20 = np.einsum("ij,ij->i", v2, v0)
+    d21 = np.einsum("ij,ij->i", v2, v1)
+    denom = np.maximum(d00 * d11 - d01 * d01, 1e-300)
+    v = (d11 * d20 - d01 * d21) / denom
+    w = (d00 * d21 - d01 * d20) / denom
+    inside = (v >= 0.0) & (w >= 0.0) & (v + w <= 1.0)
+
+    def segment(x: FloatArray, y: FloatArray) -> FloatArray:
+        d = y - x
+        t = np.clip(
+            np.einsum("ij,ij->i", p - x, d) / np.maximum(np.einsum("ij,ij->i", d, d), 1e-300),
+            0.0,
+            1.0,
+        )
+        out: FloatArray = np.linalg.norm(p - (x + t[:, None] * d), axis=1)
+        return out
+
+    edge = np.minimum(np.minimum(segment(a, b), segment(b, c)), segment(c, a))
+    out: FloatArray = np.where(inside, np.abs(height), edge)
+    return out
+
+
+def designed_labels(
+    designed: ShapeDisplay, points: FloatArray, candidates: int = 12
+) -> tuple[IntArray, IntArray | None]:
+    """Piece and tier of the designed skin's triangle nearest each point.
+
+    Parameters
+    ----------
+    designed : ShapeDisplay
+        The designed display (:func:`designed_display`), envelope frame, m.
+    points : ndarray, shape (k, 3)
+        Points on (or near) the designed skin, m.
+    candidates : int
+        Designed triangles (by nearest centre) among which the nearest by true
+        point-to-triangle distance is taken.
+
+    Returns
+    -------
+    (ndarray of int, ndarray of int or None)
+        Piece (``pieces`` for the cap or tip disc) and tier of each point (None when the
+        designed display has no tiers).
+    """
+    from scipy.spatial import cKDTree
+
+    corners = designed.points[designed.triangles]
+    centres = corners.mean(axis=1)
+    k = min(candidates, len(centres))
+    _, near = cKDTree(centres).query(np.asarray(points, dtype=np.float64), k=k)
+    near = np.asarray(near, dtype=np.int64).reshape(len(points), k)
+    p = np.repeat(np.asarray(points, dtype=np.float64), k, axis=0)
+    flat = near.ravel()
+    dist = _point_triangle_distance(
+        p, corners[flat, 0], corners[flat, 1], corners[flat, 2]
+    ).reshape(len(points), k)
+    best = near[np.arange(len(points)), np.argmin(dist, axis=1)]
+    piece: IntArray = np.asarray(designed.piece, dtype=np.int64)[best]
+    tier: IntArray | None = (
+        None if designed.tier is None else np.asarray(designed.tier, dtype=np.int64)[best]
+    )
+    return piece, tier
+
+
 def simulated_display(
     design: PrimitiveDesign, appendage: AppendageModel, result: SimulationResult
 ) -> ShapeDisplay:
     """The solved skin of a shape with its pieces and seams, on the envelope, m.
 
-    Pieces are told apart by where each triangle starts (the sub-model's designed initial
-    shape), so the colouring follows the cloth however far the solve moves it.
+    Pieces, tiers and the cap are told apart by where each triangle starts (the
+    sub-model's designed initial shape): each takes those of the designed skin's triangle
+    it starts on (:func:`designed_labels`), so the colouring is the designed one and
+    follows the cloth however far the solve moves it.
 
     Parameters
     ----------
@@ -342,23 +422,9 @@ def simulated_display(
     start = to_envelope_frame(design, model.positions)
     cen = start[tri].mean(axis=1)
     prim = design.primitive
-    tip = None
-    if prim.closed_tip:
-        # Tip (cap) triangles: every corner inside the cap's radius, at the top. Each
-        # panel triangle has a corner outside it; a narrow neck lies lower down.
-        rel = start[tri] - design.base_point
-        height = rel @ design.axis
-        rho = np.linalg.norm(rel - height[..., None] * design.axis, axis=-1)
-        rc = prim.tip_radius
-        floor = float(getattr(design._skin, "cap_floor", prim.tip_height))
-        tip = np.all(rho <= rc * (1.0 + 1e-6) + 1e-9, axis=1) & np.all(
-            height >= floor - 0.25 * rc, axis=1
-        )
-        if getattr(design._skin, "_cap", None) is not None:
-            # A moved cap: the triangles on or above its plane.
-            origin, _e1, _e2, normal = design._skin.cap_frame()
-            tip = np.all((start[tri] - origin) @ normal >= -0.25 * rc, axis=1)
-    piece = _piece_of(design, cen, tip)
+    # Each triangle is the designed skin's where it starts: its piece, tier and cap are
+    # those of the designed display (exact for every kind, split and cap shape).
+    piece, tier = designed_labels(designed_display(design), cen)
     pts = to_envelope_frame(design, result.positions)
     name = prim.name
     seams = [
@@ -369,7 +435,7 @@ def simulated_display(
     ]
     rim_nodes = np.asarray(appendage.rim_nodes, dtype=np.int64)
     rim = pts[np.append(rim_nodes, rim_nodes[:1])]
-    return ShapeDisplay(pts[used], remap[tri], piece, prim.pieces, seams, rim)
+    return ShapeDisplay(pts[used], remap[tri], piece, prim.pieces, seams, rim, tier)
 
 
 def export_scene(

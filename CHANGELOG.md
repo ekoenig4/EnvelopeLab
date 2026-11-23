@@ -3,6 +3,13 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: an inflated special shape was coloured unlike its design in the 3D view. Its
+  tiers were not kept (a split shape's upper tiers took the first tier's colour, e.g. a
+  red ball on a black stalk drawn black) and its cap was guessed from its size and height
+  (a shaped or moved cap came out the wrong size, e.g. an eye's white centre 58 % too
+  large). Each inflated triangle now takes the piece, tier and cap of the designed skin
+  triangle it starts on; the result file stores the tiers. Simulate the shapes again for
+  the corrected colours (older results load as before). No numerical result changes.
 - Fixed (changes results): the gores of a **leaning** dome or revolved shape were cut
   short of cloth where the footprint slants across them, more the more it leans: about
   2 % in total at 10°, 6 % at 20°, 17 % at 35° (up to 33 % for one gore) on a 5 m
