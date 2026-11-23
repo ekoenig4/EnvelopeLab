@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed (changes results): the gores of a **leaning** dome or revolved shape were cut
+  short of cloth where the footprint slants across them, more the more it leans: about
+  2 % in total at 10°, 6 % at 20°, 17 % at 35° (up to 33 % for one gore) on a 5 m
+  stalk-and-ball antenna. Such gores are now developed along true parallels and cut along
+  the footprint; the cut cloth matches the upright shape (−0.7 % for that antenna with 12
+  gores, at every lean) and its preview solve converges in about half the iterations,
+  without the large-strain warning. Re-export the build pack of any leaning dome or
+  revolved shape. Upright shapes and every benchmark are unchanged.
 - Fixed: a tall or leaning dome, tube or revolved shape near the crown could not be placed
   ("the skin does not reach the envelope") when the search below its base ran through the
   balloon and out of its far side, e.g. a stalk-and-ball antenna converted from a mesh,

@@ -265,6 +265,21 @@ is reported as the *area distortion* (flat area against designed area). For a
 hemispherical dome it falls as about \(1/M^2\): 3.7 %, 0.9 % and 0.2 % for 8, 16 and 32
 gores (see [Special-shape primitives](../validation/special-shape-primitives.md)).
 
+**A slanted footprint.** On a leaning shape the footprint rises across a gore of the bottom
+tier: its lower edge is not one parallel. Laying the band's own rows (which end on the
+footprint) straight across would put the footprint on \(y = 0\) and lose the cloth between
+its lowest and highest point; the loss grows with the lean (about 6 %, 17 % in total for a
+5 m stalk-and-ball at 20°, 35°). Where the footprint rises more than 1 mm (assumed) across
+a gore, the gore is therefore developed like one under a moved cap: classic, on the
+parallels \(u\) = const from the footprint's lowest point in the gore, and cut along the
+footprint where it lies. It is then stretched and sheared as above and widened towards the
+footprint, \(x' = x\,(1 + \delta\,(1 - y/Y)^2) + \kappa y,\ y' = (1 + \alpha)\,y\), with
+\(\alpha, \kappa, \delta\) solved so that both seams and the footprint edge (sewn to the
+line marked on the envelope) have their true 3D lengths. The top stays a straight row, so
+a top on a parallel keeps its true length (it is sewn to the next tier or a cap). A leaning shape then gets
+as much cloth as the same shape upright (`tests/unit/test_leaned_gores.py`); gores whose
+footprint rises less, such as every upright shape, are developed as before, bit for bit.
+
 ### Checks
 
 | Check | Measure | Limit (source) |
