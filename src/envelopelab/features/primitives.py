@@ -1899,16 +1899,24 @@ class _Skin:
         u = np.linspace(-reach, self.total, FOOTPRINT_GRID)
         uu, pp = np.meshgrid(u, phi)
         sd = self.surface.signed_distance(self.at_u(uu, pp)).reshape(uu.shape)
-        if np.any(sd[:, 0] >= 0.0):
+        inside = sd < 0.0
+        if not np.all(inside.any(axis=1)):
             raise PrimitiveError(
                 f"{name}: the skin does not reach the envelope; the base is too large for "
                 "the local envelope curvature"
             )
         if np.any(sd[:, -1] <= 0.0):
             raise PrimitiveError(f"{name}: the tip lies inside the envelope; reduce the lean")
-        inside = sd < 0.0
         last = inside.shape[1] - 1 - np.argmax(inside[:, ::-1], axis=1)
-        crossings = np.sum(np.diff(inside.astype(np.int8), axis=1) != 0, axis=1)
+        # The footprint is where the stretch inside the envelope that ends at ``last``
+        # leaves it. Below that stretch the search line may have left the envelope again
+        # through its far side (a long or leaning shape near the crown): those crossings
+        # are not the shape's. When the line starts inside (start -1), every crossing
+        # counts, as before.
+        idx = np.arange(inside.shape[1])
+        start = np.where(~inside & (idx[None, :] < last[:, None]), idx[None, :], -1).max(axis=1)
+        flips = np.diff(inside.astype(np.int8), axis=1) != 0
+        crossings = np.sum(flips & (idx[None, :-1] > start[:, None]), axis=1)
         if np.any(crossings > 1):
             raise PrimitiveError(
                 f"{name}: the skin touches the envelope again; reduce the lean or the size"

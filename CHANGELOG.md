@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: a tall or leaning dome, tube or revolved shape near the crown could not be placed
+  ("the skin does not reach the envelope") when the search below its base ran through the
+  balloon and out of its far side, e.g. a stalk-and-ball antenna converted from a mesh,
+  leaning 35°. The footprint is now the crossing next to the base; shapes that placed
+  before keep exactly the same footprint.
 - Fixed: a special shape on a straight stretch of the envelope (for example between the
   control points of a profile of straight segments) was refused as "the envelope is not
   convex round the feature". A straight stretch is now a cone (meridian radius infinite),

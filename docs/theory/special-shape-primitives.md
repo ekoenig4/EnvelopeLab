@@ -78,7 +78,10 @@ footprint point on meridian \( \phi \) is the last crossing of that line from in
 outside the envelope. It is found by sampling the signed distance to the meridian curve
 at 241 points along the path (about 1 % of its length apart), which brackets the
 crossing, and bisecting to \(10^{-7}\) m. So the skin always reaches the envelope,
-including where a leaned base circle dips below it. A meridian that crosses the envelope
+including where a leaned base circle dips below it. The path below the base is long (twice
+the skin's length), so for a long or leaning shape near the crown it can pass through the
+balloon and leave it again on the far side; only the stretch inside the envelope that ends
+at the footprint counts, and crossings below it are not the shape's. A meridian that crosses the envelope
 more than once (the skin touching the envelope again) is rejected; a second crossing
 closer than the sample spacing is not detected.
 
