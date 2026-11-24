@@ -35,6 +35,7 @@ it never leaves a shape out without saying so.
 |---|---|
 | `<name>-00-BUILD-PACK-INDEX.pdf` | Start here (three A3 sheets): the key dimensions in metric and English, the features, the shop limits the pack is built to (bolt width, cutting table, largest piece), how to print; the index of every file (`REF` to read, `1:1` to print at actual size, `CAD`); and the build order, each step naming the sheet to work from |
 | `<name>-spec-summary.pdf` | The design at a glance, metric and English: size, volume, mouth, parachute hole and overlap, line lengths, lift and lift margin, configuration, rigging factors of safety, and **every value tagged *assumed*** (check these against datasheets before building) |
+| `<name>-lift-chart.pdf` / `.csv` | [Lift charts](lift-charts.md): the load the balloon floats at the top-temperature limit, the top temperature a load needs, and the ceiling, over ambient temperature and altitude; points above the limit are shaded and marked |
 | `<name>-build-log.pdf` | Sign-off sheets for the floor: panel cutting, each special shape, the turning vents, and the parachute, rigging and final inspection |
 | `<name>-panel-A.pdf`, `<name>-panel-B.pdf`, … | Cutting the envelope: one PDF per panel, the whole panel at 1:1 on one page |
 | `<name>-panel-C-left-half.pdf`, `<name>-panel-C-right-half.pdf`, … | Rows cut as **half gores** (Shape mode, *Panels and print roll*): one PDF per half instead of the panel's; cut each once per gore and sew each pair together along the centre seam first (the sewing schedule lists these seams first) |

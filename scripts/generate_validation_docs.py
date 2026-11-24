@@ -8,6 +8,7 @@ from pathlib import Path
 
 from envelopelab.validation import (
     analytic_geometry,
+    lift_chart,
     pattern_import,
     preview_solver,
     rigging,
@@ -19,6 +20,7 @@ ANALYTIC = ROOT / "docs" / "validation" / "analytic-geometry.md"
 FIXTURES = ROOT / "docs" / "validation" / "pattern-import-fixtures.md"
 PREVIEW = ROOT / "docs" / "validation" / "preview-solver-benchmarks.md"
 RIGGING = ROOT / "docs" / "validation" / "rigging-benchmarks.md"
+LIFT = ROOT / "docs" / "validation" / "lift-chart-benchmarks.md"
 CALCULIX = ROOT / "docs" / "validation" / "preview-vs-calculix"  # .json, .md, .svg
 SPECIAL = ROOT / "docs" / "validation" / "special-shape-fixtures"  # .json, .md
 SHAPES = ROOT / "docs" / "validation" / "shape-families.md"
@@ -42,7 +44,7 @@ SPECIAL_FIXTURE_NOTES = [
 
 def main(argv: list[str] | None = None) -> None:
     """Regenerate all pages, or only those named (``analytic``, ``fixtures``, ``preview``,
-    ``shapes``, ``rigging``, ``calculix``, ``special``, ``primitives``).
+    ``shapes``, ``rigging``, ``lift``, ``calculix``, ``special``, ``primitives``).
 
     ``calculix`` runs the CalculiX verification study (needs ``ccx``, several minutes),
     ``special`` the special-shape feature benchmarks (CalculiX rows when ``ccx`` is
@@ -55,6 +57,7 @@ def main(argv: list[str] | None = None) -> None:
         "preview",
         "shapes",
         "rigging",
+        "lift",
     }
     failed: list[str] = []
     ANALYTIC.parent.mkdir(parents=True, exist_ok=True)
@@ -70,6 +73,10 @@ def main(argv: list[str] | None = None) -> None:
         rig_results = rigging.run_benchmarks()
         RIGGING.write_text(rigging.render_markdown(rig_results), encoding="utf-8")
         failed += [r.name for r in rig_results if not r.passed]
+    if "lift" in pages:
+        lift_results = lift_chart.run_benchmarks()
+        LIFT.write_text(lift_chart.render_markdown(lift_results), encoding="utf-8")
+        failed += [r.name for r in lift_results if not r.passed]
     if "preview" in pages:
         bench = preview_solver.run_benchmarks(ENVELOPE_FIXTURE)
         PREVIEW.write_text(preview_solver.render_markdown(bench), encoding="utf-8")

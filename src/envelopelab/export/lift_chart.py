@@ -1,0 +1,708 @@
+"""Build-pack lift chart: ``<slug>-lift-chart.pdf`` and ``<slug>-lift-chart.csv``.
+
+The equilibrium points come from :mod:`envelopelab.lift_chart`; this module only picks
+the chart axes from the design and draws them. Pages (A4 landscape):
+
+1. maximum load at the top-temperature limit vs ambient temperature, one curve per
+   altitude (the flight-manual loading chart), with the inputs and their source tags;
+2. top temperature needed vs load, one panel per altitude, one curve per ambient
+   temperature; the region above the limit is shaded and labelled;
+3. equilibrium altitude (ceiling) vs load at the limit, one curve per ISA deviation.
+
+The CSV lists every equilibrium point of the grid with its status. Nothing is hidden: a
+state above the limit is marked ``above_limit``, a load the envelope cannot lift
+``no_equilibrium``.
+"""
+
+from __future__ import annotations
+
+import csv
+import math
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import TYPE_CHECKING, Any
+
+from envelopelab.atmosphere import CELSIUS_OFFSET, PhysicalConstant, isa
+from envelopelab.export.documents import SAFETY_NOTICE, pdf_text
+from envelopelab.lift_chart import (
+    DEFAULT_TOP_TO_MEAN,
+    LiftChart,
+    LiftChartInputs,
+    equilibrium_altitude,
+    equilibrium_load,
+    equilibrium_top_temperature,
+    lift_chart,
+    nice_step,
+)
+
+if TYPE_CHECKING:
+    from envelopelab.design.model import DesignDocument
+    from envelopelab.export.shop import PackContext
+    from envelopelab.project.gore_design import GoreOutputs
+
+RGB = tuple[float, float, float]
+#: Pressure altitudes of the chart curves, m.
+ALTITUDES = (0.0, 1000.0, 2000.0, 3000.0)
+#: Ambient temperatures of the chart curves, degC.
+AMBIENTS_C = (-10.0, 0.0, 10.0, 20.0, 30.0)
+#: Ambient temperature axis of the loading chart, degC.
+AMBIENT_AXIS_C = (-20.0, 40.0)
+#: ISA deviations of the ceiling chart, K.
+ISA_OFFSETS = (-15.0, 0.0, 15.0, 30.0)
+#: Lowest top temperature tabulated, degC.
+LOWEST_TOP_C = 70.0
+#: Points per curve.
+SAMPLES = 61
+COLOURS: tuple[RGB, ...] = (
+    (0.11, 0.37, 0.71),
+    (0.85, 0.45, 0.05),
+    (0.20, 0.55, 0.20),
+    (0.55, 0.25, 0.65),
+    (0.10, 0.60, 0.65),
+    (0.45, 0.45, 0.45),
+)
+RED = (0.75, 0.12, 0.10)
+MUTED = (0.33, 0.36, 0.40)
+GRID = (0.85, 0.87, 0.90)
+TINT = (0.99, 0.90, 0.89)
+#: Exact unit definitions (international pound and foot, 1959; NIST SP 811).
+KG_PER_LB = 0.45359237
+M_PER_FT = 0.3048
+
+
+def lb(kg: float) -> float:
+    """Pounds (lb) of a mass in kg."""
+    return kg / KG_PER_LB
+
+
+def ft(m: float) -> float:
+    """Feet (ft) of a length in m."""
+    return m / M_PER_FT
+
+
+def fahrenheit(celsius: float) -> float:
+    """degF of a temperature in degC."""
+    return celsius * 1.8 + 32.0
+
+
+def kg_lb(kg: float) -> str:
+    """``300 kg / 661 lb``."""
+    return f"{kg:,.0f} kg / {lb(kg):,.0f} lb"
+
+
+def c_f(celsius: float) -> str:
+    """``120 degC / 248 degF``."""
+    return f"{celsius:.0f} degC / {fahrenheit(celsius):.0f} degF"
+
+
+@dataclass(frozen=True)
+class SecondAxis:
+    """English-unit scale opposite a metric axis: ``english = scale * metric + offset``."""
+
+    label: str
+    scale: float
+    offset: float = 0.0
+
+
+LB_AXIS = SecondAxis("lb", 1.0 / KG_PER_LB)
+F_AXIS = SecondAxis("degF", 1.8, 32.0)
+FT_AXIS = SecondAxis("ft", 1.0 / M_PER_FT)
+
+
+def top_temperature_limit(design: DesignDocument, fabrics: Any = None) -> PhysicalConstant:
+    """Lowest service temperature of the design's fabrics, K, as the top-temperature limit.
+
+    Parameters
+    ----------
+    design : DesignDocument
+        Design whose zones name the fabrics.
+    fabrics : FabricLibraryRepository or FabricCatalog, optional
+        Fabric library; a fabric missing from it gets the generic ``assumed`` 120 degC of
+        :func:`envelopelab.project.simulation.membrane_for_fabric`.
+
+    Returns
+    -------
+    PhysicalConstant
+        Limit in K with the source tag of the fabric that sets it.
+    """
+    from envelopelab.project.simulation import membrane_for_fabric
+
+    best: PhysicalConstant | None = None
+    for zone, fabric_id in sorted(design.zones.items()):
+        value = membrane_for_fabric(fabric_id, fabrics).max_service_temperature
+        if best is None or value.value < best.value:
+            known = fabrics is not None and fabrics.fabric(fabric_id) is not None
+            where = value.note if known else "not in the fabric library: generic value"
+            best = PhysicalConstant(
+                value.value,
+                "K",
+                value.source,
+                f"service temperature of fabric {fabric_id!r} (zone {zone}); {where}",
+            )
+    if best is None:
+        fallback = membrane_for_fabric("", None).max_service_temperature
+        best = PhysicalConstant(fallback.value, "K", fallback.source, "no fabric zones")
+    return best
+
+
+def chart_inputs(
+    design: DesignDocument,
+    outputs: GoreOutputs | None,
+    fabrics: Any = None,
+    top_to_mean: PhysicalConstant = DEFAULT_TOP_TO_MEAN,
+) -> LiftChartInputs | None:
+    """The lift-chart inputs of a gore design, or None when its mass is not estimated.
+
+    Parameters
+    ----------
+    design : DesignDocument
+        Gore design.
+    outputs : GoreOutputs or None
+        Its live outputs (volume m^3, envelope and rigging mass kg).
+    fabrics : FabricLibraryRepository or FabricCatalog, optional
+        Fabric library for the top-temperature limit.
+    top_to_mean : PhysicalConstant, optional
+        Top minus mean internal temperature, K.
+
+    Returns
+    -------
+    LiftChartInputs or None
+    """
+    if outputs is None or outputs.envelope_mass is None:
+        return None
+    return LiftChartInputs(
+        volume=outputs.volume,
+        volume_note="lofted design profile (as drawn, not a solved inflated shape)",
+        fixed_mass=outputs.envelope_mass + (outputs.rigging_mass or 0.0),
+        fixed_mass_sources=outputs.sources,
+        top_limit=top_temperature_limit(design, fabrics),
+        top_to_mean=top_to_mean,
+    )
+
+
+@dataclass(frozen=True)
+class ChartAxes:
+    """The grid of a build-pack lift chart (SI: m, K, kg)."""
+
+    altitudes: tuple[float, ...]
+    ambient_temperatures: tuple[float, ...]
+    top_temperatures: tuple[float, ...]
+    loads: tuple[float, ...]
+    isa_offsets: tuple[float, ...]
+
+
+def chart_axes(inputs: LiftChartInputs) -> ChartAxes:
+    """Default axes: :data:`ALTITUDES`, :data:`AMBIENTS_C`, top temperatures every 10 degC
+    up to the limit, loads from 0 to the most the balloon lifts (coldest ambient, sea
+    level, at the limit) in round steps, and :data:`ISA_OFFSETS`."""
+    limit = inputs.top_limit.value
+    tops = [
+        t + CELSIUS_OFFSET
+        for t in range(int(LOWEST_TOP_C), int(math.floor(limit - CELSIUS_OFFSET)) + 1, 10)
+    ]
+    if not tops or abs(tops[-1] - limit) > 1e-9:
+        tops.append(limit)
+    ambients = tuple(t + CELSIUS_OFFSET for t in AMBIENTS_C)
+    most = max(equilibrium_load(inputs, h, t, limit).load for h in ALTITUDES for t in ambients[:1])
+    top_load = max(most, 100.0)
+    step = nice_step(top_load, 10)
+    loads = tuple(step * k for k in range(int(math.ceil(top_load / step)) + 1))
+    return ChartAxes(ALTITUDES, ambients, tuple(tops), loads, ISA_OFFSETS)
+
+
+def build_chart(inputs: LiftChartInputs, axes: ChartAxes) -> LiftChart:
+    """The equilibrium points of ``axes`` (:func:`envelopelab.lift_chart.lift_chart`)."""
+    return lift_chart(
+        inputs,
+        axes.altitudes,
+        axes.ambient_temperatures,
+        axes.top_temperatures,
+        axes.loads,
+        axes.isa_offsets,
+    )
+
+
+# --------------------------------------------------------------------------------------
+# CSV
+# --------------------------------------------------------------------------------------
+
+CSV_COLUMNS = (
+    "solved_for",
+    "altitude_m",
+    "isa_offset_K",
+    "ambient_C",
+    "top_C",
+    "mean_C",
+    "load_kg",
+    "gross_lift_N",
+    "status",
+)
+
+
+def _c(kelvin: float) -> str:
+    return "" if not math.isfinite(kelvin) else f"{kelvin - CELSIUS_OFFSET:.2f}"
+
+
+def _num(value: float, digits: int = 2) -> str:
+    return "" if not math.isfinite(value) else f"{value:.{digits}f}"
+
+
+def csv_rows(chart: LiftChart) -> list[list[str]]:
+    """One row per equilibrium point (:data:`CSV_COLUMNS`; blank where undefined)."""
+    return [
+        [
+            p.solved_for,
+            _num(p.altitude, 1),
+            _num(p.isa_offset, 1),
+            _c(p.ambient_temperature),
+            _c(p.top_temperature),
+            _c(p.mean_temperature),
+            _num(p.load, 2),
+            _num(p.gross_lift, 1),
+            p.status,
+        ]
+        for p in chart.points()
+    ]
+
+
+def write_lift_chart_csv(chart: LiftChart, path: str | Path) -> Path:
+    """Write ``chart``'s equilibrium points as CSV; returns the path."""
+    out = Path(path)
+    with out.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(CSV_COLUMNS)
+        writer.writerows(csv_rows(chart))
+    return out
+
+
+# --------------------------------------------------------------------------------------
+# PDF
+# --------------------------------------------------------------------------------------
+
+
+@dataclass
+class Series:
+    """One curve: label, (x, y) points (``nan`` breaks the line) and colour."""
+
+    label: str
+    points: list[tuple[float, float]]
+    colour: RGB
+    dash: tuple[float, float] | None = None
+
+
+@dataclass
+class Plot:
+    """A line chart in a box of the page (points)."""
+
+    box: tuple[float, float, float, float]  # x, y (bottom left), width, height
+    title: str
+    xlabel: str
+    ylabel: str
+    xrange: tuple[float, float]
+    yrange: tuple[float, float]
+    series: list[Series] = field(default_factory=list)
+    hlines: list[tuple[float, str, RGB]] = field(default_factory=list)
+    vlines: list[tuple[float, str, RGB]] = field(default_factory=list)
+    shade_above: tuple[float, str] | None = None
+    legend_at_bottom: bool = False
+    x2: SecondAxis | None = None
+    y2: SecondAxis | None = None
+
+
+def _clip(
+    a: tuple[float, float], b: tuple[float, float], lo: tuple[float, float], hi: tuple[float, float]
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """Liang-Barsky clip of segment ab to the box [lo, hi]; None when outside."""
+    t0, t1 = 0.0, 1.0
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    for p, q in (
+        (-dx, a[0] - lo[0]),
+        (dx, hi[0] - a[0]),
+        (-dy, a[1] - lo[1]),
+        (dy, hi[1] - a[1]),
+    ):
+        if p == 0.0:
+            if q < 0.0:
+                return None
+            continue
+        r = q / p
+        if p < 0.0:
+            t0 = max(t0, r)
+        else:
+            t1 = min(t1, r)
+        if t0 > t1:
+            return None
+    return (a[0] + t0 * dx, a[1] + t0 * dy), (a[0] + t1 * dx, a[1] + t1 * dy)
+
+
+def _ticks(lo: float, hi: float, count: int = 8) -> list[float]:
+    step = nice_step(hi - lo, count)
+    start = math.ceil(lo / step - 1e-9) * step
+    out, k = [], 0
+    while start + k * step <= hi + 1e-9 * step:
+        out.append(start + k * step)
+        k += 1
+    return out
+
+
+def _label(value: float) -> str:
+    return f"{value:,.0f}" if abs(value - round(value)) < 1e-9 else f"{value:,.1f}"
+
+
+def draw_plot(canvas: Any, plot: Plot) -> None:
+    """Draw ``plot`` on the current page of a :class:`~envelopelab.report.pdf.PdfCanvas`."""
+    x0, y0, w, h = plot.box
+    (xa, xb), (ya, yb) = plot.xrange, plot.yrange
+
+    def to_page(x: float, y: float) -> tuple[float, float]:
+        return x0 + (x - xa) / (xb - xa) * w, y0 + (y - ya) / (yb - ya) * h
+
+    if plot.shade_above is not None and plot.shade_above[0] < yb:
+        level = max(plot.shade_above[0], ya)
+        _, py = to_page(xa, level)
+        canvas.rect(x0, py, w, y0 + h - py, fill=TINT)
+    for x in _ticks(xa, xb):
+        px, _ = to_page(x, ya)
+        canvas.line(px, y0, px, y0 + h, GRID, 0.3)
+        canvas.text(px - 2.2 * len(_label(x)), y0 - 10, _label(x), 7, color=MUTED)
+    for y in _ticks(ya, yb):
+        _, py = to_page(xa, y)
+        canvas.line(x0, py, x0 + w, py, GRID, 0.3)
+        canvas.text(x0 - 4 - 3.9 * len(_label(y)), py - 2.5, _label(y), 7, color=MUTED)
+    if plot.x2 is not None:
+        sa, sb = sorted(plot.x2.scale * v + plot.x2.offset for v in (xa, xb))
+        for t in _ticks(sa, sb):
+            px, _ = to_page((t - plot.x2.offset) / plot.x2.scale, ya)
+            canvas.line(px, y0 + h, px, y0 + h + 3, MUTED, 0.5)
+            canvas.text(px - 2.2 * len(_label(t)), y0 + h + 5, _label(t), 7, color=MUTED)
+    if plot.y2 is not None:
+        sa, sb = sorted(plot.y2.scale * v + plot.y2.offset for v in (ya, yb))
+        for t in _ticks(sa, sb):
+            _, py = to_page(xa, (t - plot.y2.offset) / plot.y2.scale)
+            canvas.line(x0 + w, py, x0 + w + 3, py, MUTED, 0.5)
+            canvas.text(x0 + w + 5, py - 2.5, _label(t), 7, color=MUTED)
+        y2 = pdf_text(f"({plot.y2.label})")
+        canvas.text(x0 + w - 4.0 * len(y2), y0 + h + 16, y2, 8)
+    canvas.rect(x0, y0, w, h, stroke=(0.0, 0.0, 0.0))
+    canvas.text(x0, y0 + h + 28, pdf_text(plot.title), 9, True)
+    xlabel = plot.xlabel
+    if plot.x2 is not None:
+        xlabel += f"; top scale {plot.x2.label}"
+    canvas.text(x0 + w / 2 - 2.0 * len(xlabel), y0 - 22, pdf_text(xlabel), 8)
+    canvas.text(x0, y0 + h + 16, pdf_text(plot.ylabel), 8)
+    for level, text, colour in plot.hlines:
+        if ya <= level <= yb:
+            _, py = to_page(xa, level)
+            canvas.polygon(
+                [(x0, py), (x0 + w, py)], stroke=colour, width=1.0, dash=(4, 3), closed=False
+            )
+            canvas.text(x0 + w - 4.0 * len(text) - 4, py + 3, pdf_text(text), 7, True, colour)
+    for level, text, colour in plot.vlines:
+        if xa <= level <= xb:
+            px, _ = to_page(level, ya)
+            canvas.polygon(
+                [(px, y0), (px, y0 + h)], stroke=colour, width=0.8, dash=(2, 2), closed=False
+            )
+            # Left of the line: the legend sits at the bottom right.
+            label = pdf_text(text)
+            canvas.text(px - 3 - 3.5 * len(label), y0 + 4, label, 7, color=colour)
+    for s in plot.series:
+        run: list[tuple[float, float]] = []
+        segments: list[list[tuple[float, float]]] = []
+        for a, b in zip(s.points, s.points[1:], strict=False):
+            if not all(math.isfinite(v) for v in (*a, *b)):
+                continue
+            clipped = _clip(a, b, (xa, ya), (xb, yb))
+            if clipped is None:
+                continue
+            p, q = to_page(*clipped[0]), to_page(*clipped[1])
+            if run and math.dist(run[-1], p) < 1e-6:
+                run.append(q)
+            else:
+                if len(run) > 1:
+                    segments.append(run)
+                run = [p, q]
+        if len(run) > 1:
+            segments.append(run)
+        for seg in segments:
+            canvas.polygon(seg, stroke=s.colour, width=1.4, dash=s.dash, closed=False)
+    if plot.shade_above is not None and plot.shade_above[0] < yb:
+        text = pdf_text(plot.shade_above[1])
+        canvas.rect(x0 + 2, y0 + h - 13, 3.9 * len(text) + 4, 11, fill=TINT)
+        canvas.text(x0 + 4, y0 + h - 10, text, 7, True, RED)
+    # Legend inside the box, top right (or bottom right, clear of rising curves).
+    ly = y0 + 6 + 11 * (len(plot.series) - 1) if plot.legend_at_bottom else y0 + h - 12
+    for s in plot.series:
+        lx = x0 + w - 132
+        canvas.rect(lx - 2, ly - 3, 130, 11, fill=(1.0, 1.0, 1.0))
+        canvas.rect(lx, ly + 1, 14, 2.4, fill=s.colour)
+        canvas.text(lx + 18, ly, pdf_text(s.label), 7)
+        ly -= 11
+
+
+def _sweep(lo: float, hi: float, n: int = SAMPLES) -> list[float]:
+    return [lo + (hi - lo) * k / (n - 1) for k in range(n)]
+
+
+def _ceil_to(value: float, step: float) -> float:
+    return math.ceil(value / step) * step
+
+
+def _loading_plot(inputs: LiftChartInputs, box: tuple[float, float, float, float]) -> Plot:
+    limit = inputs.top_limit.value
+    xs = _sweep(*AMBIENT_AXIS_C)
+    series = []
+    lows, highs = [0.0], [0.0]
+    for k, h in enumerate(ALTITUDES):
+        pts = [(x, equilibrium_load(inputs, h, x + CELSIUS_OFFSET, limit).load) for x in xs]
+        lows += [y for _, y in pts]
+        highs += [y for _, y in pts]
+        series.append(Series(f"{h:,.0f} m / {ft(h):,.0f} ft", pts, COLOURS[k % len(COLOURS)]))
+    step = nice_step(max(highs) - min(lows), 8)
+    yr = (min(0.0, math.floor(min(lows) / step) * step), _ceil_to(max(highs), step))
+    return Plot(
+        box,
+        f"Maximum load at the top-temperature limit {c_f(limit - CELSIUS_OFFSET)}",
+        "Ambient temperature at altitude (degC)",
+        "Load (kg)",
+        AMBIENT_AXIS_C,
+        yr,
+        series,
+        hlines=[(0.0, "cannot lift its own mass below 0 kg", RED)] if yr[0] < 0 else [],
+        x2=F_AXIS,
+        y2=LB_AXIS,
+    )
+
+
+def _temperature_plot(
+    inputs: LiftChartInputs,
+    axes: ChartAxes,
+    altitude: float,
+    box: tuple[float, float, float, float],
+    payload: float | None,
+) -> Plot:
+    limit = inputs.top_limit.value
+    load_max = axes.loads[-1]
+    xs = _sweep(0.0, load_max)
+    series = []
+    for k, t_amb in enumerate(axes.ambient_temperatures):
+        pts = [
+            (m, equilibrium_top_temperature(inputs, altitude, t_amb, m).top_temperature) for m in xs
+        ]
+        pts = [(m, t - CELSIUS_OFFSET) for m, t in pts]
+        series.append(
+            Series(f"ambient {c_f(t_amb - CELSIUS_OFFSET)}", pts, COLOURS[k % len(COLOURS)])
+        )
+    lo = min(axes.ambient_temperatures) - CELSIUS_OFFSET
+    y_top = limit - CELSIUS_OFFSET + 40.0
+    return Plot(
+        box,
+        f"Top temperature needed - pressure altitude {altitude:,.0f} m / {ft(altitude):,.0f} ft",
+        "Load (kg)",
+        "Top (degC)",
+        (0.0, load_max),
+        (lo, y_top),
+        series,
+        hlines=[(limit - CELSIUS_OFFSET, f"LIMIT {c_f(limit - CELSIUS_OFFSET)}", RED)],
+        vlines=[] if payload is None else [(payload, f"design load {kg_lb(payload)}", MUTED)],
+        shade_above=(limit - CELSIUS_OFFSET, "ABOVE TOP-TEMPERATURE LIMIT - NOT PERMITTED"),
+        legend_at_bottom=True,
+        x2=LB_AXIS,
+        y2=F_AXIS,
+    )
+
+
+def _ceiling_plot(
+    inputs: LiftChartInputs, axes: ChartAxes, box: tuple[float, float, float, float]
+) -> Plot:
+    limit = inputs.top_limit.value
+    xs = _sweep(0.0, axes.loads[-1], 81)
+    series = []
+    for k, dt in enumerate(axes.isa_offsets):
+        # The curve ends exactly where the balloon floats the load at sea level.
+        end = equilibrium_load(inputs, 0.0, isa(0.0, dt).temperature, limit).load
+        loads = sorted({*(m for m in xs if m < end), max(end, 0.0)})
+        pts = [(m, equilibrium_altitude(inputs, dt, limit, m).altitude) for m in loads]
+        if end >= 0.0:
+            pts[-1] = (end, 0.0)
+        series.append(
+            Series(f"ISA {dt:+.0f} K / {1.8 * dt:+.0f} degF", pts, COLOURS[k % len(COLOURS)])
+        )
+    return Plot(
+        box,
+        f"Equilibrium altitude (ceiling) at the top-temperature limit "
+        f"{c_f(limit - CELSIUS_OFFSET)}, from sea level",
+        "Load (kg)",
+        "Altitude (m)",
+        (0.0, axes.loads[-1]),
+        (0.0, 11000.0),
+        series,
+        x2=LB_AXIS,
+        y2=FT_AXIS,
+    )
+
+
+def input_lines(inputs: LiftChartInputs) -> list[str]:
+    """The inputs of the chart with their units and source tags, one per line."""
+    sources = ", ".join(sorted(set(inputs.fixed_mass_sources))) or "none recorded"
+    return [
+        f"Envelope volume: {inputs.volume:,.0f} m3 / {inputs.volume / M_PER_FT**3:,.0f} cu ft "
+        f"({inputs.volume_note}).",
+        f"Envelope + rigging mass: {inputs.fixed_mass:,.1f} kg / {lb(inputs.fixed_mass):,.0f} lb "
+        f"(sources: {sources}). "
+        "Load = everything else: basket, burners, fuel, occupants.",
+        f"Top-temperature limit: {c_f(inputs.top_limit.value - CELSIUS_OFFSET)} "
+        f"[{inputs.top_limit.source}] - {inputs.top_limit.reference}.",
+        f"Mean gas temperature = top - {inputs.top_to_mean.value:.0f} K "
+        f"({1.8 * inputs.top_to_mean.value:.0f} degF) "
+        f"[{inputs.top_to_mean.source}] - {inputs.top_to_mean.reference}.",
+        "Equilibrium: V (rho_amb - rho_int) = envelope + rigging + load; dry air, ISA pressure "
+        "at the pressure altitude, ambient temperature as given at that altitude; still "
+        "air, no climb or descent. Ceiling: ISA temperature profile shifted by the ISA "
+        "deviation.",
+        "Humid air and combustion products are not modelled: on a humid day the real lift "
+        "is slightly lower. Keep a margin: these are static equilibrium values.",
+        SAFETY_NOTICE,
+    ]
+
+
+def write_lift_chart_pdf(
+    inputs: LiftChartInputs,
+    axes: ChartAxes,
+    path: str | Path,
+    title: str,
+    payload: float | None = None,
+) -> Path:
+    """Write the lift-chart PDF (module docstring: pages); returns the path.
+
+    Parameters
+    ----------
+    inputs : LiftChartInputs
+        Volume (m^3), fixed mass (kg), temperature limit and offset (K).
+    axes : ChartAxes
+        Grid of the charts.
+    path : str or Path
+        Output file.
+    title : str
+        Page title (design name).
+    payload : float, optional
+        Design load, kg, marked on the temperature charts.
+    """
+    from envelopelab.export.shop import A4_LANDSCAPE, Pages
+
+    doc = Pages(A4_LANDSCAPE)
+    canvas = doc.canvas
+    width, height = A4_LANDSCAPE
+    margin = 40.0
+
+    def header(subtitle: str) -> None:
+        canvas.text(margin, height - margin, pdf_text(f"{title.upper()} - LIFT CHART"), 14, True)
+        canvas.text(margin, height - margin - 16, pdf_text(subtitle), 8, color=MUTED)
+
+    header("Static equilibrium: the load the balloon floats, and the top temperature it needs.")
+    draw_plot(canvas, _loading_plot(inputs, (margin + 40, 270, 470, 220)))
+    y = 225.0
+    for line in input_lines(inputs):
+        for text in _wrap(pdf_text(line), 150):
+            canvas.text(margin, y, text, 7.5, color=MUTED if line == SAFETY_NOTICE else (0, 0, 0))
+            y -= 10
+        y -= 2
+    legend_x = margin + 560
+    lines = [
+        "How to read it:",
+        "Each curve is one pressure altitude.",
+        "Go up from the ambient temperature",
+        "at that altitude to the curve: that",
+        "load floats with the crown at the",
+        "limit. More load cannot float",
+        "without exceeding the limit.",
+        "",
+        "English units: lb on the right",
+        "scale, degF on the top scale.",
+    ]
+    ly = 500.0
+    for text in lines:
+        canvas.text(legend_x + 10, ly, text, 8, text.endswith(":"))
+        ly -= 11
+
+    canvas.new_page()
+    header("Top temperature that floats a load. Above the red line the fabric limit is exceeded.")
+    cols, rows = 2, 2
+    pw, ph = 330.0, 185.0
+    for k, altitude in enumerate(axes.altitudes[: cols * rows]):
+        c, r = k % cols, k // cols
+        box = (margin + 50 + c * (pw + 60), height - 285 - r * (ph + 70), pw, ph)
+        draw_plot(canvas, _temperature_plot(inputs, axes, altitude, box, payload))
+
+    canvas.new_page()
+    header(
+        "Highest altitude the balloon floats a load with the crown at the limit "
+        "(lines end where it cannot lift the load at sea level)."
+    )
+    draw_plot(canvas, _ceiling_plot(inputs, axes, (margin + 60, 90, 700, 400)))
+    return doc.save(path)
+
+
+def _wrap(text: str, width: int) -> list[str]:
+    words, line, out = text.split(), "", []
+    for word in words:
+        if line and len(line) + len(word) + 1 > width:
+            out.append(line)
+            line = word
+        else:
+            line = f"{line} {word}".strip()
+    out.append(line)
+    return out
+
+
+def write_lift_chart(
+    ctx: PackContext,
+    pdf_path: Path,
+    csv_path: Path,
+    fabrics: Any = None,
+    top_to_mean: PhysicalConstant = DEFAULT_TOP_TO_MEAN,
+) -> tuple[Path, Path]:
+    """Write the build pack's lift chart PDF and CSV.
+
+    When the envelope mass is not estimated both files say so instead of charting.
+
+    Parameters
+    ----------
+    ctx : PackContext
+        The pack's design and outputs.
+    pdf_path, csv_path : Path
+        Output files.
+    fabrics : FabricLibraryRepository or FabricCatalog, optional
+        Fabric library for the top-temperature limit.
+    top_to_mean : PhysicalConstant, optional
+        Top minus mean internal temperature, K.
+
+    Returns
+    -------
+    (Path, Path)
+        The PDF and CSV paths.
+    """
+    name = ctx.design.meta.name or "design"
+    inputs = chart_inputs(ctx.design, ctx.outputs, fabrics, top_to_mean)
+    if inputs is None:
+        from envelopelab.export.shop import A4_LANDSCAPE, Pages
+
+        doc = Pages(A4_LANDSCAPE)
+        doc.title(f'"{name.upper()}" - LIFT CHART')
+        doc.lines(
+            [
+                "NOT PRODUCED: the envelope mass is not estimated (see the design findings).",
+                SAFETY_NOTICE,
+            ],
+            doc.margin,
+            doc.size[0] - 2 * doc.margin,
+        )
+        doc.save(pdf_path)
+        with csv_path.open("w", newline="", encoding="utf-8") as handle:
+            csv.writer(handle).writerow(CSV_COLUMNS)
+        return pdf_path, csv_path
+    axes = chart_axes(inputs)
+    payload = ctx.design.operating.payload_mass
+    write_lift_chart_pdf(inputs, axes, pdf_path, name, payload)
+    write_lift_chart_csv(build_chart(inputs, axes), csv_path)
+    return pdf_path, csv_path

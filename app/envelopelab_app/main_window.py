@@ -928,6 +928,7 @@ class MainWindow(QMainWindow):
                 session.content_hash(), session.path.name if session.path else ""
             ),
             status=status_line(self.view3d),
+            fabrics=self.controller.fabrics.catalog(),
         )
         return self.shapes.export_pack(
             out_dir, extras, self.prefs.print_roll_width if roll_width is None else roll_width

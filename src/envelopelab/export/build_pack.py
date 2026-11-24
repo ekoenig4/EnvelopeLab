@@ -1217,6 +1217,9 @@ class PackExtras:
         converged, not verified with CalculiX"), "" for none.
     table_length : float
         Cutting-table length, m (a shop limit printed in the index).
+    fabrics : FabricLibraryRepository or FabricCatalog, optional
+        Fabric library; the lift chart takes its top-temperature limit from it (the
+        generic ``assumed`` limit without it).
     """
 
     include: frozenset[str] = frozenset()
@@ -1226,6 +1229,7 @@ class PackExtras:
     provenance: Any = None
     status: str = ""
     table_length: float = 12 * 0.3048  # m (12 ft, a common cutting table; source: assumed)
+    fabrics: Any = None
 
 
 def write_documents(
@@ -1330,6 +1334,11 @@ def write_documents(
 
             for path, what in write_colour_plan(ctx, out):
                 written.append((path, "planning", "LAYOUT & PLANNING", "REF", what))
+    if "lift_chart" in extras.include:
+        from envelopelab.export.lift_chart import write_lift_chart
+
+        pdf_name, csv_name = docs.document_files(stem, "lift_chart")
+        add("lift_chart", *write_lift_chart(ctx, out / pdf_name, out / csv_name, extras.fabrics))
     if "sewing" in extras.include:
         from envelopelab.export.planning import write_sewing_schedule
 

@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: lift charts. The new `envelopelab.lift_chart` solves the static equilibrium
+  V (rho_amb - rho_int) = envelope + rigging + load for whichever of top (crown)
+  temperature, ambient temperature, altitude and load is unknown. The mean gas
+  temperature is the top temperature minus an offset (20 K, tagged *assumed*). The build
+  pack gains `<name>-lift-chart.pdf` (maximum load at the top-temperature limit, top
+  temperature needed per load, ceiling) and `<name>-lift-chart.csv` (every equilibrium
+  point with its status). The charts show metric and English units (kg/lb, °C/°F,
+  m/ft). Points above the fabric limit are shaded and marked, never dropped. No
+  existing result changes.
 - Changed: the 3D view opens a project on its most up-to-date shape (CalculiX, else
   preview, else design; only a current, converged run) in *Layer colour*, and results
   are no longer coloured by factor of safety unless chosen. Zones below the limit are
