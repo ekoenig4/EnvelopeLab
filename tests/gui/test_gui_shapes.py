@@ -1269,9 +1269,23 @@ def test_profile_is_edited_by_dragging_points_and_splits(gore_window: MainWindow
     gore_window.undo()
     _placed(gore_window)
 
-    # Double-click the outline: a point is added there; Delete removes it again.
+    # Double-click the outline: a point is added there; Delete removes it again. The
+    # outline passes through the points, so the click goes where it is farthest from
+    # them on screen (how far that is in px depends on the platform's view scale).
+    from envelopelab_app.shape_profile_view import PICK_DISTANCE
+
     n = len(start)
-    mid = view.curve[len(view.curve) // 3]
+
+    def px_to_points(c: np.ndarray) -> float:
+        at = _at(view, float(c[0]), float(c[1]))
+        return min(
+            float(np.hypot(at.x() - q.x(), at.y() - q.y()))
+            for q in (_at(view, r, z) for r, z in view.profile)
+        )
+
+    clear = [px_to_points(c) for c in view.curve]
+    mid = view.curve[int(np.argmax(clear))]
+    assert max(clear) > PICK_DISTANCE
     _mouse(view, QMouseEvent.Type.MouseButtonDblClick, _at(view, *mid))
     _placed(gore_window)
     assert len(spec().profile) == n + 1 and len(view.selected) == 1
