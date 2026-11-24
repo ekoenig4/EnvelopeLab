@@ -29,6 +29,7 @@ from envelopelab.materials.repository import (
     source_tag,
     validate_fabric,
 )
+from envelopelab.project.coordinates import POSITION_UNIT_LABELS, POSITION_UNITS
 from envelopelab_app.settings import Preferences
 
 INCH = 0.0254  # m
@@ -85,7 +86,20 @@ class PreferencesDialog(QDialog):
             "Roll the 1:1 templates are printed on (and the cloth is cut from): a panel "
             "whose page is wider than it both ways gets a warning"
         )
+        self.position_units = QComboBox()
+        self.position_units.setObjectName("positionUnits")
+        for units in POSITION_UNITS:
+            self.position_units.addItem(POSITION_UNIT_LABELS[units], units)
+        self.position_units.setCurrentIndex(
+            max(self.position_units.findData(prefs.position_units), 0)
+        )
+        self.position_units.setToolTip(
+            "Show and type positions on the balloon in metres, or as a gore and panel row "
+            "with the fraction across the gore and up the row (a special shape's own "
+            "gores and tiers on the shape). What is saved is the same either way."
+        )
         form = QFormLayout()
+        form.addRow("Positions shown in", self.position_units)
         form.addRow("Autosave every", self.autosave)
         form.addRow("Preview mesh edge length", self.preview_mesh)
         form.addRow("CalculiX mesh edge length", self.calculix_mesh)
@@ -128,6 +142,7 @@ class PreferencesDialog(QDialog):
             recovery_dir=self.recovery.text().strip(),
             material_library=self.material_library.text().strip(),
             print_roll_width=float(self.print_roll.value()) * INCH,
+            position_units=str(self.position_units.currentData()),
         )
 
 

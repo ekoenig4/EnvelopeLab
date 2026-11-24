@@ -76,7 +76,7 @@ def test_no_run_means_no_banner_and_no_fields(gore_window: MainWindow) -> None:
 
 
 @pytest.mark.slow
-def test_preview_run_colours_by_fos_and_goes_grey_when_stale(
+def test_preview_run_can_be_coloured_by_fos_and_goes_grey_when_stale(
     gore_window: MainWindow, qtbot: QtBot
 ) -> None:
     w = gore_window
@@ -89,8 +89,12 @@ def test_preview_run_colours_by_fos_and_goes_grey_when_stale(
     qtbot.waitUntil(lambda: view.run_choice.currentData() == PREVIEW, timeout=10_000)
     record = session.project.runs[0]
     assert record.converged
-    # A current, converged preview: coloured by warp FoS, banner says it is unverified
-    # (or names the failing zones), and the run details give the §6.5 facts.
+    # A current, converged preview opens in Layer colour; chosen, the warp FoS colours
+    # it. The banner says it is unverified (or names the failing zones) either way, and
+    # the run details give the §6.5 facts.
+    assert view.shown_field() is None
+    view.field_choice.setCurrentIndex(view.field_choice.findData("fos_warp"))
+    view.field_choice.activated.emit(view.field_choice.currentIndex())
     field = view.shown_field()
     assert field is not None and field.name == "fos_warp"
     assert len(field.values) == record.n_elements
@@ -124,19 +128,20 @@ def test_preview_run_colours_by_fos_and_goes_grey_when_stale(
     assert requested == [PREVIEW]
 
 
-def test_layer_list_shows_short_names_with_the_full_label_as_tooltip(
+def test_objects_list_shows_short_names_with_the_full_label_as_tooltip(
     gore_window: MainWindow,
 ) -> None:
     from envelopelab_app.panels.view3d import Layer
     from envelopelab_app.theme import STATUS_STYLES
 
     view = gore_window.view3d
+    # The Objects list names the object; its tooltip has the full description of what
+    # it is drawn as.
     item = view.layer_item("design")
-    assert item is not None and item.text(0) == "Design surface"
-    assert item.toolTip(0) == view.labels()["design"]  # the full description
+    assert item is not None and item.text(0) == "Envelope"
+    assert view.labels()["design"] in item.toolTip(0)
     assert len(item.text(0)) < len(item.toolTip(0))
-    group = item.parent()
-    assert group is not None and group.text(0) == "Design"
+    assert item.parent() is None
     empty = np.zeros((0, 3))
     stale = Layer("envelopelab-preview", "envelopelab-preview", "long [STALE]", empty, empty)
     stale.stale = True

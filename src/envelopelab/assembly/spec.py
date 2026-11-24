@@ -20,6 +20,7 @@ Lengths are in mm in the file and converted to m by the ``*_m`` properties.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -145,6 +146,18 @@ class RingSpec(BaseModel):
     def instance_id(self, row: str, gore: int) -> str:
         """Instance id of one ring panel."""
         return f"{self.name}/{row}@{gore}"
+
+
+_INSTANCE_ID = re.compile(r"^(?P<ring>[^/]+)/(?P<row>[^@]+)@(?P<gore>\d+)$")
+
+
+def parse_instance_id(instance_id: str) -> tuple[str, str, int] | None:
+    """Ring, row and gore of a ring panel's instance id (``<ring>/<row>@<gore>``, as
+    :meth:`RingSpec.instance_id` writes it); None for any other instance (a part)."""
+    m = _INSTANCE_ID.match(instance_id)
+    if m is None:
+        return None
+    return m.group("ring"), m.group("row"), int(m.group("gore"))
 
 
 class FeatureSelector(BaseModel):

@@ -23,7 +23,7 @@ listed in the Validation panel. Lengths are shown in m, angles in degrees.
 from __future__ import annotations
 
 import math
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -43,6 +43,8 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QDoubleSpinBox,
     QFileDialog,
     QFormLayout,
@@ -73,11 +75,31 @@ from PySide6.QtWidgets import (
 
 from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH, PackExtras
 from envelopelab.export.templates import MARGIN, roll_fit, turn_points
+from envelopelab.features.mesh_profile import ROUND_TOLERANCE, ProfileFit, fit_profile
 from envelopelab.features.metrics import REQUIRED_FOS
 from envelopelab.features.primitives import CutPiece, PrimitiveDesign, PrimitiveError
+from envelopelab.project.coordinates import (
+    across_from_metres,
+    across_metres,
+    balloon_position,
+    format_row_position,
+    parse_row_position,
+    split_fraction,
+    split_metres,
+    tape_at,
+)
 from envelopelab.project.model import SOLVER_LABELS
 from envelopelab.project.placement_map import snap
 from envelopelab.project.shape_groups import group_names
+from envelopelab.project.shape_profile import (
+    insert_profile_point,
+    move_split,
+    profile_curve,
+    remove_profile_point,
+    split_fraction_at,
+    split_points,
+)
+from envelopelab.project.shape_profile import scale_profile as scaled_profile
 from envelopelab.project.shapes import (
     CAP_PANEL_TOP_WIDTH,
     MAX_PIECES,
@@ -92,10 +114,12 @@ from envelopelab.project.shapes import (
     cap_diameter,
     default_shape,
     mesh_shape,
+    mesh_size,
     piece_count,
     placement_at,
     pointed,
     shape_fabrics,
+    widest_radius,
 )
 from envelopelab.project.symmetry import axis_gore_label
 from envelopelab_app.controller import WorkspaceController
@@ -108,7 +132,9 @@ from envelopelab_app.placement_view import (
     PlacementData,
     PlacementView,
 )
+from envelopelab_app.position_editor import PositionEditor
 from envelopelab_app.refresh import Refresher
+from envelopelab_app.shape_profile_view import ShapeProfileView
 from envelopelab_app.view_tools import FitButton
 
 FAIL_COLOR = "#b00020"
@@ -156,10 +182,9 @@ class FieldSpec:
     decimals: int = 3
 
 
+#: The base point's gore, across and tape position are a PositionEditor (metres or
+#: balloon coordinates); these are the rest of the placement.
 PLACEMENT_FIELDS: tuple[FieldSpec, ...] = (
-    FieldSpec(("placement", "gore"), "Gore", integer=True, minimum=1, maximum=999),
-    FieldSpec(("placement", "tape_position"), "Tape position from mouth (m)", minimum=0.001),
-    FieldSpec(("placement", "across"), "Across gore (-0.5…0.5)", minimum=-0.5, maximum=0.5),
     FieldSpec(("placement", "lean_deg"), "Lean (deg)", maximum=75.0, decimals=1),
     FieldSpec(
         ("placement", "lean_toward_deg"),
@@ -203,6 +228,69 @@ def _values(path: tuple[str, ...], value: Any) -> dict[str, Any]:
     return {path[0]: {path[1]: value}}
 
 
+class ResizeMeshDialog(QDialog):
+    """Asks for a mesh shape's new size, m (length up the tape, width across, height);
+    with *Keep proportions* ticked, changing one size changes the others alike."""
+
+    def __init__(self, parent: QWidget | None, size: tuple[float, float, float]) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Resize shape")
+        self.setObjectName("resizeMeshDialog")
+        self.old = size
+        form = QFormLayout(self)
+        note = QLabel(
+            "The shape is scaled about its base point and cut again. Its feed holes, cap "
+            "and placement are kept: check them after a large change."
+        )
+        note.setWordWrap(True)
+        form.addRow(note)
+        self.boxes: list[QDoubleSpinBox] = []
+        for label, value, name in zip(
+            ("Length up the tape (m)", "Width across the gores (m)", "Height (m)"),
+            size,
+            ("resizeAlong", "resizeAcross", "resizeHeight"),
+            strict=True,
+        ):
+            box = QDoubleSpinBox()
+            box.setObjectName(name)
+            box.setDecimals(3)
+            box.setRange(0.001, 1000.0)
+            box.setSingleStep(0.05)
+            box.setValue(value)
+            box.setKeyboardTracking(False)
+            box.valueChanged.connect(lambda _v, b=box: self._changed(b))
+            form.addRow(label, box)
+            self.boxes.append(box)
+        self.keep = QCheckBox("Keep proportions")
+        self.keep.setObjectName("resizeKeep")
+        self.keep.setChecked(True)
+        form.addRow(self.keep)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        form.addRow(buttons)
+
+    def _changed(self, box: QDoubleSpinBox) -> None:
+        if not self.keep.isChecked():
+            return
+        i = self.boxes.index(box)
+        factor = box.value() / self.old[i]
+        for j, other in enumerate(self.boxes):
+            if j != i:
+                other.blockSignals(True)
+                other.setValue(self.old[j] * factor)
+                other.blockSignals(False)
+
+    def factors(self) -> tuple[float, float, float]:
+        """Scale factors up the tape, across and in height (new size / old size)."""
+        along, across, height = (
+            b.value() / old for b, old in zip(self.boxes, self.old, strict=True)
+        )
+        return along, across, height
+
+
 def _ask(
     parent: QWidget,
     title: str,
@@ -211,8 +299,6 @@ def _ask(
 ) -> list[float] | None:
     """A small dialog of numbers (label, minimum, maximum, value, decimals) and an
     optional tick box (its state comes last, 1 or 0); None when cancelled."""
-    from PySide6.QtWidgets import QDialog, QDialogButtonBox
-
     dialog = QDialog(parent)
     dialog.setWindowTitle(title)
     form = QFormLayout(dialog)
@@ -725,6 +811,37 @@ class ShapesPanel(QWidget):
         self.profile_table.itemChanged.connect(self._profile_edited)
         self.profile_box = QWidget()
         profile_layout = QVBoxLayout(self.profile_box)
+        self.profile_view = ShapeProfileView()
+        self.profile_view.pointsDropped.connect(self._profile_dropped)
+        self.profile_view.splitDropped.connect(self._split_dropped)
+        self.profile_view.insertRequested.connect(self._insert_profile_at)
+        self.profile_view.removeRequested.connect(self._remove_profile_points)
+        self.profile_view.selectionChanged.connect(self._profile_selection_changed)
+        profile_layout.addWidget(self.profile_view, 3)
+        tools = QHBoxLayout()
+        tools.addWidget(QLabel("Soft radius (m)"))
+        self.profile_soft = QDoubleSpinBox()
+        self.profile_soft.setObjectName("shapeProfileSoft")
+        self.profile_soft.setRange(0.0, 50.0)
+        self.profile_soft.setDecimals(2)
+        self.profile_soft.setSingleStep(0.05)
+        self.profile_soft.setToolTip(
+            "Dragged points pull their neighbours within this distance along the outline "
+            "(0: only the selected points move)"
+        )
+        self.profile_soft.valueChanged.connect(
+            lambda v: setattr(self.profile_view, "soft_radius", float(v))
+        )
+        tools.addWidget(self.profile_soft)
+        self.profile_scale_button = QPushButton("Scale…")
+        self.profile_scale_button.setObjectName("shapeProfileScale")
+        self.profile_scale_button.setToolTip(
+            "Make the whole shape, or the selected points, larger or smaller (one undo step)"
+        )
+        self.profile_scale_button.clicked.connect(self._scale_profile_dialog)
+        tools.addWidget(self.profile_scale_button)
+        tools.addStretch(1)
+        profile_layout.addLayout(tools)
         profile_layout.addWidget(QLabel("Profile points, base first, axis last (m)"))
         profile_layout.addWidget(self.profile_table, 1)
         row_buttons = QHBoxLayout()
@@ -1016,6 +1133,7 @@ class ShapesPanel(QWidget):
         # Where the shapes sit on the balloon: the first tab, shown by default.
         self.placement = PlacementView(gpu=enable_3d)
         self.placement.map.shapeClicked.connect(self.select)
+        self.placement.map.describe_point = self._describe_point
         self.placement.shapeMoved.connect(self.move_object)
         self.placement.nudged.connect(self.nudge)
         self._axis: _AxisSession | None = None
@@ -1385,6 +1503,41 @@ class ShapesPanel(QWidget):
             self.selected = None
             self.refresh()
 
+    def _axis_label(self, line: float) -> str:
+        """Where an axis at gore position ``line`` lies, in the preferred units."""
+        return axis_gore_label(line, self._gores(), self.controller.position_units)
+
+    def _describe_point(self, g: float, tape: float) -> str:
+        """The map point at gore position ``g`` (gore widths from seam 0) and tape
+        position ``tape`` (m), in the preferred units."""
+        k = int(g // 1)
+        gores = self._gores()
+        return self.controller.describe_position(k % gores + 1, g - k - 0.5, tape)
+
+    def _position_context(self, spec: ShapeSpec) -> None:
+        """Show ``spec``'s base point in the preferred units."""
+        design = self.controller.design
+        gores = design.gores.count if design is not None and design.gores is not None else 999
+        self.position.set_context(
+            self.controller.envelope_surface(), self.controller.position_units, gores
+        )
+        p = spec.placement
+        self.position.set_position(p.gore, p.across, p.tape_position)
+
+    def _position_edited(self, gore: int, across: float, tape: float) -> None:
+        name = self.selected
+        if name is None:
+            return
+        values = {"placement": {"gore": gore, "across": across, "tape_position": tape}}
+
+        def apply() -> None:
+            if self.selected != name:
+                return
+            if not self.controller.edit("update_shape", name, values):
+                self._update_form(self.spec())  # refused: show the stored point again
+
+        self.controller.edit_live(f"shape:{name}:placement", apply)
+
     def set_value_live(self, path: tuple[str, ...], value: Any) -> None:
         """Change one value of the selected shape in real time (a spin box being spun or
         held: :meth:`WorkspaceController.edit_live`; the newest value wins, one undo
@@ -1641,14 +1794,16 @@ class ShapesPanel(QWidget):
         self.editor_stack.setCurrentIndex(0 if overlay is None else 1)
         if overlay is not None:
             session = self.controller.session
-            _surface, layout, error = self.overlay_layout()
+            surface, layout, error = self.overlay_layout()
             colour = None
             if session is not None:
                 from envelopelab.project.colours import PanelRef
 
                 colour = session.state.colours.colour_of(PanelRef(overlay.name, "A", 1))
             gores = session.design.gores.count if session and session.design.gores else 1
-            self.overlay_editor.set_overlay(overlay, layout, error, colour, gores)
+            self.overlay_editor.set_overlay(
+                overlay, layout, error, colour, gores, surface, self.controller.position_units
+            )
         self._update_form(spec)
         self._show_result(spec)
         self._show_simulation(spec)
@@ -1724,6 +1879,11 @@ class ShapesPanel(QWidget):
         if spec is None:
             return
         self.name_edit.setText(spec.name)  # also undoes a refused rename
+        if isinstance(spec, MeshShape):
+            along, across, height = mesh_size(spec)
+            self.mesh_size_label.setText(
+                f"{along:.3f} up × {across:.3f} across × {height:.3f} high (m)"
+            )
         self.group_combo.blockSignals(True)
         self.group_combo.clear()
         self.group_combo.addItems(["", *group_names(self.specs())])
@@ -1734,17 +1894,26 @@ class ShapesPanel(QWidget):
             box.blockSignals(True)
             box.setValue(_get(data, path))
             box.blockSignals(False)
+        self._position_context(spec)
         self.holes_table.blockSignals(True)
         self.holes_table.setRowCount(len(spec.feed_holes))
+        surface = self.controller.envelope_surface()
+        balloon = self.controller.position_units == "balloon"
+        self.holes_table.setHorizontalHeaderLabels(
+            ["gore", "row + fraction up", "across (0 seam … 1 next)", "radius (m)"]
+            if balloon and surface is not None
+            else ["gore", "up the tape (m)", "from gore centre (m)", "radius (m)"]
+        )
         for i, hole in enumerate(spec.feed_holes):
-            for j, text in enumerate(
-                (
-                    str(hole.gore),
-                    f"{hole.tape_position:.4f}",
-                    f"{hole.across:.3f}",
-                    f"{hole.radius:.4f}",
-                )
-            ):
+            up_text, across_text = f"{hole.tape_position:.4f}", f"{hole.across:.3f}"
+            if surface is not None and balloon:
+                b = balloon_position(surface, hole.gore, hole.across, hole.tape_position)
+                up_text = format_row_position(b.row, b.row_fraction)
+                across_text = f"{b.gore_fraction:.3f}"
+            elif surface is not None:
+                across_m = across_metres(surface, hole.across, hole.tape_position)
+                across_text = f"{across_m:.4f}"
+            for j, text in enumerate((str(hole.gore), up_text, across_text, f"{hole.radius:.4f}")):
                 self.holes_table.setItem(i, j, QTableWidgetItem(text))
         self.holes_table.blockSignals(False)
         self.feed_check.blockSignals(True)
@@ -1780,6 +1949,16 @@ class ShapesPanel(QWidget):
                 self.profile_table.setItem(i, 0, QTableWidgetItem(f"{rho:.4f}"))
                 self.profile_table.setItem(i, 1, QTableWidgetItem(f"{zeta:.4f}"))
             self.profile_table.blockSignals(False)
+            self._show_profile(spec)
+
+    def _show_profile(self, spec: RevolvedShape) -> None:
+        """Draw ``spec``'s profile, outline and splits in the visual editor."""
+        try:
+            curve = profile_curve(spec.profile, spec.smooth)
+            splits = split_points(spec)
+        except (ValueError, PrimitiveError):
+            curve, splits = np.asarray(spec.profile, dtype=np.float64), np.zeros((0, 2))
+        self.profile_view.set_shape(spec.profile, spec.smooth, curve, splits)
 
     def _build_form(self, spec: ShapeSpec | None) -> None:
         for form in (self.form, self.holes_form):
@@ -1818,7 +1997,33 @@ class ShapesPanel(QWidget):
             )
             mesh_label.setWordWrap(True)
             self.form.addRow("Mesh", mesh_label)
+            self.mesh_size_label = QLabel()
+            self.mesh_size_label.setObjectName("shapeMeshSizeLabel")
+            resize = QPushButton("Resize…")
+            resize.setObjectName("shapeResize")
+            resize.setToolTip(
+                "Make the shape larger or smaller, in proportion or in one direction "
+                "(one undo step)"
+            )
+            resize.clicked.connect(self._resize_dialog)
+            size_row = QHBoxLayout()
+            size_row.addWidget(self.mesh_size_label, 1)
+            size_row.addWidget(resize)
+            self.form.addRow("Size", size_row)
+            convert = QPushButton("Convert to revolved…")
+            convert.setObjectName("shapeConvertRevolved")
+            convert.setToolTip(
+                "Replace a mesh that is round about its axis (a mast, a knob, a ball) by a "
+                "revolved profile: exact gores, horizontal splits and the visual profile "
+                "editor. Shows how far the mesh is from round first; undo brings it back."
+            )
+            convert.clicked.connect(self._convert_dialog)
+            self.form.addRow("", convert)
         gores = self.controller.design.gores.count if self.controller.is_gore else 999  # type: ignore[union-attr]
+        self.position = PositionEditor("shapePlacement", "shape:placement.", self)
+        self.position.add_to(self.form)
+        self.position.edited.connect(self._position_edited)
+        self._position_context(spec)
         for field in (*PLACEMENT_FIELDS, *KIND_FIELDS[spec.kind], *COMMON_FIELDS):
             box: QSpinBox | QDoubleSpinBox
             if field.integer:
@@ -1882,8 +2087,10 @@ class ShapesPanel(QWidget):
         self.holes_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.holes_table.setMinimumHeight(160)
         self.holes_table.setToolTip(
-            "More feed holes inside the footprint: gore number, tape length from the mouth, "
-            "fraction of the gore width from its centreline, finished radius."
+            "More feed holes inside the footprint: gore number, where up the tape and across "
+            "the gore (in metres, or as the panel row with the fraction up it and the "
+            "fraction across the gore, as Preferences ▸ Positions shown in says), finished "
+            "radius."
         )
         self.holes_table.itemChanged.connect(self._hole_edited)
         add_hole = QPushButton("Add feed hole")
@@ -2236,7 +2443,7 @@ class ShapesPanel(QWidget):
         self.axes_list.clear()
         for axis in self.axes():
             users = [s.name for s in self.specs() if s.mirror and s.mirror.axis == axis.name]
-            text = f"{axis.name} — {axis_gore_label(axis.line, self._gores())}"
+            text = f"{axis.name} — {self._axis_label(axis.line)}"
             item = QListWidgetItem(text + (f"  ({len(users)} twin(s))" if users else ""))
             item.setData(Qt.ItemDataRole.UserRole, axis.name)
             self.axes_list.addItem(item)
@@ -2294,9 +2501,7 @@ class ShapesPanel(QWidget):
         targets = [a.name for a in self.axes()] if session.mode.startswith("mirror") else None
         self.placement.begin_axis(title, accept, name, self._gores(), targets)
         if session.line is not None:
-            self.placement.show_axis_line(
-                session.line, axis_gore_label(session.line, self._gores())
-            )
+            self.placement.show_axis_line(session.line, self._axis_label(session.line))
         else:
             self.placement.show_axis_line(self._base_line(), "click on the map or the 3D view")
         self._update_axis_preview()
@@ -2374,19 +2579,19 @@ class ShapesPanel(QWidget):
         g %= self._gores()
         if chosen:
             session.line = g
-            self.placement.show_axis_line(g, axis_gore_label(g, self._gores()))
+            self.placement.show_axis_line(g, self._axis_label(g))
         else:
             session.hover = g
             if session.line is None:  # nothing chosen yet: the bar follows the pointer
                 self.placement.show_axis_line(
-                    g, f"pointer: {axis_gore_label(g, self._gores())}, click to place it"
+                    g, f"pointer: {self._axis_label(g)}, click to place it"
                 )
         self._update_axis_preview()
 
     def _axis_typed(self, g: float) -> None:
         if self._axis is not None and not self._axis.fixed:
             self._axis.line = g % self._gores()
-            self.placement.show_axis_line(self._axis.line, axis_gore_label(g, self._gores()))
+            self.placement.show_axis_line(self._axis.line, self._axis_label(g))
             self._update_axis_preview()
 
     def _axis_target(self, name: str) -> None:
@@ -2399,9 +2604,7 @@ class ShapesPanel(QWidget):
         session.axis = None if axis is None else axis.name
         session.line = None if axis is None else float(axis.line)
         if axis is not None:
-            self.placement.show_axis_line(
-                axis.line, axis_gore_label(axis.line, self._gores()), editable=False
-            )
+            self.placement.show_axis_line(axis.line, self._axis_label(axis.line), editable=False)
         else:
             self.placement.show_axis_line(self._base_line(), "click on the map or the 3D view")
         self._update_axis_preview()
@@ -2426,7 +2629,7 @@ class ShapesPanel(QWidget):
         chosen = session.line
         preview = AxisPreview(
             name if not session.fixed else str(session.axis),
-            axis_gore_label(chosen, n) if chosen is not None else "not placed yet",
+            self._axis_label(chosen) if chosen is not None else "not placed yet",
         )
         if chosen is not None:
             preview.map_line, preview.lines3d = lines(chosen)
@@ -2501,6 +2704,75 @@ class ShapesPanel(QWidget):
         axis = self._chosen_axis()
         if axis is not None:
             self.controller.edit("remove_symmetry_axis", axis.name)
+
+    def resize_mesh(self, along: float, across: float, height: float) -> bool:
+        """Scale the selected mesh shape by these factors up the tape, across the gores and
+        in height (one undo step); whether it changed."""
+        if self.selected is None:
+            return False
+        return bool(self.controller.edit("scale_mesh_shape", self.selected, along, across, height))
+
+    def _resize_dialog(self) -> None:
+        spec = self.spec()
+        if not isinstance(spec, MeshShape):
+            return
+        dialog = ResizeMeshDialog(self, mesh_size(spec))
+        if dialog.exec():
+            self.resize_mesh(*dialog.factors())
+
+    def fit_mesh(self, points: int = 16) -> ProfileFit | None:
+        """A revolved profile fitted to the selected mesh shape (None: not a mesh, or
+        no fit; the reason is reported)."""
+        spec = self.spec()
+        if not isinstance(spec, MeshShape):
+            return None
+        try:
+            return fit_profile(np.asarray(spec.vertices), np.asarray(spec.triangles), points)
+        except ValueError as exc:
+            self.controller.editRejected.emit(f"{spec.name}: {exc}")
+            return None
+
+    @staticmethod
+    def fit_summary(fit: ProfileFit) -> str:
+        """How far the mesh is from the fitted profile, for the user to judge."""
+        text = (
+            f"Largest deviation {1000 * fit.max_deviation:.0f} mm "
+            f"({100 * fit.relative_deviation:.1f} % of the widest radius, "
+            f"{1000 * fit.widest_radius:.0f} mm) at {fit.deviation_height:.2f} m up; "
+            f"RMS {1000 * fit.rms_deviation:.0f} mm; {len(fit.profile)} profile points."
+        )
+        if not fit.round:
+            text += (
+                "\n\nWARNING: this mesh is not round about its axis (more than "
+                f"{100 * ROUND_TOLERANCE:.0f} % off). Converting it changes its shape."
+            )
+        return text
+
+    def convert_mesh(self, fit: ProfileFit) -> bool:
+        """Replace the selected mesh shape by the revolved profile ``fit`` (one undo
+        step) and show its Profile tab."""
+        if self.selected is None:
+            return False
+        ok = bool(
+            self.controller.edit("convert_mesh_to_revolved", self.selected, fit.profile, fit.smooth)
+        )
+        if ok:
+            self.editor_tabs.setCurrentIndex(1)
+        return ok
+
+    def _convert_dialog(self) -> None:
+        answer = _ask(self, "Convert to revolved profile", [("Profile points", 3, 64, 16, 0)])
+        if answer is None:
+            return
+        fit = self.fit_mesh(int(answer[0]))
+        if fit is None:
+            return
+        icon = QMessageBox.Icon.Information if fit.round else QMessageBox.Icon.Warning
+        box = QMessageBox(icon, "Convert to revolved profile", self.fit_summary(fit), parent=self)
+        box.setInformativeText("Convert this shape? Undo brings the mesh back.")
+        box.setStandardButtons(QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel)
+        if box.exec() == QMessageBox.StandardButton.Ok:
+            self.convert_mesh(fit)
 
     def _mirror_dialog(self) -> None:
         self.begin_mirror()
@@ -2581,8 +2853,18 @@ class ShapesPanel(QWidget):
         self.splits_table.setVerticalHeaderLabels(
             [f"{letters[i]}|{letters[i + 1]}" for i in range(len(spec.splits))]
         )
-        for i, f in enumerate(spec.splits):
-            self.splits_table.setItem(i, 0, QTableWidgetItem(f"{100.0 * f:.1f}"))
+        in_metres = self._splits_in_metres(spec)
+        self.splits_table.setHorizontalHeaderLabels(
+            [
+                "Split at (m along the skin from the rim)"
+                if in_metres
+                else "Split at (% of the profile)"
+            ]
+        )
+        values = split_metres(spec) if in_metres else [100.0 * f for f in spec.splits]
+        for i, v in enumerate(values):
+            text = f"{v:.3f}" if in_metres else f"{v:.1f}"
+            self.splits_table.setItem(i, 0, QTableWidgetItem(text))
         self.splits_table.blockSignals(False)
         for widget in (self.splits_table, self.add_split_button, self.remove_split_button):
             widget.setEnabled(not mesh)
@@ -2685,6 +2967,9 @@ class ShapesPanel(QWidget):
         widths.addLayout(buttons)
         form.addRow("Crown widths", widths)
         # Where the panels meet (the cap's centre), as plan fractions (ADR-0052).
+        #: Metres per unit of the Across/Up boxes: the widest radius in metres, 1 in
+        #: balloon coordinates (the stored fractions).
+        self._meeting_scale = 1.0
         self.meeting_pad = MeetingPointPad()
         self.meeting_pad.setObjectName("shapeMeetingPad")
         self.meeting_pad.moved.connect(self._meeting_dragged)
@@ -2701,8 +2986,10 @@ class ShapesPanel(QWidget):
             spin.setSingleStep(0.05)
             spin.setKeyboardTracking(False)
             spin.setToolTip(
-                f"Where the panels meet, {tip}, as a fraction of the shape's widest radius "
-                "seen from above (0, 0: the tip; it stays in place when the shape is resized)"
+                f"Where the panels meet, {tip}, seen from above: in m, or in balloon "
+                "coordinates as a fraction of the shape's widest radius (Preferences ▸ "
+                "Positions shown in). 0, 0: the tip; it stays in place relative to the "
+                "shape when the shape is resized."
             )
             spin.valueChanged.connect(self._meeting_typed)
         self.meeting_centre = QPushButton("Back to the tip")
@@ -3029,9 +3316,23 @@ class ShapesPanel(QWidget):
             shift = float(getattr(prim, "cap_shift", 0.0))
         except (PrimitiveError, ValueError):
             across, up, seams, shift = 0.0, 0.0, [], 0.0
+        # Metres: offsets seen from above (fraction x widest radius); balloon
+        # coordinates: the fractions of the widest radius the shape stores.
+        scale = 1.0
+        if self.controller.position_units == "metres":
+            try:
+                scale = widest_radius(spec)
+            except (PrimitiveError, ValueError):
+                scale = 1.0
+        self._meeting_scale = scale if scale > 0.0 else 1.0
+        metres = self.controller.position_units == "metres"
         for box, value in ((self.cap_across, across), (self.cap_up, up)):
             box.blockSignals(True)
-            box.setValue(value)
+            box.setDecimals(4 if metres else 3)  # metres to 0.1 mm
+            box.setRange(-self._meeting_scale, self._meeting_scale)
+            box.setSuffix(" m" if metres else "")
+            box.setSingleStep(0.05 * self._meeting_scale)
+            box.setValue(value * self._meeting_scale)
             box.blockSignals(False)
         self.meeting_pad.set_state(across, up, seams)
         self.meeting_pad.set_cap(self._cap_view(spec))
@@ -3066,12 +3367,13 @@ class ShapesPanel(QWidget):
     def _meeting_dragged(self, across: float, up: float) -> None:
         for box, value in ((self.cap_across, across), (self.cap_up, up)):
             box.blockSignals(True)
-            box.setValue(value)
+            box.setValue(value * self._meeting_scale)
             box.blockSignals(False)
         self.set_meeting_point(across, up, live=True)
 
     def _meeting_typed(self, _value: float) -> None:
-        across, up = float(self.cap_across.value()), float(self.cap_up.value())
+        scale = self._meeting_scale
+        across, up = float(self.cap_across.value()) / scale, float(self.cap_up.value()) / scale
         h = math.hypot(across, up)
         if h > 1.0:  # keep it inside the outline: shorten towards the tip
             across, up = round(across / h, 3), round(up / h, 3)
@@ -3277,14 +3579,24 @@ class ShapesPanel(QWidget):
         if not self.set_panel_widths(widths):
             self._fill_layout(spec)
 
+    def _splits_in_metres(self, spec: ShapeSpec) -> bool:
+        """Whether the splits table shows metres along the skin (the units preference;
+        a mesh shape has no splits)."""
+        return self.controller.position_units == "metres" and not isinstance(spec, MeshShape)
+
     def _split_edited(self, item: QTableWidgetItem) -> None:
         spec = self.spec()
         if spec is None:
             return
         splits = list(spec.splits)
         try:
-            splits[item.row()] = float(item.text()) / 100.0
-        except ValueError:
+            value = float(item.text())
+            if self._splits_in_metres(spec):
+                splits[item.row()] = split_fraction(spec, value)
+            else:
+                splits[item.row()] = value / 100.0
+        except ValueError as exc:
+            self.controller.editRejected.emit(f"split {item.row() + 1}: {exc}")
             self._fill_layout(spec)
             return
         if not self.set_splits(splits):
@@ -3347,14 +3659,34 @@ class ShapesPanel(QWidget):
         holes = self._holes()
         if item.row() >= len(holes):
             return
-        key = ("gore", "tape_position", "across", "radius")[item.column()]
+        hole = holes[item.row()]
+        surface = self.controller.envelope_surface()
+        balloon = self.controller.position_units == "balloon"
+        column = item.column()
+        key = ("gore", "tape_position", "across", "radius")[column]
+        text = item.text()
         try:
-            value: float | int = int(item.text()) if key == "gore" else float(item.text())
-        except ValueError:
-            self.controller.editRejected.emit(f"{key}: not a number: {item.text()!r}")
+            if key == "gore":
+                hole["gore"] = int(text)
+            elif key == "radius":
+                hole["radius"] = float(text)
+            elif key == "tape_position" and balloon and surface is not None:
+                row, fraction = parse_row_position(text)
+                hole["tape_position"] = tape_at(surface, row, fraction)
+            elif key == "tape_position":
+                hole["tape_position"] = float(text)
+            elif balloon and surface is not None:
+                hole["across"] = float(text) - 0.5
+                if not -0.5 <= hole["across"] <= 0.5:
+                    raise ValueError("across a gore is between 0 (one seam) and 1 (the other)")
+            elif surface is not None:
+                hole["across"] = across_from_metres(surface, float(text), hole["tape_position"])
+            else:
+                hole["across"] = float(text)
+        except ValueError as exc:
+            self.controller.editRejected.emit(f"feed hole {item.row() + 1}: {exc}")
             self._update_form(self.spec())
             return
-        holes[item.row()][key] = value
         if not self.set_value(("feed_holes",), holes):
             self._update_form(self.spec())
 
@@ -3374,6 +3706,89 @@ class ShapesPanel(QWidget):
             base = getattr(spec, "base_radius", None)
             radius = round(0.4 * base, 3) if base else 0.1
         self.set_value(("feed_hole_radius",), radius)
+
+    def _set_profile(self, profile: Sequence[tuple[float, float]]) -> bool:
+        """Make ``profile`` (m) the selected revolved shape's profile (one undo step)."""
+        ok = self.set_value(("profile",), [[float(r), float(z)] for r, z in profile])
+        if not ok:
+            self._update_form(self.spec())
+        return ok
+
+    def _profile_dropped(self, profile: Sequence[tuple[float, float]]) -> None:
+        self._set_profile(profile)
+
+    def _split_dropped(self, index: int, rho: float, zeta: float) -> None:
+        spec = self.spec()
+        if not isinstance(spec, RevolvedShape):
+            return
+        splits = move_split(spec.splits, index, split_fraction_at(spec, rho, zeta))
+        if not self.set_value(("splits",), splits):
+            self._update_form(self.spec())
+
+    def _insert_profile_at(self, rho: float, zeta: float) -> None:
+        spec = self.spec()
+        if not isinstance(spec, RevolvedShape):
+            return
+        profile, index = insert_profile_point(spec.profile, rho, zeta)
+        if self._set_profile(profile):
+            self.profile_view.select([index])
+
+    def _remove_profile_points(self, indices: Sequence[int]) -> None:
+        spec = self.spec()
+        if not isinstance(spec, RevolvedShape):
+            return
+        profile: list[tuple[float, float]] = list(spec.profile)
+        try:
+            for index in sorted(indices, reverse=True):
+                profile = remove_profile_point(profile, index)
+        except ValueError as exc:
+            self.controller.editRejected.emit(str(exc))
+            return
+        if self._set_profile(profile):
+            self.profile_view.select([])
+
+    def _profile_selection_changed(self) -> None:
+        chosen = self.profile_view.selected
+        self.profile_table.blockSignals(True)
+        self.profile_table.clearSelection()
+        if chosen:
+            self.profile_table.setCurrentCell(chosen[0], 0)
+        self.profile_table.blockSignals(False)
+        what = "selected points" if chosen else "whole shape"
+        self.profile_scale_button.setText(f"Scale {what}…")
+
+    def scale_profile(self, factor_rho: float, factor_zeta: float) -> bool:
+        """Scale the selected revolved shape's profile by these factors across and up
+        (dimensionless): the selected points about their centroid, or with none
+        selected the whole shape about its base (one undo step)."""
+        spec = self.spec()
+        if not isinstance(spec, RevolvedShape):
+            return False
+        try:
+            profile = scaled_profile(
+                spec.profile,
+                factor_rho,
+                factor_zeta,
+                self.profile_view.selected,
+                self.profile_view.soft_radius,
+            )
+        except ValueError as exc:
+            self.controller.editRejected.emit(str(exc))
+            return False
+        return self._set_profile(profile)
+
+    def _scale_profile_dialog(self) -> None:
+        what = "selected points" if self.profile_view.selected else "whole shape"
+        answer = _ask(
+            self,
+            f"Scale {what}",
+            [
+                ("Radius × (across)", 0.05, 20.0, 1.0, 3),
+                ("Height × (up)", 0.05, 20.0, 1.0, 3),
+            ],
+        )
+        if answer is not None:
+            self.scale_profile(answer[0], answer[1])
 
     def _profile_points(self) -> list[list[float]] | None:
         points = []

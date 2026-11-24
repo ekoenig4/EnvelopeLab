@@ -1899,16 +1899,24 @@ class _Skin:
         u = np.linspace(-reach, self.total, FOOTPRINT_GRID)
         uu, pp = np.meshgrid(u, phi)
         sd = self.surface.signed_distance(self.at_u(uu, pp)).reshape(uu.shape)
-        if np.any(sd[:, 0] >= 0.0):
+        inside = sd < 0.0
+        if not np.all(inside.any(axis=1)):
             raise PrimitiveError(
                 f"{name}: the skin does not reach the envelope; the base is too large for "
                 "the local envelope curvature"
             )
         if np.any(sd[:, -1] <= 0.0):
             raise PrimitiveError(f"{name}: the tip lies inside the envelope; reduce the lean")
-        inside = sd < 0.0
         last = inside.shape[1] - 1 - np.argmax(inside[:, ::-1], axis=1)
-        crossings = np.sum(np.diff(inside.astype(np.int8), axis=1) != 0, axis=1)
+        # The footprint is where the stretch inside the envelope that ends at ``last``
+        # leaves it. Below that stretch the search line may have left the envelope again
+        # through its far side (a long or leaning shape near the crown): those crossings
+        # are not the shape's. When the line starts inside (start -1), every crossing
+        # counts, as before.
+        idx = np.arange(inside.shape[1])
+        start = np.where(~inside & (idx[None, :] < last[:, None]), idx[None, :], -1).max(axis=1)
+        flips = np.diff(inside.astype(np.int8), axis=1) != 0
+        crossings = np.sum(flips & (idx[None, :-1] > start[:, None]), axis=1)
         if np.any(crossings > 1):
             raise PrimitiveError(
                 f"{name}: the skin touches the envelope again; reduce the lean or the size"
@@ -2153,23 +2161,28 @@ class _GorePiece(_Piece):
 
 
 class _ClippedGore(_Piece):
-    """A gore of the top tier under a moved cap: developed as a classic gore (rows on the
-    skin's parallels) up to the highest point of its cap edge, and cut along that edge.
+    """A gore with a slanted edge: under a moved cap (its top) or on the footprint of a
+    leaning shape (its bottom). It is developed as a classic gore (rows on the skin's
+    parallels) from the lowest to the highest point of its edges and cut along them.
 
-    The cap's edge crosses the gore on a slant; laying the band's own rows (which end on
-    that slanted edge) straight across, as :class:`_GorePiece` does, would misplace the
-    cloth near the cap, so the rows are the parallels :math:`u` = const instead and the
-    cap's edge is drawn on the developed gore where it lies.
+    A slanted edge crosses the gore's parallels; laying the band's own rows (which end on
+    that edge) straight across, as :class:`_GorePiece` does, would misplace the cloth
+    there (on a leaning shape's footprint it loses cloth, more the more it leans), so the
+    rows are the parallels :math:`u` = const instead and the edge is drawn on the
+    developed gore where it lies.
     """
 
-    def __init__(self, band: _Band, phi_a: float, phi_b: float) -> None:
+    def __init__(self, band: _Band, phi_a: float, phi_b: float, bottom: bool = False) -> None:
         super().__init__(band, phi_a, phi_b)
         ph = np.linspace(phi_a, phi_b, 97)
-        u_max = float(np.max(band.skin.top_at(ph)))
-        self.inner_band = _Band(band.skin, band.u_lo, u_max, band.tier)
+        self.top_clipped = band.to_top
+        self.bottom_clipped = bottom
+        u_max = float(np.max(band.skin.top_at(ph))) if band.to_top else band.u_hi
+        u_min = float(np.min(band.u0_at(ph))) if bottom else band.u_lo
+        self.inner_band = _Band(band.skin, u_min, u_max, band.tier)
         self.inner_band.to_top = False
         self.inner = _GorePiece(self.inner_band, phi_a, phi_b)
-        # Both sides of every skin seam laid at the seam's true 3D length, to the cap.
+        # Both sides of every skin seam laid at the seam's true 3D length, edge to edge.
         t = np.linspace(0.0, 1.0, 241)
         self.seam_3d = tuple(_length(band.at(t, np.full(len(t), p))) for p in (phi_a, phi_b))
         self.stretch = self.inner.stretch
@@ -2180,62 +2193,86 @@ class _ClippedGore(_Piece):
         return out
 
     def equalise(self, left: float, right: float) -> None:
-        r"""Shear, stretch and widen the developed gore so that its seam edges, up to the
-        cap's edge, and that edge itself have their true 3D lengths (m).
+        r"""Shear, stretch and widen the developed gore so that its seam edges and its
+        slanted edges have their true 3D lengths (m).
 
+        Under a slanted top only (a moved cap) as before:
         :math:`x' = x\,(1 + \beta (y/Y)^2) + \kappa y,\ y' = (1 + \alpha + \gamma x/X)\,y`
-        (:math:`X, Y` the gore's developed half width and height): :math:`\alpha, \kappa,
-        \gamma` as in :meth:`_GorePiece.equalise`; :math:`\beta` widens the gore towards the
-        cap, where the slanted cap edge runs across it, so that edge is as long as the
-        flat cap's edge it is sewn to. Gauss-Newton iteration (least-norm steps) on the
-        three lengths.
+        (:math:`X, Y` the developed half width and height; :math:`\alpha, \kappa,
+        \gamma` as in :meth:`_GorePiece.equalise`; :math:`\beta` makes the cap's edge as
+        long as the flat cap's edge it is sewn to), by Gauss-Newton iteration with
+        least-norm steps on the three lengths.
+
+        With a slanted bottom (a leaning shape's footprint) the gore is stretched and
+        sheared like an upright gore and widened towards the footprint,
+        :math:`x' = x\,(1 + \beta (y/Y)^2 + \delta (1 - y/Y)^2) + \kappa y,\
+        y' = (1 + \alpha)\,y` (:math:`\beta` only when the top is slanted too): the seams
+        and the footprint, sewn to the line on the envelope, get their true lengths, and
+        the top stays straight, so a top on a parallel keeps its true length (it is sewn
+        to the next tier or a cap). Newton iteration on as many lengths as unknowns.
         """
         inner = self.inner
         x, y = inner.classic[..., 0], inner.classic[..., 1]
         height = max(float(y.max()), 1e-9)
+        width = max(float(np.abs(x).max()), 1e-9)
         n = 241
         t = np.linspace(0.0, 1.0, n)
         ph = np.linspace(self.phi_a, self.phi_b, n)
-        top_3d = _length(self.skin.at(np.ones(n), ph))
-        target = np.array([left, right, top_3d])
-
-        width = max(float(np.abs(x).max()), 1e-9)
+        targets = [left, right]
+        if self.top_clipped:
+            targets.append(_length(self.skin.at(np.ones(n), ph)))
+        if self.bottom_clipped:
+            targets.append(_length(self.skin.at(np.zeros(n), ph)))
+        target = np.array(targets)
 
         def warp(c: FloatArray) -> FloatArray:
-            return np.stack(
-                [
-                    x * (1.0 + c[2] * (y / height) ** 2) + c[1] * y,
-                    y * (1.0 + c[0] + c[3] * x / width),
-                ],
-                axis=2,
-            )
+            if not self.bottom_clipped:  # stretch, shear, top widening, keystone
+                return np.stack(
+                    [
+                        x * (1.0 + c[2] * (y / height) ** 2) + c[1] * y,
+                        y * (1.0 + c[0] + c[3] * x / width),
+                    ],
+                    axis=2,
+                )
+            widen = c[-1] * (1.0 - y / height) ** 2  # stretch, shear, [top], bottom
+            if self.top_clipped:
+                widen = widen + c[2] * (y / height) ** 2
+            return np.stack([x * (1.0 + widen) + c[1] * y, y * (1.0 + c[0])], axis=2)
 
         def lengths(c: FloatArray) -> FloatArray:
             inner._set(warp(c))
             got = [
                 _length(self.flat(t, np.full(n, self.phi_a))),
                 _length(self.flat(t, np.full(n, self.phi_b))),
-                _length(self.flat(np.ones(n), ph)),
             ]
+            if self.top_clipped:
+                got.append(_length(self.flat(np.ones(n), ph)))
+            if self.bottom_clipped:
+                got.append(_length(self.flat(np.zeros(n), ph)))
             out: FloatArray = np.array(got) - target
             return out
 
-        c = np.zeros(4)
+        size = len(targets) if self.bottom_clipped else 4
+        c = np.zeros(size)
         for _ in range(40):
             f = lengths(c)
             if float(np.abs(f).max()) < 1e-9:
                 break
-            jac = np.column_stack([(lengths(c + h) - f) / 1e-7 for h in np.eye(4) * 1e-7])
-            c = c - np.linalg.lstsq(jac, f, rcond=None)[0]
+            jac = np.column_stack([(lengths(c + h) - f) / 1e-7 for h in np.eye(size) * 1e-7])
+            if self.bottom_clipped:
+                c = c - _newton_step(jac, f)
+            else:
+                c = c - np.linalg.lstsq(jac, f, rcond=None)[0]
         if float(np.abs(lengths(c)).max()) > 1e-6:
             raise PrimitiveError(
-                "a gore under the moved cap cannot be laid flat with its true seam and cap "
-                "edge lengths; move the cap less"
+                "a gore with a slanted edge (under a moved cap, or on a leaning shape's "
+                "footprint) cannot be laid flat with its true seam and edge lengths; move "
+                "the cap less, lean the shape less or add gores"
             )
         inner._set(warp(c))
         inner.stretch = (float(c[0]), float(c[1]))
         self.stretch = inner.stretch
-        self.widening = float(c[2])
+        self.widening = float(c[2]) if self.top_clipped else 0.0
 
     def flat(self, t: FloatArray, phi: FloatArray) -> FloatArray:
         t, phi = np.broadcast_arrays(np.asarray(t, float), np.asarray(phi, float))
@@ -2324,6 +2361,19 @@ def _developable(primitive: Primitive) -> bool:
     return False
 
 
+#: A footprint that rises more than this across a gore, m, is a slanted edge: the gore is
+#: developed along true parallels and cut along it (:class:`_ClippedGore`; source:
+#: assumed, the geometry tolerance: below it the straight-across rows misplace less).
+FOOTPRINT_SLANT = 1e-3
+
+
+def _footprint_slant(band: _Band, phi_a: float, phi_b: float) -> float:
+    """How far the footprint rises across the gore between ``phi_a`` and ``phi_b`` (rad),
+    along the skin's meridians, m."""
+    u0 = band.u0_at(np.linspace(phi_a, phi_b, 97))
+    return float(np.max(u0) - np.min(u0))
+
+
 def _pieces(skin: _Skin, primitive: RevolvedPrimitive) -> list[_Piece]:
     """Every skin piece, tier by tier from the footprint up, round the axis in each."""
     seams = _seams(primitive)
@@ -2334,12 +2384,14 @@ def _pieces(skin: _Skin, primitive: RevolvedPrimitive) -> list[_Piece]:
         if _developable(primitive):
             tier = [_ConePiece(band, float(a), float(b)) for a, b in pairs]
         else:
-            gores: list[_GorePiece | _ClippedGore] = [
-                _ClippedGore(band, float(a), float(b))
-                if band.to_top
-                else _GorePiece(band, float(a), float(b))
-                for a, b in pairs
-            ]
+            gores: list[_GorePiece | _ClippedGore] = []
+            for a, b in pairs:
+                slanted = band.u_lo is None and _footprint_slant(band, a, b) > FOOTPRINT_SLANT
+                gores.append(
+                    _ClippedGore(band, float(a), float(b), bottom=slanted)
+                    if band.to_top or slanted
+                    else _GorePiece(band, float(a), float(b))
+                )
             # Both sides of every skin seam are laid at the seam's true 3D length.
             for g in gores:
                 g.equalise(*g.seam_3d)
@@ -3333,12 +3385,22 @@ class EnvelopeHost(HostSurface):
         return d.surface.signed_distance(p @ self._rotation())
 
 
+#: Below this turn of the meridian per unit length, 1/m, the envelope round a shape is
+#: taken as straight (a cone, :math:`R_1 = \infty`; source: assumed, rounding level).
+STRAIGHT_CURVATURE = 1e-9
+
+
 def host_surface_at(design: PrimitiveDesign, window: float = 0.25) -> EnvelopeHost:
     r"""Host of a primitive's sub-model: the true envelope round the base point.
 
     The local radii (for the far-field prestress only) are :math:`R_1`, the meridian
     radius of curvature from the tangent-angle change over ``base_s +- window``, and
-    :math:`R_2 = r/\cos\beta`.
+    :math:`R_2 = r/\cos\beta`. Where the meridian is straight there (a turn below
+    :data:`STRAIGHT_CURVATURE` per m, e.g. between the control points of a profile of
+    straight segments) the envelope is locally a cone and :math:`R_1 = \infty`: the
+    prestress is then the exact membrane state of a pressurised cone,
+    :math:`N_\theta = p R_2`, :math:`N_m = p R_2 / 2`
+    (:func:`~envelopelab.features.builder.shell_prestress`).
 
     Parameters
     ----------
@@ -3351,6 +3413,12 @@ def host_surface_at(design: PrimitiveDesign, window: float = 0.25) -> EnvelopeHo
     -------
     EnvelopeHost
         Host with its chart origin at the base point.
+
+    Raises
+    ------
+    PrimitiveError
+        Where the envelope curves inward (toward its axis) round the base point: the
+        membrane would not be taut there in this model.
     """
     surface, s0 = design.surface, design.base_s
     prof = surface.profile
@@ -3359,14 +3427,17 @@ def host_surface_at(design: PrimitiveDesign, window: float = 0.25) -> EnvelopeHo
     dz = np.interp([lo, s0, hi], prof.s, surface._dz)
     ang = np.unwrap(np.arctan2(dz, dr))
     curvature = float(ang[2] - ang[0]) / max(hi - lo, 1e-12)
-    if curvature <= 1e-9:
+    if curvature < -STRAIGHT_CURVATURE:
         raise PrimitiveError(
-            f"{design.primitive.name}: the envelope is not convex round the feature"
+            f"{design.primitive.name}: the envelope curves inward under the shape "
+            f"({s0:.2f} m up the tape); a shape needs a part of the envelope that is "
+            "curved outward or straight"
         )
     beta = math.atan2(-float(dr[1]), float(dz[1]))
     r0, z0 = surface.radius_height(np.array([s0]))
     return EnvelopeHost(
-        meridian_radius=1.0 / curvature,
+        # A straight stretch (a cone) has an infinite meridian radius.
+        meridian_radius=math.inf if curvature <= STRAIGHT_CURVATURE else 1.0 / curvature,
         hoop_radius=float(r0[0]) / math.cos(beta),
         normal_elevation=beta,
         centre_height=float(z0[0]),

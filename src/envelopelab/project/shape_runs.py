@@ -236,6 +236,7 @@ def display_arrays(display: ShapeDisplay) -> dict[str, np.ndarray]:
         ),
         "seam_offsets": np.concatenate([[0], np.cumsum(lengths)]).astype(np.int64),
         "rim": np.asarray(display.rim, dtype=np.float64).reshape(-1, 3),
+        **({} if display.tier is None else {"tier": np.asarray(display.tier, dtype=np.int64)}),
     }
 
 
@@ -251,4 +252,6 @@ def display_from_arrays(arrays: dict[str, Any]) -> ShapeDisplay:
         int(np.asarray(arrays["pieces"]).ravel()[0]),
         seams,
         np.asarray(arrays["rim"], dtype=np.float64).reshape(-1, 3),
+        # Results from before tiers were stored: every triangle in the first tier.
+        np.asarray(arrays["tier"], dtype=np.int64) if "tier" in arrays else None,
     )

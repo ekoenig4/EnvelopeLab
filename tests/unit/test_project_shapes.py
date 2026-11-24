@@ -30,6 +30,7 @@ from envelopelab.project.shapes import (
     footprint_preview,
     host_row,
     mesh_shape,
+    mesh_size,
     placement_at,
     shape_design,
     shape_fabrics,
@@ -384,3 +385,79 @@ def test_cap_diameter_survives_save_and_load(session: ProjectSession, tmp_path: 
     assert back.cap_diameter == 0.12
     auto = _dome(session, "Auto")
     assert auto.cap_diameter is None  # new shapes are capped automatically
+
+
+def _blob(session: ProjectSession, name: str = "Blob") -> MeshShape:
+    mesh = ellipsoid_mesh(0.3, 0.2, 0.4, -0.1, rings=8, segments=12)
+    spec = mesh_shape(name, mesh.vertices, mesh.triangles, ShapePlacement(gore=3, tape_position=4))
+    edits.add_shape(session, spec)
+    return spec
+
+
+def test_mesh_size_is_the_extent_up_across_and_the_height(session: ProjectSession) -> None:
+    along, across, height = mesh_size(_blob(session))
+    assert along == pytest.approx(0.6, rel=1e-9)
+    assert across == pytest.approx(0.4, rel=1e-9)
+    assert height == pytest.approx(0.3, rel=1e-9)  # centre at -0.1, semi-axis 0.4
+
+
+def test_resizing_a_mesh_shape_scales_it_about_its_base_in_one_undo_step(
+    session: ProjectSession,
+) -> None:
+    before = _blob(session)
+    assert edits.scale_mesh_shape(session, "Blob", 1.5, 1.5, 2.0)
+    after = session.state.shapes[0]
+    assert isinstance(after, MeshShape)
+    a0, c0, h0 = mesh_size(before)
+    a1, c1, h1 = mesh_size(after)
+    assert (a1, c1, h1) == pytest.approx((1.5 * a0, 1.5 * c0, 2.0 * h0), rel=1e-12)
+    assert after.triangles == before.triangles
+    assert after.placement == before.placement
+    # Resized, it is still placed and cut on the envelope.
+    surface = envelope_surface(session.design, session.patterns)
+    assert shape_design(after, surface).pieces
+    session.undo()
+    assert session.state.shapes[0] == before
+
+
+def test_unit_resize_changes_nothing(session: ProjectSession) -> None:
+    _blob(session)
+    before = session.state.model_copy(deep=True)
+    assert not edits.scale_mesh_shape(session, "Blob", 1.0, 1.0, 1.0)
+    assert session.state == before
+
+
+def test_invalid_resizes_change_nothing(session: ProjectSession) -> None:
+    _blob(session)
+    edits.add_shape(session, _dome(session))
+    before = session.state.model_copy(deep=True)
+    with pytest.raises(ValueError, match="positive"):
+        edits.scale_mesh_shape(session, "Blob", 0.0, 1.0, 1.0)
+    with pytest.raises(ValueError, match="positive"):
+        edits.scale_mesh_shape(session, "Blob", 1.0, float("nan"), 1.0)
+    with pytest.raises(ValueError, match="not a mesh"):
+        edits.scale_mesh_shape(session, "Nose", 2.0, 2.0, 2.0)
+    with pytest.raises(KeyError):
+        edits.scale_mesh_shape(session, "Tail", 2.0, 2.0, 2.0)
+    assert session.state == before
+
+
+def test_a_mirror_twin_follows_a_resize(session: ProjectSession) -> None:
+    _blob(session, "Eye")
+    edits.add_symmetry_axis(session, "Face centre", 1.0)
+    twin = edits.mirror_shape(session, "Eye", "Face centre")
+    assert edits.scale_mesh_shape(session, "Eye", 1.0, 1.25, 1.0)
+    shapes = {s.name: s for s in session.state.shapes}
+    eye, mirror = shapes["Eye"], shapes[twin]
+    assert isinstance(eye, MeshShape) and isinstance(mirror, MeshShape)
+    assert mesh_size(mirror) == pytest.approx(mesh_size(eye), rel=1e-12)
+
+
+def test_widest_radius_of_every_kind(session: ProjectSession) -> None:
+    from envelopelab.project.shapes import widest_radius
+
+    tube = default_shape("tube", session.design, "Mast")
+    assert isinstance(tube, TubeShape)
+    assert widest_radius(tube) == pytest.approx(max(tube.base_radius, tube.tip_radius))
+    dome = _dome(session)
+    assert widest_radius(dome) == pytest.approx(dome.base_radius, rel=1e-6)

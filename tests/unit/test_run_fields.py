@@ -111,9 +111,10 @@ def test_fos_is_left_out_without_a_matching_model_or_resultants(
 ) -> None:
     model, result = solved
     arrays = _arrays(result, model)
-    assert "fos_warp" not in run_fields(arrays)  # stale run: no model given
+    # A run saved without its zone strengths, and no model: no factor of safety.
+    assert "fos_warp" not in run_fields(arrays)
     why = missing_fields(arrays)
-    assert "current run" in why["fos_warp"]
+    assert "run it again" in why["fos_warp"]
     calculix = {k: v for k, v in arrays.items() if k not in ("fabric_resultants", "wrinkle_state")}
     fields = run_fields(calculix, model)
     assert "fos_warp" not in fields and "n_warp" not in fields and "n1" in fields
@@ -126,3 +127,21 @@ def test_run_fields_of_positions_only() -> None:
     arrays = {"positions": model.positions, "triangles": model.triangles}
     assert run_fields(arrays, model) == {}
     assert set(missing_fields(arrays, model)) == set(FIELD_LABELS)
+
+
+def test_fos_comes_from_the_strengths_stored_with_the_run(
+    solved: tuple[SolverModel, SolveResult],
+) -> None:
+    """A reopened project has no solver model: the run's stored strengths give the same
+    factors of safety, and the stored zone names the same zones."""
+    from envelopelab.project.simulation import zone_arrays
+
+    model, result = solved
+    arrays = {**_arrays(result, model), **zone_arrays(model)}
+    stored = run_fields(arrays)  # no model
+    expected = triangle_factors_of_safety(model, result.fabric_resultants)
+    assert np.array_equal(stored["fos_warp"].values, expected[:, 0])
+    assert np.array_equal(stored["fos_weft"].values, expected[:, 1])
+    assert "fos_warp" not in missing_fields(arrays)
+    names = [model.zone_names[int(i)] for i in model.tri_zone]
+    assert list(arrays["tri_zone_name"]) == names

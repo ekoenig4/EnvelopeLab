@@ -35,10 +35,9 @@ the status bar says so. The envelope's own solve does not include the shapes.
 * Every run row names its solver — **Preview (dynamic relaxation)** or **CalculiX
   verification** — with a solver-coloured swatch; the 3D view uses the same colours
   (preview blue, CalculiX orange, rest mesh olive, reference mesh green; the design
-  surface in its fabric colours with dark seams). Its layer list, legend and *Run* list
-  use short names (*Design surface*, *Rest mesh*, *Preview result*, *CalculiX result*,
-  *Dome (designed)*, *Dome (inflated)*, *Reference: scan.obj*); hover a layer for its full
-  description (solver, run id, construction, …).
+  surface in its fabric colours with dark seams). Its Objects list and legend use short
+  names (*Envelope*, *Dome*, *Rest mesh*, *Reference: scan.obj*); hover an object for the
+  full description of what it is drawn as (solver, run id, construction, …).
 * Each run shows its **state** as a chip with the same symbols and colours as the 3D
   view's banner (i *Current*, ✓ *Current* for CalculiX, ◷ *Stale*, ▲ *FoS fail*, ✕ *Not
   converged*), whether it **converged**, the **Min FoS** (the lowest fabric factor of
@@ -60,17 +59,33 @@ the status bar says so. The envelope's own solve does not include the shapes.
 
 The 3D view's toolbar chooses what it shows:
 
-* **Run**: the solve the colours, the banner and the run details describe: the latest
-  preview or CalculiX run, each **the whole balloon**, the envelope and every special shape
-  solved with it ("Preview run · envelope + 2 shapes").
-* **Colour by**: *Factor of safety, warp* or *weft* (the default for a current, converged
-  preview run), the principal, warp and weft resultants (N/m), *Wrinkling* (taut,
+* **Shape**: *Designed*, *Inflated (preview)* or *Inflated (CalculiX)*: every object is
+  drawn as designed, or as inflated by the latest preview or CalculiX run (**the whole
+  balloon**, the envelope and every special shape solved with it). An object that run did
+  not solve is drawn as designed and its row says so (*designed (not in inflated
+  (calculix))*). A choice without a result is greyed out. The colours, the banner and the
+  run details describe the chosen run. A project opens on its most up-to-date shape:
+  *Inflated (CalculiX)*, else *Inflated (preview)*, else *Designed*, the first whose
+  latest run is current and converged (an unconverged run is never opened by default).
+  A run that finishes switches to its inflated shape. Zones below the factor-of-safety
+  limit are always listed in the run banner, whatever the colours show.
+* **Colour by**: *Layer colour* (the default: panel colours), *Factor of safety, warp*
+  or *weft*, the principal, warp and weft resultants (N/m), *Wrinkling* (taut,
   wrinkled, slack), *Displacement from the as-sewn shape* (mm), *Deviation from
-  design* (mm, see below), or *Layer colour*.
+  design* (mm, see below). A field once chosen stays chosen until the project is
+  opened again.
   A field the run cannot give is listed but greyed out; hover for why (for example
   "CalculiX does not report warp/weft resultants", or a run from an older version that
-  has to be run again).
+  has to be run again). With a field chosen, a part that cannot give it is drawn in its
+  plain colour, never in panel colours, so nothing is mistaken for the field's values.
 * **Display**: *Shaded*, *Shaded + mesh edges* or *Wireframe*.
+
+With *Colour by: Layer colour*, the inflated envelope is drawn like the design: every
+triangle in the colour of the panel it was cut from (fabric or Colours-mode colour, every
+second gore darker) with the sewn seams as dark lines, and without the solver's mesh
+edges (choose *Shaded + mesh edges* to see them). Layer colour stays chosen when you pick
+it; a new result still opens on the factor of safety, so failures are seen first. A run
+that did not converge always keeps its red mesh edges, and a stale run is drawn grey.
 
 The factor of safety is coloured in bands of the required factor (5 by default, tagged
 *assumed*): everything **below the limit is orange and labelled FAIL** on the colour
@@ -91,17 +106,25 @@ mesh instead. The same values can be shown on the flat panels in the Patterns vi
 **Special shapes** are parts of the run, not runs of their own. *Colour by* colours the
 envelope and every shape of the run together on **one scale**, so the weakest spot of the
 whole balloon stands out (the factor-of-safety limit, 5, applies to every part). Choosing a
-result field hides the design surfaces (they lie where the result does and would cover
-it); choosing *Deviation from design* shows them again, each part's deviation drawn on its
-own design (the envelope surface, *Dome (designed)*, ...). Tick them back in the layer tree
-whenever you like. The shape's skin factor in the Special shapes panel is the conservative
+result field colours the inflated shapes; *Deviation from design* draws each part's
+deviation on its own design (the envelope surface, the designed dome, ...), which is then
+shown with the inflated shape as a faint outline. The shape's skin factor in the Special shapes panel is the conservative
 bound min(N_ult,warp, N_ult,weft) / N1 (major principal resultant), so it is never above
 the lowest warp or weft value shown here. Simulations from earlier versions have no stored
 skin results: run them again for the colours.
 
-The **layer tree** groups the layers: *Design* (design surface, panel details, designed
-shapes), *Result* (the inflated envelope and shapes, the rest mesh), *Rigging* and
-*Reference*. A group's box shows or hides all its layers. **Go to part** (camera bar) fits
+Each run's result file keeps the panel each triangle was cut from, the sewn seams and the
+strength and zone of each triangle's fabric as solved. So a reopened project draws its
+runs in panel colours, colours them by factor of safety and lists the zones below the
+limit, exactly as in the session that solved them; the *Rest mesh* comes from the latest
+current run. Runs saved by versions before this change open plain blue, without factors
+of safety, until run again.
+
+The **Objects** list (beside the view) lists what is on the balloon: the *Envelope*, the
+*Special shapes* and *Overlays* (each group's box ticks all of them), then *Rigging*,
+*Symmetry axes*, a loaded *Reference* mesh and the *Rest mesh* (the as-sewn starting shape,
+off until ticked). Tick an object to draw it, as the *Shape* choice says; each row states
+the status of what it is drawn as (*✕ not converged*, *◷ stale*). **Go to part** (camera bar) fits
 the view to the envelope or a shape.
 
 A **status banner** across the top of the view always states the chosen run's state, worst
@@ -117,7 +140,7 @@ limit"; other parts in the same state are listed after "Also:"). It cannot be cl
 | ✓ **Current and converged** | a current, converged CalculiX run exists too | — |
 
 "Verified" only means a current, converged CalculiX run exists for the same design; compare
-the two runs in the Simulation Runs table. The **Run details** card beside the layer tree
+the two runs in the Simulation Runs table. The **Run details** card beside the Objects list
 gives the solver and version, the envelope's mesh size, load case, run time and volume and
 the material source tags (**assumed** in bold), then one row per part (status, iterations,
 final residual, lowest factor of safety) and each shape's mesh and run time (hover for what

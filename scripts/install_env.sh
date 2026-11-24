@@ -63,7 +63,7 @@ Usage: bash scripts/install_env.sh [options]
   --extras LIST          pip extras to install (default: dev,docs,gui,fast)
   --venv DIR             virtualenv directory (default: .venv; "none" installs into
                          the current Python environment)
-  --python EXE           Python >= 3.11 used to create the virtualenv (default: python3)
+  --python EXE           Python >= 3.12 used to create the virtualenv (default: python3)
   --package-manager PM   apt, dnf, pacman or zypper (default: detected)
   --system-only          only install system packages
   --no-system            skip system packages (no root/sudo needed)
@@ -207,8 +207,8 @@ fi
 if [ "$DO_PYTHON" -eq 1 ]; then
     cd "$REPO"
     if [ "$DRY_RUN" -eq 0 ]; then
-        if ! "$PYTHON" -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null; then
-            echo "EnvelopeLab needs Python >= 3.11; $PYTHON is $("$PYTHON" -V 2>&1 || echo missing)." >&2
+        if ! "$PYTHON" -c 'import sys; sys.exit(sys.version_info < (3, 12))' 2>/dev/null; then
+            echo "EnvelopeLab needs Python >= 3.12; $PYTHON is $("$PYTHON" -V 2>&1 || echo missing)." >&2
             echo "Install a newer Python and pass it with --python." >&2
             exit 1
         fi

@@ -76,12 +76,39 @@ in the editor next to them, and you can move the selected shape on either:
    envelope on gore 1, about halfway up the tape. **Import mesh (OBJ/STL/PLY)…** adds a
    free-form shape modelled in Blender (metres, Y up for OBJ as Blender exports it; Z up
    for STL and PLY). The mesh is stored in the project, so the file is no longer needed.
-2. Edit the shape. **Placement & size**: placement (gore, tape position from the
-   mouth in m, position across the gore, lean and lean direction in degrees), sizes in m,
+2. Edit the shape. **Placement & size**: placement (gore, position across the
+   gore and up the tape, in metres or [balloon coordinates](positions.md); lean and lean
+   direction in degrees), sizes in m,
    the number of skin gores or panels, match marks per piece, seam allowance and the
    skin fabric (by default the fabric of the envelope row the shape sits on).
-   **Profile**: a revolved shape's profile points (radius and height in m, base first,
-   axis last). **Feed holes & cap**: an optional feed hole in the envelope under the base
+   A mesh shape shows its **Size** instead (length up the tape, width across the gores
+   and height above the base point, m). **Resize…** asks for a new size: with *Keep
+   proportions* ticked, changing one size changes the others alike; untick it to stretch
+   the shape one way only (a taller antenna, a wider ear). The mesh is scaled about its
+   base point and cut again (one undo step; a linked mirror twin follows). Feed holes,
+   the cap and the placement are kept, so check them after a large change.
+   **Convert to revolved…** replaces a mesh that is round about its axis, such as an
+   antenna or a ball, by a revolved profile. It asks how many profile points to use (16
+   by default; more follow the mesh more closely), fits them to the mesh and shows how
+   far the mesh is from the result: the largest deviation in mm and as a share of the
+   widest radius, where it is, and the RMS deviation. A mesh more than 5 % off is
+   flagged as not round, because converting it would change its shape. After converting,
+   the shape keeps its name, placement, fabric, feed holes, cap and group; its panels
+   become gores, and it can be split across (a stalk and a ball as two tiers), edited on
+   the **Profile** tab and scaled there. Undo brings the mesh back
+   ([theory](../theory/mesh-to-profile.md)).
+   **Profile**: a revolved shape's outline, drawn with its mirror image, the axis
+   (dotted) and the base (solid). Drag a point to reshape it (Ctrl+click selects
+   several, which move together; **Soft radius** lets the neighbours follow).
+   Double-click the outline to add a point, press Delete to remove the selected ones.
+   **Scale whole shape…** grows or shrinks the shape about its base (radius and height
+   factors); with points selected it reads **Scale selected points…** and scales only
+   them, about their middle, for example a bigger ball on top of a stalk. Horizontal
+   splits are drawn as green lines with the tier letters between them: drag a split's
+   dot along the outline to put the seam where you want it, such as at the neck between
+   a stalk and a ball. The base point stays on the base and a pointed tip stays on the
+   axis. Every drag is one undo step. The table below lists the same points (radius and
+   height in m, base first, axis last) for typing exact values. **Feed holes & cap**: an optional feed hole in the envelope under the base
    point, the cap, and *More feed holes*, extra holes inside the footprint (gore, tape
    position from the mouth in m, position across the gore, radius in m). *Add feed
    hole* puts one at the base point to edit; *Remove feed hole* deletes the selected
@@ -234,8 +261,9 @@ in the editor next to them, and you can move the selected shape on either:
    as designed and inflated, chamber pressure, wrinkled fraction, rim tape tension and
    the factor of safety of each region. The 3D View then draws the shape **as sewn and
    inflated**: the skin sewn from its cut pieces, as the solver left it, with the same
-   colours and seams. While that result is current the designed shape is hidden; tick
-   its layer in the layer list to compare the two (your choice is kept). A result that
+   colours and seams. Switch the 3D View's **Shape** between *Designed* and *Inflated
+   (preview)* (or *CalculiX*) to compare the two; untick the shape in the **Objects**
+   list to hide it. A result that
    did not converge says **NOT CONVERGED** in its label, and a **STALE** one is drawn grey.
 6. **Export build pack…** (also **File ▸ Export build pack…**, [guide](build-pack.md)) writes the envelope rows, the parachute (radial panel and
    centre panel) and every shape's pieces and marking sheets (DXF, PDF and `index.json`,
@@ -551,7 +579,7 @@ default.
 ## Limitations
 
 * Revolved shapes are symmetric about their axis. Use a Blender mesh for anything
-  else.
+  else. A round mesh can be converted to a revolved shape (**Convert to revolved…**).
 * A free-form shape's axis must leave the mesh through its top, and each panel must be
   a single piece. A strongly curved horn may need a leaned placement, or more panels.
 * A free-form shape rests in its flattened panels exactly as the mesh describes it. Use

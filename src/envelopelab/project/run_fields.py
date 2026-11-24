@@ -4,8 +4,10 @@ A run keeps its result arrays in the project's run directory (positions, initial
 triangles, principal resultants, and for preview runs the warp/weft resultants and the
 wrinkle state; see :func:`envelopelab.project.simulation.run_record`). This module turns
 them into named scalar fields with units. Nothing is recomputed from the solver: every
-field is read from the stored arrays, except the factor of safety, which divides the
-stored yarn resultants by the zone strengths of the solved model
+field is read from the stored arrays, including the factor of safety, which divides the
+stored yarn resultants by the stored strength of each triangle's zone (``tri_strength``,
+:func:`envelopelab.solvers.results.factors_from_strengths`); runs saved before the
+strengths were stored take them from the solved model instead
 (:func:`envelopelab.solvers.results.triangle_factors_of_safety`).
 
 A field that cannot be made from a run (an older run without warp/weft resultants, a
@@ -79,8 +81,13 @@ def run_fields(
     """
     out: dict[str, ResultField] = {}
     fabric = arrays.get("fabric_resultants")
-    if fabric is not None and model is not None and _model_matches(arrays, model):
+    fos = None
+    if fabric is not None and "tri_strength" in arrays:
+        # The strengths the run was solved with, stored with it (reopened projects).
+        fos = factors_from_strengths(fabric, arrays["tri_strength"])
+    elif fabric is not None and model is not None and _model_matches(arrays, model):
         fos = triangle_factors_of_safety(model, fabric)
+    if fos is not None:
         out["fos_warp"] = ResultField(
             "fos_warp", "triangle", fos[:, 0], "-", "warp strength / warp resultant"
         )
@@ -281,7 +288,9 @@ def missing_fields(
         if key in shown:
             continue
         if key in SAFETY_FIELDS:
-            reasons[key] = why_fabric or "only for a current run (zone strengths of its model)"
+            reasons[key] = why_fabric or (
+                "this run was saved without its zone strengths: run it again"
+            )
         elif key in ("n_warp", "n_weft"):
             reasons[key] = why_fabric
         elif key == "deviation":

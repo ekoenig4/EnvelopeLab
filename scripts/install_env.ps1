@@ -7,7 +7,7 @@
     Windows needs no system libraries (the Qt, VTK and Gmsh wheels bring their own). The
     script:
 
-      1. finds Python 3.11 or newer (the "py" launcher first, then "python"), or installs
+      1. finds Python 3.12 or newer (the "py" launcher first, then "python"), or installs
          Python 3.12 with winget when -InstallPython is given;
       2. creates the virtualenv .venv and runs pip install -e ".[gui,fast]" (-Dev: also the
          test and docs tools, and the pre-commit hooks);
@@ -34,7 +34,7 @@ param(
     [switch]$Dev,
     # Virtualenv directory, relative to the repository (default .venv).
     [string]$Venv = ".venv",
-    # Python >= 3.11 used to create the virtualenv (default: found automatically).
+    # Python >= 3.12 used to create the virtualenv (default: found automatically).
     [string]$Python = "",
     # Install Python 3.12 with winget when no suitable Python is found.
     [switch]$InstallPython,
@@ -79,18 +79,18 @@ function Test-Python([string]$Exe, [string[]]$Prefix) {
     } catch { return $null }
     if ($LASTEXITCODE -ne 0 -or -not $out) { return $null }
     $version = [version]("$out".Trim())
-    if ($version -lt [version]"3.11") { return $null }
+    if ($version -lt [version]"3.12") { return $null }
     return [pscustomobject]@{ Exe = $Exe; Prefix = $Prefix; Version = $version }
 }
 
 function Find-Python {
     if ($Python) {
         $found = Test-Python $Python @()
-        if (-not $found) { throw "$Python is not Python 3.11 or newer" }
+        if (-not $found) { throw "$Python is not Python 3.12 or newer" }
         return $found
     }
-    # 3.12 and 3.13 first: every dependency (Qt, VTK, Gmsh, Numba) has wheels for them.
-    foreach ($v in "3.12", "3.13", "3.11") {
+    # 3.12 first: the only version CI tests (ADR-0057); every dependency has wheels for 3.13 too.
+    foreach ($v in "3.12", "3.13") {
         $found = Test-Python "py" @("-$v")
         if ($found) { return $found }
     }
@@ -120,7 +120,7 @@ if (-not $py) {
         $py = [pscustomobject]@{ Exe = "py"; Prefix = @("-3.12"); Version = [version]"3.12" }
     } else {
         Write-Host @"
-No Python 3.11 or newer was found.
+No Python 3.12 or newer was found.
   * Run this script again with -InstallPython (installs Python 3.12 with winget), or
   * install Python 3.12 from https://www.python.org/downloads/windows/ and tick
     'Add python.exe to PATH' in the installer, then run this script again.
@@ -129,8 +129,8 @@ No Python 3.11 or newer was found.
     }
 }
 Write-Host "  using $($py.Exe) $($py.Prefix -join ' ') (Python $($py.Version))"
-if ($py.Version -ge [version]"3.14") {
-    Write-Host "  warning: Python $($py.Version) is newer than the tested versions (3.11-3.13); if pip fails, install Python 3.12 and pass it with -Python" -ForegroundColor Yellow
+if ($py.Version -ge [version]"3.13") {
+    Write-Host "  warning: Python $($py.Version) is newer than the tested version (3.12); if pip or the app fails, install Python 3.12 and pass it with -Python" -ForegroundColor Yellow
 }
 
 # --- 2. Virtualenv and package -----------------------------------------------------------

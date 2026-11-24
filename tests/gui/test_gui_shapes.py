@@ -10,7 +10,7 @@ from typing import Any
 import numpy as np
 import pytest
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGraphicsPolygonItem, QGraphicsRectItem
+from PySide6.QtWidgets import QGraphicsPolygonItem, QGraphicsRectItem, QLabel
 from pytestqt.qtbot import QtBot
 
 from envelopelab.export.qa import check_pack
@@ -263,12 +263,19 @@ def test_3d_view_draws_shapes_as_sewn_pieces(gore_window: MainWindow) -> None:
     assert sewn.visible and not view.layers["shape:Dome"].visible
     assert sewn.face_colors is not None and len(np.unique(sewn.face_colors, axis=0)) == 2
     assert len(sewn.polylines["skin_seams"]) == 16 + 1
-    # The user's choice is kept when the layers are rebuilt.
+    # The finished simulation switched the Shape to the preview's inflated shape; the
+    # envelope, not solved by it, is drawn as designed and its row says so.
+    assert view.state() == "envelopelab-preview" and view.layers["design"].visible
+    envelope = view.object_item("envelope")
+    assert envelope is not None and "designed (not in" in envelope.text(0)
+    # Designed again, and the user's choices are kept when the layers are rebuilt.
+    assert view.set_state("design")
+    assert view.layers["shape:Dome"].visible and not sewn.visible
     item = view.layer_item("shape:Dome")
     assert item is not None
-    item.setCheckState(0, Qt.CheckState.Checked)
+    item.setCheckState(0, Qt.CheckState.Unchecked)
     view.refresh()
-    assert view.layers["shape:Dome"].visible
+    assert view.state() == "design" and not view.layers["shape:Dome"].visible
 
 
 def test_cap_diameter_is_automatic_or_chosen_in_the_form(gore_window: MainWindow) -> None:
@@ -590,10 +597,13 @@ def test_one_run_colours_the_envelope_and_its_shapes_together(
     details = view.run_details.text()
     assert ">Envelope<" in details and ">Dome<" in details
     assert view.banner.kind in ("info", "fail", "error")
-    # The tree groups the layers; the Result group holds the envelope and the dome.
+    # The Objects list: the dome under Special shapes; the run switched the Shape to
+    # its inflated balloon, the envelope and the dome both inflated.
     item = view.layer_item("shape-sim:Dome")
     group = None if item is None else item.parent()
-    assert group is not None and group.text(0) == "Result"
+    assert group is not None and group.text(0) == "Special shapes"
+    assert view.state() == PREVIEW
+    assert view.layers[PREVIEW].visible and view.layers["shape-sim:Dome"].visible
     # The Probe names the part it hit.
     on_dome = view.layers["shape-sim:Dome"].points[0]
     assert view.part_at(on_dome) == "shape-sim:Dome"
@@ -1134,3 +1144,217 @@ def test_patterns_show_the_print_roll_like_the_special_shapes(gore_window: MainW
             if isinstance(cut, QGraphicsPolygonItem):
                 drawn = cut.sceneBoundingRect()
                 assert drawn.left() > -0.01 and drawn.right() < 3.7 + 0.01
+
+
+def test_resize_a_mesh_shape_in_proportion_or_one_way(
+    gore_window: MainWindow, tmp_path: Path
+) -> None:
+    from envelopelab.project.shapes import MeshShape, mesh_size
+    from envelopelab_app.panels.shapes import ResizeMeshDialog
+
+    gore_window.show_panel("shapes")
+    mesh = ellipsoid_mesh(0.25, 0.2, 0.3, -0.05, rings=10, segments=16)
+    path = write_obj_scene(
+        tmp_path / "antenna.obj", [MeshObject("antenna", mesh.vertices, mesh.triangles)]
+    )
+    panel = gore_window.shapes
+    assert panel.import_mesh(path) == "antenna"
+    _placed(gore_window)
+    spec = panel.spec()
+    assert isinstance(spec, MeshShape)
+    size = mesh_size(spec)
+    label = panel.findChild(QLabel, "shapeMeshSizeLabel")
+    assert label is not None and f"{size[2]:.3f} high" in label.text()
+
+    # Keep proportions: a new height scales the other two sizes alike.
+    dialog = ResizeMeshDialog(panel, size)
+    dialog.boxes[2].setValue(size[2] * 1.5)
+    assert dialog.boxes[0].value() == pytest.approx(size[0] * 1.5, abs=1e-3)
+    assert dialog.factors() == pytest.approx((1.5, 1.5, 1.5), rel=1e-2)
+    # Without: only the height changes.
+    dialog = ResizeMeshDialog(panel, size)
+    dialog.keep.setChecked(False)
+    dialog.boxes[2].setValue(size[2] * 2.0)
+    assert dialog.factors() == pytest.approx((1.0, 1.0, 2.0), rel=1e-2)
+
+    assert panel.resize_mesh(*dialog.factors())
+    _placed(gore_window)
+    resized = panel.spec()
+    assert isinstance(resized, MeshShape)
+    assert mesh_size(resized)[2] == pytest.approx(2.0 * size[2], rel=1e-2)
+    assert f"{mesh_size(resized)[2]:.3f} high" in label.text()
+    assert panel.placed("antenna") is not None, panel.status.text()
+    gore_window.undo()
+    _placed(gore_window)
+    back = panel.spec()
+    assert isinstance(back, MeshShape) and mesh_size(back) == pytest.approx(size)
+
+
+def _mouse(view: Any, kind: Any, at: Any, modifiers: Any = None) -> None:
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QMouseEvent
+
+    button = Qt.MouseButton.LeftButton
+    event = QMouseEvent(
+        kind,
+        QPointF(at),
+        QPointF(at),
+        button,
+        Qt.MouseButton.NoButton if kind == QMouseEvent.Type.MouseButtonRelease else button,
+        modifiers or Qt.KeyboardModifier.NoModifier,
+    )
+    {
+        QMouseEvent.Type.MouseButtonPress: view.mousePressEvent,
+        QMouseEvent.Type.MouseMove: view.mouseMoveEvent,
+        QMouseEvent.Type.MouseButtonRelease: view.mouseReleaseEvent,
+        QMouseEvent.Type.MouseButtonDblClick: view.mouseDoubleClickEvent,
+    }[kind](event)
+
+
+def _at(view: Any, rho: float, zeta: float) -> Any:
+    from PySide6.QtCore import QPointF
+
+    return QPointF(view.mapFromScene(QPointF(rho, -zeta)))
+
+
+def _drag(view: Any, start: Any, end: Any) -> None:
+    from PySide6.QtGui import QMouseEvent
+
+    _mouse(view, QMouseEvent.Type.MouseButtonPress, start)
+    _mouse(view, QMouseEvent.Type.MouseMove, end)
+    _mouse(view, QMouseEvent.Type.MouseButtonRelease, end)
+
+
+def test_profile_is_edited_by_dragging_points_and_splits(gore_window: MainWindow) -> None:
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QKeyEvent, QMouseEvent
+
+    from envelopelab.project.shapes import RevolvedShape
+
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    panel.add_shape("revolved")
+    _placed(gore_window)
+    panel.editor_tabs.setCurrentIndex(1)
+    view = panel.profile_view
+    view.resize(400, 400)
+    view.set_shape(view.profile, view.smooth, view.curve, np.asarray(view.splits))
+
+    def spec() -> RevolvedShape:
+        s = panel.spec()
+        assert isinstance(s, RevolvedShape)
+        return s
+
+    start = spec().profile
+    assert view.profile == [tuple(p) for p in start] and len(view.curve) > 10
+
+    # Drag the second point up by about 0.1 m: one edit, the curve follows.
+    k = 1
+    r, z = start[k]
+    _drag(view, _at(view, r, z), _at(view, r, z + 0.1))
+    _placed(gore_window)
+    moved = spec().profile
+    assert moved[k][1] == pytest.approx(z + 0.1, abs=0.02)
+    assert moved[0] == start[0] and view.profile[k] == pytest.approx(moved[k])
+    gore_window.undo()
+    _placed(gore_window)
+    assert spec().profile == start
+
+    # Scale the whole shape (no selection) about its base.
+    view.select([])
+    assert panel.scale_profile(1.5, 1.5)
+    _placed(gore_window)
+    assert np.asarray(spec().profile) == pytest.approx(1.5 * np.asarray(start))
+    assert "placed" in panel.status.text(), panel.status.text()
+    gore_window.undo()
+    _placed(gore_window)
+
+    # Double-click the outline: a point is added there; Delete removes it again. The
+    # outline passes through the points, so the click goes where it is farthest from
+    # them on screen (how far that is in px depends on the platform's view scale).
+    from envelopelab_app.shape_profile_view import PICK_DISTANCE
+
+    n = len(start)
+
+    def px_to_points(c: np.ndarray) -> float:
+        at = _at(view, float(c[0]), float(c[1]))
+        return min(
+            float(np.hypot(at.x() - q.x(), at.y() - q.y()))
+            for q in (_at(view, r, z) for r, z in view.profile)
+        )
+
+    clear = [px_to_points(c) for c in view.curve]
+    mid = view.curve[int(np.argmax(clear))]
+    assert max(clear) > PICK_DISTANCE
+    _mouse(view, QMouseEvent.Type.MouseButtonDblClick, _at(view, *mid))
+    _placed(gore_window)
+    assert len(spec().profile) == n + 1 and len(view.selected) == 1
+    view.keyPressEvent(
+        QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Delete, Qt.KeyboardModifier.NoModifier)
+    )
+    _placed(gore_window)
+    assert len(spec().profile) == n
+
+    # A split drawn on the outline is dragged along it.
+    assert panel.set_value(("splits",), [0.5])
+    _placed(gore_window)
+    assert len(view.splits) == 1
+    sr, sz = view.splits[0]
+    target = view.curve[int(0.75 * len(view.curve))]
+    _drag(view, _at(view, sr, sz), _at(view, *target))
+    _placed(gore_window)
+    assert spec().splits[0] > 0.6
+    assert view.split_at(QPointF(-1000.0, -1000.0)) is None
+
+
+def test_convert_a_round_mesh_to_a_revolved_profile(
+    gore_window: MainWindow, tmp_path: Path
+) -> None:
+    from envelopelab.project.shapes import MeshShape, RevolvedShape
+    from envelopelab.validation.primitives import revolved_mesh
+
+    antenna = [(0.18, 0.0), (0.12, 0.48), (0.12, 0.62), (0.22, 0.74), (0.24, 0.86), (0.0, 1.08)]
+    mesh = revolved_mesh(antenna, sink=0.02)
+    path = write_obj_scene(
+        tmp_path / "antenna.obj", [MeshObject("antenna", mesh.vertices, mesh.triangles)]
+    )
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    assert panel.import_mesh(path) == "antenna"
+    _placed(gore_window)
+    before = panel.spec()
+    assert isinstance(before, MeshShape)
+
+    fit = panel.fit_mesh(16)
+    assert fit is not None and fit.round
+    summary = panel.fit_summary(fit)
+    assert "Largest deviation" in summary and "WARNING" not in summary
+    assert panel.convert_mesh(fit)
+    _placed(gore_window)
+    spec = panel.spec()
+    assert isinstance(spec, RevolvedShape) and spec.name == "antenna"
+    assert panel.editor_tabs.isTabVisible(1) and panel.editor_tabs.currentIndex() == 1
+    assert len(panel.profile_view.profile) == 16
+    assert panel.placed("antenna") is not None, panel.status.text()
+    # Now the stalk and the ball can be cut as two tiers.
+    assert panel.set_value(("splits",), [0.5])
+    _placed(gore_window)
+    assert len(panel.profile_view.splits) == 1
+    gore_window.undo()
+    gore_window.undo()
+    _placed(gore_window)
+    assert panel.spec() == before
+
+
+def test_a_mesh_that_is_not_round_is_warned_before_converting(
+    gore_window: MainWindow, tmp_path: Path
+) -> None:
+    ear = ellipsoid_mesh(0.3, 0.1, 0.25, -0.05, rings=16, segments=32)
+    path = write_obj_scene(tmp_path / "ear.obj", [MeshObject("ear", ear.vertices, ear.triangles)])
+    gore_window.show_panel("shapes")
+    panel = gore_window.shapes
+    assert panel.import_mesh(path) == "ear"
+    _placed(gore_window)
+    fit = panel.fit_mesh()
+    assert fit is not None and not fit.round
+    assert "WARNING: this mesh is not round" in panel.fit_summary(fit)

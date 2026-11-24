@@ -37,7 +37,6 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
-    QSpinBox,
     QTableWidget,
     QTableWidgetItem,
     QToolButton,
@@ -45,8 +44,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from envelopelab.project.coordinates import PositionUnits
 from envelopelab.project.overlays import OUTLINE_KINDS
 from envelopelab_app.hints import set_hint
+from envelopelab_app.position_editor import PositionEditor
 
 #: Symmetry choices: mirror axes and their text.
 SYMMETRIES: tuple[tuple[int, str], ...] = (
@@ -426,15 +427,15 @@ class OverlayEditor(QWidget):
         self.name.setObjectName("overlayName")
         self.name.editingFinished.connect(self._name_done)
         form.addRow("Name", self.name)
-        self.gore = QSpinBox()
-        self.gore.setRange(1, 200)
-        self.gore.valueChanged.connect(lambda v: self._emit({"placement": {"gore": v}}))
-        form.addRow("Gore", self.gore)
-        self.tape = self._spin(0.0, 1000.0, 3, " m", lambda v: {"placement": {"tape_position": v}})
-        form.addRow("Tape position from mouth", self.tape)
-        self.across = self._spin(-0.5, 0.5, 3, "", lambda v: {"placement": {"across": v}})
-        self.across.setSingleStep(0.05)
-        form.addRow("Across gore (-0.5...0.5)", self.across)
+        # The centre's gore, across and tape position, in metres or balloon coordinates.
+        self.position = PositionEditor("overlay", "shape:overlay.placement.", self)
+        self.position.add_to(form)
+        self.position.edited.connect(
+            lambda g, a, t: self._emit(
+                {"placement": {"gore": g, "across": a, "tape_position": t}}, live=True
+            )
+        )
+        self.gore = self.position.gore
         self.kind = QComboBox()
         self.kind.setObjectName("overlayKind")
         for kind in OUTLINE_KINDS:
@@ -474,9 +475,6 @@ class OverlayEditor(QWidget):
         # Pointing at a number shows where it acts on the balloon (ADR-0050): the
         # overlay's outline, resolved by the Special shapes panel (``shape:`` keys).
         for box, key in (
-            (self.gore, "placement.gore"),
-            (self.tape, "placement.tape_position"),
-            (self.across, "placement.across"),
             (self.width_box, "width"),
             (self.height_box, "height"),
             (self.turn, "turn_deg"),
@@ -594,17 +592,24 @@ class OverlayEditor(QWidget):
     # -- showing ----------------------------------------------------------------------
 
     def set_overlay(
-        self, spec: Any, layout: Any, error: str, colour: str | None, gores: int
+        self,
+        spec: Any,
+        layout: Any,
+        error: str,
+        colour: str | None,
+        gores: int,
+        surface: Any = None,
+        units: PositionUnits = "metres",
     ) -> None:
-        """Show ``spec`` and its ``layout`` (None when it cannot be laid: ``error``)."""
+        """Show ``spec`` and its ``layout`` (None when it cannot be laid: ``error``); its
+        centre in ``units`` on the envelope ``surface`` (None: fractions of the gore)."""
         self.spec = spec
         self._filling = True
         try:
             self.name.setText(spec.name)
-            self.gore.setMaximum(max(gores, 1))
-            self.gore.setValue(spec.placement.gore)
-            self.tape.setValue(spec.placement.tape_position)
-            self.across.setValue(spec.placement.across)
+            self.position.set_context(surface, units, gores)
+            p = spec.placement
+            self.position.set_position(p.gore, p.across, p.tape_position)
             self.kind.setCurrentIndex(OUTLINE_KINDS.index(spec.outline))
             self.width_box.setValue(spec.width * 1000.0)
             self.height_box.setValue(spec.height * 1000.0)
@@ -786,7 +791,15 @@ class OverlayEditor(QWidget):
         if path:
             self.import_outline(path, values)
         else:
-            self.set_overlay(self.spec, None, "choose an outline file", None, self.gore.maximum())
+            self.set_overlay(
+                self.spec,
+                None,
+                "choose an outline file",
+                None,
+                self.gore.maximum(),
+                self.position.surface,
+                self.position.units,
+            )
 
     def _import_dialog(self) -> None:
         self.import_dialog_then({})

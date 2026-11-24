@@ -78,7 +78,10 @@ footprint point on meridian \( \phi \) is the last crossing of that line from in
 outside the envelope. It is found by sampling the signed distance to the meridian curve
 at 241 points along the path (about 1 % of its length apart), which brackets the
 crossing, and bisecting to \(10^{-7}\) m. So the skin always reaches the envelope,
-including where a leaned base circle dips below it. A meridian that crosses the envelope
+including where a leaned base circle dips below it. The path below the base is long (twice
+the skin's length), so for a long or leaning shape near the crown it can pass through the
+balloon and leave it again on the far side; only the stretch inside the envelope that ends
+at the footprint counts, and crossings below it are not the shape's. A meridian that crosses the envelope
 more than once (the skin touching the envelope again) is rejected; a second crossing
 closer than the sample spacing is not detected.
 
@@ -261,6 +264,21 @@ other without changing the area, and the stretch changes both. The distortion th
 is reported as the *area distortion* (flat area against designed area). For a
 hemispherical dome it falls as about \(1/M^2\): 3.7 %, 0.9 % and 0.2 % for 8, 16 and 32
 gores (see [Special-shape primitives](../validation/special-shape-primitives.md)).
+
+**A slanted footprint.** On a leaning shape the footprint rises across a gore of the bottom
+tier: its lower edge is not one parallel. Laying the band's own rows (which end on the
+footprint) straight across would put the footprint on \(y = 0\) and lose the cloth between
+its lowest and highest point; the loss grows with the lean (about 6 %, 17 % in total for a
+5 m stalk-and-ball at 20°, 35°). Where the footprint rises more than 1 mm (assumed) across
+a gore, the gore is therefore developed like one under a moved cap: classic, on the
+parallels \(u\) = const from the footprint's lowest point in the gore, and cut along the
+footprint where it lies. It is then stretched and sheared as above and widened towards the
+footprint, \(x' = x\,(1 + \delta\,(1 - y/Y)^2) + \kappa y,\ y' = (1 + \alpha)\,y\), with
+\(\alpha, \kappa, \delta\) solved so that both seams and the footprint edge (sewn to the
+line marked on the envelope) have their true 3D lengths. The top stays a straight row, so
+a top on a parallel keeps its true length (it is sewn to the next tier or a cap). A leaning shape then gets
+as much cloth as the same shape upright (`tests/unit/test_leaned_gores.py`); gores whose
+footprint rises less, such as every upright shape, are developed as before, bit for bit.
 
 ### Checks
 
@@ -477,6 +495,12 @@ and the host footprint therefore have the same length. The load tapes on the gor
 and optionally the row seams, cross the patch. The far-field prestress of the patch uses
 the local radii at the base point (\(R_1\) from the meridian's curvature over
 \( \pm 0.25 \) m, \( R_2 = r/\cos\beta \)) in the membrane theory of shells of revolution.
+Where the meridian is straight over that window (a turn below \(10^{-9}\) per m, assumed;
+for example between the control points of a profile of straight segments) the envelope
+is locally a cone and \(R_1 = \infty\): the prestress is then the exact membrane state
+of a pressurised cone, \(N_\theta = p R_2\), \(N_m = p R_2/2\) (benchmarked on a conical
+flank in [the validation page](../validation/special-shape-primitives.md)). Only an
+envelope that curves inward round the base point is refused.
 
 **Footprint nodes on the designed footprint.** The skin rim and the host footprint share
 their nodes, and every rim node rests on its piece's flat rim at the point of the designed
@@ -561,8 +585,8 @@ tangent plane, its hoop extent divided by \(2w(s)\) at each height.
 
 ## Valid range
 
-The footprint must stay on the convex part of the envelope between the mouth and the
-crown, and be star-shaped about the base point. Bases larger than about a quarter of the
+The footprint must stay on a part of the envelope that curves outward or is straight (a
+cone) between the mouth and the crown, and be star-shaped about the base point. Bases larger than about a quarter of the
 local envelope radius, and leans that make the skin touch the envelope again, are
 rejected. Leans are limited to 75°.
 

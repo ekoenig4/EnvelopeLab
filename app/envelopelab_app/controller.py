@@ -30,6 +30,7 @@ from envelopelab.materials.repository import (
     open_user_library,
 )
 from envelopelab.project import edits
+from envelopelab.project.coordinates import POSITION_UNITS, PositionUnits, describe_position
 from envelopelab.project.dependencies import ARTIFACTS, ArtifactStatus, canonical_hash
 from envelopelab.project.gore_design import (
     DesignFinding,
@@ -97,6 +98,8 @@ class WorkspaceController(QObject):
     editRejected = Signal(str)  # noqa: N815
     libraryChanged = Signal()  # noqa: N815
     shapesChanged = Signal()  # noqa: N815 (placed shapes or shape simulations changed)
+    #: How positions are shown changed (metres or balloon coordinates).
+    unitsChanged = Signal()  # noqa: N815
     message = Signal(str)
 
     def __init__(self, prefs: Preferences, fabrics: FabricLibraryRepository | None = None) -> None:
@@ -530,9 +533,25 @@ class WorkspaceController(QObject):
 
     def preferences_changed(self) -> None:
         """The preferences changed: recompute what depends on them (the roll width
-        checks of the shapes and the envelope panels)."""
+        checks of the shapes and the envelope panels, and how positions are shown)."""
         self.bump()
         self.shapesChanged.emit()
+        self.unitsChanged.emit()
+
+    @property
+    def position_units(self) -> PositionUnits:
+        """How positions on the balloon are shown and typed (the preference)."""
+        for units in POSITION_UNITS:
+            if self.prefs.position_units == units:
+                return units
+        return "metres"
+
+    def describe_position(self, gore: int, across: float, tape: float) -> str:
+        """A stored position on the envelope in words, in the preferred units."""
+        surface = self.envelope_surface()
+        if surface is None:
+            return f"gore {gore}, {tape:.3f} m up the tape"
+        return describe_position(surface, self.position_units, gore, across, tape)
 
     def shape_checks(self, name: str) -> list[DesignCheck]:
         """Pattern checks of placed shape ``name`` and whether each piece's page fits the

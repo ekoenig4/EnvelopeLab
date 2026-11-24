@@ -44,6 +44,10 @@ class Preferences:
         Width of the roll the 1:1 templates are printed on and the cloth is cut from, m
         (default 60 in). Every piece whose page is wider than it both ways gets a
         warning, and the build-pack export starts from it.
+    position_units : str
+        How positions on the balloon are shown and typed: ``metres`` (default) or
+        ``balloon`` (gore and panel row with fractions;
+        :mod:`envelopelab.project.coordinates`). What is saved is the same either way.
     """
 
     autosave_minutes: float = 2.0
@@ -56,6 +60,7 @@ class Preferences:
     recovery_dir: str = ""
     material_library: str = ""
     print_roll_width: float = DEFAULT_ROLL_WIDTH
+    position_units: str = "metres"
 
     def resolved_recovery_dir(self) -> Path:
         """Autosave directory."""

@@ -966,3 +966,31 @@ def model_from_rest_model(
         name=name,
         source_hash=rest.imported.content_hash,
     )
+
+
+def seam_segments(
+    seams: Sequence[SeamLine], positions: npt.ArrayLike
+) -> dict[str, list[FloatArray]]:
+    """The sewn seams as line segments on node positions, for drawing.
+
+    Parameters
+    ----------
+    seams : sequence of SeamLine
+        The model's seams (mesh edges along each).
+    positions : array_like, shape (n, 3)
+        Node positions, m (the rest mesh or a solved shape).
+
+    Returns
+    -------
+    dict of str to list of ndarray, shape (2, 3)
+        ``vertical_seams`` (seams between gores, ids with ``:v:``) and
+        ``horizontal_seams`` (every other seam: between rows, and the hems), each a list
+        of two-point segments, m.
+    """
+    x = np.asarray(positions, dtype=np.float64)
+    out: dict[str, list[FloatArray]] = {"vertical_seams": [], "horizontal_seams": []}
+    for seam in seams:
+        kind = "vertical_seams" if ":v:" in seam.name else "horizontal_seams"
+        edges = np.asarray(seam.edges, dtype=np.int64).reshape(-1, 2)
+        out[kind] += [x[e] for e in edges]
+    return out

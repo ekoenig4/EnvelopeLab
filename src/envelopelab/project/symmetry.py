@@ -53,8 +53,14 @@ class MirrorLink(BaseModel):
     axis: str = Field(min_length=1)
 
 
-def axis_gore_label(line: float, gores: int) -> str:
-    """Where an axis lies, in words (``centre of gore 6``, ``seam 6|7``, ``gore 6 +0.25``)."""
+def axis_gore_label(line: float, gores: int, units: str = "metres") -> str:
+    """Where an axis lies, in words: ``centre of gore 6``, ``seam 6|7``, else the
+    fraction of the gore's width from its centre (``gore 6 +0.25``) or, in balloon
+    coordinates (``units`` ``"balloon"``), across it from seam to seam (``gore 6 + 0.75``).
+
+    An axis is a meridian: its offset in metres changes with the gore's width up the
+    tape, so it is given as a fraction of the gore either way.
+    """
     g = line % gores
     cell = int(g // 1)
     frac = g - cell
@@ -63,6 +69,8 @@ def axis_gore_label(line: float, gores: int) -> str:
     if frac < 1e-9:
         left = cell if cell > 0 else gores
         return f"seam {left}|{cell + 1}"
+    if units == "balloon":
+        return f"gore {cell + 1} + {frac:.2f}"
     return f"gore {cell + 1} {frac - 0.5:+.2f}"
 
 

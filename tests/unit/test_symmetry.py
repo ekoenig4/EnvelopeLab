@@ -87,6 +87,8 @@ def test_axes_are_named_saved_and_described(session: ProjectSession) -> None:
     assert axis_gore_label(6.0, 12) == "seam 6|7"
     assert axis_gore_label(0.0, 12) == "seam 12|1"
     assert axis_gore_label(5.75, 12) == "gore 6 +0.25"
+    assert axis_gore_label(5.75, 12, "balloon") == "gore 6 + 0.75"
+    assert axis_gore_label(5.5, 12, "balloon") == "centre of gore 6"
     with pytest.raises(ValueError, match="exists"):
         edits.add_symmetry_axis(session, "Face centre", 1.0)
 

@@ -3,6 +3,8 @@ layout section (ADR-0049)."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
@@ -11,7 +13,14 @@ from PySide6.QtWidgets import QPushButton
 from envelopelab_app.main_window import MainWindow
 
 
+def _fractions(window: MainWindow) -> None:
+    """Show where the panels meet as fractions of the widest radius (balloon
+    coordinates); in metres the boxes show offsets in m."""
+    window.apply_preferences(replace(window.prefs, position_units="balloon"))
+
+
 def test_the_crown_box_sets_the_seam_angles_and_moves_the_cap(gore_window: MainWindow) -> None:
+    _fractions(gore_window)
     gore_window.show_panel("shapes")
     panel = gore_window.shapes
     panel.add_shape("dome")
@@ -46,6 +55,7 @@ def test_the_crown_box_sets_the_seam_angles_and_moves_the_cap(gore_window: MainW
 
 
 def test_the_meeting_pad_moves_where_the_panels_meet(gore_window: MainWindow) -> None:
+    _fractions(gore_window)
     gore_window.show_panel("shapes")
     panel = gore_window.shapes
     panel.add_shape("dome")

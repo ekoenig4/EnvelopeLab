@@ -1931,6 +1931,118 @@ def update_shape(session: ProjectSession, name: str, values: dict[str, Any]) -> 
     return session.edit_shapes(f"Edit shape {values.get('name', name)}", mutate)
 
 
+def scale_mesh_shape(
+    session: ProjectSession, name: str, along: float, across: float, height: float
+) -> bool:
+    """Resize mesh shape ``name`` about its base point (one undo step).
+
+    The stored vertices are scaled (:func:`envelopelab.project.shapes.
+    scaled_mesh_vertices`); a linked mirror twin follows.
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit.
+    name : str
+        Mesh shape to resize.
+    along, across, height : float
+        Scale factors up the tape, across the gores and out of the envelope,
+        dimensionless (1: unchanged).
+
+    Returns
+    -------
+    bool
+        Whether the shape changed (False when every factor is 1).
+
+    Raises
+    ------
+    KeyError
+        For an unknown shape.
+    ValueError
+        For a shape that is not a mesh, or a factor that is not finite and positive
+        (nothing is changed).
+    """
+    from envelopelab.project.shapes import scaled_mesh_vertices
+
+    def mutate(shapes: list[dict[str, Any]]) -> None:
+        shape = next((s for s in shapes if s["name"] == name), None)
+        if shape is None:
+            raise KeyError(f"no special shape {name!r}")
+        if shape["kind"] != "mesh":
+            raise ValueError(f"{name!r} is not a mesh shape")
+        scaled = scaled_mesh_vertices(np.asarray(shape["vertices"]), along, across, height)
+        shape["vertices"] = [[float(c) for c in v] for v in scaled]
+
+    return session.edit_shapes(f"Resize shape {name}", mutate)
+
+
+def convert_mesh_to_revolved(
+    session: ProjectSession,
+    name: str,
+    profile: Sequence[tuple[float, float]],
+    smooth: bool = True,
+) -> bool:
+    """Replace mesh shape ``name`` by a revolved shape of ``profile`` (one undo step).
+
+    The profile normally comes from :func:`envelopelab.features.mesh_profile.fit_profile`
+    (whose deviation from the mesh the user has seen). The new shape keeps the name,
+    placement, fabric, feed holes, cap, seam turn, panel widths, group and mirror link;
+    the mesh's panels become its gores (at least 3; with fewer, equal widths). Undo
+    brings the mesh back; a linked mirror twin follows.
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Session to edit.
+    name : str
+        Mesh shape to convert.
+    profile : sequence of (float, float)
+        Profile points :math:`(\\rho, \\zeta)`, m, base first.
+    smooth : bool
+        Join the points by a spline (True) or straight segments.
+
+    Returns
+    -------
+    bool
+        Whether the state changed.
+
+    Raises
+    ------
+    KeyError
+        For an unknown shape.
+    ValueError
+        For a shape that is not a mesh, or a profile the shape does not accept (nothing
+        is changed).
+    """
+
+    from envelopelab.project.shapes import RevolvedShape, to_primitive
+
+    def mutate(shapes: list[dict[str, Any]]) -> None:
+        index = next((i for i, s in enumerate(shapes) if s["name"] == name), None)
+        if index is None:
+            raise KeyError(f"no special shape {name!r}")
+        shape = shapes[index]
+        if shape["kind"] != "mesh":
+            raise ValueError(f"{name!r} is not a mesh shape")
+        mesh_only = ("kind", "vertices", "triangles", "source", "panels")
+        new = {k: v for k, v in shape.items() if k not in mesh_only}
+        gores = max(int(shape["panels"]), 3)
+        if gores != int(shape["panels"]):
+            new["panel_widths"] = []
+        new.update(
+            kind="revolved",
+            profile=[[float(r), float(z)] for r, z in profile],
+            gores=gores,
+            smooth=bool(smooth),
+        )
+        # The profile must make a shape (base at zeta = 0, off the axis, ...), not only
+        # valid data.
+        to_primitive(RevolvedShape.model_validate(new)).validate()
+        shapes[index] = new
+
+    return session.edit_shapes(f"Convert shape {name} to a revolved profile", mutate)
+
+
 def remove_shape(session: ProjectSession, name: str) -> bool:
     """Remove shape ``name`` (``KeyError`` if unknown)."""
 

@@ -88,7 +88,7 @@ application's 3D view shows for the run chosen there:
   values are not final.
 
 Drag to rotate, shift-drag or right-drag to pan, use the wheel to zoom; **Front**,
-**Side**, **Top** and **Isometric** set the view; the layer list turns parts on and off.
+**Side**, **Top** and **Isometric** set the view; the parts list turns parts on and off.
 The page needs WebGL (every current browser has it) and nothing else: it can be sent by
 e-mail or opened from a USB stick.
 

@@ -3,6 +3,84 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the 3D view opens a project on its most up-to-date shape (CalculiX, else
+  preview, else design; only a current, converged run) in *Layer colour*, and results
+  are no longer coloured by factor of safety unless chosen. Zones below the limit are
+  still listed in the run banner.
+- Fixed: after reopening a project the factor-of-safety colouring was missing (the
+  envelope showed its panel colours under *Colour by: Factor of safety*) and the run banner
+  listed no zones below the limit. A run's result file now keeps each triangle's fabric
+  strength and zone as solved, so a reopened run shows the same factors of safety and
+  failing zones; a part that cannot give the chosen field is drawn plain, never in panel
+  colours. Factors of safety are unchanged; older runs need one re-run.
+- Fixed: after reopening a project the 3D view lost the rest mesh and drew an inflated
+  envelope plain blue. A run's result file now keeps each triangle's panel and the sewn
+  seams, and the rest mesh is drawn from the latest current run. Runs saved before this
+  fix need one re-run for their panel colours.
+- Fixed: an inflated special shape was coloured unlike its design in the 3D view. Its
+  tiers were not kept (a split shape's upper tiers took the first tier's colour, e.g. a
+  red ball on a black stalk drawn black) and its cap was guessed from its size and height
+  (a shaped or moved cap came out the wrong size, e.g. an eye's white centre 58 % too
+  large). Each inflated triangle now takes the piece, tier and cap of the designed skin
+  triangle it starts on; the result file stores the tiers. Simulate the shapes again for
+  the corrected colours (older results load as before). No numerical result changes.
+- Fixed (changes results): the gores of a **leaning** dome or revolved shape were cut
+  short of cloth where the footprint slants across them, more the more it leans: about
+  2 % in total at 10°, 6 % at 20°, 17 % at 35° (up to 33 % for one gore) on a 5 m
+  stalk-and-ball antenna. Such gores are now developed along true parallels and cut along
+  the footprint; the cut cloth matches the upright shape (−0.7 % for that antenna with 12
+  gores, at every lean) and its preview solve converges in about half the iterations,
+  without the large-strain warning. Re-export the build pack of any leaning dome or
+  revolved shape. Upright shapes and every benchmark are unchanged.
+- Fixed: a tall or leaning dome, tube or revolved shape near the crown could not be placed
+  ("the skin does not reach the envelope") when the search below its base ran through the
+  balloon and out of its far side, e.g. a stalk-and-ball antenna converted from a mesh,
+  leaning 35°. The footprint is now the crossing next to the base; shapes that placed
+  before keep exactly the same footprint.
+- Fixed: a special shape on a straight stretch of the envelope (for example between the
+  control points of a profile of straight segments) was refused as "the envelope is not
+  convex round the feature". A straight stretch is now a cone (meridian radius infinite),
+  whose starting stresses are exact (hoop p R2, meridional p R2/2; new benchmark rows);
+  only an envelope curving inward is refused, with a message naming where. Results of
+  shapes on curved parts of the envelope are unchanged.
+- Changed: the 3D view's layer tree is now an **Objects** list (the envelope, each
+  special shape and overlay, rigging, symmetry axes, reference and rest meshes, each with
+  a check box), and a **Shape** choice draws them *Designed*, *Inflated (preview)* or
+  *Inflated (CalculiX)*; it replaces the *Run* list. Special shapes keep their latest
+  simulation by each solver, so their CalculiX result can be shown next to the preview's.
+  A finished run switches to its inflated shape.
+- Changed: the inflated envelope is drawn like the design with *Colour by: Layer colour*
+  (panel and fabric colours, darker alternate gores, seam lines, no solver mesh edges in
+  *Shaded*). Unconverged runs keep their red mesh edges.
+- Fixed: choosing *Layer colour* in *Colour by* was immediately replaced by the factor of
+  safety, so a result could not be shown in its own colours.
+- Added: **Preferences ▸ Positions shown in**: metres (default) or balloon coordinates,
+  gore + fraction across it (0 at one seam, 1 at the other) and panel row + fraction up
+  it. The shape placement form, feed-hole table, overlay editor, gore-map pointer, 3D drag
+  messages and symmetry-axis labels follow it. On a special shape, positions use the
+  shape's own frame: horizontal splits in m along the skin or % of the profile, where the
+  panels meet in m or fractions of the widest radius (the default, metres, changes how
+  these two were shown). Display only: projects store the same values and no result
+  changes.
+- Added: **Convert to revolved…** for mesh shapes that are round about their axis (an
+  antenna, a ball). A revolved profile is fitted to the mesh (plane sections, resampled
+  points) and its largest and RMS deviation from the mesh are shown before converting; a
+  mesh more than 5 % off its widest radius is flagged as not round. The converted shape
+  keeps its name, placement, fabric, feed holes, cap and group, and can then be split
+  across and edited in the profile editor. One undo step; no file-format change.
+- Added: visual profile editor for revolved shapes (Profile tab). Drag points (with soft
+  selection), double-click to add, Delete to remove, **Scale…** the whole shape or the
+  selected points, and drag horizontal splits along the outline; tier letters are shown.
+  Each drag is one undo step. The point table stays for exact values. Existing shapes'
+  results are unchanged.
+- Added: **Resize…** for mesh (free-form) shapes in Placement & size. The form shows the
+  mesh's size (up the tape, across, height, m); the dialog scales it about its base point,
+  in proportion or one direction only, as one undo step, and a linked mirror twin follows.
+  Results of shapes that are not resized are unchanged.
+- Changed: EnvelopeLab now needs **Python 3.12** (ADR-0057); Python 3.11 is no longer
+  supported or tested. CI runs Python 3.12 on Linux, macOS, Windows and WSL 2 Ubuntu
+  24.04, and the install scripts stop with a message on Python 3.11. No numerical results
+  change.
 - Added: **overlays** (appliqués) sewn on top of the envelope, anywhere and across seams
   (ADR-0056, project format 8). In Special shapes, **Add shape ▸ Overlay (appliqué)**:
   a circle, ellipse, rectangle, polygon (its corners dragged, added and removed in the
