@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the 3D view opens a project on its most up-to-date shape (CalculiX, else
+  preview, else design; only a current, converged run) in *Layer colour*, and results
+  are no longer coloured by factor of safety unless chosen. Zones below the limit are
+  still listed in the run banner.
 - Fixed: after reopening a project the factor-of-safety colouring was missing (the
   envelope showed its panel colours under *Colour by: Factor of safety*) and the run banner
   listed no zones below the limit. A run's result file now keeps each triangle's fabric

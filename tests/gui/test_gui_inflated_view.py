@@ -3,6 +3,8 @@ view's Show choice switches between them."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from PySide6.QtCore import Qt
@@ -72,12 +74,16 @@ def test_the_inflated_envelope_is_drawn_like_the_design(
     segment = result.polylines["vertical_seams"][0]
     assert segment.shape == (2, 3)
 
-    # Results open coloured by a safety field (failures shown at once); Layer colour,
-    # once chosen, stays chosen when the field list is filled again.
-    assert view.field_choice.currentData() is not None
+    # Results open in Layer colour (panel colours); a field, once chosen, stays chosen
+    # when the field list is filled again.
+    assert view.field_choice.currentData() is None and view.part_field(RESULT) is None
+    view.field_choice.setCurrentIndex(view.field_choice.findData("fos_warp"))
+    view.field_choice.activated.emit(view.field_choice.currentIndex())
+    view.refresh()
+    assert view.field_choice.currentData() == "fos_warp"
+    assert view.part_field(RESULT) is not None
     view.field_choice.setCurrentIndex(view.field_choice.findData(None))
     view.field_choice.activated.emit(view.field_choice.currentIndex())
-    assert view.field_choice.currentData() is None
     view.refresh()
     assert view.field_choice.currentData() is None and view.part_field(RESULT) is None
 
@@ -147,3 +153,39 @@ def test_the_designed_envelope_keeps_its_panel_colours_with_a_field_chosen(
     assert view.layers["design"].face_colors is not None
     assert view.shows_panel_colours("design", field_chosen=True)
     assert view.shows_panel_colours("design", field_chosen=False)
+
+
+@pytest.mark.slow
+def test_a_project_opens_on_its_most_up_to_date_shape(
+    qtbot: QtBot, gore_window: MainWindow
+) -> None:
+    """Opening a project shows CalculiX's inflated shape, else the preview's, else the
+    design: the first whose latest run is current and converged, in Layer colour."""
+    w = gore_window
+    session = w.controller.session
+    assert session is not None
+    failures: list[str] = []
+    w.simulation.failed.connect(failures.append)
+    w.runs.run_preview.click()
+    qtbot.waitUntil(lambda: len(session.project.runs) == 1 or bool(failures), timeout=600_000)
+    assert not failures, failures
+    qtbot.waitUntil(lambda: not w.simulation.running, timeout=60_000)
+    view = w.view3d
+    view.field_choice.setCurrentIndex(view.field_choice.findData("fos_warp"))
+    view.field_choice.activated.emit(view.field_choice.currentIndex())
+    view.set_state("design")
+
+    view.reopened()  # as when the project is opened again
+    view.refresh()
+    assert view.state() == RESULT and view.layers[RESULT].visible
+    assert view.field_choice.currentData() is None  # Layer colour
+
+    preview = view.layers[RESULT]
+    view.layers["calculix"] = replace(preview, key="calculix", kind="calculix")
+    assert view.opening_state() == "calculix"
+    view.layers["calculix"] = replace(preview, key="calculix", kind="calculix", converged=False)
+    assert view.opening_state() == RESULT  # an unconverged run is never the default
+    view.layers["calculix"] = replace(preview, key="calculix", kind="calculix", stale=True)
+    assert view.opening_state() == RESULT
+    view.layers[RESULT] = replace(preview, stale=True)
+    assert view.opening_state() == "design"

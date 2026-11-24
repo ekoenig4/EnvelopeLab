@@ -1104,8 +1104,8 @@ class View3DPanel(QWidget):
 
     def _follow_new_runs(self) -> None:
         """A new run (of either solver, of the envelope or of a shape on its own) since the
-        last refresh shows the balloon as it inflated it, coloured by its factor of safety:
-        its failures are seen at once. Opening a project starts on the design."""
+        last refresh shows the balloon as it inflated it. Opening a project starts on its
+        most up-to-date shape (:meth:`opening_state`) in Layer colour."""
         session = self.controller.session
         # Envelope runs, and shape simulations (a shape simulated on its own too).
         latest = {
@@ -1116,7 +1116,13 @@ class View3DPanel(QWidget):
         if session is None or id(session) != self._seen_session:
             self._seen_session = None if session is None else id(session)
             self._seen_runs = latest
-            self.state_choice.setCurrentIndex(self.state_choice.findData("design"))
+            self._layer_colour = True
+            self.field_choice.setCurrentIndex(0)
+            opening = self.opening_state()
+            self.state_choice.setCurrentIndex(self.state_choice.findData(opening))
+            index = self.run_choice.findData(opening)
+            if index >= 0:
+                self.run_choice.setCurrentIndex(index)
             return
         new = [k for k, run in latest.items() if (self._seen_runs or {}).get(k) != run]
         self._seen_runs = latest
@@ -1128,6 +1134,22 @@ class View3DPanel(QWidget):
                 self.run_choice.setCurrentIndex(index)
         elif not self._has_state(self.state()):
             self.state_choice.setCurrentIndex(self.state_choice.findData("design"))
+
+    def opening_state(self) -> str:
+        """The Shape a project opens on: CalculiX's inflated envelope, else the preview's,
+        else the design; the first whose latest run is current (not stale) and converged.
+        An unconverged run is never shown by default."""
+        for state in ("calculix", "envelopelab-preview"):
+            layer = self.layers.get(state)
+            if layer is not None and not layer.stale and layer.converged:
+                return state
+        return "design"
+
+    def reopened(self) -> None:
+        """Forget the project seen last: the next refresh opens it as a new project
+        (:meth:`opening_state`, Layer colour)."""
+        self._seen_session = None
+        self._seen_runs = None
 
     def _overlay_layers(self) -> None:
         """Every overlay (appliqué, ADR-0056) as a patch on the design surface, in its
@@ -1634,8 +1656,8 @@ class View3DPanel(QWidget):
         self.zoom_to_layer(key)
 
     def _field_chosen(self) -> None:
-        """The user chose a field: Layer colour, once chosen, is kept when the list is
-        filled again (a new result still opens on a safety field until then)."""
+        """The user chose a field: it is kept when the list is filled again (Layer colour
+        is the default)."""
         self._layer_colour = self.field_choice.currentData() is None
         self._result_changed()
 
@@ -1711,8 +1733,7 @@ class View3DPanel(QWidget):
         if chosen is None and self._layer_colour:
             index = 0  # Layer colour, as chosen
         if index < 0:
-            first = next((f for f in SAFETY_FIELDS if f in available), None)
-            index = self.field_choice.findData(first) if first else 0
+            index = 0  # Layer colour: the default, and when the chosen field is gone
         self.field_choice.setCurrentIndex(max(index, 0))
         self.field_choice.blockSignals(False)
         self._design_for_field()

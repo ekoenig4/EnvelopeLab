@@ -64,13 +64,16 @@ The 3D view's toolbar chooses what it shows:
   balloon**, the envelope and every special shape solved with it). An object that run did
   not solve is drawn as designed and its row says so (*designed (not in inflated
   (calculix))*). A choice without a result is greyed out. The colours, the banner and the
-  run details describe the chosen run. A project opens on *Designed*; a run that finishes
-  switches to its inflated shape, coloured by the factor of safety, so its failures are
-  seen first.
-* **Colour by**: *Factor of safety, warp* or *weft* (the default for a current, converged
-  preview run), the principal, warp and weft resultants (N/m), *Wrinkling* (taut,
+  run details describe the chosen run. A project opens on its most up-to-date shape:
+  *Inflated (CalculiX)*, else *Inflated (preview)*, else *Designed*, the first whose
+  latest run is current and converged (an unconverged run is never opened by default).
+  A run that finishes switches to its inflated shape. Zones below the factor-of-safety
+  limit are always listed in the run banner, whatever the colours show.
+* **Colour by**: *Layer colour* (the default: panel colours), *Factor of safety, warp*
+  or *weft*, the principal, warp and weft resultants (N/m), *Wrinkling* (taut,
   wrinkled, slack), *Displacement from the as-sewn shape* (mm), *Deviation from
-  design* (mm, see below), or *Layer colour*.
+  design* (mm, see below). A field once chosen stays chosen until the project is
+  opened again.
   A field the run cannot give is listed but greyed out; hover for why (for example
   "CalculiX does not report warp/weft resultants", or a run from an older version that
   has to be run again). With a field chosen, a part that cannot give it is drawn in its
