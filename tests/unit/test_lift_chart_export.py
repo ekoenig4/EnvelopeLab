@@ -55,7 +55,12 @@ def test_lift_chart_is_a_pack_document(pack: Path) -> None:
 
 def test_pdf_shows_limit_inputs_and_assumptions(pack: Path) -> None:
     text = _text(pack / "lift-sample-lift-chart.pdf")
-    assert text.count("LIFT CHART") == 3  # one header per page
+    # One header per page: loading, gross lift, top temperature, ceiling, theory.
+    assert text.count("LIFT CHART") == 5
+    assert "Gross lift vs mean envelope temperature" in text
+    assert "CROWN ABOVE LIMIT" in text
+    assert "How these charts are calculated" in text
+    assert "459.67" in text
     assert "LIMIT 120 degC" in text
     assert "ABOVE TOP-TEMPERATURE LIMIT - NOT PERMITTED" in text
     assert "[assumed]" in text and "top - 20 K" in text
@@ -171,3 +176,42 @@ def test_design_charts_give_the_plots_the_pdf_draws() -> None:
     assert ticks(0.0, 800.0) == [0.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0]
     broken = dataclasses.replace(OUTPUTS, envelope_mass=None, mass=None)
     assert design_charts(DESIGN, broken) is None
+
+
+def test_gross_lift_chart_is_lift_against_mean_temperature() -> None:
+    from envelopelab.export.lift_chart import design_charts
+    from envelopelab.lift_chart import lift_mass
+
+    charts = design_charts(DESIGN, OUTPUTS)
+    assert charts is not None
+    inputs = charts.inputs
+    gross = charts.plots.gross
+    assert len(gross) == len(charts.axes.altitudes)
+    first = gross[0]
+    # Curves per ambient temperature; y is V (rho_amb - rho_int) in kg at x = mean degC.
+    assert len(first.series) == len(charts.axes.ambient_temperatures)
+    x, y = first.series[0].points[30]
+    t_amb = charts.axes.ambient_temperatures[0]
+    assert y == pytest.approx(lift_mass(inputs.volume, 0.0, t_amb, x + 273.15))
+    # The crown reaches its limit at mean = limit - offset: marked and shaded beyond.
+    mean_limit = inputs.top_limit.value - inputs.top_to_mean.value - 273.15
+    assert first.vlines[0][0] == pytest.approx(mean_limit)
+    assert first.shade_right is not None and first.shade_right[0] == pytest.approx(mean_limit)
+    # Envelope + rigging, and with the design load: where a curve crosses, it floats.
+    levels = [h[0] for h in first.hlines]
+    assert levels == pytest.approx([inputs.fixed_mass, inputs.fixed_mass + 300.0])
+
+
+def test_theory_text_states_equations_constants_and_this_envelope() -> None:
+    from envelopelab.export.lift_chart import chart_axes, theory_sections
+
+    inputs = chart_inputs(DESIGN, OUTPUTS)
+    assert inputs is not None
+    sections = dict(theory_sections(inputs, chart_axes(inputs)))
+    text = " ".join(line for lines in sections.values() for line in lines)
+    assert "L = V (rho_amb - rho_int) g" in text
+    assert "R = 287.05287 J/(kg K)" in text and "53.352 ft lbf/(lb degR)" in text
+    assert "T_mean = T_top - 20 K" in text and "[assumed" in text
+    assert "101,325 Pa" in text and "79,495 Pa" in text  # ISA at 0 and 2,000 m
+    assert f"{inputs.volume:,.0f} m3" in text
+    assert "Gross lift is not payload" in text

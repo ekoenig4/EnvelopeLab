@@ -19,6 +19,45 @@ absolute errors are in the unit shown.
 | Top temperature for 528.3 kg round trip (120 degC) | - | - | K | 0.00045 | 0.05 | pass |
 | Top temperature for 300 kg at 2 000 m, 30 degC | - | - | K | < 1e-06 K | 0.01 | pass |
 | Ceiling, ISA+10, 400 kg, top 120 degC: spare lift at the ceiling | - | - | kg | < 1e-06 kg | 0.05 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 40 degF, 300 ft, envelope 130 degF | 1102.63 | 1102.63 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 40 degF, 300 ft, envelope 130 degF | 1102.63 | 1105.52 | lb | 0.0026 | 0.005 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 40 degF, 300 ft, envelope 200 degF | 1752.23 | 1752.23 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 40 degF, 300 ft, envelope 200 degF | 1752.23 | 1756.61 | lb | 0.0025 | 0.005 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 40 degF, 300 ft, envelope 280 degF | 2344.07 | 2344.07 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 40 degF, 300 ft, envelope 280 degF | 2344.07 | 2349.67 | lb | 0.0024 | 0.005 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 50 degF, 300 ft, envelope 130 degF | 960.888 | 960.888 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 50 degF, 300 ft, envelope 130 degF | 960.888 | 963.379 | lb | 0.0026 | 0.005 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 50 degF, 300 ft, envelope 200 degF | 1610.48 | 1610.48 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 50 degF, 300 ft, envelope 200 degF | 1610.48 | 1614.46 | lb | 0.0025 | 0.005 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 50 degF, 300 ft, envelope 280 degF | 2202.33 | 2202.33 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 50 degF, 300 ft, envelope 280 degF | 2202.33 | 2207.53 | lb | 0.0024 | 0.005 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 50 degF, 6,000 ft, envelope 130 degF | 778.437 | 778.437 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 50 degF, 6,000 ft, envelope 130 degF | 778.437 | 780.557 | lb | 0.0027 | 0.005 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 50 degF, 6,000 ft, envelope 200 degF | 1304.69 | 1304.69 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 50 degF, 6,000 ft, envelope 200 degF | 1304.69 | 1308.08 | lb | 0.0026 | 0.005 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 50 degF, 6,000 ft, envelope 280 degF | 1784.15 | 1784.15 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 50 degF, 6,000 ft, envelope 280 degF | 1784.15 | 1788.6 | lb | 0.0025 | 0.005 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 90 degF, 2,000 ft, envelope 130 degF | 418.733 | 418.733 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 90 degF, 2,000 ft, envelope 130 degF | 418.733 | 419.794 | lb | 0.0025 | 0.005 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 90 degF, 2,000 ft, envelope 200 degF | 1029.32 | 1029.32 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 90 degF, 2,000 ft, envelope 200 degF | 1029.32 | 1031.81 | lb | 0.0024 | 0.005 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 90 degF, 2,000 ft, envelope 280 degF | 1585.63 | 1585.63 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 90 degF, 2,000 ft, envelope 280 degF | 1585.63 | 1589.28 | lb | 0.0023 | 0.005 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 90 degF, 6,000 ft, envelope 130 degF | 360.895 | 360.895 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 90 degF, 6,000 ft, envelope 130 degF | 360.895 | 361.843 | lb | 0.0026 | 0.005 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 90 degF, 6,000 ft, envelope 200 degF | 887.147 | 887.147 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 90 degF, 6,000 ft, envelope 200 degF | 887.147 | 889.37 | lb | 0.0025 | 0.005 | pass |
+| Spreadsheet 92,000 ft3 (exact constants): 90 degF, 6,000 ft, envelope 280 degF | 1366.61 | 1366.61 | lb | < 1e-06 | 0.0001 | pass |
+| Spreadsheet 92,000 ft3 (as published): 90 degF, 6,000 ft, envelope 280 degF | 1366.61 | 1369.89 | lb | 0.0024 | 0.005 | pass |
 
 The ceiling row recomputes the spare lift at the solved altitude from the
 hand-written ISA formula; it must vanish to within 0.05 kg.
+
+The spreadsheet rows compare EnvelopeLab's gross lift, read against the mean gas
+temperature, with the Balloon Builders Journal 'Envelope lifting capacity'
+spreadsheet formula (92,000 ft3; its five ambient/altitude cases at 130, 200 and
+280 degF). With exact constants (degR = degF + 459.67, R = 53.352 ft lbf/(lb degR),
+2116.22 lbf/ft2, 0.0019812 K/ft) they agree within 1e-4. As published (+459,
+R = 53.34, 2116, 0.00198) the spreadsheet is 0.23 % to 0.27 % higher, almost all
+from +459; tolerance 0.5 %. The spreadsheet's single envelope temperature is the
+mean gas temperature; see docs/theory/lift-charts.md.

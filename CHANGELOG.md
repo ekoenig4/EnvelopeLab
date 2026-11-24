@@ -3,6 +3,14 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: the **gross lift vs mean envelope temperature** chart (the classic builders'
+  lift chart; one per altitude, with the envelope + rigging and design-load lines and the
+  mean temperature at which the crown reaches its limit) in the Lift charts tab and as
+  page 2 of the lift-chart PDF, and a **Theory** tab and PDF page stating the equations,
+  constants and assumptions with the design's own values. The theory page compares the
+  model with the Balloon Builders Journal lift spreadsheet; new benchmarks reproduce that
+  spreadsheet (within 1e-4 with exact constants; it is 0.23–0.27 % higher as published,
+  from °F + 459 and R = 53.34). No numerical result changes.
 - Added: a **Lift charts** tab in the main window (Ctrl+8) shows the design's lift charts
   (maximum load, top temperature needed per altitude, ceiling) beside the settings of
   their curves. Edits redraw the charts at once and are saved to the project as one undo

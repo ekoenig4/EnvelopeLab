@@ -101,6 +101,10 @@ class LiftChartView(QWidget):
         if plot.shade_above is not None and plot.shade_above[0] < yb:
             level = self.to_pixels(xa, max(plot.shade_above[0], ya)).y()
             painter.fillRect(QRectF(r.left(), r.top(), r.width(), level - r.top()), TINT)
+        # Shaded region right of a limit (crown above its limit on the gross-lift chart).
+        if plot.shade_right is not None and plot.shade_right[0] < xb:
+            edge = self.to_pixels(max(plot.shade_right[0], xa), ya).x()
+            painter.fillRect(QRectF(edge, r.top(), r.right() - edge, r.height()), TINT)
         # Grid and tick labels.
         painter.setFont(small)
         for x in ticks(xa, xb):
@@ -196,6 +200,15 @@ class LiftChartView(QWidget):
                 int(Qt.AlignmentFlag.AlignLeft),
                 self._elided(painter, screen_text(plot.shade_above[1]), r.width() - 12),
             )
+        if plot.shade_right is not None and plot.shade_right[0] < xb:
+            edge = self.to_pixels(max(plot.shade_right[0], xa), ya).x()
+            painter.setFont(bold)
+            painter.setPen(_colour((0.75, 0.12, 0.10)))
+            painter.drawText(
+                QRectF(edge + 4, r.top() + 4, r.right() - edge - 8, fm_h),
+                int(Qt.AlignmentFlag.AlignRight),
+                self._elided(painter, screen_text(plot.shade_right[1]), r.right() - edge - 8),
+            )
         painter.restore()
         painter.setPen(QPen(INK, 1))
         painter.drawRect(r)
@@ -207,7 +220,7 @@ class LiftChartView(QWidget):
             default=0,
         )
         box_w, box_h = width + 34, row * len(plot.series) + 6
-        bx = r.right() - box_w - 6
+        bx = r.left() + 6 if plot.legend_left else r.right() - box_w - 6
         by = (
             r.bottom() - box_h - 6 - (fm_h if plot.vlines else 0)
             if plot.legend_at_bottom

@@ -7,6 +7,7 @@ pack's (:func:`envelopelab.export.lift_chart.design_charts`); nothing is compute
 
 from __future__ import annotations
 
+import html
 from pathlib import Path
 from typing import Any
 
@@ -22,11 +23,17 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSplitter,
     QTabWidget,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
 
-from envelopelab.export.lift_chart import DesignCharts, design_charts, input_lines
+from envelopelab.export.lift_chart import (
+    DesignCharts,
+    design_charts,
+    input_lines,
+    theory_sections,
+)
 from envelopelab.project.lift_chart_settings import LiftChartSettings, UnitSystem
 from envelopelab_app.controller import WorkspaceController
 from envelopelab_app.lift_chart_dialog import LiftChartSettingsForm
@@ -40,13 +47,43 @@ UNITS_KEY = "lift_chart/units"
 #: Chart tabs: (key, label).
 CHART_TABS = (
     ("loading", "Maximum load"),
+    ("gross", "Gross lift"),
     ("temperature", "Top temperature"),
     ("ceiling", "Ceiling"),
+    ("theory", "Theory"),
+)
+#: Plain-text notation of the theory text and how it is shown (presentation only).
+_NOTATION = (
+    ("rho_amb", "ρ<sub>amb</sub>"),
+    ("rho_int", "ρ<sub>int</sub>"),
+    ("rho", "ρ"),
+    ("T_amb", "T<sub>amb</sub>"),
+    ("T_mean", "T<sub>mean</sub>"),
+    ("T_top", "T<sub>top</sub>"),
+    ("degR", "°R"),
+    ("m3", "m³"),
+    ("ft2", "ft²"),
+    ("m/s2", "m/s²"),
+    ("^5.25588", "<sup>5.25588</sup>"),
 )
 
 
+def theory_html(sections: list[tuple[str, list[str]]]) -> str:
+    """The theory text of :func:`envelopelab.export.lift_chart.theory_sections` as rich
+    text (headings, paragraphs, Greek letters, sub- and superscripts)."""
+    out = []
+    for heading, lines in sections:
+        out.append(f"<h3>{html.escape(heading)}</h3>")
+        for line in lines:
+            text = html.escape(screen_text(line))
+            for plain, shown in _NOTATION:
+                text = text.replace(plain, shown)
+            out.append(f"<p>{text}</p>")
+    return "\n".join(out)
+
+
 class LiftChartsPanel(QWidget):
-    """Settings form (left) and the three lift charts (right).
+    """Settings form (left); the lift charts and how they are calculated (right).
 
     Parameters
     ----------
@@ -109,6 +146,17 @@ class LiftChartsPanel(QWidget):
         self.ceiling = LiftChartView()
         self.ceiling.setObjectName("liftCeilingChart")
         self.temperatures = [LiftChartView() for _ in range(4)]
+        self.gross = [LiftChartView() for _ in range(4)]
+        gross_page = QWidget()
+        gross_page.setObjectName("liftGrossCharts")
+        gross_grid = QGridLayout(gross_page)
+        gross_grid.setContentsMargins(0, 0, 0, 0)
+        for k, view in enumerate(self.gross):
+            view.setObjectName(f"liftGrossChart{k}")
+            gross_grid.addWidget(view, k // 2, k % 2)
+        self.theory = QTextBrowser()
+        self.theory.setObjectName("liftTheory")
+        self.theory.setOpenExternalLinks(False)
         temperature_page = QWidget()
         grid = QGridLayout(temperature_page)
         grid.setContentsMargins(0, 0, 0, 0)
@@ -118,9 +166,8 @@ class LiftChartsPanel(QWidget):
         self.tabs = QTabWidget()
         self.tabs.setObjectName("liftChartTabs")
         temperature_page.setObjectName("liftTemperatureCharts")
-        for (_name, label), page in zip(
-            CHART_TABS, (self.loading, temperature_page, self.ceiling), strict=True
-        ):
+        pages = (self.loading, gross_page, temperature_page, self.ceiling, self.theory)
+        for (_name, label), page in zip(CHART_TABS, pages, strict=True):
             self.tabs.addTab(page, label)
         self.status = QLabel()
         self.status.setObjectName("liftStatus")
@@ -238,21 +285,26 @@ class LiftChartsPanel(QWidget):
     def _show(self, message: str) -> None:
         charts = self.charts
         if charts is None:
-            for view in (self.loading, self.ceiling, *self.temperatures):
+            for view in (self.loading, self.ceiling, *self.temperatures, *self.gross):
                 view.set_plot(None, message)
             self.status.setText(message)
             self.notes.setText("")
+            self.theory.setHtml(f"<p>{html.escape(message)}</p>")
             return
         plots = charts.plots
         self.loading.set_plot(plots.loading)
         self.ceiling.set_plot(plots.ceiling)
-        for k, view in enumerate(self.temperatures):
-            if k < len(plots.temperatures):
-                view.set_plot(plots.temperatures[k])
-                view.show()
-            else:
-                view.set_plot(None)
-                view.hide()
+        for views, shown in ((self.temperatures, plots.temperatures), (self.gross, plots.gross)):
+            for k, view in enumerate(views):
+                if k < len(shown):
+                    view.set_plot(shown[k])
+                    view.show()
+                else:
+                    view.set_plot(None)
+                    view.hide()
+        scroll = self.theory.verticalScrollBar().value()
+        self.theory.setHtml(theory_html(theory_sections(charts.inputs, charts.axes)))
+        self.theory.verticalScrollBar().setValue(scroll)
         limit = charts.inputs.top_limit
         self.status.setText(
             screen_text(

@@ -22,10 +22,14 @@ are editing, next to the settings of the curves they draw:
 * **Inputs and assumptions** (left, below): the volume, envelope and rigging mass,
   top-temperature limit and top-to-mean offset the charts use, each with its source tag,
   and the safety notice.
-* **Charts** (right), one sub-tab each: **Maximum load**, **Top temperature** (one
-  chart per altitude, up to four) and **Ceiling**. These are the pages of the PDF below,
-  drawn on screen with the same data. The region above the top-temperature limit is
-  shaded red and labelled *not permitted*.
+* **Charts** (right), one sub-tab each: **Maximum load**, **Gross lift** (one chart per
+  altitude), **Top temperature** (one chart per altitude, up to four) and **Ceiling**.
+  These are the pages of the PDF below, drawn on screen with the same data. The region
+  above the top-temperature limit is shaded red and labelled *not permitted*.
+* **Theory** (last sub-tab): how the charts are calculated, the equations, constants and
+  assumptions, with this design's own values (volume, masses, the ISA pressure at each
+  altitude, the offset and its source). The same text is the last page of the PDF;
+  [Lift charts and equilibrium](../theory/lift-charts.md) explains it in full.
 * **Export PDF…** writes these charts as a PDF, with every equilibrium point in a CSV
   file beside it.
 
@@ -37,15 +41,21 @@ the envelope mass cannot be estimated, the tab says why instead of drawing.
 *File ▸ Export build pack…*, tick **Lift charts** (ticked by default). The pack then
 contains:
 
-* `<name>-lift-chart.pdf`, three A4 landscape pages:
+* `<name>-lift-chart.pdf`, five A4 landscape pages:
     1. **Maximum load at the top-temperature limit** vs ambient temperature, one curve
        per pressure altitude (by default 0, 1 000, 2 000 and 3 000 m). Go up from the ambient
        temperature at that altitude to the curve and read the most load that floats with
        the crown at the limit. The inputs and their source tags are listed below the chart.
-    2. **Top temperature needed** vs load, one panel per altitude, one curve per ambient
+    2. **Gross lift** vs mean envelope temperature, one chart per altitude, one curve per
+       ambient temperature: the classic lift chart of builders' spreadsheets. The dashed
+       lines are the envelope + rigging mass and that plus the design load: where a curve
+       crosses one, the balloon floats. The red line marks the mean temperature at which
+       the crown reaches its limit; beyond it is shaded. Read it with the **mean** gas
+       temperature, not the crown reading (see *Mean or crown temperature* below).
+    3. **Top temperature needed** vs load, one panel per altitude, one curve per ambient
        temperature (by default −10 to 30 °C). The red dashed line is the limit. The shaded region
        above it is not permitted. The dotted line marks the design's payload.
-    3. **Equilibrium altitude (ceiling)** vs load, with the crown at the limit, one curve
+    4. **Equilibrium altitude (ceiling)** vs load, with the crown at the limit, one curve
        per ISA deviation (by default −15, 0, +15 and +30 K).
   Every chart has metric and English units: kg with an lb scale, °C with a °F scale,
   m with ft. The legends, the limit line and the design load give both.
@@ -77,6 +87,20 @@ range, is explained under the fields, and **OK** stays disabled until it is fixe
 
 When you have measured your envelope's crown-to-mean offset, enter it and set the source
 to *measured*. The charts print the value with its source tag.
+
+## Mean or crown temperature
+
+Lift depends on the **mean** temperature of the air in the whole envelope; your crown
+sensor reads the **top**, which is hotter. EnvelopeLab takes the mean as the top minus the
+*Top minus mean temperature* offset (20 K / 36 °F, *assumed*, until you enter a measured
+value). The maximum-load, top-temperature and ceiling charts are read with the crown
+temperature; the gross-lift chart with the mean.
+
+A lift spreadsheet that takes one "envelope temperature" (for example the Balloon
+Builders Journal's) assumes the whole envelope is at that temperature, so that number is
+the mean. Do not enter the crown reading there: with a 20 K difference it overstates the
+lift by 13 % to 29 % for a 92 000 ft³ envelope. With an offset of 0, EnvelopeLab's gross
+lift matches such a spreadsheet (within 0.3 %, from the spreadsheet's rounded constants).
 
 ## What goes in
 

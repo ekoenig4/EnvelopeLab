@@ -148,9 +148,12 @@ def test_lift_charts_mode_shows_the_three_charts(gore_window: MainWindow) -> Non
     assert len(shown) == 4
     assert [panel.tabs.tabText(i) for i in range(panel.tabs.count())] == [
         "Maximum load",
+        "Gross lift",
         "Top temperature",
         "Ceiling",
+        "Theory",
     ]
+    assert [v.plot is not None for v in panel.gross] == [True] * 4
     assert "assumed" in panel.status.text() and "not permitted" in panel.status.text()
     assert "not certified engineering software" in panel.notes.text()
 
@@ -223,3 +226,34 @@ def test_tab_without_a_design_says_why(window: MainWindow) -> None:
     panel = window.lift_charts
     assert panel.charts is None and not panel.form.isEnabled()
     assert "Open or create a design" in panel.loading.message
+
+
+def test_gross_lift_charts_mark_where_the_crown_reaches_its_limit(
+    gore_window: MainWindow,
+) -> None:
+    gore_window.set_mode("lift")
+    panel = gore_window.lift_charts
+    plot = panel.gross[0].plot
+    assert plot is not None and plot.shade_right is not None
+    assert "Gross lift vs mean envelope temperature" in plot.title
+    assert panel.charts is not None
+    inputs = panel.charts.inputs
+    assert plot.shade_right[0] == pytest.approx(
+        inputs.top_limit.value - inputs.top_to_mean.value - 273.15
+    )
+
+
+def test_theory_tab_states_the_equations_and_follows_the_offset(gore_window: MainWindow) -> None:
+    gore_window.set_mode("lift")
+    panel = gore_window.lift_charts
+    text = panel.theory.toPlainText()
+    assert "Gross lift (Archimedes)" in text
+    assert "L = V (ρamb - ρint) g" in text
+    assert "53.352 ft lbf/(lb °R)" in text
+    assert "°R = °F + 459.67" in text
+    assert "Tmean = Ttop - 20 K" in text
+    # A measured offset typed in the form shows in the theory at once.
+    panel.form.offset.setValue(12.0)
+    panel.form.source.setCurrentText("measured")
+    assert "Tmean = Ttop - 12 K" in panel.theory.toPlainText()
+    assert "[measured" in panel.theory.toPlainText()

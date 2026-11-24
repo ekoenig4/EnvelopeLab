@@ -5,9 +5,15 @@ the chart axes from the design and draws them. Pages (A4 landscape):
 
 1. maximum load at the top-temperature limit vs ambient temperature, one curve per
    altitude (the flight-manual loading chart), with the inputs and their source tags;
-2. top temperature needed vs load, one panel per altitude, one curve per ambient
+2. gross lift vs mean envelope temperature, one panel per altitude, one curve per
+   ambient temperature (the classic lift chart of builders' spreadsheets), with the
+   envelope + rigging mass and the design load as lines and the mean temperature at
+   which the crown reaches its limit marked;
+3. top temperature needed vs load, one panel per altitude, one curve per ambient
    temperature; the region above the limit is shaded and labelled;
-3. equilibrium altitude (ceiling) vs load at the limit, one curve per ISA deviation.
+4. equilibrium altitude (ceiling) vs load at the limit, one curve per ISA deviation;
+5. how the charts are calculated (:func:`theory_sections`): the equations, constants and
+   the values this envelope's charts use.
 
 The CSV lists every equilibrium point of the grid with its status. Nothing is hidden: a
 state above the limit is marked ``above_limit``, a load the envelope cannot lift
@@ -32,6 +38,7 @@ from envelopelab.lift_chart import (
     equilibrium_load,
     equilibrium_top_temperature,
     lift_chart,
+    lift_mass,
     nice_step,
 )
 
@@ -59,6 +66,9 @@ RED = (0.75, 0.12, 0.10)
 MUTED = (0.33, 0.36, 0.40)
 GRID = (0.85, 0.87, 0.90)
 TINT = (0.99, 0.90, 0.89)
+BLUE = (0.11, 0.37, 0.71)
+#: Start of the mean-temperature axis of the gross-lift chart, degC.
+MEAN_AXIS_START_C = 40.0
 #: Exact unit definitions (international pound and foot, 1959; NIST SP 811).
 KG_PER_LB = 0.45359237
 M_PER_FT = 0.3048
@@ -320,7 +330,10 @@ class Plot:
     hlines: list[tuple[float, str, RGB]] = field(default_factory=list)
     vlines: list[tuple[float, str, RGB]] = field(default_factory=list)
     shade_above: tuple[float, str] | None = None
+    shade_right: tuple[float, str] | None = None
     legend_at_bottom: bool = False
+    #: Legend at the left instead of the right (clear of curves that rise to the right).
+    legend_left: bool = False
     x2: SecondAxis | None = None
     y2: SecondAxis | None = None
 
@@ -377,6 +390,9 @@ def draw_plot(canvas: Any, plot: Plot) -> None:
         level = max(plot.shade_above[0], ya)
         _, py = to_page(xa, level)
         canvas.rect(x0, py, w, y0 + h - py, fill=TINT)
+    if plot.shade_right is not None and plot.shade_right[0] < xb:
+        px, _ = to_page(max(plot.shade_right[0], xa), ya)
+        canvas.rect(px, y0, x0 + w - px, h, fill=TINT)
     for x in _ticks(xa, xb):
         px, _ = to_page(x, ya)
         canvas.line(px, y0, px, y0 + h, GRID, 0.3)
@@ -446,10 +462,14 @@ def draw_plot(canvas: Any, plot: Plot) -> None:
         text = pdf_text(plot.shade_above[1])
         canvas.rect(x0 + 2, y0 + h - 13, 3.9 * len(text) + 4, 11, fill=TINT)
         canvas.text(x0 + 4, y0 + h - 10, text, 7, True, RED)
+    if plot.shade_right is not None and plot.shade_right[0] < xb:
+        text = pdf_text(plot.shade_right[1])
+        canvas.rect(x0 + w - 3.9 * len(text) - 6, y0 + h - 13, 3.9 * len(text) + 4, 11, fill=TINT)
+        canvas.text(x0 + w - 3.9 * len(text) - 4, y0 + h - 10, text, 7, True, RED)
     # Legend inside the box, top right (or bottom right, clear of rising curves).
     ly = y0 + 6 + 11 * (len(plot.series) - 1) if plot.legend_at_bottom else y0 + h - 12
     for s in plot.series:
-        lx = x0 + w - 132
+        lx = x0 + 6 if plot.legend_left else x0 + w - 132
         canvas.rect(lx - 2, ly - 3, 130, 11, fill=(1.0, 1.0, 1.0))
         canvas.rect(lx, ly + 1, 14, 2.4, fill=s.colour)
         canvas.text(lx + 18, ly, pdf_text(s.label), 7)
@@ -566,6 +586,51 @@ def _ceiling_plot(
     )
 
 
+def _gross_plot(
+    inputs: LiftChartInputs,
+    axes: ChartAxes,
+    altitude: float,
+    box: tuple[float, float, float, float],
+    payload: float | None,
+) -> Plot:
+    limit_c = inputs.top_limit.value - CELSIUS_OFFSET
+    offset = inputs.top_to_mean.value
+    mean_limit_c = limit_c - offset
+    x_range = (MEAN_AXIS_START_C, 10.0 * math.ceil((limit_c + 10.0) / 10.0))
+    xs = _sweep(*x_range)
+    series = []
+    highs = [inputs.fixed_mass + (payload or 0.0)]
+    for k, t_amb in enumerate(axes.ambient_temperatures):
+        pts = [(x, lift_mass(inputs.volume, altitude, t_amb, x + CELSIUS_OFFSET)) for x in xs]
+        highs += [y for _, y in pts]
+        series.append(
+            Series(f"ambient {c_f(t_amb - CELSIUS_OFFSET)}", pts, COLOURS[k % len(COLOURS)])
+        )
+    step = nice_step(max(highs), 8)
+    hlines = [
+        (inputs.fixed_mass, f"envelope + rigging {kg_lb(inputs.fixed_mass)}", MUTED),
+    ]
+    if payload:
+        total = inputs.fixed_mass + payload
+        hlines.append((total, f"+ design load = {kg_lb(total)}", BLUE))
+    return Plot(
+        box,
+        f"Gross lift vs mean envelope temperature - pressure altitude "
+        f"{altitude:,.0f} m / {ft(altitude):,.0f} ft",
+        "Mean envelope (gas) temperature (degC)",
+        "Gross lift (kg)",
+        x_range,
+        (0.0, _ceil_to(max(highs), step)),
+        series,
+        hlines=hlines,
+        vlines=[(mean_limit_c, f"crown {limit_c:.0f} degC = mean {mean_limit_c:.0f} degC", RED)],
+        shade_right=(mean_limit_c, "CROWN ABOVE LIMIT"),
+        legend_left=True,
+        x2=F_AXIS,
+        y2=LB_AXIS,
+    )
+
+
 #: Box of a plot drawn by its own renderer (the on-screen charts), unitless.
 UNIT_BOX = (0.0, 0.0, 1.0, 1.0)
 
@@ -579,14 +644,17 @@ class ChartSet:
     loading : Plot
         Maximum load at the top-temperature limit vs ambient temperature (page 1).
     temperatures : list of Plot
-        Top temperature needed vs load, one per altitude (page 2).
+        Top temperature needed vs load, one per altitude (page 3).
     ceiling : Plot
-        Equilibrium altitude vs load at the limit, one curve per ISA deviation (page 3).
+        Equilibrium altitude vs load at the limit, one curve per ISA deviation (page 4).
+    gross : list of Plot
+        Gross lift vs mean envelope temperature, one per altitude (page 2).
     """
 
     loading: Plot
     temperatures: list[Plot]
     ceiling: Plot
+    gross: list[Plot]
 
 
 def chart_plots(inputs: LiftChartInputs, axes: ChartAxes, payload: float | None = None) -> ChartSet:
@@ -611,6 +679,7 @@ def chart_plots(inputs: LiftChartInputs, axes: ChartAxes, payload: float | None 
         _loading_plot(inputs, axes, UNIT_BOX),
         [_temperature_plot(inputs, axes, h, UNIT_BOX, payload) for h in axes.altitudes],
         _ceiling_plot(inputs, axes, UNIT_BOX),
+        [_gross_plot(inputs, axes, h, UNIT_BOX, payload) for h in axes.altitudes],
     )
 
 
@@ -646,6 +715,131 @@ def input_lines(inputs: LiftChartInputs) -> list[str]:
         "Humid air and combustion products are not modelled: on a humid day the real lift "
         "is slightly lower. Keep a margin: these are static equilibrium values.",
         SAFETY_NOTICE,
+    ]
+
+
+#: Pascal per pound-force per square foot (exact from the lbf and ft definitions).
+PA_PER_PSF = 4.4482216152605 / M_PER_FT**2
+
+
+def theory_sections(
+    inputs: LiftChartInputs, axes: ChartAxes | None = None
+) -> list[tuple[str, list[str]]]:
+    """How the lift charts are calculated, with the values this envelope's charts use.
+
+    The single source of the theory shown in the application and on the last page of
+    the PDF (the theory page of the documentation, ``docs/theory/lift-charts.md``,
+    derives it). Plain text: ``rho`` for density, ``degC``/``degF``/``degR``.
+
+    Parameters
+    ----------
+    inputs : LiftChartInputs
+        Volume (m^3), fixed mass (kg), limit and offset (K).
+    axes : ChartAxes, optional
+        The chart grid; its altitudes get their ISA pressures listed.
+
+    Returns
+    -------
+    list of (str, list of str)
+        Headings and their paragraphs.
+    """
+    from envelopelab.atmosphere import G0, R_DRY_AIR
+
+    r_si = R_DRY_AIR.value
+    r_eng = r_si * KG_PER_LB / (4.4482216152605 * M_PER_FT) / 1.8
+    limit = inputs.top_limit.value
+    offset = inputs.top_to_mean.value
+    t15 = 15.0 + CELSIUS_OFFSET
+    uniform = lift_mass(inputs.volume, 0.0, t15, limit)
+    stratified = lift_mass(inputs.volume, 0.0, t15, limit - offset)
+    altitudes = axes.altitudes if axes is not None else (0.0,)
+    pressures = [
+        f"{h:,.0f} m ({ft(h):,.0f} ft): p = {isa(h).pressure:,.0f} Pa "
+        f"({isa(h).pressure / PA_PER_PSF:,.1f} lbf/ft2)"
+        for h in altitudes
+    ]
+    return [
+        (
+            "1. Gross lift (Archimedes)",
+            [
+                "L = V (rho_amb - rho_int) g. The air the envelope displaces weighs "
+                "V rho_amb g; the hot air inside weighs V rho_int g. L is the gross lift: "
+                "everything the balloon can carry, its own envelope and rigging included.",
+                "Both densities follow the ideal-gas law at the same static pressure p (the "
+                "mouth is open, so the inside is at ambient pressure): rho = p / (R T), so "
+                "L / g = (p V / R) (1/T_amb - 1/T_mean).",
+                f"R = {r_si:.5f} J/(kg K) for dry air [datasheet, ISO 2533] = "
+                f"{r_eng:.3f} ft lbf/(lb degR); g = {G0.value} m/s2. Temperatures are "
+                "absolute: K = degC + 273.15, degR = degF + 459.67.",
+            ],
+        ),
+        (
+            "2. Equilibrium (what the load charts solve)",
+            [
+                "The balloon floats when L / g = envelope + rigging + load. Any three of "
+                "top temperature, ambient temperature, altitude and load fix the fourth.",
+                f"Envelope + rigging: {inputs.fixed_mass:,.1f} kg / "
+                f"{lb(inputs.fixed_mass):,.0f} lb. Load: basket, burners, fuel, occupants.",
+                "Load at a top temperature: load = L/g - envelope - rigging. Top "
+                "temperature for a load: 1/T_mean = 1/T_amb - R (envelope + rigging + load) "
+                "/ (p V); no temperature works when the mass exceeds V rho_amb. Ceiling: "
+                "the lowest altitude, in the ISA shifted by the ISA deviation, where the "
+                "spare lift turns negative.",
+            ],
+        ),
+        (
+            "3. Which temperature: mean vs top (crown)",
+            [
+                "Lift depends on the mean temperature of the gas in the whole envelope. "
+                "Pilots read, and the fabric limit applies to, the crown (top), which is "
+                "hotter. The charts use T_mean = T_top - "
+                f"{offset:.0f} K ({1.8 * offset:.0f} degF) "
+                f"[{inputs.top_to_mean.source}: {inputs.top_to_mean.reference}].",
+                "Spreadsheets that enter one 'envelope temperature' treat the envelope as "
+                "uniform: that temperature is the mean. Entering the crown reading there "
+                "overstates lift. For this envelope at sea level, 15 degC: with the crown "
+                f"at its limit {c_f(limit - CELSIUS_OFFSET)} the gross lift is "
+                f"{kg_lb(stratified)}; a uniform envelope at that temperature would "
+                f"lift {kg_lb(uniform)} ({100.0 * (uniform / stratified - 1.0):+.0f} %).",
+                "The gross-lift chart is drawn against the mean temperature (directly "
+                "comparable with such spreadsheets); the red line marks the mean "
+                "temperature at which the crown reaches its limit.",
+            ],
+        ),
+        (
+            "4. Atmosphere",
+            [
+                "Pressure: International Standard Atmosphere (ISO 2533) at the pressure "
+                "altitude, p = 101,325 Pa (1 - 0.0065 h / 288.15)^5.25588 below 11 km "
+                "(h in m; 0.0065 K/m = 0.0019812 degF/ft).",
+                *pressures,
+                "Ambient temperature: as given at that altitude (not derived from the "
+                "lapse rate), except for the ceiling chart, which follows the ISA "
+                "temperature shifted by the ISA deviation.",
+            ],
+        ),
+        (
+            "5. This envelope",
+            [
+                f"Volume V = {inputs.volume:,.0f} m3 / {inputs.volume / M_PER_FT**3:,.0f} "
+                f"cu ft: {inputs.volume_note}.",
+                f"Top-temperature limit {c_f(limit - CELSIUS_OFFSET)} "
+                f"[{inputs.top_limit.source}: {inputs.top_limit.reference}].",
+            ],
+        ),
+        (
+            "6. Assumptions and limits",
+            [
+                "Static equilibrium in still air (no climb, descent, wind or drag); dry "
+                "air inside and out (humid air and combustion products, not modelled, "
+                "lower the real lift slightly); uniform densities over the envelope "
+                "height (< 0.4 % over 30 m); a constant top-to-mean offset; the volume "
+                "does not change with temperature. Valid from -5,000 m to 11,000 m.",
+                "Gross lift is not payload: subtract the envelope, rigging, basket, "
+                "burners, fuel and people. Keep a margin: these are equilibrium values, "
+                "not a certified loading chart.",
+            ],
+        ),
     ]
 
 
@@ -709,6 +903,18 @@ def write_lift_chart_pdf(
         ly -= 11
 
     canvas.new_page()
+    header(
+        "Gross lift (everything the balloon can carry, envelope included) vs the mean gas "
+        "temperature. Where a curve crosses a dashed line the balloon floats."
+    )
+    cols, rows = 2, 2
+    pw, ph = 330.0, 185.0
+    for k, altitude in enumerate(axes.altitudes[: cols * rows]):
+        c, r = k % cols, k // cols
+        box = (margin + 50 + c * (pw + 60), height - 285 - r * (ph + 70), pw, ph)
+        draw_plot(canvas, _gross_plot(inputs, axes, altitude, box, payload))
+
+    canvas.new_page()
     header("Top temperature that floats a load. Above the red line the fabric limit is exceeded.")
     cols, rows = 2, 2
     pw, ph = 330.0, 185.0
@@ -723,6 +929,26 @@ def write_lift_chart_pdf(
         "(lines end where it cannot lift the load at sea level)."
     )
     draw_plot(canvas, _ceiling_plot(inputs, axes, (margin + 60, 90, 700, 400)))
+
+    canvas.new_page()
+    header("How these charts are calculated.")
+    y = height - margin - 40
+    for heading, lines in theory_sections(inputs, axes):
+        if y < margin + 40:
+            canvas.new_page()
+            header("How these charts are calculated (continued).")
+            y = height - margin - 40
+        canvas.text(margin, y, pdf_text(heading), 9, True)
+        y -= 12
+        for line in lines:
+            for text in _wrap(pdf_text(line), 165):
+                if y < margin:
+                    canvas.new_page()
+                    header("How these charts are calculated (continued).")
+                    y = height - margin - 40
+                canvas.text(margin + 8, y, text, 7.5)
+                y -= 9.5
+        y -= 6
     return doc.save(path)
 
 

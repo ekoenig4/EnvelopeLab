@@ -15,9 +15,16 @@ ambient air temperature *at that altitude* (K), :math:`T_{mean}` the volume-mean
 temperature inside the envelope (K), :math:`m_{fixed}` the envelope and rigging mass and
 :math:`m_{load}` everything else (basket, burners, fuel, occupants), kg.
 
-Pilots read the **top (crown) temperature**; the gas below the crown is cooler. The mean
+The left-hand side is the gross lift as a mass, :func:`lift_mass`: everything the
+balloon can carry, its own envelope and rigging included.
+
+Pilots read the **top (crown) temperature**, and the fabric limit applies there; the gas
+below the crown is cooler, and the lift depends on the volume-mean temperature. The mean
 temperature is taken a fixed offset below the top (:data:`DEFAULT_TOP_TO_MEAN`,
-tagged ``assumed`` unless replaced by a measured value):
+tagged ``assumed`` unless replaced by a measured value). A lift spreadsheet that enters
+one uniform "envelope temperature" (e.g. the Balloon Builders Journal's) uses the mean
+temperature: with exact constants it equals :func:`lift_mass`
+(``envelopelab.validation.lift_chart``); reading the crown sensor into it overstates lift.
 
 .. math:: T_{mean} = T_{top} - \Delta T_{top \to mean}
 

@@ -17,6 +17,20 @@ dry air :math:`R_d = 287.05287` J/(kg K).
   inverse of the first case, must return 120 degC.
 * Ceiling: at the computed altitude the spare lift, recomputed from the ISA formula above,
   must vanish.
+
+Builders' spreadsheet (gross lift in US units, :func:`spreadsheet_lift`): the "Envelope
+lifting capacity" spreadsheet of the Balloon Builders Journal (issue 8) computes
+
+.. math::
+    L\,[\mathrm{lb}] = \frac{V\,p}{R}\left(\frac{1}{T_{amb}} - \frac{1}{T_{env}}\right),
+    \qquad p = 2116 \left(\frac{288.15}{288.15 - 0.00198\,h}\right)^{-5.25587}
+
+with :math:`V` in ft^3, :math:`h` in ft, :math:`p` in lbf/ft^2, :math:`R = 53.34`
+ft lbf/(lb degR) and temperatures in degR = degF + 459 (one uniform envelope
+temperature). With its own constants it is 0.23 % to 0.27 % above EnvelopeLab (+459
+instead of +459.67 is +0.24 %, R = 53.34 instead of 53.352 is +0.02 %); with exact
+constants the two agree to 1e-4, so the spreadsheet's envelope temperature is
+EnvelopeLab's mean gas temperature.
 """
 
 from __future__ import annotations
@@ -27,6 +41,7 @@ from envelopelab.lift_chart import (
     equilibrium_altitude,
     equilibrium_load,
     equilibrium_top_temperature,
+    lift_mass,
 )
 from envelopelab.validation.analytic_geometry import (
     BenchmarkResult,
@@ -62,6 +77,91 @@ def _isa_troposphere(h: float, offset: float = 0.0) -> tuple[float, float]:
 
 def _hand_load(p: float, t_amb: float, t_top: float) -> float:
     return VOLUME * (p / (R_D * t_amb) - p / (R_D * (t_top - OFFSET))) - FIXED
+
+
+#: Spreadsheet constants as published, and the exact values they approximate.
+SHEET_CONSTANTS = {"rankine": 459.0, "r": 53.34, "p0": 2116.0, "lapse": 0.00198}
+EXACT_CONSTANTS = {
+    "rankine": 459.67,  # degR = degF + 459.67 (definition)
+    "r": R_D * 0.45359237 / (4.4482216152605 * 0.3048) / 1.8,  # ft lbf/(lb degR)
+    "p0": P0 / (4.4482216152605 / 0.3048**2),  # lbf/ft2
+    "lapse": 0.0065 * 0.3048,  # K/ft
+}
+SHEET_VOLUME_FT3 = 92000.0
+#: The spreadsheet's cases: (ambient degF, altitude ft MSL).
+SHEET_CASES = ((40.0, 300.0), (50.0, 300.0), (50.0, 6000.0), (90.0, 2000.0), (90.0, 6000.0))
+
+
+def spreadsheet_lift(
+    volume_ft3: float,
+    ambient_f: float,
+    envelope_f: float,
+    altitude_ft: float,
+    rankine: float,
+    r: float,
+    p0: float,
+    lapse: float,
+) -> float:
+    """Gross lift of the builders' spreadsheet (module docstring), lb.
+
+    Parameters
+    ----------
+    volume_ft3 : float
+        Envelope volume, ft^3.
+    ambient_f, envelope_f : float
+        Ambient and (uniform) envelope temperatures, degF.
+    altitude_ft : float
+        Pressure altitude, ft.
+    rankine, r, p0, lapse : float
+        degF-to-degR offset; gas constant, ft lbf/(lb degR); sea-level pressure, lbf/ft^2;
+        lapse rate, K/ft.
+
+    Returns
+    -------
+    float
+        Gross lift, lb (lbm; numerically lbf at standard gravity).
+    """
+    p = p0 * float((288.15 / (288.15 - lapse * altitude_ft)) ** -5.25587)
+    return volume_ft3 * p / r * (1.0 / (ambient_f + rankine) - 1.0 / (envelope_f + rankine))
+
+
+def _app_lift_lb(ambient_f: float, envelope_f: float, altitude_ft: float) -> float:
+    def kelvin(f: float) -> float:
+        return (f - 32.0) / 1.8 + 273.15
+
+    volume = SHEET_VOLUME_FT3 * 0.3048**3
+    kg = lift_mass(volume, altitude_ft * 0.3048, kelvin(ambient_f), kelvin(envelope_f))
+    return kg / 0.45359237
+
+
+def _spreadsheet_benchmarks() -> list[BenchmarkResult]:
+    out = []
+    for ambient, altitude in SHEET_CASES:
+        for envelope in (130.0, 200.0, 280.0):
+            app = _app_lift_lb(ambient, envelope, altitude)
+            args = (SHEET_VOLUME_FT3, ambient, envelope, altitude)
+            case = f"{ambient:.0f} degF, {altitude:,.0f} ft, envelope {envelope:.0f} degF"
+            out.append(
+                BenchmarkResult(
+                    f"Spreadsheet 92,000 ft3 (exact constants): {case}",
+                    app,
+                    spreadsheet_lift(*args, **EXACT_CONSTANTS),
+                    "lb",
+                    "relative",
+                    1e-4,
+                )
+            )
+            out.append(
+                BenchmarkResult(
+                    f"Spreadsheet 92,000 ft3 (as published): {case}",
+                    app,
+                    spreadsheet_lift(*args, **SHEET_CONSTANTS),
+                    "lb",
+                    "relative",
+                    5e-3,
+                )
+            )
+    return out
 
 
 def run_benchmarks() -> list[BenchmarkResult]:
@@ -143,6 +243,7 @@ def run_benchmarks() -> list[BenchmarkResult]:
             "absolute",
             0.05,
         ),
+        *_spreadsheet_benchmarks(),
     ]
 
 
@@ -178,8 +279,17 @@ def render_markdown(results: list[BenchmarkResult]) -> str:
         "The ceiling row recomputes the spare lift at the solved altitude from the",
         "hand-written ISA formula; it must vanish to within 0.05 kg.",
         "",
+        "The spreadsheet rows compare EnvelopeLab's gross lift, read against the mean gas",
+        "temperature, with the Balloon Builders Journal 'Envelope lifting capacity'",
+        "spreadsheet formula (92,000 ft3; its five ambient/altitude cases at 130, 200 and",
+        "280 degF). With exact constants (degR = degF + 459.67, R = 53.352 ft lbf/(lb degR),",
+        "2116.22 lbf/ft2, 0.0019812 K/ft) they agree within 1e-4. As published (+459,",
+        "R = 53.34, 2116, 0.00198) the spreadsheet is 0.23 % to 0.27 % higher, almost all",
+        "from +459; tolerance 0.5 %. The spreadsheet's single envelope temperature is the",
+        "mean gas temperature; see docs/theory/lift-charts.md.",
+        "",
     ]
     return "\n".join(lines)
 
 
-__all__ = ["INPUTS", "run_benchmarks", "render_markdown"]
+__all__ = ["INPUTS", "render_markdown", "run_benchmarks", "spreadsheet_lift"]
