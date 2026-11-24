@@ -47,6 +47,7 @@ from envelopelab_app.panels.base import UNSAVED_MARK, Panel
 from envelopelab_app.panels.colours import ColoursPanel
 from envelopelab_app.panels.design_tree import DesignTreePanel
 from envelopelab_app.panels.history import HistoryPanel
+from envelopelab_app.panels.lift_charts import LiftChartsPanel
 from envelopelab_app.panels.materials import MaterialsPanel
 from envelopelab_app.panels.patterns import PatternPanel
 from envelopelab_app.panels.properties import PropertiesPanel
@@ -128,6 +129,9 @@ class MainWindow(QMainWindow):
         self.colours = ColoursPanel(self.controller, gpu=use_3d)
         self.colours.settings = settings  # recent colours
         self.colours.load_recent()
+        self.lift_charts = LiftChartsPanel(self.controller)
+        self.lift_charts.settings = settings  # units typed in
+        self.lift_charts.load_units()
         # The 3D inlays of the design modes draw what the placement views draw.
         self.controller.placement_provider = self.shapes.placement_data
         # Pointing at or editing a number shows where on the balloon it acts.
@@ -181,6 +185,12 @@ class MainWindow(QMainWindow):
                 artifacts=("shapes",),
             ),
             "colours": Panel("Panel Colours", self.controller, self.colours, scope={"colours"}),
+            "lift": Panel(
+                "Lift Charts",
+                self.controller,
+                self.lift_charts,
+                scope={"lift_chart", "geometry", "operating", "materials", "rigging", "tapes"},
+            ),
         }
         self._build_workspace()
 
@@ -259,6 +269,7 @@ class MainWindow(QMainWindow):
             ),
             "colours": self.panels["colours"],
             "history": self.panels["history"],
+            "lift": self.panels["lift"],
         }
         #: Mode holding each panel (the sidebar and warnings strip show in every mode).
         self.panel_modes: dict[str, str | None] = {
@@ -273,6 +284,7 @@ class MainWindow(QMainWindow):
             "runs": "simulate",
             "colours": "colours",
             "history": "history",
+            "lift": "lift",
         }
         self.mode_stack = QStackedWidget()
         self.mode_tabs = QTabBar()

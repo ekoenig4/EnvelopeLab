@@ -9,6 +9,29 @@ of top temperatures, ambient temperatures, altitudes and loads.
     loading chart. Points above the top-temperature limit are shaded red and marked
     `above_limit`. Check every value tagged *assumed* before relying on the charts.
 
+## The Lift charts mode
+
+The **Lift charts** tab of the main window (Ctrl+8) shows the charts of the design you
+are editing, next to the settings of the curves they draw:
+
+* **Curves** (left): the settings of [Choosing the curves](#choosing-the-curves). The
+  charts redraw as you type. A setting is saved to the project when you pause, as one
+  undo step, so *Edit ▸ Undo* puts the previous curves back in the form and the charts.
+  While an entry does not read, the charts keep the last good curves and the reason
+  is shown in red.
+* **Inputs and assumptions** (left, below): the volume, envelope and rigging mass,
+  top-temperature limit and top-to-mean offset the charts use, each with its source tag,
+  and the safety notice.
+* **Charts** (right), one sub-tab each: **Maximum load**, **Top temperature** (one
+  chart per altitude, up to four) and **Ceiling**. These are the pages of the PDF below,
+  drawn on screen with the same data. The region above the top-temperature limit is
+  shaded red and labelled *not permitted*.
+* **Export PDF…** writes these charts as a PDF, with every equilibrium point in a CSV
+  file beside it.
+
+The charts follow every edit of the design (profile, fabrics, rigging, payload). When
+the envelope mass cannot be estimated, the tab says why instead of drawing.
+
 ## Getting the charts
 
 *File ▸ Export build pack…*, tick **Lift charts** (ticked by default). The pack then
@@ -32,8 +55,8 @@ contains:
 
 ## Choosing the curves
 
-*Design ▸ Lift charts…* (or **Curves and units…** beside *Lift charts* in the export
-dialog) sets the curves for this project. They are saved with the project and undone
+The **Lift charts** tab, *Design ▸ Lift charts…* or **Curves and units…** beside
+*Lift charts* in the export dialog set the curves for this project. They are saved with the project and undone
 with *Edit ▸ Undo* like any edit.
 
 | Setting | What it does | Allowed |

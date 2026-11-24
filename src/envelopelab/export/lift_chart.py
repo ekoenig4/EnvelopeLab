@@ -566,6 +566,65 @@ def _ceiling_plot(
     )
 
 
+#: Box of a plot drawn by its own renderer (the on-screen charts), unitless.
+UNIT_BOX = (0.0, 0.0, 1.0, 1.0)
+
+
+@dataclass(frozen=True)
+class ChartSet:
+    """Every chart of the lift-chart document, as plot data.
+
+    Attributes
+    ----------
+    loading : Plot
+        Maximum load at the top-temperature limit vs ambient temperature (page 1).
+    temperatures : list of Plot
+        Top temperature needed vs load, one per altitude (page 2).
+    ceiling : Plot
+        Equilibrium altitude vs load at the limit, one curve per ISA deviation (page 3).
+    """
+
+    loading: Plot
+    temperatures: list[Plot]
+    ceiling: Plot
+
+
+def chart_plots(inputs: LiftChartInputs, axes: ChartAxes, payload: float | None = None) -> ChartSet:
+    """The plot data of every lift chart, the same the PDF draws (units: kg, degC, m on
+    the axes, with lb, degF and ft second scales).
+
+    Parameters
+    ----------
+    inputs : LiftChartInputs
+        Volume (m^3), fixed mass (kg), limit and offset (K).
+    axes : ChartAxes
+        The curves (:func:`chart_axes`).
+    payload : float, optional
+        Design load, kg, marked on the temperature charts.
+
+    Returns
+    -------
+    ChartSet
+        Plots in :data:`UNIT_BOX`; a renderer maps their ranges to its own area.
+    """
+    return ChartSet(
+        _loading_plot(inputs, axes, UNIT_BOX),
+        [_temperature_plot(inputs, axes, h, UNIT_BOX, payload) for h in axes.altitudes],
+        _ceiling_plot(inputs, axes, UNIT_BOX),
+    )
+
+
+def ticks(lo: float, hi: float, count: int = 8) -> list[float]:
+    """Round tick values (1-2-2.5-5 steps) from ``lo`` to ``hi``, about ``count`` of them;
+    same unit as ``lo`` and ``hi``."""
+    return _ticks(lo, hi, count)
+
+
+def tick_label(value: float) -> str:
+    """``1,000`` or ``2.5``: a tick value as printed on the charts."""
+    return _label(value)
+
+
 def input_lines(inputs: LiftChartInputs) -> list[str]:
     """The inputs of the chart with their units and source tags, one per line."""
     sources = ", ".join(sorted(set(inputs.fixed_mass_sources))) or "none recorded"
@@ -679,6 +738,52 @@ def _wrap(text: str, width: int) -> list[str]:
     return out
 
 
+@dataclass(frozen=True)
+class DesignCharts:
+    """The lift charts of a design: their inputs, grid and plot data."""
+
+    inputs: LiftChartInputs
+    axes: ChartAxes
+    plots: ChartSet
+
+
+def design_charts(
+    design: DesignDocument,
+    outputs: GoreOutputs | None,
+    fabrics: Any = None,
+    settings: LiftChartSettings | None = None,
+) -> DesignCharts | None:
+    """The lift charts of a design with the project's settings (None when the envelope
+    mass is not estimated).
+
+    Parameters
+    ----------
+    design : DesignDocument
+        Gore design (payload kg, fabric zones).
+    outputs : GoreOutputs or None
+        Its live outputs (volume m^3, envelope and rigging mass kg).
+    fabrics : FabricLibraryRepository or FabricCatalog, optional
+        Fabric library for the top-temperature limit.
+    settings : LiftChartSettings, optional
+        Curves (SI) and the top-to-mean offset (K, tagged); defaults when None.
+
+    Returns
+    -------
+    DesignCharts or None
+    """
+    from envelopelab.project.lift_chart_settings import LiftChartSettings
+
+    s = settings if settings is not None else LiftChartSettings()
+    offset = PhysicalConstant(
+        s.top_to_mean.value, "K", s.top_to_mean.source, s.top_to_mean.note or "lift-chart settings"
+    )
+    inputs = chart_inputs(design, outputs, fabrics, offset)
+    if inputs is None:
+        return None
+    axes = chart_axes(inputs, s)
+    return DesignCharts(inputs, axes, chart_plots(inputs, axes, design.operating.payload_mass))
+
+
 def write_lift_chart(
     ctx: PackContext,
     pdf_path: Path,
@@ -724,15 +829,9 @@ def write_design_lift_chart(
     (Path, Path or None)
         The PDF and CSV paths.
     """
-    from envelopelab.project.lift_chart_settings import LiftChartSettings
-
     name = design.meta.name or "design"
-    s = settings if settings is not None else LiftChartSettings()
-    offset = PhysicalConstant(
-        s.top_to_mean.value, "K", s.top_to_mean.source, s.top_to_mean.note or "lift-chart settings"
-    )
-    inputs = chart_inputs(design, outputs, fabrics, offset)
-    if inputs is None:
+    charts = design_charts(design, outputs, fabrics, settings)
+    if charts is None:
         from envelopelab.export.shop import A4_LANDSCAPE, Pages
 
         doc = Pages(A4_LANDSCAPE)
@@ -750,7 +849,7 @@ def write_design_lift_chart(
             with csv_path.open("w", newline="", encoding="utf-8") as handle:
                 csv.writer(handle).writerow(CSV_COLUMNS)
         return pdf_path, csv_path
-    axes = chart_axes(inputs, s)
+    inputs, axes = charts.inputs, charts.axes
     write_lift_chart_pdf(inputs, axes, pdf_path, name, design.operating.payload_mass)
     if csv_path is not None:
         write_lift_chart_csv(build_chart(inputs, axes), csv_path)

@@ -146,3 +146,28 @@ def test_no_nan_in_ok_rows(pack: Path) -> None:
         if row[-1] == "ok":
             assert all(row[k] for k in (1, 3, 4, 5, 6, 7)), row
             assert all(math.isfinite(float(row[k])) for k in (1, 3, 4, 5, 6, 7))
+
+
+def test_design_charts_give_the_plots_the_pdf_draws() -> None:
+    from envelopelab.export.lift_chart import design_charts, ticks
+    from envelopelab.project.lift_chart_settings import LiftChartSettings
+
+    settings = LiftChartSettings(altitudes=[0.0, 2000.0], isa_offsets=[0.0, 20.0])
+    charts = design_charts(DESIGN, OUTPUTS, None, settings)
+    assert charts is not None
+    plots = charts.plots
+    assert [s.label for s in plots.loading.series] == ["0 m / 0 ft", "2,000 m / 6,562 ft"]
+    assert len(plots.temperatures) == 2
+    assert len(plots.ceiling.series) == 2
+    # Same equilibrium as the solver: the loading curve at 15 degC, sea level.
+    xs = [x for x, _ in plots.loading.series[0].points]
+    k = min(range(len(xs)), key=lambda i: abs(xs[i] - 15.0))
+    x, y = plots.loading.series[0].points[k]
+    point = equilibrium_load(charts.inputs, 0.0, x + 273.15, charts.inputs.top_limit.value)
+    assert y == pytest.approx(point.load)
+    # The temperature charts carry the limit line and the shaded region.
+    temp = plots.temperatures[0]
+    assert temp.shade_above is not None and temp.hlines[0][0] == pytest.approx(120.0)
+    assert ticks(0.0, 800.0) == [0.0, 100.0, 200.0, 300.0, 400.0, 500.0, 600.0, 700.0, 800.0]
+    broken = dataclasses.replace(OUTPUTS, envelope_mass=None, mass=None)
+    assert design_charts(DESIGN, broken) is None

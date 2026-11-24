@@ -130,3 +130,96 @@ def test_export_dialog_offers_the_curve_settings(gore_window: MainWindow, qtbot:
     assert button is not None
     button.click()
     assert calls == [1]
+
+
+# -- the Lift charts mode -------------------------------------------------------------------
+
+
+def test_lift_charts_mode_shows_the_three_charts(gore_window: MainWindow) -> None:
+    labels = [gore_window.mode_tabs.tabText(i) for i in range(gore_window.mode_tabs.count())]
+    assert any(label.startswith("Lift charts") for label in labels)
+    gore_window.set_mode("lift")
+    assert not gore_window.sidebar_visible()  # a wide mode
+    panel = gore_window.lift_charts
+    assert panel.charts is not None
+    assert panel.loading.plot is not None and len(panel.loading.plot.series) == 4
+    assert panel.ceiling.plot is not None
+    shown = [v for v in panel.temperatures if v.plot is not None]
+    assert len(shown) == 4
+    assert [panel.tabs.tabText(i) for i in range(panel.tabs.count())] == [
+        "Maximum load",
+        "Top temperature",
+        "Ceiling",
+    ]
+    assert "assumed" in panel.status.text() and "not permitted" in panel.status.text()
+    assert "not certified engineering software" in panel.notes.text()
+
+
+def test_typing_redraws_at_once_and_saves_as_one_undo_step(gore_window: MainWindow) -> None:
+    gore_window.set_mode("lift")
+    panel = gore_window.lift_charts
+    session = gore_window.controller.session
+    assert session is not None
+    panel.form.altitudes.setText("0, 1")
+    panel.form.altitudes.setText("0, 15")
+    panel.form.altitudes.setText("0, 1500")
+    # Drawn at once, not yet saved.
+    assert panel.loading.plot is not None
+    assert [s.label for s in panel.loading.plot.series][1] == "1,500 m / 4,921 ft"
+    assert [not v.isHidden() for v in panel.temperatures] == [True, True, False, False]
+    assert session.project.state.lift_chart.is_default()
+    assert panel.apply_pending()
+    assert session.project.state.lift_chart.altitudes == [0.0, 1500.0]
+    # One undo step brings the defaults back, in the form and the charts.
+    session.undo()
+    assert session.project.state.lift_chart.is_default()
+    assert panel.form.altitudes.text() == "0, 1000, 2000, 3000"
+    assert panel.loading.plot is not None and len(panel.loading.plot.series) == 4
+
+
+def test_bad_entry_keeps_the_last_charts_and_saves_nothing(gore_window: MainWindow) -> None:
+    gore_window.set_mode("lift")
+    panel = gore_window.lift_charts
+    before = panel.loading.plot
+    panel.form.ambients.setText("cold")
+    assert "'cold' is not a number" in panel.form.error.text()
+    assert panel.loading.plot is before
+    assert not panel.apply_pending()
+    session = gore_window.controller.session
+    assert session is not None and session.project.state.lift_chart.is_default()
+
+
+def test_design_edits_redraw_the_charts(gore_window: MainWindow) -> None:
+    gore_window.set_mode("lift")
+    panel = gore_window.lift_charts
+    assert panel.charts is not None
+    old = panel.charts.inputs.fixed_mass
+    session = gore_window.controller.session
+    assert session is not None
+    session.set_design_value(("operating", "payload_mass"), 77.0)
+    assert panel.charts is not None
+    temp = panel.temperatures[0].plot
+    assert temp is not None and temp.vlines[0][0] == pytest.approx(77.0)
+    assert panel.charts.inputs.fixed_mass == pytest.approx(old)
+
+
+def test_units_are_remembered(gore_window: MainWindow) -> None:
+    panel = gore_window.lift_charts
+    panel.form.units.setCurrentIndex(1)
+    assert panel.settings is not None
+    assert panel.settings.value("lift_chart/units") == "english"
+    assert panel.form.altitudes.text() == "0, 3280.8, 6561.7, 9842.5"
+
+
+def test_export_pdf_from_the_tab(gore_window: MainWindow, tmp_path: Path) -> None:
+    panel = gore_window.lift_charts
+    path = panel.export_pdf(tmp_path / "charts")
+    assert path == tmp_path / "charts.pdf"
+    assert path.read_bytes().startswith(b"%PDF")
+    assert (tmp_path / "charts.csv").read_text(encoding="utf-8").startswith("solved_for,")
+
+
+def test_tab_without_a_design_says_why(window: MainWindow) -> None:
+    panel = window.lift_charts
+    assert panel.charts is None and not panel.form.isEnabled()
+    assert "Open or create a design" in panel.loading.message

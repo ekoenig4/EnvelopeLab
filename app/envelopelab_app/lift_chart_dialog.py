@@ -1,4 +1,7 @@
-"""Design ▸ Lift charts…: choose the curves of the lift charts and the top-to-mean offset.
+"""The lift-chart settings form, and Design ▸ Lift charts… (the form in a dialog).
+
+The form chooses the curves of the lift charts and the top-to-mean offset; the Lift
+charts mode shows it beside the charts, the dialog alone.
 
 The values are typed in metric (m, °C, kg) or English (ft, °F, lb) units; switching the
 units converts what is typed. Conversion and validation live in
@@ -10,6 +13,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import cast
 
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -49,37 +53,34 @@ SOURCES = ("assumed", "measured", "datasheet")
 AUTOMATIC_START = 1000.0
 
 
-class LiftChartDialog(QDialog):
-    """Edit a copy of the lift-chart settings; :meth:`settings` returns them (SI).
+class LiftChartSettingsForm(QWidget):
+    """Fields of the lift-chart settings in the builder's units, validated as typed.
+
+    ``edited`` is emitted on every change the builder makes, with the settings typed
+    (SI) or None while something does not read (the reason is in :attr:`error`).
+    :meth:`show_settings` fills the fields without emitting it.
 
     Parameters
     ----------
     settings : LiftChartSettings
         Starting settings, SI.
     units : {"metric", "english"}
-        Units to type in (remembered by the caller).
+        Units to type in.
     parent : QWidget, optional
-    preview : callable, optional
-        ``preview(settings)`` shows the charts for the settings typed (e.g. writes a PDF
-        and opens it); the *Preview…* button appears only with it.
     """
+
+    edited = Signal(object)
 
     def __init__(
         self,
         settings: LiftChartSettings,
         units: UnitSystem = "metric",
         parent: QWidget | None = None,
-        preview: Callable[[LiftChartSettings], object] | None = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Lift charts")
-        self._preview = preview
+        self.setObjectName("liftChartSettingsForm")
+        self._loading = False
         self._result: LiftChartSettings | None = settings
-        intro = QLabel(
-            "Choose the curves the lift charts draw. Type several values separated by "
-            "commas. The charts in the build pack always show metric and English units."
-        )
-        intro.setWordWrap(True)
         self.units = QComboBox()
         self.units.setObjectName("liftUnits")
         for key, text in UNIT_CHOICES:
@@ -116,7 +117,7 @@ class LiftChartDialog(QDialog):
         self.note = QLineEdit()
         self.note.setObjectName("liftOffsetNote")
         self.note.setPlaceholderText("Where the value comes from")
-        self._suffix: dict[str, QLabel] = {}
+        self._suffix: list[QLabel] = []
         load_row = QHBoxLayout()
         load_row.addWidget(self.max_load)
         load_row.addWidget(self._unit_label("mass"))
@@ -143,34 +144,21 @@ class LiftChartDialog(QDialog):
         self.error.setStyleSheet("color: #b3302f;")
         self.defaults = QPushButton("Restore defaults")
         self.defaults.setObjectName("liftDefaults")
-        self.defaults.clicked.connect(lambda: self._show(LiftChartSettings()))
-        self.buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        self.buttons.addButton(self.defaults, QDialogButtonBox.ButtonRole.ResetRole)
-        if preview is not None:
-            self.preview_button = QPushButton("Preview…")
-            self.preview_button.setObjectName("liftPreview")
-            self.preview_button.clicked.connect(self._run_preview)
-            self.buttons.addButton(self.preview_button, QDialogButtonBox.ButtonRole.ActionRole)
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
+        self.defaults.clicked.connect(self._restore_defaults)
         layout = QVBoxLayout(self)
-        layout.addWidget(intro)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.addLayout(form)
         layout.addWidget(self.error)
-        layout.addWidget(self.buttons)
         self.units.setCurrentIndex(next(k for k, (u, _t) in enumerate(UNIT_CHOICES) if u == units))
         self._units: UnitSystem = units
-        self._show(settings)
+        self.show_settings(settings)
         self.units.currentIndexChanged.connect(self._units_changed)
         for line in (self.altitudes, self.ambients, self.isa, self.note):
-            line.textChanged.connect(self._validate)
+            line.textChanged.connect(self._changed)
         for spin in (self.max_load, self.lowest_top, self.offset):
-            spin.valueChanged.connect(self._validate)
-        self.auto_load.toggled.connect(self._validate)
-        self.source.currentIndexChanged.connect(self._validate)
-        self._validate()
+            spin.valueChanged.connect(self._changed)
+        self.auto_load.toggled.connect(self._changed)
+        self.source.currentIndexChanged.connect(self._changed)
 
     # -- layout helpers -----------------------------------------------------------------
 
@@ -184,7 +172,7 @@ class LiftChartDialog(QDialog):
     def _unit_label(self, kind: str) -> QLabel:
         label = QLabel()
         label.setProperty("unitKind", kind)
-        self._suffix[f"{kind}{len(self._suffix)}"] = label
+        self._suffix.append(label)
         return label
 
     def _with_unit(self, line: QLineEdit, kind: str) -> QHBoxLayout:
@@ -193,32 +181,38 @@ class LiftChartDialog(QDialog):
         row.addWidget(self._unit_label(kind))
         return row
 
+    def _label_units(self) -> None:
+        labels = UNIT_LABELS[self._units]
+        for label in self._suffix:
+            label.setText(labels[str(label.property("unitKind"))])
+
     # -- state --------------------------------------------------------------------------
 
     def unit_system(self) -> UnitSystem:
         """The units typed in."""
         return cast(UnitSystem, self.units.currentData())
 
-    def _show(self, settings: LiftChartSettings) -> None:
-        units = self.unit_system()
-        shown = displayed(settings, units)
-        labels = UNIT_LABELS[units]
-        for label in self._suffix.values():
-            label.setText(labels[str(label.property("unitKind"))])
-        self.altitudes.setText(format_numbers(shown.altitudes))
-        self.ambients.setText(format_numbers(shown.ambient_temperatures))
-        self.isa.setText(format_numbers(shown.isa_offsets))
-        self.auto_load.setChecked(shown.max_load is None)
-        # Automatic: start the box at a round 1 000 kg should the builder untick it.
-        manual = LiftChartSettings(max_load=AUTOMATIC_START).model_copy(
-            update={"max_load": settings.max_load or AUTOMATIC_START}
-        )
-        self.max_load.setValue(displayed(manual, units).max_load or AUTOMATIC_START)
-        self.max_load.setEnabled(shown.max_load is not None)
-        self.lowest_top.setValue(shown.lowest_top_temperature)
-        self.offset.setValue(shown.top_to_mean)
-        self.source.setCurrentText(shown.source)
-        self.note.setText(shown.note)
+    def show_settings(self, settings: LiftChartSettings) -> None:
+        """Fill the fields with ``settings`` (SI) in the current units; emits nothing."""
+        self._loading = True
+        try:
+            units = self._units
+            shown = displayed(settings, units)
+            self._label_units()
+            self.altitudes.setText(format_numbers(shown.altitudes))
+            self.ambients.setText(format_numbers(shown.ambient_temperatures))
+            self.isa.setText(format_numbers(shown.isa_offsets))
+            self.auto_load.setChecked(shown.max_load is None)
+            # Automatic: start the box at a round 1 000 kg should the builder untick it.
+            manual = settings.model_copy(update={"max_load": settings.max_load or AUTOMATIC_START})
+            self.max_load.setValue(displayed(manual, units).max_load or AUTOMATIC_START)
+            self.lowest_top.setValue(shown.lowest_top_temperature)
+            self.offset.setValue(shown.top_to_mean)
+            self.source.setCurrentText(shown.source)
+            self.note.setText(shown.note)
+        finally:
+            self._loading = False
+        self._validate()
 
     def _read(self) -> LiftChartSettings:
         """The settings typed, SI; raises ValueError (or a pydantic ValidationError)."""
@@ -244,28 +238,108 @@ class LiftChartDialog(QDialog):
             self.error.setText(error_text(exc))
         else:
             self.error.setText("")
-        ok = self.buttons.button(QDialogButtonBox.StandardButton.Ok)
-        ok.setEnabled(self._result is not None)
-        if self._preview is not None:
-            self.preview_button.setEnabled(self._result is not None)
+
+    def _changed(self) -> None:
+        if self._loading:
+            return
+        self._validate()
+        self.edited.emit(self._result)
+
+    def _restore_defaults(self) -> None:
+        self.show_settings(LiftChartSettings())
+        self.edited.emit(self._result)
 
     def _units_changed(self) -> None:
-        # Convert what is typed; when it does not read, keep the text and say so.
-        if self._result is not None:
-            current = self._result
-            self._units = self.unit_system()
-            self._show(current)
+        # Convert what is typed; when it does not read, keep the text and relabel only.
+        current = self._result
+        self._units = self.unit_system()
+        if current is not None:
+            self.show_settings(current)
         else:
-            self._units = self.unit_system()
-            labels = UNIT_LABELS[self._units]
-            for label in self._suffix.values():
-                label.setText(labels[str(label.property("unitKind"))])
-        self._validate()
-
-    def _run_preview(self) -> None:
-        if self._preview is not None and self._result is not None:
-            self._preview(self._result)
+            self._label_units()
+            self._validate()
 
     def settings(self) -> LiftChartSettings | None:
         """The settings typed, SI (None while something does not read)."""
         return self._result
+
+
+class LiftChartDialog(QDialog):
+    """The settings form in a dialog; :meth:`settings` returns what was typed (SI).
+
+    Parameters
+    ----------
+    settings : LiftChartSettings
+        Starting settings, SI.
+    units : {"metric", "english"}
+        Units to type in (remembered by the caller).
+    parent : QWidget, optional
+    preview : callable, optional
+        ``preview(settings)`` shows the charts for the settings typed (e.g. writes a PDF
+        and opens it); the *Preview…* button appears only with it.
+    """
+
+    def __init__(
+        self,
+        settings: LiftChartSettings,
+        units: UnitSystem = "metric",
+        parent: QWidget | None = None,
+        preview: Callable[[LiftChartSettings], object] | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Lift charts")
+        self._preview = preview
+        intro = QLabel(
+            "Choose the curves the lift charts draw. Type several values separated by "
+            "commas. The charts always show metric and English units."
+        )
+        intro.setWordWrap(True)
+        self.form = LiftChartSettingsForm(settings, units, self)
+        # The form's fields, under the names the dialog has always had.
+        f = self.form
+        self.units, self.altitudes, self.ambients, self.isa = (
+            f.units,
+            f.altitudes,
+            f.ambients,
+            f.isa,
+        )
+        self.auto_load, self.max_load, self.lowest_top = f.auto_load, f.max_load, f.lowest_top
+        self.offset, self.source, self.note, self.error = f.offset, f.source, f.note, f.error
+        self.defaults = f.defaults
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        self.buttons.addButton(self.defaults, QDialogButtonBox.ButtonRole.ResetRole)
+        if preview is not None:
+            self.preview_button = QPushButton("Preview…")
+            self.preview_button.setObjectName("liftPreview")
+            self.preview_button.clicked.connect(self._run_preview)
+            self.buttons.addButton(self.preview_button, QDialogButtonBox.ButtonRole.ActionRole)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        layout = QVBoxLayout(self)
+        layout.addWidget(intro)
+        layout.addWidget(self.form)
+        layout.addWidget(self.buttons)
+        f.edited.connect(self._enable)
+        f.units.currentIndexChanged.connect(self._enable)
+        self._enable()
+
+    def _enable(self, *_args: object) -> None:
+        ok = self.form.settings() is not None
+        self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(ok)
+        if self._preview is not None:
+            self.preview_button.setEnabled(ok)
+
+    def _run_preview(self) -> None:
+        settings = self.form.settings()
+        if self._preview is not None and settings is not None:
+            self._preview(settings)
+
+    def unit_system(self) -> UnitSystem:
+        """The units typed in."""
+        return self.form.unit_system()
+
+    def settings(self) -> LiftChartSettings | None:
+        """The settings typed, SI (None while something does not read)."""
+        return self.form.settings()

@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: a **Lift charts** tab in the main window (Ctrl+8) shows the design's lift charts
+  (maximum load, top temperature needed per altitude, ceiling) beside the settings of
+  their curves. Edits redraw the charts at once and are saved to the project as one undo
+  step. **Export PDF…** writes the charts with their CSV. Same data as the build pack;
+  no numerical result changes.
 - Added: *Design ▸ Lift charts…* chooses the lift charts' curves per project: altitudes,
   ambient temperatures, ISA deviations, the load-axis end, the lowest tabulated top
   temperature and the top-to-mean offset with its source tag. Values are typed in
