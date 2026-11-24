@@ -350,7 +350,12 @@ def test_solved_preview_is_drawn_with_its_factor_of_safety_scale(
     assert w.simulation.wait(600_000)
     qtbot.waitUntil(lambda: len(session.project.runs) == 1, timeout=10_000)
     view = w.view3d
-    qtbot.waitUntil(lambda: view.shown_field() is not None, timeout=10_000)
+    # The finished run is shown inflated, in Layer colour; its factor of safety, chosen,
+    # colours it with the banded scale and the limit.
+    qtbot.waitUntil(lambda: view.state() == PREVIEW, timeout=10_000)
+    assert view.shown_field() is None
+    view.field_choice.setCurrentIndex(view.field_choice.findData("fos_warp"))
+    view.field_choice.activated.emit(view.field_choice.currentIndex())
     field = view.shown_field()
     assert field is not None and field.name == "fos_warp"
     view.redraw()
