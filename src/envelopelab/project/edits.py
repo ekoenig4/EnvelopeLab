@@ -55,6 +55,7 @@ from envelopelab.project.gore_design import (
     profile_from_arrays,
     profile_layout,
 )
+from envelopelab.project.lift_chart_settings import LiftChartSettings
 from envelopelab.project.model import (
     ConstraintLocks,
     ManualOutline,
@@ -2616,3 +2617,26 @@ def duplicate_overlay(session: ProjectSession, name: str) -> str:
     copy = current.model_copy(update={"name": unique_name(session, name), "placement": placement})
     add_overlay(session, copy)
     return copy.name
+
+
+# -- lift-chart settings (ADR-0059) --------------------------------------------------------
+
+
+def set_lift_chart(session: ProjectSession, settings: LiftChartSettings | None) -> bool:
+    """Set the lift-chart settings (None: the defaults; one undo step).
+
+    Parameters
+    ----------
+    session : ProjectSession
+        Open project.
+    settings : LiftChartSettings or None
+        Curves and top-to-mean offset, SI (m, K, kg); None restores the defaults.
+
+    Returns
+    -------
+    bool
+        Whether the state changed.
+    """
+    new = settings if settings is not None else LiftChartSettings()
+    text = "Reset lift-chart settings" if new.is_default() else "Set lift-chart settings"
+    return session.edit_lift_chart(text, new)

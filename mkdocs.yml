@@ -118,6 +118,7 @@ nav:
       - ADR-0056: adr/ADR-0056-overlays.md
       - ADR-0057: adr/ADR-0057-python-3-12-only.md
       - ADR-0058: adr/ADR-0058-blender-live-link.md
+      - ADR-0059: adr/ADR-0059-lift-chart-settings.md
 theme:
   name: material
 markdown_extensions:

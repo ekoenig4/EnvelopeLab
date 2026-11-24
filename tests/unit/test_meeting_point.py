@@ -129,7 +129,7 @@ def test_relative_meeting_points_survive_a_save_and_load() -> None:
     state = session.state.model_copy(update={"shapes": [spec]})
     project = session.project.model_copy(update={"state": state})
     back = load_project_text(dump_project(project))
-    assert isinstance(back, Project) and back.format_version == 8
+    assert isinstance(back, Project) and back.format_version == 9
     (shape,) = back.state.shapes
     assert (shape.cap_across, shape.cap_up) == (0.2, -0.1)
 

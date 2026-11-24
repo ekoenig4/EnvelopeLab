@@ -89,6 +89,16 @@ KEYS: tuple[tuple[str, str], ...] = (
         "`points` are the corners of one slice between the first two axes). Written "
         "only when there are any; older files read as having none.",
     ),
+    (
+        "`state.lift_chart`",
+        "Lift-chart settings (version 9, ADR-0059; read only by the build-pack lift "
+        "charts), SI: `altitudes` (m, 1 to 4 pressure altitudes), `ambient_temperatures` "
+        "(K, 1 to 6), `isa_offsets` (K, 1 to 6 ISA deviations of the ceiling curves), "
+        "`max_load` (kg end of the load axis; null: the most the balloon lifts), "
+        "`lowest_top_temperature` (K) and `top_to_mean` (K, with `source` "
+        "`datasheet | measured | assumed` and `note`). Written only when they differ from "
+        "the defaults; older files read with the defaults.",
+    ),
     ("`snapshots`", "Named copies of `state` with their design content hash."),
     ("`versions`", "Committed design versions (`version_id`, `parent_id`, message, state)."),
     ("`provenance`", "Append-only log of flagged edits (manual overrides and their undo)."),

@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: *Design ▸ Lift charts…* chooses the lift charts' curves per project: altitudes,
+  ambient temperatures, ISA deviations, the load-axis end, the lowest tabulated top
+  temperature and the top-to-mean offset with its source tag. Values are typed in
+  metric or English units, with a preview, and saved in the project. Project format 9:
+  versions 1 to 8 read with the default curves (ADR-0059). Default charts are unchanged.
 - Added: lift charts. The new `envelopelab.lift_chart` solves the static equilibrium
   V (rho_amb - rho_int) = envelope + rigging + load for whichever of top (crown)
   temperature, ambient temperature, altitude and load is unknown. The mean gas

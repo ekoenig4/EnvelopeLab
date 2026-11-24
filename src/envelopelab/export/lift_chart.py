@@ -39,18 +39,12 @@ if TYPE_CHECKING:
     from envelopelab.design.model import DesignDocument
     from envelopelab.export.shop import PackContext
     from envelopelab.project.gore_design import GoreOutputs
+    from envelopelab.project.lift_chart_settings import LiftChartSettings
 
 RGB = tuple[float, float, float]
-#: Pressure altitudes of the chart curves, m.
-ALTITUDES = (0.0, 1000.0, 2000.0, 3000.0)
-#: Ambient temperatures of the chart curves, degC.
-AMBIENTS_C = (-10.0, 0.0, 10.0, 20.0, 30.0)
-#: Ambient temperature axis of the loading chart, degC.
+#: Ambient temperature axis of the loading chart, degC (widened to cover the chosen
+#: ambient temperatures).
 AMBIENT_AXIS_C = (-20.0, 40.0)
-#: ISA deviations of the ceiling chart, K.
-ISA_OFFSETS = (-15.0, 0.0, 15.0, 30.0)
-#: Lowest top temperature tabulated, degC.
-LOWEST_TOP_C = 70.0
 #: Points per curve.
 SAMPLES = 61
 COLOURS: tuple[RGB, ...] = (
@@ -191,23 +185,45 @@ class ChartAxes:
     isa_offsets: tuple[float, ...]
 
 
-def chart_axes(inputs: LiftChartInputs) -> ChartAxes:
-    """Default axes: :data:`ALTITUDES`, :data:`AMBIENTS_C`, top temperatures every 10 degC
-    up to the limit, loads from 0 to the most the balloon lifts (coldest ambient, sea
-    level, at the limit) in round steps, and :data:`ISA_OFFSETS`."""
+def chart_axes(inputs: LiftChartInputs, settings: LiftChartSettings | None = None) -> ChartAxes:
+    """The chart grid from the project's lift-chart settings (defaults when None).
+
+    Altitudes, ambient temperatures and ISA deviations are the settings' own; top
+    temperatures run every 10 degC from the lowest top temperature up to the limit (the
+    limit always included); loads run from 0 to the settings' load-axis end, or else to
+    the most the balloon lifts (lowest altitude, coldest ambient, at the limit), in round
+    steps.
+
+    Parameters
+    ----------
+    inputs : LiftChartInputs
+        Volume (m^3), fixed mass (kg), limit and offset (K).
+    settings : LiftChartSettings, optional
+        Curves (SI: m, K, kg).
+
+    Returns
+    -------
+    ChartAxes
+    """
+    from envelopelab.project.lift_chart_settings import LiftChartSettings
+
+    s = settings if settings is not None else LiftChartSettings()
     limit = inputs.top_limit.value
-    tops = [
-        t + CELSIUS_OFFSET
-        for t in range(int(LOWEST_TOP_C), int(math.floor(limit - CELSIUS_OFFSET)) + 1, 10)
-    ]
-    if not tops or abs(tops[-1] - limit) > 1e-9:
-        tops.append(limit)
-    ambients = tuple(t + CELSIUS_OFFSET for t in AMBIENTS_C)
-    most = max(equilibrium_load(inputs, h, t, limit).load for h in ALTITUDES for t in ambients[:1])
-    top_load = max(most, 100.0)
+    tops: list[float] = []
+    t = s.lowest_top_temperature
+    while t < limit - 1e-9:
+        tops.append(t)
+        t += 10.0
+    tops.append(limit)
+    ambients = tuple(s.ambient_temperatures)
+    if s.max_load is not None:
+        top_load = s.max_load
+    else:
+        most = equilibrium_load(inputs, min(s.altitudes), min(ambients), limit).load
+        top_load = max(most, 100.0)
     step = nice_step(top_load, 10)
-    loads = tuple(step * k for k in range(int(math.ceil(top_load / step)) + 1))
-    return ChartAxes(ALTITUDES, ambients, tuple(tops), loads, ISA_OFFSETS)
+    loads = tuple(step * k for k in range(int(math.ceil(top_load / step - 1e-9)) + 1))
+    return ChartAxes(tuple(s.altitudes), ambients, tuple(tops), loads, tuple(s.isa_offsets))
 
 
 def build_chart(inputs: LiftChartInputs, axes: ChartAxes) -> LiftChart:
@@ -448,12 +464,20 @@ def _ceil_to(value: float, step: float) -> float:
     return math.ceil(value / step) * step
 
 
-def _loading_plot(inputs: LiftChartInputs, box: tuple[float, float, float, float]) -> Plot:
+def _loading_plot(
+    inputs: LiftChartInputs, axes: ChartAxes, box: tuple[float, float, float, float]
+) -> Plot:
     limit = inputs.top_limit.value
-    xs = _sweep(*AMBIENT_AXIS_C)
+    coldest = min(axes.ambient_temperatures) - CELSIUS_OFFSET
+    warmest = max(axes.ambient_temperatures) - CELSIUS_OFFSET
+    x_range = (
+        min(AMBIENT_AXIS_C[0], 10.0 * math.floor(coldest / 10.0 - 1.0)),
+        max(AMBIENT_AXIS_C[1], 10.0 * math.ceil(warmest / 10.0 + 1.0)),
+    )
+    xs = _sweep(*x_range)
     series = []
     lows, highs = [0.0], [0.0]
-    for k, h in enumerate(ALTITUDES):
+    for k, h in enumerate(axes.altitudes):
         pts = [(x, equilibrium_load(inputs, h, x + CELSIUS_OFFSET, limit).load) for x in xs]
         lows += [y for _, y in pts]
         highs += [y for _, y in pts]
@@ -465,7 +489,7 @@ def _loading_plot(inputs: LiftChartInputs, box: tuple[float, float, float, float
         f"Maximum load at the top-temperature limit {c_f(limit - CELSIUS_OFFSET)}",
         "Ambient temperature at altitude (degC)",
         "Load (kg)",
-        AMBIENT_AXIS_C,
+        x_range,
         yr,
         series,
         hlines=[(0.0, "cannot lift its own mass below 0 kg", RED)] if yr[0] < 0 else [],
@@ -600,7 +624,7 @@ def write_lift_chart_pdf(
         canvas.text(margin, height - margin - 16, pdf_text(subtitle), 8, color=MUTED)
 
     header("Static equilibrium: the load the balloon floats, and the top temperature it needs.")
-    draw_plot(canvas, _loading_plot(inputs, (margin + 40, 270, 470, 220)))
+    draw_plot(canvas, _loading_plot(inputs, axes, (margin + 40, 270, 470, 220)))
     y = 225.0
     for line in input_lines(inputs):
         for text in _wrap(pdf_text(line), 150):
@@ -660,30 +684,54 @@ def write_lift_chart(
     pdf_path: Path,
     csv_path: Path,
     fabrics: Any = None,
-    top_to_mean: PhysicalConstant = DEFAULT_TOP_TO_MEAN,
+    settings: LiftChartSettings | None = None,
 ) -> tuple[Path, Path]:
-    """Write the build pack's lift chart PDF and CSV.
+    """Write the build pack's lift chart PDF and CSV (:func:`write_design_lift_chart` of
+    the pack's design and outputs)."""
+    write_design_lift_chart(ctx.design, ctx.outputs, pdf_path, csv_path, fabrics, settings)
+    return pdf_path, csv_path
+
+
+def write_design_lift_chart(
+    design: DesignDocument,
+    outputs: GoreOutputs | None,
+    pdf_path: Path,
+    csv_path: Path | None = None,
+    fabrics: Any = None,
+    settings: LiftChartSettings | None = None,
+) -> tuple[Path, Path | None]:
+    """Write the lift chart PDF (and CSV) of a design.
 
     When the envelope mass is not estimated both files say so instead of charting.
 
     Parameters
     ----------
-    ctx : PackContext
-        The pack's design and outputs.
-    pdf_path, csv_path : Path
-        Output files.
+    design : DesignDocument
+        Gore design (name, payload, fabric zones).
+    outputs : GoreOutputs or None
+        Its live outputs (volume m^3, envelope and rigging mass kg).
+    pdf_path : Path
+        PDF file.
+    csv_path : Path, optional
+        CSV file (none written when None, e.g. for a preview).
     fabrics : FabricLibraryRepository or FabricCatalog, optional
         Fabric library for the top-temperature limit.
-    top_to_mean : PhysicalConstant, optional
-        Top minus mean internal temperature, K.
+    settings : LiftChartSettings, optional
+        The project's curves and top-to-mean offset (defaults when None).
 
     Returns
     -------
-    (Path, Path)
+    (Path, Path or None)
         The PDF and CSV paths.
     """
-    name = ctx.design.meta.name or "design"
-    inputs = chart_inputs(ctx.design, ctx.outputs, fabrics, top_to_mean)
+    from envelopelab.project.lift_chart_settings import LiftChartSettings
+
+    name = design.meta.name or "design"
+    s = settings if settings is not None else LiftChartSettings()
+    offset = PhysicalConstant(
+        s.top_to_mean.value, "K", s.top_to_mean.source, s.top_to_mean.note or "lift-chart settings"
+    )
+    inputs = chart_inputs(design, outputs, fabrics, offset)
     if inputs is None:
         from envelopelab.export.shop import A4_LANDSCAPE, Pages
 
@@ -698,11 +746,12 @@ def write_lift_chart(
             doc.size[0] - 2 * doc.margin,
         )
         doc.save(pdf_path)
-        with csv_path.open("w", newline="", encoding="utf-8") as handle:
-            csv.writer(handle).writerow(CSV_COLUMNS)
+        if csv_path is not None:
+            with csv_path.open("w", newline="", encoding="utf-8") as handle:
+                csv.writer(handle).writerow(CSV_COLUMNS)
         return pdf_path, csv_path
-    axes = chart_axes(inputs)
-    payload = ctx.design.operating.payload_mass
-    write_lift_chart_pdf(inputs, axes, pdf_path, name, payload)
-    write_lift_chart_csv(build_chart(inputs, axes), csv_path)
+    axes = chart_axes(inputs, s)
+    write_lift_chart_pdf(inputs, axes, pdf_path, name, design.operating.payload_mass)
+    if csv_path is not None:
+        write_lift_chart_csv(build_chart(inputs, axes), csv_path)
     return pdf_path, csv_path

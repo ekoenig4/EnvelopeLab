@@ -1220,6 +1220,8 @@ class PackExtras:
     fabrics : FabricLibraryRepository or FabricCatalog, optional
         Fabric library; the lift chart takes its top-temperature limit from it (the
         generic ``assumed`` limit without it).
+    lift_chart : LiftChartSettings, optional
+        The project's lift-chart settings (the defaults when None).
     """
 
     include: frozenset[str] = frozenset()
@@ -1230,6 +1232,7 @@ class PackExtras:
     status: str = ""
     table_length: float = 12 * 0.3048  # m (12 ft, a common cutting table; source: assumed)
     fabrics: Any = None
+    lift_chart: Any = None
 
 
 def write_documents(
@@ -1338,7 +1341,12 @@ def write_documents(
         from envelopelab.export.lift_chart import write_lift_chart
 
         pdf_name, csv_name = docs.document_files(stem, "lift_chart")
-        add("lift_chart", *write_lift_chart(ctx, out / pdf_name, out / csv_name, extras.fabrics))
+        add(
+            "lift_chart",
+            *write_lift_chart(
+                ctx, out / pdf_name, out / csv_name, extras.fabrics, extras.lift_chart
+            ),
+        )
     if "sewing" in extras.include:
         from envelopelab.export.planning import write_sewing_schedule
 

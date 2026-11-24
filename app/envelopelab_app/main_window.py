@@ -365,6 +365,7 @@ class MainWindow(QMainWindow):
         self.cancel_action = self._action("C&ancel run", self.simulation.cancel)
         self.reference_action = self._action("Load &reference mesh…", self.reference_dialog)
         self.export_pack_action = self._action("&Export build pack…", self.export_pack_dialog)
+        self.lift_chart_action = self._action("&Lift charts…", self.lift_chart_dialog)
         self.detect_action = self._action("Detect CalculiX again", self.simulation.detect_calculix)
 
         menu = self.menuBar()
@@ -391,6 +392,7 @@ class MainWindow(QMainWindow):
         design_menu = menu.addMenu("&Design")
         design_menu.addAction(self.regen_action)
         design_menu.addAction(self.reference_action)
+        design_menu.addAction(self.lift_chart_action)
         sim_menu = menu.addMenu("&Simulation")
         sim_menu.addAction(self.preview_action)
         sim_menu.addAction(self.calculix_action)
@@ -877,7 +879,9 @@ class MainWindow(QMainWindow):
             self.controller.editRejected.emit("a build pack needs a standard-gore design")
             return
         folder = str(self.settings.value("export/pack_folder", "") or "")
-        dialog = ExportPackDialog(self, folder, self.prefs.print_roll_width)
+        dialog = ExportPackDialog(
+            self, folder, self.prefs.print_roll_width, lift_settings=self.lift_chart_dialog
+        )
         if dialog.exec():
             self.settings.setValue("export/pack_folder", str(dialog.path()))
             self.export_build_pack(dialog.path(), dialog.include(), dialog.roll_width())
@@ -929,10 +933,67 @@ class MainWindow(QMainWindow):
             ),
             status=status_line(self.view3d),
             fabrics=self.controller.fabrics.catalog(),
+            lift_chart=session.project.state.lift_chart,
         )
         return self.shapes.export_pack(
             out_dir, extras, self.prefs.print_roll_width if roll_width is None else roll_width
         )
+
+    def lift_chart_dialog(self) -> bool:
+        """Design ▸ Lift charts…: edit the project's lift-chart settings (one undo step);
+        returns whether they were changed."""
+        from envelopelab_app.lift_chart_dialog import LiftChartDialog
+
+        session = self.controller.session
+        if session is None:
+            return False
+        if session.design.gores is None:
+            self.controller.editRejected.emit("lift charts need a standard-gore design")
+            return False
+        units = str(self.settings.value("lift_chart/units", "metric") or "metric")
+        dialog = LiftChartDialog(
+            session.project.state.lift_chart,
+            "english" if units == "english" else "metric",
+            self,
+            preview=self.preview_lift_chart,
+        )
+        if not dialog.exec():
+            return False
+        self.settings.setValue("lift_chart/units", dialog.unit_system())
+        chosen = dialog.settings()
+        if chosen is None:
+            return False
+        return bool(self.controller.edit("set_lift_chart", chosen))
+
+    def preview_lift_chart(self, settings: Any = None) -> Path | None:
+        """Write the lift-chart PDF of the current design with ``settings`` (the project's
+        when None) to a temporary file and open it; returns the file (None when refused)."""
+        import tempfile
+
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        from envelopelab.export.lift_chart import write_design_lift_chart
+
+        session = self.controller.session
+        if session is None or session.design.gores is None:
+            return None
+        folder = Path(tempfile.mkdtemp(prefix="envelopelab-lift-"))
+        path = folder / "lift-chart-preview.pdf"
+        written = self.controller.attempt(
+            write_design_lift_chart,
+            session.design,
+            self.controller.outputs,
+            path,
+            None,
+            self.controller.fabrics.catalog(),
+            settings if settings is not None else session.project.state.lift_chart,
+        )
+        if written is None:
+            return None
+        if self.interactive:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        return path
 
     def reference_dialog(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

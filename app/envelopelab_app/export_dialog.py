@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 from PySide6.QtWidgets import (
@@ -29,6 +30,8 @@ class ExportPackDialog(QDialog):
     """Choose the folder, the fabric roll width and the documents of a build pack.
 
     ``roll_width`` (m) is the starting roll width (the *Print roll width* preference).
+    ``lift_settings`` opens the project's lift-chart settings (a button beside the lift
+    charts' check box).
 
     The 1:1 templates and ``cad/`` (one DXF per piece and ``index.json``) are always
     written; the documents are optional.
@@ -39,6 +42,7 @@ class ExportPackDialog(QDialog):
         parent: QWidget | None = None,
         folder: str = "",
         roll_width: float = DEFAULT_ROLL_WIDTH,
+        lift_settings: Callable[[], object] | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Export build pack")
@@ -73,6 +77,17 @@ class ExportPackDialog(QDialog):
             box.setChecked(True)
             box.setToolTip(", ".join(suffix for suffix, _what in DOCUMENTS[key].files))
             self.checks[key] = box
+            if key == "lift_chart" and lift_settings is not None:
+                # The curves are the project's; edit them without leaving the export.
+                settings = QPushButton("Curves and units…")
+                settings.setObjectName("packLiftSettings")
+                settings.setToolTip("Altitudes, temperatures, load axis and top-to-mean offset")
+                settings.clicked.connect(lift_settings)
+                row_box = QHBoxLayout()
+                row_box.addWidget(box, 1)
+                row_box.addWidget(settings)
+                docs.addLayout(row_box)
+                continue
             docs.addWidget(box)
         form.addRow("Include", docs)
         note = QLabel(

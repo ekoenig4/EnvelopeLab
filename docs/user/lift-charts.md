@@ -16,19 +16,44 @@ contains:
 
 * `<name>-lift-chart.pdf`, three A4 landscape pages:
     1. **Maximum load at the top-temperature limit** vs ambient temperature, one curve
-       per pressure altitude (0, 1 000, 2 000 and 3 000 m). Go up from the ambient
+       per pressure altitude (by default 0, 1 000, 2 000 and 3 000 m). Go up from the ambient
        temperature at that altitude to the curve and read the most load that floats with
        the crown at the limit. The inputs and their source tags are listed below the chart.
     2. **Top temperature needed** vs load, one panel per altitude, one curve per ambient
-       temperature (−10 to 30 °C). The red dashed line is the limit. The shaded region
+       temperature (by default −10 to 30 °C). The red dashed line is the limit. The shaded region
        above it is not permitted. The dotted line marks the design's payload.
     3. **Equilibrium altitude (ceiling)** vs load, with the crown at the limit, one curve
-       per ISA deviation (−15, 0, +15 and +30 K).
+       per ISA deviation (by default −15, 0, +15 and +30 K).
   Every chart has metric and English units: kg with an lb scale, °C with a °F scale,
   m with ft. The legends, the limit line and the design load give both.
 * `<name>-lift-chart.csv` (SI and °C only): every equilibrium point of the grid, with columns
   `solved_for, altitude_m, isa_offset_K, ambient_C, top_C, mean_C, load_kg,
   gross_lift_N, status`.
+
+## Choosing the curves
+
+*Design ▸ Lift charts…* (or **Curves and units…** beside *Lift charts* in the export
+dialog) sets the curves for this project. They are saved with the project and undone
+with *Edit ▸ Undo* like any edit.
+
+| Setting | What it does | Allowed |
+|---|---|---|
+| **Units** | Type in metric (m, °C, kg) or English (ft, °F, lb). Switching converts what is typed. The choice is remembered. | |
+| **Altitudes** | Pressure altitudes: one curve each on the loading chart and one panel each on the temperature page | 1 to 4, −5 000 m to 11 000 m |
+| **Ambient temperatures** | One curve each on the temperature page | 1 to 6, −50 °C to 60 °C |
+| **ISA deviations** | One curve each on the ceiling chart (0 is a standard day) | 1 to 6, −50 K to 50 K |
+| **Load axis up to** | The end of the load axis. *Automatic* uses the most the balloon lifts | above 0 |
+| **Lowest top temperature** | The first crown temperature tabulated in the CSV (then every 10 °C to the limit) | 0 °C to 200 °C |
+| **Top minus mean temperature** | The offset between crown and mean gas temperature, with its source (*assumed*, *measured* or *datasheet*) and a note | 0 to 100 K |
+
+Type lists separated by commas, semicolons or spaces. Thousands separators are fine:
+`0, 5,000, 10,000` reads as three altitudes. Anything that doesn't read, or is out of
+range, is explained under the fields, and **OK** stays disabled until it is fixed.
+**Preview…** opens the charts for what is typed, before you save it.
+**Restore defaults** brings back the default curves and the *assumed* 20 K offset.
+
+When you have measured your envelope's crown-to-mean offset, enter it and set the source
+to *measured*. The charts print the value with its source tag.
 
 ## What goes in
 
@@ -37,7 +62,7 @@ contains:
 | Envelope volume | the design's lofted profile (as drawn) | geometry |
 | Envelope + rigging mass | the mass estimate (Shape mode outputs) | the fabric, tape and line values |
 | Top-temperature limit | lowest service temperature of the design's fabrics | the fabric's tag; 120 °C *assumed* when not in the library |
-| Mean temperature | top − 20 K | *assumed*, replace with a measured value |
+| Mean temperature | top − the offset of *Design ▸ Lift charts…* (20 K by default) | the offset's tag: *assumed* by default |
 
 **Load** means everything carried besides the envelope and rigging: basket, burners,
 fuel and occupants.
