@@ -95,3 +95,32 @@ def test_the_inflated_envelope_is_drawn_like_the_design(
     assert view.layers["rest"].visible
     view.set_object_visible("envelope", False)
     assert not view.layers[RESULT].visible and not view.layers["design"].visible
+
+
+@pytest.mark.slow
+def test_a_reopened_run_keeps_its_panel_colours_and_rest_mesh(
+    qtbot: QtBot, gore_window: MainWindow
+) -> None:
+    """The solver model is not rebuilt when a project is reopened: the run's own result
+    file carries what the view needs (its panels, seams and as-sewn shape)."""
+    w = gore_window
+    session = w.controller.session
+    assert session is not None
+    failures: list[str] = []
+    w.simulation.failed.connect(failures.append)
+    w.runs.run_preview.click()
+    qtbot.waitUntil(lambda: len(session.project.runs) == 1 or bool(failures), timeout=600_000)
+    assert not failures, failures
+    qtbot.waitUntil(lambda: not w.simulation.running, timeout=60_000)
+    view = w.view3d
+    view.refresh()
+    before = view.layers[RESULT].face_colors
+    assert before is not None
+    w.controller.model_cache = None  # as after reopening the project
+    view.refresh()
+    result = view.layers[RESULT]
+    assert result.face_colors is not None and np.array_equal(result.face_colors, before)
+    assert result.polylines["vertical_seams"] and result.polylines["horizontal_seams"]
+    assert "rest" in view.layers and len(view.layers["rest"].faces) == len(result.faces)
+    view.set_object_visible("rest", True)
+    assert view.layers["rest"].visible

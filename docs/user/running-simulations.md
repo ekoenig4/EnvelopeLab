@@ -109,6 +109,11 @@ bound min(N_ult,warp, N_ult,weft) / N1 (major principal resultant), so it is nev
 the lowest warp or weft value shown here. Simulations from earlier versions have no stored
 skin results: run them again for the colours.
 
+Each run's result file keeps the panel each triangle was cut from and the sewn seams, so
+a reopened project draws its runs in panel colours too, and the *Rest mesh* comes from the
+latest current run. Runs saved by versions before this change open plain blue until run
+again.
+
 The **Objects** list (beside the view) lists what is on the balloon: the *Envelope*, the
 *Special shapes* and *Overlays* (each group's box ticks all of them), then *Rigging*,
 *Symmetry axes*, a loaded *Reference* mesh and the *Rest mesh* (the as-sewn starting shape,

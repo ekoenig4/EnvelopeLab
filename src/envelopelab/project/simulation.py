@@ -623,4 +623,38 @@ def run_record(
         arrays["wrinkle_state"] = np.asarray(result.wrinkle_state, dtype=np.int8)
     if result.fabric_resultants is not None:
         arrays["fabric_resultants"] = np.asarray(result.fabric_resultants, dtype=np.float64)
+    arrays.update(panel_arrays(built))
     return record, arrays
+
+
+def panel_arrays(built: BuiltModel) -> dict[str, np.ndarray]:
+    """What a run's result file needs to be drawn like the design without its solver
+    model (which is not rebuilt when a project is reopened).
+
+    Returns
+    -------
+    dict of str to ndarray
+        ``tri_row`` and ``tri_gore``: the panel row label and gore number (from 1) each
+        triangle was cut from ("" and 0 for a part that is not a ring panel);
+        ``seam_edges`` (k, 2): node pairs along the sewn seams, and ``seam_vertical``
+        (k,): which of them run between gores. Empty when the mesh has no panels.
+    """
+    from envelopelab.assembly.spec import parse_instance_id
+
+    mesh = built.build.mesh
+    if mesh is None or len(mesh.tri_instance) != len(built.model.triangles):
+        return {}
+    panels = [parse_instance_id(i) for i in mesh.instance_ids]
+    rows = np.array(["" if p is None else p[1] for p in panels], dtype=np.str_)
+    gores = np.array([0 if p is None else p[2] for p in panels], dtype=np.int64)
+    tri = np.asarray(mesh.tri_instance, dtype=np.int64)
+    edges = [np.asarray(s.edges, dtype=np.int64).reshape(-1, 2) for s in built.model.seams]
+    vertical = [
+        np.full(len(e), ":v:" in s.name) for e, s in zip(edges, built.model.seams, strict=True)
+    ]
+    return {
+        "tri_row": rows[tri],
+        "tri_gore": gores[tri],
+        "seam_edges": np.vstack(edges) if edges else np.zeros((0, 2), dtype=np.int64),
+        "seam_vertical": np.concatenate(vertical) if vertical else np.zeros(0, dtype=bool),
+    }

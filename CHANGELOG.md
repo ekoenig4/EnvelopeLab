@@ -3,6 +3,10 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: after reopening a project the 3D view lost the rest mesh and drew an inflated
+  envelope plain blue. A run's result file now keeps each triangle's panel and the sewn
+  seams, and the rest mesh is drawn from the latest current run. Runs saved before this
+  fix need one re-run for their panel colours.
 - Fixed: an inflated special shape was coloured unlike its design in the 3D view. Its
   tiers were not kept (a split shape's upper tiers took the first tier's colour, e.g. a
   red ball on a black stalk drawn black) and its cap was guessed from its size and height

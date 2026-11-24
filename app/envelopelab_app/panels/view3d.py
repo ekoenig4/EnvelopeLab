@@ -948,6 +948,23 @@ class View3DPanel(QWidget):
                 zones=zones,
                 tapes={c.name: c.edges for c in model.cables},
             )
+        if session is not None and "rest" not in self.layers:
+            # No solver model this session (the project was reopened): the rest mesh as
+            # the latest current run saved it (its as-sewn initial shape).
+            for record in reversed(session.project.runs):
+                arrays = session.run_arrays(record.run_id)
+                if arrays is None or "initial_positions" not in arrays:
+                    continue
+                if session.run_status(record) != "current":
+                    continue
+                self.layers["rest"] = Layer(
+                    "rest",
+                    "rest",
+                    "Rest mesh (as-sewn initial shape, from run " + str(record.run_id) + ")",
+                    arrays["initial_positions"],
+                    arrays["triangles"],
+                )
+                break
         if session is not None:
             latest: dict[str, RunRecord] = {}
             for record in session.project.runs:
@@ -966,7 +983,7 @@ class View3DPanel(QWidget):
                 face_colors, seams = (
                     (None, {})
                     if stale
-                    else self._result_style(arrays["positions"], arrays["triangles"])
+                    else self._result_style(arrays["positions"], arrays["triangles"], arrays)
                 )
                 self.layers[solver] = Layer(
                     solver,
@@ -1266,30 +1283,47 @@ class View3DPanel(QWidget):
         )
 
     def _result_style(
-        self, positions: np.ndarray, triangles: np.ndarray
+        self,
+        positions: np.ndarray,
+        triangles: np.ndarray,
+        arrays: dict[str, np.ndarray] | None = None,
     ) -> tuple[np.ndarray | None, dict[str, list[np.ndarray]]]:
         """Panel colours per triangle and the seams of a solved envelope, so it is drawn
-        like the design: each triangle in its panel's colour (the panel it was cut from,
-        :func:`envelopelab.assembly.spec.parse_instance_id`) and the sewn seams as dark
-        lines on the solved positions. (None, {}) when the solved mesh is not the current
-        rest mesh's (a stale run: it keeps its grey)."""
-        model = self._current_model()
-        cache = self.controller.model_cache
+        like the design: each triangle in its panel's colour (the panel it was cut from)
+        and the sewn seams as dark lines on the solved positions. They come from the run's
+        result file (``tri_row``, ``tri_gore``, ``seam_edges``:
+        :func:`envelopelab.project.simulation.panel_arrays`), else from the current
+        solver model (runs saved before the file kept them); (None, {}) without either."""
         session = self.controller.session
-        if model is None or cache is None or session is None or session.design.gores is None:
-            return None, {}
-        mesh = cache.built.build.mesh
-        if mesh is None:
-            return None, {}
-        if len(mesh.tri_instance) != len(triangles) or len(positions) != len(model.positions):
+        if session is None or session.design.gores is None:
             return None, {}
         letters = [r.letter for r in session.design.gores.panel_rows]
         index = {letter: i for i, letter in enumerate(letters)}
-        panels = [parse_instance_id(i) for i in mesh.instance_ids]
-        inst_row = np.array([-1 if p is None else index.get(p[1], -1) for p in panels])
-        inst_gore = np.array([0 if p is None else p[2] for p in panels])
-        face_row = inst_row[mesh.tri_instance]
-        face_gore = inst_gore[mesh.tri_instance]
+        seams: dict[str, list[np.ndarray]] = {}
+        if arrays is not None and "tri_row" in arrays and len(arrays["tri_row"]) == len(triangles):
+            face_row = np.array([index.get(str(r), -1) for r in arrays["tri_row"]])
+            face_gore = np.asarray(arrays["tri_gore"], dtype=np.int64)
+            x = np.asarray(positions, dtype=np.float64)
+            edges = np.asarray(arrays["seam_edges"], dtype=np.int64).reshape(-1, 2)
+            vertical = np.asarray(arrays["seam_vertical"], dtype=bool)
+            seams = {
+                "vertical_seams": [x[e] for e in edges[vertical]],
+                "horizontal_seams": [x[e] for e in edges[~vertical]],
+            }
+        else:
+            model = self._current_model()
+            cache = self.controller.model_cache
+            if model is None or cache is None or cache.built.build.mesh is None:
+                return None, {}
+            mesh = cache.built.build.mesh
+            if len(mesh.tri_instance) != len(triangles) or len(positions) != len(model.positions):
+                return None, {}
+            panels = [parse_instance_id(i) for i in mesh.instance_ids]
+            inst_row = np.array([-1 if p is None else index.get(p[1], -1) for p in panels])
+            inst_gore = np.array([0 if p is None else p[2] for p in panels])
+            face_row = inst_row[mesh.tri_instance]
+            face_gore = inst_gore[mesh.tri_instance]
+            seams = seam_segments(model.seams, positions)
         known = (face_row >= 0) & (face_gore >= 1)
         rgb = np.tile(np.array([0xD9, 0xE7, 0xF5], dtype=np.uint8), (len(triangles), 1))
         if np.any(known):
@@ -1300,7 +1334,7 @@ class View3DPanel(QWidget):
                 np.asarray(positions),
                 np.asarray(triangles)[known],
             )
-        return rgb, seam_segments(model.seams, positions)
+        return rgb, seams
 
     def _panel_rgb(
         self,
