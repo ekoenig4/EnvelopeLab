@@ -76,7 +76,7 @@ def test_no_run_means_no_banner_and_no_fields(gore_window: MainWindow) -> None:
 
 
 @pytest.mark.slow
-def test_preview_run_colours_by_fos_and_goes_grey_when_stale(
+def test_preview_run_can_be_coloured_by_fos_and_goes_grey_when_stale(
     gore_window: MainWindow, qtbot: QtBot
 ) -> None:
     w = gore_window
@@ -89,8 +89,12 @@ def test_preview_run_colours_by_fos_and_goes_grey_when_stale(
     qtbot.waitUntil(lambda: view.run_choice.currentData() == PREVIEW, timeout=10_000)
     record = session.project.runs[0]
     assert record.converged
-    # A current, converged preview: coloured by warp FoS, banner says it is unverified
-    # (or names the failing zones), and the run details give the §6.5 facts.
+    # A current, converged preview opens in Layer colour; chosen, the warp FoS colours
+    # it. The banner says it is unverified (or names the failing zones) either way, and
+    # the run details give the §6.5 facts.
+    assert view.shown_field() is None
+    view.field_choice.setCurrentIndex(view.field_choice.findData("fos_warp"))
+    view.field_choice.activated.emit(view.field_choice.currentIndex())
     field = view.shown_field()
     assert field is not None and field.name == "fos_warp"
     assert len(field.values) == record.n_elements
