@@ -624,7 +624,30 @@ def run_record(
     if result.fabric_resultants is not None:
         arrays["fabric_resultants"] = np.asarray(result.fabric_resultants, dtype=np.float64)
     arrays.update(panel_arrays(built))
+    arrays.update(zone_arrays(built.model))
     return record, arrays
+
+
+def zone_arrays(model: SolverModel) -> dict[str, np.ndarray]:
+    """What a run's result file needs for its factors of safety and failing zones
+    without its solver model (which is not rebuilt when a project is reopened).
+
+    Returns
+    -------
+    dict of str to ndarray
+        ``tri_strength`` (m, 2): warp and weft strength of each triangle's material
+        zone, N/m, as solved; ``tri_zone_name`` (m,): the zone's name.
+    """
+    strengths = np.array(
+        [
+            (model.materials[z].strength_warp.value, model.materials[z].strength_weft.value)
+            for z in model.zone_names
+        ],
+        dtype=np.float64,
+    ).reshape(-1, 2)
+    zone = np.asarray(model.tri_zone, dtype=np.int64)
+    names = np.array(list(model.zone_names), dtype=np.str_)
+    return {"tri_strength": strengths[zone], "tri_zone_name": names[zone]}
 
 
 def panel_arrays(built: BuiltModel) -> dict[str, np.ndarray]:

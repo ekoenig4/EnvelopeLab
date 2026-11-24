@@ -1756,6 +1756,36 @@ class View3DPanel(QWidget):
         ]
         return np.concatenate(parts) if parts else np.zeros(0)
 
+    def _zone_names(self, key: str, run_id: str) -> list[str] | None:
+        """Material zone name of each triangle of the envelope solved by run ``run_id``:
+        as stored with the run, else from the current solver model (runs saved before
+        the names were stored); None without either."""
+        session = self.controller.session
+        arrays = session.run_arrays(run_id) if session is not None else None
+        n = len(self.layers[key].faces)
+        if arrays is not None and "tri_zone_name" in arrays and len(arrays["tri_zone_name"]) == n:
+            return [str(z) for z in arrays["tri_zone_name"]]
+        model = self._current_model()
+        if model is None or len(model.tri_zone) != n:
+            return None
+        return [model.zone_names[int(i)] for i in model.tri_zone]
+
+    def shows_panel_colours(self, key: str, field_chosen: bool | None = None) -> bool:
+        """Whether ``key`` is drawn in its panel colours. A solved part of the run is,
+        only while no field is chosen (``field_chosen``, default: the Colour-by choice):
+        with a field chosen that it cannot give, it is drawn in its plain colour, so the
+        panel colours are never read as the field's values. A designed shape, which has
+        no fields, always is."""
+        layer = self.layers.get(key)
+        if field_chosen is None:
+            field_chosen = isinstance(self.field_choice.currentData(), str)
+        return (
+            layer is not None
+            and layer.face_colors is not None
+            and not layer.stale
+            and not (field_chosen and key in self.parts())
+        )
+
     def run_state(self, key: str | None = None) -> RunState | None:
         """Facts about one part of the chosen run (default: its envelope) for the status
         banner (None without a run)."""
@@ -1770,16 +1800,13 @@ class View3DPanel(QWidget):
         failing: list[str] = []
         lows: list[float] = []
         shape = key.startswith("shape-sim:")
-        model = None if shape else self._current_model()
+        zones = None if shape else self._zone_names(key, record.run_id)
         for name, direction in zip(SAFETY_FIELDS, ("warp", "weft"), strict=True):
             field = fields.get(name)
-            if field is None or (model is None and not shape):
+            if field is None or (zones is None and not shape):
                 continue
-            zone_of = (
-                [f"{self.part_name(key)} skin"] * len(field.values)
-                if model is None
-                else [model.zone_names[int(i)] for i in model.tri_zone]
-            )
+            zone_of = [f"{self.part_name(key)} skin"] * len(field.values) if shape else zones
+            assert zone_of is not None
             failing += failing_zone_names(field.values, zone_of, direction, FOS_LIMIT)
             finite = field.values[np.isfinite(field.values)]
             if finite.size:
@@ -1977,8 +2004,7 @@ class View3DPanel(QWidget):
                 )
                 legend.append([layer.legend_name, layer.color])
                 continue
-            coloured = self.part_field(layer.key) is not None
-            if layer.face_colors is not None and not layer.stale and not coloured:
+            if self.shows_panel_colours(layer.key) and layer.face_colors is not None:
                 mesh.cell_data["rgb"] = layer.face_colors
                 rgb_kwargs: dict[str, Any] = {"show_edges": with_edges}
                 if not layer.converged:

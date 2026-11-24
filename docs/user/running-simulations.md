@@ -73,7 +73,8 @@ The 3D view's toolbar chooses what it shows:
   design* (mm, see below), or *Layer colour*.
   A field the run cannot give is listed but greyed out; hover for why (for example
   "CalculiX does not report warp/weft resultants", or a run from an older version that
-  has to be run again).
+  has to be run again). With a field chosen, a part that cannot give it is drawn in its
+  plain colour, never in panel colours, so nothing is mistaken for the field's values.
 * **Display**: *Shaded*, *Shaded + mesh edges* or *Wireframe*.
 
 With *Colour by: Layer colour*, the inflated envelope is drawn like the design: every
@@ -109,10 +110,12 @@ bound min(N_ult,warp, N_ult,weft) / N1 (major principal resultant), so it is nev
 the lowest warp or weft value shown here. Simulations from earlier versions have no stored
 skin results: run them again for the colours.
 
-Each run's result file keeps the panel each triangle was cut from and the sewn seams, so
-a reopened project draws its runs in panel colours too, and the *Rest mesh* comes from the
-latest current run. Runs saved by versions before this change open plain blue until run
-again.
+Each run's result file keeps the panel each triangle was cut from, the sewn seams and the
+strength and zone of each triangle's fabric as solved. So a reopened project draws its
+runs in panel colours, colours them by factor of safety and lists the zones below the
+limit, exactly as in the session that solved them; the *Rest mesh* comes from the latest
+current run. Runs saved by versions before this change open plain blue, without factors
+of safety, until run again.
 
 The **Objects** list (beside the view) lists what is on the balloon: the *Envelope*, the
 *Special shapes* and *Overlays* (each group's box ticks all of them), then *Rigging*,

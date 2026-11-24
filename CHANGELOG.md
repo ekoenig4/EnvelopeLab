@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: after reopening a project the factor-of-safety colouring was missing (the
+  envelope showed its panel colours under *Colour by: Factor of safety*) and the run banner
+  listed no zones below the limit. A run's result file now keeps each triangle's fabric
+  strength and zone as solved, so a reopened run shows the same factors of safety and
+  failing zones; a part that cannot give the chosen field is drawn plain, never in panel
+  colours. Factors of safety are unchanged; older runs need one re-run.
 - Fixed: after reopening a project the 3D view lost the rest mesh and drew an inflated
   envelope plain blue. A run's result file now keeps each triangle's panel and the sewn
   seams, and the rest mesh is drawn from the latest current run. Runs saved before this

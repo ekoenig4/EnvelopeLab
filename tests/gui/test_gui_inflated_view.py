@@ -116,11 +116,34 @@ def test_a_reopened_run_keeps_its_panel_colours_and_rest_mesh(
     view.refresh()
     before = view.layers[RESULT].face_colors
     assert before is not None
+    fos_before = view.part_fields[RESULT]["fos_warp"].values
+    state_before = view.run_state()
+    assert state_before is not None
     w.controller.model_cache = None  # as after reopening the project
     view.refresh()
+    # The factors of safety (and the zones below the limit) come from the run itself.
+    fos = view.part_fields[RESULT].get("fos_warp")
+    assert fos is not None and np.array_equal(fos.values, fos_before)
+    state = view.run_state()
+    assert state is not None and state.failing_zones == state_before.failing_zones
+    assert state.min_fos == state_before.min_fos
+    # A solved part is drawn in panel colours only with Layer colour chosen: with a
+    # field chosen it shows the field, or its plain colour when it cannot give it.
+    assert view.shows_panel_colours(RESULT, field_chosen=False)
+    assert not view.shows_panel_colours(RESULT, field_chosen=True)
     result = view.layers[RESULT]
     assert result.face_colors is not None and np.array_equal(result.face_colors, before)
     assert result.polylines["vertical_seams"] and result.polylines["horizontal_seams"]
     assert "rest" in view.layers and len(view.layers["rest"].faces) == len(result.faces)
     view.set_object_visible("rest", True)
     assert view.layers["rest"].visible
+
+
+def test_the_designed_envelope_keeps_its_panel_colours_with_a_field_chosen(
+    gore_window: MainWindow,
+) -> None:
+    view = gore_window.view3d
+    view.refresh()
+    assert view.layers["design"].face_colors is not None
+    assert view.shows_panel_colours("design", field_chosen=True)
+    assert view.shows_panel_colours("design", field_chosen=False)
