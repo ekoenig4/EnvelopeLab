@@ -71,11 +71,14 @@ def test_leaning_gores_keep_true_seam_and_footprint_lengths(lean: float) -> None
 
 
 def test_an_upright_dome_is_cut_as_before() -> None:
-    """Footprints that do not slant across a gore keep their pattern bit for bit."""
+    """Footprints that do not slant across a gore keep their pattern: equal to the areas
+    recorded before the change up to floating-point rounding, which differs between
+    platforms in the last digits (1e-12 relative: far below the percent the change moves
+    a slanted gore by)."""
     design = _shape("dome", 0.0)
     areas = [p.flat_area for p in design.pieces[:2]]  # type: ignore[attr-defined]
     # Sphere envelope gore 3, mid tape (the generic sphere), recorded before the change.
-    assert areas == [0.3791983535061876, 0.3791983980815933]
+    assert areas == pytest.approx([0.3791983535061876, 0.3791983980815933], rel=1e-12)
 
 
 @pytest.mark.parametrize("lean", [20.0, 35.0])

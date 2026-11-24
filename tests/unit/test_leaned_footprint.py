@@ -46,9 +46,12 @@ def test_a_leaning_shape_near_the_crown_is_placed_at_its_base(lean: float) -> No
 
 
 def test_the_same_shape_upright_is_unchanged() -> None:
-    """Shapes that placed before keep exactly the same footprint (the only crossing)."""
+    """Shapes that placed before keep the same footprint (the only crossing): equal to
+    the value recorded before the fix up to floating-point rounding, which differs
+    between platforms in the last digits (1e-12 relative: far below any change of the
+    method, which moves it by percent)."""
     surface = sphere_envelope()
     s0 = 0.8 * surface.profile.meridian_length
     shape = Revolved("stalk", Placement(1, s0, lean_deg=25.0), STALK_AND_BALL, gores=8)
     design = design_primitive(shape, surface)
-    assert design.footprint_length == 3.9893326421444746  # recorded before the fix
+    assert design.footprint_length == pytest.approx(3.9893326421444746, rel=1e-12)
