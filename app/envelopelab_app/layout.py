@@ -3,7 +3,7 @@
 The window shows one workflow mode at a time (a page of the mode stack) between a sidebar
 (design tree, properties) and an always-visible Validation / Warnings strip, so safety
 warnings are never hidden by the layout. A *wide* mode (:data:`WIDE_MODES`, the Special
-shapes editor and the Colours mode) collapses the sidebar and shrinks the strip to
+shapes editor, the Colours mode and the Lift charts) collapses the sidebar and shrinks the strip to
 :data:`COMPACT_WARNINGS_PX` while it is shown; the other modes keep their sizes. Every
 resizable divider is a named ``QSplitter``; the layout is the current mode plus each
 splitter's state, kept in ``QSettings`` under ``layout/<slot>/``.
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import QSplitter, QWidget
 LAYOUT_VERSION = 2
 
 #: Modes that take the whole window (sidebar collapsed, warnings strip compact).
-WIDE_MODES = frozenset({"shapes", "colours"})
+WIDE_MODES = frozenset({"shapes", "colours", "lift"})
 #: Height of the Validation / Warnings strip in a wide mode, px (never below the strip's
 #: own minimum): its title, the error and warning counts and the first lines stay readable.
 COMPACT_WARNINGS_PX = 110
@@ -39,6 +39,8 @@ MODES: tuple[tuple[str, str], ...] = (
     ("simulate", "3D / Simulation"),
     ("colours", "Colours"),
     ("history", "History"),
+    # Last, so the earlier modes keep their Ctrl+1 to Ctrl+7 shortcuts.
+    ("lift", "Lift charts"),
 )
 MODE_KEYS = tuple(key for key, _ in MODES)
 
@@ -54,6 +56,7 @@ DEFAULT_SIZES: dict[str, tuple[int, ...]] = {
     "simulateSplitter": (620, 220),  # 3D view above the runs table
     "shapesSplitter": (200, 620, 620),  # shape list | tabbed editor | tabbed results
     "coloursSplitter": (640, 420, 280),  # panel grid | balloon in 3D | colour picker
+    "liftChartsSplitter": (380, 900),  # curve settings | charts
 }
 
 

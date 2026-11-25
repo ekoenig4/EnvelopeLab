@@ -241,7 +241,7 @@ def test_colours_survive_save_load_and_older_files_read_uncoloured(
     session.create_snapshot("painted")
     path = session.save(tmp_path / "c.elproj")
     data = json.loads(path.read_text(encoding="utf-8"))
-    assert data["format_version"] == 8
+    assert data["format_version"] == 11
     assert data["state"]["colours"]["envelope"] == {"A": {"3": "#7030a0"}}
     again = ProjectSession.open(path)
     assert again.state.colours == session.state.colours
@@ -251,7 +251,7 @@ def test_colours_survive_save_load_and_older_files_read_uncoloured(
     for snap in data["snapshots"]:
         snap["state"].pop("colours", None)
     old = load_project_text(json.dumps(data))
-    assert old.format_version == 8 and old.state.colours.is_empty()
+    assert old.format_version == 11 and old.state.colours.is_empty()
 
 
 def test_renames_keep_colours_and_removed_panels_drop_at_the_next_paint(

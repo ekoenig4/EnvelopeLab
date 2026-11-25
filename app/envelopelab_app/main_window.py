@@ -47,6 +47,7 @@ from envelopelab_app.panels.base import UNSAVED_MARK, Panel
 from envelopelab_app.panels.colours import ColoursPanel
 from envelopelab_app.panels.design_tree import DesignTreePanel
 from envelopelab_app.panels.history import HistoryPanel
+from envelopelab_app.panels.lift_charts import LiftChartsPanel
 from envelopelab_app.panels.materials import MaterialsPanel
 from envelopelab_app.panels.patterns import PatternPanel
 from envelopelab_app.panels.properties import PropertiesPanel
@@ -128,6 +129,9 @@ class MainWindow(QMainWindow):
         self.colours = ColoursPanel(self.controller, gpu=use_3d)
         self.colours.settings = settings  # recent colours
         self.colours.load_recent()
+        self.lift_charts = LiftChartsPanel(self.controller)
+        self.lift_charts.settings = settings  # units typed in
+        self.lift_charts.load_units()
         # The 3D inlays of the design modes draw what the placement views draw.
         self.controller.placement_provider = self.shapes.placement_data
         # Pointing at or editing a number shows where on the balloon it acts.
@@ -181,6 +185,12 @@ class MainWindow(QMainWindow):
                 artifacts=("shapes",),
             ),
             "colours": Panel("Panel Colours", self.controller, self.colours, scope={"colours"}),
+            "lift": Panel(
+                "Lift Charts",
+                self.controller,
+                self.lift_charts,
+                scope={"lift_chart", "geometry", "operating", "materials", "rigging", "tapes"},
+            ),
         }
         self._build_workspace()
 
@@ -259,6 +269,7 @@ class MainWindow(QMainWindow):
             ),
             "colours": self.panels["colours"],
             "history": self.panels["history"],
+            "lift": self.panels["lift"],
         }
         #: Mode holding each panel (the sidebar and warnings strip show in every mode).
         self.panel_modes: dict[str, str | None] = {
@@ -273,6 +284,7 @@ class MainWindow(QMainWindow):
             "runs": "simulate",
             "colours": "colours",
             "history": "history",
+            "lift": "lift",
         }
         self.mode_stack = QStackedWidget()
         self.mode_tabs = QTabBar()
@@ -365,6 +377,7 @@ class MainWindow(QMainWindow):
         self.cancel_action = self._action("C&ancel run", self.simulation.cancel)
         self.reference_action = self._action("Load &reference mesh…", self.reference_dialog)
         self.export_pack_action = self._action("&Export build pack…", self.export_pack_dialog)
+        self.lift_chart_action = self._action("&Lift charts…", self.lift_chart_dialog)
         self.detect_action = self._action("Detect CalculiX again", self.simulation.detect_calculix)
 
         menu = self.menuBar()
@@ -391,6 +404,7 @@ class MainWindow(QMainWindow):
         design_menu = menu.addMenu("&Design")
         design_menu.addAction(self.regen_action)
         design_menu.addAction(self.reference_action)
+        design_menu.addAction(self.lift_chart_action)
         sim_menu = menu.addMenu("&Simulation")
         sim_menu.addAction(self.preview_action)
         sim_menu.addAction(self.calculix_action)
@@ -877,7 +891,9 @@ class MainWindow(QMainWindow):
             self.controller.editRejected.emit("a build pack needs a standard-gore design")
             return
         folder = str(self.settings.value("export/pack_folder", "") or "")
-        dialog = ExportPackDialog(self, folder, self.prefs.print_roll_width)
+        dialog = ExportPackDialog(
+            self, folder, self.prefs.print_roll_width, lift_settings=self.lift_chart_dialog
+        )
         if dialog.exec():
             self.settings.setValue("export/pack_folder", str(dialog.path()))
             self.export_build_pack(dialog.path(), dialog.include(), dialog.roll_width())
@@ -928,10 +944,75 @@ class MainWindow(QMainWindow):
                 session.content_hash(), session.path.name if session.path else ""
             ),
             status=status_line(self.view3d),
+            fabrics=self.controller.fabrics.catalog(),
+            lift_chart=session.project.state.lift_chart,
         )
         return self.shapes.export_pack(
             out_dir, extras, self.prefs.print_roll_width if roll_width is None else roll_width
         )
+
+    def lift_chart_dialog(self) -> bool:
+        """Design ▸ Lift charts…: edit the project's lift-chart settings (one undo step);
+        returns whether they were changed."""
+        from envelopelab_app.lift_chart_dialog import LiftChartDialog
+
+        session = self.controller.session
+        if session is None:
+            return False
+        if session.design.gores is None:
+            self.controller.editRejected.emit("lift charts need a standard-gore design")
+            return False
+        units = str(self.settings.value("lift_chart/units", "metric") or "metric")
+        dialog = LiftChartDialog(
+            session.project.state.lift_chart,
+            "english" if units == "english" else "metric",
+            self,
+            preview=self.preview_lift_chart,
+        )
+        from envelopelab.export.lift_chart import top_temperature_limit
+
+        fabric = self.controller.attempt(
+            top_temperature_limit, session.design, self.controller.fabrics.catalog()
+        )
+        if fabric is not None:
+            dialog.form.set_fabric_limit(fabric.value, fabric.source)
+        if not dialog.exec():
+            return False
+        self.settings.setValue("lift_chart/units", dialog.unit_system())
+        chosen = dialog.settings()
+        if chosen is None:
+            return False
+        return bool(self.controller.edit("set_lift_chart", chosen))
+
+    def preview_lift_chart(self, settings: Any = None) -> Path | None:
+        """Write the lift-chart PDF of the current design with ``settings`` (the project's
+        when None) to a temporary file and open it; returns the file (None when refused)."""
+        import tempfile
+
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+
+        from envelopelab.export.lift_chart import write_design_lift_chart
+
+        session = self.controller.session
+        if session is None or session.design.gores is None:
+            return None
+        folder = Path(tempfile.mkdtemp(prefix="envelopelab-lift-"))
+        path = folder / "lift-chart-preview.pdf"
+        written = self.controller.attempt(
+            write_design_lift_chart,
+            session.design,
+            self.controller.outputs,
+            path,
+            None,
+            self.controller.fabrics.catalog(),
+            settings if settings is not None else session.project.state.lift_chart,
+        )
+        if written is None:
+            return None
+        if self.interactive:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        return path
 
     def reference_dialog(self) -> None:
         path, _ = QFileDialog.getOpenFileName(

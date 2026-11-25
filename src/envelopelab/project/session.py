@@ -37,6 +37,7 @@ from envelopelab.project.dependencies import (
     group_hashes,
     input_groups,
 )
+from envelopelab.project.lift_chart_settings import LiftChartSettings
 from envelopelab.project.model import (
     DesignState,
     DesignVersion,
@@ -149,6 +150,7 @@ def _state_from(
     axes: list[dict[str, Any]] | None = None,
     colours: PanelColours | None = None,
     overlays: list[dict[str, Any]] | None = None,
+    lift_chart: LiftChartSettings | None = None,
 ) -> DesignState:
     doc = DesignDocument.model_validate(design)
     return DesignState.model_validate(
@@ -159,6 +161,7 @@ def _state_from(
             "symmetry_axes": axes or [],
             "colours": colours if colours is not None else PanelColours(),
             "overlays": overlays or [],
+            "lift_chart": lift_chart if lift_chart is not None else LiftChartSettings(),
         }
     )
 
@@ -307,7 +310,8 @@ class ProjectSession:
         shapes = _shapes_data(self.project.state)
         colours = self.project.state.colours.to_data()
         overlays = _overlays_data(self.project.state)
-        self._hashes = group_hashes(input_groups(design, patterns, shapes, colours, overlays))
+        lift = self.project.state.lift_chart.to_data()
+        self._hashes = group_hashes(input_groups(design, patterns, shapes, colours, overlays, lift))
         # Library values are not part of the file, so they only enter the fingerprints,
         # never the saved/unsaved comparison of ``_hashes``.
         self._fingerprints = fingerprints({**self._hashes, **self._external_hashes()})
@@ -390,6 +394,7 @@ class ProjectSession:
         ) == _axes_data(state)
         same_colours = before.colours == state.colours
         same_colours &= _overlays_data(before) == _overlays_data(state)
+        same_colours &= before.lift_chart == state.lift_chart
         if design_b == design_a and patterns_b == patterns_a and same_shapes and same_colours:
             return False
         after = state.model_copy(deep=True)
@@ -459,7 +464,9 @@ class ProjectSession:
         colours = renamed(self.project.state.colours, letters, _row_letters(design), shapes=False)
         overlays = _overlays_data(self.project.state)
         return self.apply_state(
-            _state_from(design, patterns, shapes, axes, colours, overlays),
+            _state_from(
+                design, patterns, shapes, axes, colours, overlays, self.project.state.lift_chart
+            ),
             description,
             provenance,
         )
@@ -521,7 +528,10 @@ class ProjectSession:
         )
         overlays = _overlays_data(self.project.state)
         return self.apply_state(
-            _state_from(design, patterns, shapes, axes, colours, overlays), description
+            _state_from(
+                design, patterns, shapes, axes, colours, overlays, self.project.state.lift_chart
+            ),
+            description,
         )
 
     def edit_overlays(
@@ -563,6 +573,7 @@ class ProjectSession:
                 _axes_data(state),
                 colours,
                 overlays,
+                state.lift_chart,
             ),
             description,
         )
@@ -594,6 +605,24 @@ class ProjectSession:
         grids += [overlay_grid(o.name) for o in state.overlays]
         colours = pruned(change(state.colours), rows, count, grids, halved)
         after = state.model_copy(update={"colours": colours})
+        return self.apply_state(after, description)
+
+    def edit_lift_chart(self, description: str, settings: LiftChartSettings) -> bool:
+        """Replace the lift-chart settings (one undo step).
+
+        Parameters
+        ----------
+        description : str
+            History text.
+        settings : LiftChartSettings
+            New settings, SI (m, K, kg).
+
+        Returns
+        -------
+        bool
+            Whether the state changed.
+        """
+        after = self.project.state.model_copy(update={"lift_chart": settings})
         return self.apply_state(after, description)
 
     def set_design_value(

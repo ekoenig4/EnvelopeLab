@@ -116,6 +116,15 @@ DOCUMENTS: dict[str, DocumentSpec] = {
         "CAD",
         "Combined DXFs: envelope development, panel grid, appendage pieces (+ PNG previews)",
     ),
+    "lift_chart": DocumentSpec(
+        (
+            ("lift-chart.pdf", "lift charts: load, top temperature, altitude at equilibrium"),
+            ("lift-chart.csv", "every equilibrium point of the lift charts"),
+        ),
+        "START HERE",
+        "REF",
+        "Lift charts: equilibrium load, top temperature and ceiling (PDF + CSV)",
+    ),
     "top_bottom": DocumentSpec(
         (
             ("parachute.pdf", "parachute data and full rigging lengths"),

@@ -3,6 +3,54 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: the crown temperature limit of the lift charts can be set per project in the
+  Lift charts tab (*Crown temperature limit*, with its source tag). By default it is still
+  the lowest service temperature of the design's fabrics (120 °C *assumed* when a fabric
+  is not in the library). A limit above the fabrics' is flagged in red on the form, the
+  charts and the PDF. Project format 11 (ADR-0061); older projects take the limit from the
+  fabrics. No result changes by default.
+- Changed: the gross-lift chart is read against the **crown** temperature (the one the
+  pilot measures) instead of the mean gas temperature, so the crown limit is one red line
+  and the shaded region means what it says; each point's lift still uses the mean that
+  crown temperature gives. With a fixed offset of 0 it is the spreadsheet chart exactly.
+  No lift value changes.
+- Changed (changes results): the lift charts now take the mean gas temperature from the
+  envelope's shape by default (level-1 stratification, ADR-0060): an assumed linear
+  temperature profile from the mouth (50 % of the crown's rise above ambient, *assumed*)
+  to the crown, averaged over the design's volume by height, never less than the 20 K
+  offset below the crown (now a floor). On the generic test envelopes the offset at the
+  crown limit goes from 20 K to 31 / 27 / 23 K at 0 / 15 / 30 °C ambient, and the load at
+  the limit falls by 9 / 7 / 4 % (2,605 m³: 826 → 753 kg, 651 → 605 kg,
+  493 → 474 kg at sea level). *Fixed offset* restores the previous charts. New
+  Stratification chart (tab and PDF page) with the profile and its pressure. Project
+  format 10; older projects open with the defaults.
+- Added: the **gross lift vs mean envelope temperature** chart (the classic builders'
+  lift chart; one per altitude, with the envelope + rigging and design-load lines and the
+  mean temperature at which the crown reaches its limit) in the Lift charts tab and as
+  page 2 of the lift-chart PDF, and a **Theory** tab and PDF page stating the equations,
+  constants and assumptions with the design's own values. The theory page compares the
+  model with the Balloon Builders Journal lift spreadsheet; new benchmarks reproduce that
+  spreadsheet (within 1e-4 with exact constants; it is 0.23–0.27 % higher as published,
+  from °F + 459 and R = 53.34). No numerical result changes.
+- Added: a **Lift charts** tab in the main window (Ctrl+8) shows the design's lift charts
+  (maximum load, top temperature needed per altitude, ceiling) beside the settings of
+  their curves. Edits redraw the charts at once and are saved to the project as one undo
+  step. **Export PDF…** writes the charts with their CSV. Same data as the build pack;
+  no numerical result changes.
+- Added: *Design ▸ Lift charts…* chooses the lift charts' curves per project: altitudes,
+  ambient temperatures, ISA deviations, the load-axis end, the lowest tabulated top
+  temperature and the top-to-mean offset with its source tag. Values are typed in
+  metric or English units, with a preview, and saved in the project. Project format 9:
+  versions 1 to 8 read with the default curves (ADR-0059). Default charts are unchanged.
+- Added: lift charts. The new `envelopelab.lift_chart` solves the static equilibrium
+  V (rho_amb - rho_int) = envelope + rigging + load for whichever of top (crown)
+  temperature, ambient temperature, altitude and load is unknown. The mean gas
+  temperature is the top temperature minus an offset (20 K, tagged *assumed*). The build
+  pack gains `<name>-lift-chart.pdf` (maximum load at the top-temperature limit, top
+  temperature needed per load, ceiling) and `<name>-lift-chart.csv` (every equilibrium
+  point with its status). The charts show metric and English units (kg/lb, °C/°F,
+  m/ft). Points above the fabric limit are shaded and marked, never dropped. No
+  existing result changes.
 - Changed: the 3D view opens a project on its most up-to-date shape (CalculiX, else
   preview, else design; only a current, converged run) in *Layer colour*, and results
   are no longer coloured by factor of safety unless chosen. Zones below the limit are

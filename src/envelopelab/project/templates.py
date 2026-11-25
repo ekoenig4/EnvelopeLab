@@ -282,6 +282,7 @@ def state_from_template(template: Project, name: str) -> DesignState:
         symmetry_axes=state.symmetry_axes,
         colours=state.colours,
         overlays=state.overlays,
+        lift_chart=state.lift_chart,
     )
 
 

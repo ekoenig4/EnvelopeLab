@@ -18,12 +18,15 @@ nav:
       - "Positions: metres or balloon coordinates": user/positions.md
       - Parachute and rigging: user/rigging.md
       - Exporting a build pack: user/build-pack.md
+      - Lift charts: user/lift-charts.md
   - Developer:
       - Setup: dev/setup.md
       - CalculiX installation: dev/calculix-installation.md
       - Solver trial (Smalley 90K): dev/solver-trial.md
   - Theory:
       - Atmosphere: theory/atmosphere.md
+      - Lift charts and equilibrium: theory/lift-charts.md
+      - Gas temperature stratification: theory/stratification.md
       - Gore geometry: theory/gore-geometry.md
       - Virtual sewing: theory/virtual-sewing.md
       - Dynamic-relaxation solver: theory/dynamic-relaxation.md
@@ -49,6 +52,7 @@ nav:
       - Special-shape primitives: validation/special-shape-primitives.md
       - Shape-family benchmarks: validation/shape-families.md
       - Rigging benchmarks: validation/rigging-benchmarks.md
+      - Lift-chart benchmarks: validation/lift-chart-benchmarks.md
   - Formats:
       - Design schema: formats/design-schema.md
       - Pattern import mapping: formats/pattern-import-mapping.md
@@ -115,6 +119,9 @@ nav:
       - ADR-0056: adr/ADR-0056-overlays.md
       - ADR-0057: adr/ADR-0057-python-3-12-only.md
       - ADR-0058: adr/ADR-0058-blender-live-link.md
+      - ADR-0059: adr/ADR-0059-lift-chart-settings.md
+      - ADR-0060: adr/ADR-0060-envelope-shape-mean-temperature.md
+      - ADR-0061: adr/ADR-0061-lift-chart-crown-limit.md
 theme:
   name: material
 markdown_extensions:

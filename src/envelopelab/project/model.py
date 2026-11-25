@@ -20,7 +20,11 @@ JSON file that wraps one design document (unchanged, in the design schema) with
 * the **panel colours** (a visual layer: the display colour of envelope panels and
   special-shape pieces, :mod:`envelopelab.project.colours`) and the **overlays**
   (appliqué patches sewn on top of the envelope, :mod:`envelopelab.project.overlays`)
-  since version 8.
+  since version 8;
+* the **lift-chart settings** (the curves the build-pack lift charts draw and the
+  top-to-mean temperature offset, :mod:`envelopelab.project.lift_chart_settings`) since
+  version 9, with the mean-temperature model and the mouth temperature rise since
+  version 10 and the crown temperature limit since version 11.
 
 Version 1 files (no shapes) are read as version 2 files with no shapes (ADR-0020).
 
@@ -40,14 +44,15 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from envelopelab.design.model import DesignDocument, load_design_document
 from envelopelab.project.colours import PanelColours
+from envelopelab.project.lift_chart_settings import LiftChartSettings
 from envelopelab.project.overlays import OverlaySpec
 from envelopelab.project.shapes import ShapeSpec
 from envelopelab.project.symmetry import SymmetryAxis
 
 PROJECT_FORMAT: Literal["envelopelab.project"] = "envelopelab.project"
-PROJECT_FORMAT_VERSION: Literal[8] = 8
+PROJECT_FORMAT_VERSION: Literal[11] = 11
 #: Older versions :func:`load_project_text` still reads (see :func:`migrate_project_data`).
-READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 8)
+READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 PROJECT_SUFFIX = ".elproj"
 
 NotchEdge = Literal["left", "right", "bottom", "top"]
@@ -237,8 +242,8 @@ class ProfileTarget(BaseModel):
 
 class DesignState(BaseModel):
     """Everything that is edited: the design document, its pattern annotations, the
-    special shapes placed on it, the symmetry axes, the panel colours and the overlays
-    (appliqués sewn on the envelope)."""
+    special shapes placed on it, the symmetry axes, the panel colours, the overlays
+    (appliqués sewn on the envelope) and the lift-chart settings."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -248,6 +253,7 @@ class DesignState(BaseModel):
     symmetry_axes: list[SymmetryAxis] = Field(default_factory=list)
     colours: PanelColours = Field(default_factory=PanelColours)
     overlays: list[OverlaySpec] = Field(default_factory=list)
+    lift_chart: LiftChartSettings = Field(default_factory=LiftChartSettings)
 
     @model_validator(mode="after")
     def _unique_shape_names(self) -> DesignState:
@@ -527,7 +533,7 @@ class Project(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     format: Literal["envelopelab.project"] = PROJECT_FORMAT
-    format_version: Literal[8] = PROJECT_FORMAT_VERSION
+    format_version: Literal[11] = PROJECT_FORMAT_VERSION
     state: DesignState
     locks: ConstraintLocks = Field(default_factory=ConstraintLocks)
     profile_target: ProfileTarget | None = None
@@ -541,7 +547,8 @@ class Project(BaseModel):
 
 def state_to_data(state: DesignState) -> dict[str, Any]:
     """JSON data of a design state (design with its content hash); the panel colours
-    only when some panel is coloured."""
+    only when some panel is coloured, the overlays only when there are any and the
+    lift-chart settings only when they differ from the defaults."""
     data: dict[str, Any] = {
         "design": state.design.with_updated_hash().model_dump(by_alias=True, mode="json"),
         "patterns": state.patterns.model_dump(mode="json"),
@@ -552,6 +559,8 @@ def state_to_data(state: DesignState) -> dict[str, Any]:
         data["colours"] = state.colours.to_data()
     if state.overlays:
         data["overlays"] = [o.model_dump(mode="json") for o in state.overlays]
+    if not state.lift_chart.is_default():
+        data["lift_chart"] = state.lift_chart.to_data()
     return data
 
 
@@ -566,6 +575,7 @@ def state_from_data(data: dict[str, Any]) -> DesignState:
             "symmetry_axes": data.get("symmetry_axes", []),
             "colours": data.get("colours") or {},
             "overlays": data.get("overlays") or [],
+            "lift_chart": data.get("lift_chart") or {},
         }
     )
 
@@ -584,7 +594,12 @@ def migrate_project_data(raw: dict[str, Any]) -> dict[str, Any]:
     (``cap_across``, ``cap_up``); their caps are placed by ``cap_shift`` as before
     (ADR-0052). Versions 1 to 6 have no crown outlines (``crown_shape``); their caps are
     circles (ADR-0054). Versions 1 to 7 have no panel colours (``colours``); their panels
-    read as uncoloured (ADR-0055), and no overlays (ADR-0056).
+    read as uncoloured (ADR-0055), and no overlays (ADR-0056). Versions 1 to 8 have no
+    lift-chart settings (``lift_chart``); they read with the default settings
+    (ADR-0059). Versions 1 to 9 have no mean-temperature model (``lift_chart.mean_model``,
+    ``mouth_excess``); they read with the defaults, the envelope-shape model (ADR-0060).
+    Versions 1 to 10 have no crown temperature limit setting (``lift_chart.top_limit``);
+    they read with the limit from the fabrics (ADR-0061).
 
     Raises
     ------

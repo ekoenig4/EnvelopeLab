@@ -12,6 +12,7 @@ the menu **View** lists the same modes with shortcuts:
 | **3D / Simulation** | Ctrl+5 | The 3D view above the **Simulation Runs** table |
 | **Colours** | Ctrl+6 | The **Panel Colours** grid and colour picker: colour every panel of the envelope and the special shapes ([guide](panel-colours.md)) |
 | **History** | Ctrl+7 | Undo history, snapshots, versions and provenance |
+| **Lift charts** | Ctrl+8 | The **Lift Charts** of the design beside the curves they draw: maximum load, top temperature needed and ceiling, redrawn as you edit ([guide](lift-charts.md#the-lift-charts-mode)) |
 
 Two areas stay visible in every mode:
 

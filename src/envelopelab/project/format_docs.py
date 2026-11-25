@@ -89,6 +89,23 @@ KEYS: tuple[tuple[str, str], ...] = (
         "`points` are the corners of one slice between the first two axes). Written "
         "only when there are any; older files read as having none.",
     ),
+    (
+        "`state.lift_chart`",
+        "Lift-chart settings (version 9, ADR-0059; read only by the build-pack lift "
+        "charts), SI: `altitudes` (m, 1 to 4 pressure altitudes), `ambient_temperatures` "
+        "(K, 1 to 6), `isa_offsets` (K, 1 to 6 ISA deviations of the ceiling curves), "
+        "`max_load` (kg end of the load axis; null: the most the balloon lifts), "
+        "`lowest_top_temperature` (K) and `top_to_mean` (K, with `source` "
+        "`datasheet | measured | assumed` and `note`; the offset with `fixed_offset`, its "
+        "floor with `envelope_shape`), and from version 10 (ADR-0060) `mean_model` "
+        "(`envelope_shape`, the default: the mean gas temperature from the envelope's shape "
+        "and a linear temperature profile; or `fixed_offset`) and `mouth_excess` (the "
+        "mouth temperature rise as a fraction of the crown's rise above ambient, 0 to 1, "
+        "with `source` and `note`), and from version 11 (ADR-0061) `top_limit` (the crown "
+        "temperature limit, K, with `source` and `note`; null, the default: the lowest "
+        "service temperature of the design's fabrics). Written only when they differ from "
+        "the defaults; older files read with the defaults.",
+    ),
     ("`snapshots`", "Named copies of `state` with their design content hash."),
     ("`versions`", "Committed design versions (`version_id`, `parent_id`, message, state)."),
     ("`provenance`", "Append-only log of flagged edits (manual overrides and their undo)."),
