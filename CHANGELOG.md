@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the gross-lift chart is read against the **crown** temperature (the one the
+  pilot measures) instead of the mean gas temperature, so the crown limit is one red line
+  and the shaded region means what it says; each point's lift still uses the mean that
+  crown temperature gives. With a fixed offset of 0 it is the spreadsheet chart exactly.
+  No lift value changes.
 - Changed (changes results): the lift charts now take the mean gas temperature from the
   envelope's shape by default (level-1 stratification, ADR-0060): an assumed linear
   temperature profile from the mouth (50 % of the crown's rise above ambient, *assumed*)

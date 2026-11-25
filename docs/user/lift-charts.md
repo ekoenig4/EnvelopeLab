@@ -47,12 +47,13 @@ contains:
        per pressure altitude (by default 0, 1 000, 2 000 and 3 000 m). Go up from the ambient
        temperature at that altitude to the curve and read the most load that floats with
        the crown at the limit. The inputs and their source tags are listed below the chart.
-    2. **Gross lift** vs mean envelope temperature, one chart per altitude, one curve per
-       ambient temperature: the classic lift chart of builders' spreadsheets. The dashed
-       lines are the envelope + rigging mass and that plus the design load: where a curve
-       crosses one, the balloon floats. The red line marks the mean temperature at which
-       the crown reaches its limit; beyond it is shaded. Read it with the **mean** gas
-       temperature, not the crown reading (see *Mean or crown temperature* below).
+    2. **Gross lift** vs crown temperature, one chart per altitude, one curve per
+       ambient temperature: the classic lift chart of builders' spreadsheets, read with
+       your crown sensor. The dashed lines are the envelope + rigging mass and that plus
+       the design load: where a curve crosses one, the balloon floats. The red line is the
+       crown limit; beyond it is shaded and the curves end there. Behind each point the
+       lift uses the mean gas temperature that crown temperature gives (see *Mean or crown
+       temperature* below).
     3. **Top temperature needed** vs load, one panel per altitude, one curve per ambient
        temperature (by default −10 to 30 °C). The red dashed line is the limit. The shaded region
        above it is not permitted. The dotted line marks the design's payload.
@@ -106,8 +107,7 @@ temperature, the mean it gives, the height below which half the volume lies, and
 pressure difference that profile produces next to a uniform envelope's. A lower *Mouth
 temperature rise* is more conservative; an offset of 0 is the least conservative choice.
 These profiles are assumptions, not measurements: with a crown sensor and one sensor
-partway down you can measure the offset and enter it as *measured*. The maximum-load, top-temperature and ceiling charts are read with the crown
-temperature; the gross-lift chart with the mean.
+partway down you can measure the offset and enter it as *measured*. Every chart is read with the crown temperature.
 
 A lift spreadsheet that takes one "envelope temperature" (for example the Balloon
 Builders Journal's) assumes the whole envelope is at that temperature, so that number is

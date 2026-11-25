@@ -59,7 +59,7 @@ def test_pdf_shows_limit_inputs_and_assumptions(pack: Path) -> None:
     # ceiling, theory.
     assert text.count("LIFT CHART") == 6
     assert "Gas temperature by height" in text
-    assert "Gross lift vs mean envelope temperature" in text
+    assert "Gross lift vs crown temperature" in text
     assert "CROWN ABOVE LIMIT" in text
     assert "How these charts are calculated" in text
     assert "459.67" in text
@@ -180,7 +180,7 @@ def test_design_charts_give_the_plots_the_pdf_draws() -> None:
     assert design_charts(DESIGN, broken) is None
 
 
-def test_gross_lift_chart_is_lift_against_mean_temperature() -> None:
+def test_gross_lift_chart_is_read_against_the_crown_temperature() -> None:
     from envelopelab.export.lift_chart import design_charts
     from envelopelab.lift_chart import lift_mass
 
@@ -190,26 +190,19 @@ def test_gross_lift_chart_is_lift_against_mean_temperature() -> None:
     gross = charts.plots.gross
     assert len(gross) == len(charts.axes.altitudes)
     first = gross[0]
-    # Curves per ambient temperature; y is V (rho_amb - rho_int) in kg at x = mean degC.
+    limit_c = inputs.top_limit.value - 273.15
+    # Curves per ambient; x is the crown temperature (degC), y the gross lift (kg) with
+    # the mean that crown gives, which is never above the crown.
     assert len(first.series) == len(charts.axes.ambient_temperatures)
-    x, y = first.series[0].points[30]
-    t_amb = charts.axes.ambient_temperatures[0]
-    assert y == pytest.approx(lift_mass(inputs.volume, 0.0, t_amb, x + 273.15))
-    # The crown reaches its limit at mean = limit - offset: marked and shaded beyond.
-    mean_limit = (
-        min(inputs.mean_of(inputs.top_limit.value, t) for t in charts.axes.ambient_temperatures)
-        - 273.15
-    )
-    assert first.vlines[0][0] == pytest.approx(mean_limit)
-    highest = (
-        max(inputs.mean_of(inputs.top_limit.value, t) for t in charts.axes.ambient_temperatures)
-        - 273.15
-    )
-    assert first.shade_right is not None and first.shade_right[0] == pytest.approx(highest)
-    # Each curve ends where its crown reaches the limit.
     for series, t_amb in zip(first.series, charts.axes.ambient_temperatures, strict=True):
-        end = inputs.mean_of(inputs.top_limit.value, t_amb) - 273.15
-        assert series.points[-1][0] == pytest.approx(end)
+        x, y = series.points[30]
+        mean = inputs.mean_of(x + 273.15, t_amb)
+        assert mean < x + 273.15
+        assert y == pytest.approx(lift_mass(inputs.volume, 0.0, t_amb, mean))
+        assert series.points[-1][0] == pytest.approx(limit_c)  # every curve ends at the limit
+    # The limit is one line, and the shading starts there.
+    assert first.vlines[0][0] == pytest.approx(limit_c)
+    assert first.shade_right is not None and first.shade_right[0] == pytest.approx(limit_c)
     # Envelope + rigging, and with the design load: where a curve crosses, it floats.
     levels = [h[0] for h in first.hlines]
     assert levels == pytest.approx([inputs.fixed_mass, inputs.fixed_mass + 300.0])

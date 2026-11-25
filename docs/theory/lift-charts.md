@@ -80,10 +80,11 @@ fixed 20 K offset (the shape model typically gives more):
 | 90 °F, 6 000 ft | 250 °F | 1 199 lb | 979 lb | −18 % |
 
 Reading the crown sensor into a uniform-temperature chart therefore overstates the lift
-(by the amount the crown is hotter than the mean). EnvelopeLab draws the **gross-lift
-chart against the mean temperature**, so it reads like those charts, and marks the mean
-temperature at which the crown reaches its limit; the load, top-temperature and ceiling
-charts are read against the **top** temperature, the one the pilot sees.
+(by the amount the crown is hotter than the mean). EnvelopeLab reads **every chart against
+the crown (top) temperature**, the one the pilot measures; each point's lift uses the mean
+that crown temperature gives (section above). The gross-lift chart therefore has the same
+form as those spreadsheet charts but with the crown on its horizontal axis; with a fixed
+offset of 0 the two are identical.
 
 ## 3. Atmosphere
 
@@ -159,7 +160,7 @@ is nearly vertical near sea level.
 | Chart (PDF page, *Lift charts* sub-tab) | x | y | Curves | Temperature read against |
 |---|---|---|---|---|
 | Maximum load | ambient temperature at altitude | load at the limit | one per altitude | top, at its limit |
-| Gross lift | mean envelope temperature | gross lift \(L/g\) | one per ambient, one panel per altitude | mean; red line where the crown reaches its limit |
+| Gross lift | crown temperature | gross lift \(L/g\) | one per ambient, one panel per altitude | top; red line at the limit |
 | Stratification | gas temperature / pressure difference | height above the mouth | one per ambient (temperature); stratified vs uniform (pressure) | top, at its limit (shape model only) |
 | Top temperature | load | top temperature needed | one per ambient, one panel per altitude | top |
 | Ceiling | load | equilibrium altitude | one per ISA deviation | top, at its limit |
@@ -167,7 +168,7 @@ is nearly vertical near sea level.
 
 On the gross-lift chart the dashed lines are the envelope + rigging mass and that plus the
 design load: where a curve crosses a line, the balloon floats with that load. The region
-beyond the red line (crown above its limit) is shaded. On the top-temperature chart the
+beyond the red line (crown above its limit) is shaded and every curve ends at it. On the top-temperature chart the
 region above the limit is shaded. Each chart also has the US scale of each axis.
 
 ## 7. Comparison with builders' lift spreadsheets

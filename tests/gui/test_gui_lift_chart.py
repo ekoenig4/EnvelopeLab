@@ -236,12 +236,11 @@ def test_gross_lift_charts_mark_where_the_crown_reaches_its_limit(
     panel = gore_window.lift_charts
     plot = panel.gross[0].plot
     assert plot is not None and plot.shade_right is not None
-    assert "Gross lift vs mean envelope temperature" in plot.title
+    assert "Gross lift vs crown temperature" in plot.title
     assert panel.charts is not None
     inputs = panel.charts.inputs
-    ambients = panel.charts.axes.ambient_temperatures
-    highest = max(inputs.mean_of(inputs.top_limit.value, t) for t in ambients)
-    assert plot.shade_right[0] == pytest.approx(highest - 273.15)
+    assert plot.shade_right[0] == pytest.approx(inputs.top_limit.value - 273.15)
+    assert plot.xlabel.startswith("Crown (top) temperature")
 
 
 def test_theory_tab_states_the_equations_and_follows_the_offset(gore_window: MainWindow) -> None:

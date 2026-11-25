@@ -5,10 +5,11 @@ the chart axes from the design and draws them. Pages (A4 landscape):
 
 1. maximum load at the top-temperature limit vs ambient temperature, one curve per
    altitude (the flight-manual loading chart), with the inputs and their source tags;
-2. gross lift vs mean envelope temperature, one panel per altitude, one curve per
-   ambient temperature (the classic lift chart of builders' spreadsheets), with the
-   envelope + rigging mass and the design load as lines and the mean temperature at
-   which the crown reaches its limit marked;
+2. gross lift vs crown (top) temperature, the temperature the pilot reads, one panel per
+   altitude, one curve per ambient temperature (the classic lift chart of builders'
+   spreadsheets, with the mean gas temperature behind each point taken from the crown
+   temperature), with the envelope + rigging mass and the design load as lines and the
+   crown limit marked;
 3. top temperature needed vs load, one panel per altitude, one curve per ambient
    temperature; the region above the limit is shaded and labelled;
 4. equilibrium altitude (ceiling) vs load at the limit, one curve per ISA deviation;
@@ -78,8 +79,8 @@ MUTED = (0.33, 0.36, 0.40)
 GRID = (0.85, 0.87, 0.90)
 TINT = (0.99, 0.90, 0.89)
 BLUE = (0.11, 0.37, 0.71)
-#: Start of the mean-temperature axis of the gross-lift chart, degC.
-MEAN_AXIS_START_C = 40.0
+#: Start of the crown-temperature axis of the gross-lift chart, degC.
+TOP_AXIS_START_C = 40.0
 #: Exact unit definitions (international pound and foot, 1959; NIST SP 811).
 KG_PER_LB = 0.45359237
 M_PER_FT = 0.3048
@@ -624,22 +625,26 @@ def _gross_plot(
     box: tuple[float, float, float, float],
     payload: float | None,
 ) -> Plot:
+    """Gross lift vs the crown (top) temperature the pilot reads; the lift of each point
+    uses the mean gas temperature that crown gives (:meth:`LiftChartInputs.mean_of`)."""
     limit_c = inputs.top_limit.value - CELSIUS_OFFSET
-    x_range = (MEAN_AXIS_START_C, 10.0 * math.ceil((limit_c + 10.0) / 10.0))
-    xs = _sweep(*x_range)
+    x_range = (TOP_AXIS_START_C, 10.0 * math.ceil((limit_c + 10.0) / 10.0))
+    # Each curve ends at the limit: a crown hotter than that is not permitted.
+    xs = sorted({*(x for x in _sweep(*x_range) if x < limit_c), limit_c})
     series = []
     highs = [inputs.fixed_mass + (payload or 0.0)]
-    # The mean at which the crown reaches its limit depends on the ambient temperature
-    # with stratification: each curve ends there (beyond is not permitted).
-    mean_limits = [
-        inputs.mean_of(inputs.top_limit.value, t) - CELSIUS_OFFSET
-        for t in axes.ambient_temperatures
-    ]
     for k, t_amb in enumerate(axes.ambient_temperatures):
-        end = mean_limits[k]
         pts = [
-            (x, lift_mass(inputs.volume, altitude, t_amb, x + CELSIUS_OFFSET))
-            for x in sorted({*(x for x in xs if x < end), end})
+            (
+                x,
+                lift_mass(
+                    inputs.volume,
+                    altitude,
+                    t_amb,
+                    inputs.mean_of(x + CELSIUS_OFFSET, t_amb),
+                ),
+            )
+            for x in xs
         ]
         highs += [y for _, y in pts]
         series.append(
@@ -654,27 +659,20 @@ def _gross_plot(
         hlines.append((total, f"+ design load = {kg_lb(total)}", BLUE))
     return Plot(
         box,
-        f"Gross lift vs mean envelope temperature - pressure altitude "
+        f"Gross lift vs crown temperature - pressure altitude "
         f"{altitude:,.0f} m / {ft(altitude):,.0f} ft",
-        "Mean envelope (gas) temperature (degC)",
+        "Crown (top) temperature (degC)",
         "Gross lift (kg)",
         x_range,
         (0.0, _ceil_to(max(highs), step)),
         series,
         hlines=hlines,
-        vlines=[(min(mean_limits), _limit_label(limit_c, mean_limits), RED)],
-        # Shaded where the crown is above its limit at every ambient temperature shown.
-        shade_right=(max(mean_limits), "CROWN ABOVE LIMIT"),
+        vlines=[(limit_c, f"limit {c_f(limit_c)}", RED)],
+        shade_right=(limit_c, "CROWN ABOVE LIMIT"),
         legend_left=True,
         x2=F_AXIS,
         y2=LB_AXIS,
     )
-
-
-def _limit_label(limit_c: float, means: list[float]) -> str:
-    lo, hi = min(means), max(means)
-    span = f"{lo:.0f} degC" if round(hi) == round(lo) else f"{lo:.0f}-{hi:.0f} degC"
-    return f"crown {limit_c:.0f} degC = mean {span} (curve ends)"
 
 
 def half_volume_height(dist: VolumeDistribution) -> float:
@@ -779,7 +777,7 @@ class ChartSet:
     ceiling : Plot
         Equilibrium altitude vs load at the limit, one curve per ISA deviation (page 4).
     gross : list of Plot
-        Gross lift vs mean envelope temperature, one per altitude (page 2).
+        Gross lift vs crown temperature, one per altitude (page 2).
     stratification : list of Plot
         Gas temperature and pressure difference by height (page 3); empty with a fixed
         offset.
@@ -992,9 +990,10 @@ def theory_sections(
                 f"{mean15 - CELSIUS_OFFSET:.0f} degC) the gross lift is "
                 f"{kg_lb(stratified)}; a uniform envelope at that temperature would "
                 f"lift {kg_lb(uniform)} ({100.0 * (uniform / stratified - 1.0):+.0f} %).",
-                "The gross-lift chart is drawn against the mean temperature (directly "
-                "comparable with such spreadsheets); each curve ends where the crown reaches "
-                "its limit, and the red line marks the lowest such mean (coldest ambient).",
+                "The gross-lift chart is drawn against the crown temperature, the one the "
+                "pilot reads; each point's lift uses the mean that crown temperature gives. "
+                "With a fixed offset of 0 the crown is the mean and the chart is the "
+                "uniform-temperature spreadsheet's.",
             ],
         ),
         (
@@ -1095,8 +1094,8 @@ def write_lift_chart_pdf(
 
     canvas.new_page()
     header(
-        "Gross lift (everything the balloon can carry, envelope included) vs the mean gas "
-        "temperature. Where a curve crosses a dashed line the balloon floats."
+        "Gross lift (everything the balloon can carry, envelope included) vs the crown "
+        "temperature the pilot reads. Where a curve crosses a dashed line the balloon floats."
     )
     cols, rows = 2, 2
     pw, ph = 330.0, 185.0
