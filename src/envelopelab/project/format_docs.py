@@ -101,8 +101,10 @@ KEYS: tuple[tuple[str, str], ...] = (
         "(`envelope_shape`, the default: the mean gas temperature from the envelope's shape "
         "and a linear temperature profile; or `fixed_offset`) and `mouth_excess` (the "
         "mouth temperature rise as a fraction of the crown's rise above ambient, 0 to 1, "
-        "with `source` and `note`). Written only when they differ from the defaults; older "
-        "files read with the defaults.",
+        "with `source` and `note`), and from version 11 (ADR-0061) `top_limit` (the crown "
+        "temperature limit, K, with `source` and `note`; null, the default: the lowest "
+        "service temperature of the design's fabrics). Written only when they differ from "
+        "the defaults; older files read with the defaults.",
     ),
     ("`snapshots`", "Named copies of `state` with their design content hash."),
     ("`versions`", "Committed design versions (`version_id`, `parent_id`, message, state)."),

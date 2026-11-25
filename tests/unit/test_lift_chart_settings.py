@@ -76,7 +76,7 @@ def test_default_settings_leave_file_and_fingerprints_unchanged(session: Project
     before = session.fingerprints()
     data = json.loads(dump_project(session.project))
     assert "lift_chart" not in data["state"]
-    assert data["format_version"] == 10
+    assert data["format_version"] == 11
     edits.set_lift_chart(session, CUSTOM)
     assert session.fingerprints()["export"] != before["export"]
     assert session.fingerprints()["simulation"] == before["simulation"]
@@ -99,7 +99,7 @@ def test_version_8_files_read_with_default_settings(session: ProjectSession) -> 
     data = json.loads(dump_project(session.project))
     data["format_version"] = 8
     project = load_project_text(json.dumps(data))
-    assert project.format_version == 10
+    assert project.format_version == 11
     assert project.state.lift_chart.is_default()
 
 
@@ -189,3 +189,56 @@ def test_mouth_excess_is_entered_in_percent() -> None:
     assert shown.mouth_excess == pytest.approx(35.0)
     assert shown.mean_model == "fixed_offset" and shown.mouth_source == "measured"
     assert from_displayed(shown) == settings
+
+
+def test_crown_limit_defaults_to_the_fabrics_and_is_validated() -> None:
+    assert LiftChartSettings().top_limit is None
+    with pytest.raises(ValidationError, match="crown temperature limit must lie between"):
+        LiftChartSettings(top_limit=TaggedValue(value=700.0, source="datasheet"))
+
+
+def test_crown_limit_survives_save_and_old_files_take_the_fabrics(
+    session: ProjectSession, tmp_path: Path
+) -> None:
+    limited = LiftChartSettings(
+        top_limit=TaggedValue(value=383.15, source="datasheet", note="fabric X datasheet")
+    )
+    edits.set_lift_chart(session, limited)
+    path = session.save(tmp_path / "limit.elproj")
+    data = json.loads(path.read_text(encoding="utf-8"))
+    assert data["format_version"] == 11
+    assert data["state"]["lift_chart"]["top_limit"]["value"] == 383.15
+    assert ProjectSession.open(path).project.state.lift_chart == limited
+    del data["state"]["lift_chart"]["top_limit"]
+    data["format_version"] = 10
+    assert load_project_text(json.dumps(data)).state.lift_chart.top_limit is None
+
+
+def test_crown_limit_is_entered_in_the_builders_units() -> None:
+    from envelopelab.project.lift_chart_settings import displayed, from_displayed
+
+    settings = LiftChartSettings(top_limit=TaggedValue(value=383.15, source="measured"))
+    shown = displayed(settings, "english")
+    assert shown.top_limit == pytest.approx(230.0)  # 110 degC
+    assert shown.limit_source == "measured"
+    assert from_displayed(shown) == settings
+
+
+def test_charts_use_the_crown_limit_and_warn_above_the_fabrics(session: ProjectSession) -> None:
+    from envelopelab.export.lift_chart import design_charts, input_lines
+
+    outputs = gore_outputs(session.design, session.patterns)
+    lower = LiftChartSettings(top_limit=TaggedValue(value=383.15, source="datasheet"))
+    charts = design_charts(session.design, outputs, None, lower)
+    assert charts is not None
+    assert charts.inputs.top_limit.value == pytest.approx(383.15)
+    assert charts.inputs.fabric_limit is not None
+    assert charts.inputs.fabric_limit.value == pytest.approx(393.15)  # generic, assumed
+    assert not charts.inputs.limit_above_fabric
+    assert charts.plots.gross[0].vlines[0][0] == pytest.approx(110.0)
+    higher = LiftChartSettings(top_limit=TaggedValue(value=403.15, source="assumed"))
+    hot = design_charts(session.design, outputs, None, higher)
+    assert hot is not None and hot.inputs.limit_above_fabric
+    assert any(
+        line.startswith("WARNING: the limit is 10 K above") for line in input_lines(hot.inputs)
+    )

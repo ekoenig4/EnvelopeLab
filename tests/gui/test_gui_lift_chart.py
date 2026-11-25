@@ -288,3 +288,30 @@ def test_stratification_tab_and_mean_model_control(gore_window: MainWindow) -> N
     session = gore_window.controller.session
     assert session is not None
     assert session.project.state.lift_chart.mean_model == "fixed_offset"
+
+
+def test_crown_limit_in_the_lift_charts_tab(gore_window: MainWindow) -> None:
+    gore_window.set_mode("lift")
+    panel = gore_window.lift_charts
+    form = panel.form
+    # Default: from the fabrics (the generic 120 degC, assumed), shown and not editable.
+    assert form.limit_auto.isChecked() and not form.limit.isEnabled()
+    assert form.limit.value() == pytest.approx(120.0)
+    assert "120 °C [assumed]" in form.limit_hint.text()
+    # A lower, datasheet limit: no warning, the charts follow it.
+    form.limit_auto.setChecked(False)
+    form.limit.setValue(110.0)
+    form.limit_source.setCurrentText("datasheet")
+    assert form.limit_warning.text() == ""
+    assert panel.charts is not None
+    assert panel.charts.inputs.top_limit.value == pytest.approx(383.15)
+    # Above the fabrics: flagged in the form and in the charts' status line.
+    form.limit.setValue(130.0)
+    assert "Above the fabrics' service temperature by 10" in form.limit_warning.text()
+    assert "WARNING" in panel.status.text()
+    assert panel.apply_pending()
+    session = gore_window.controller.session
+    assert session is not None and session.project.state.lift_chart.top_limit is not None
+    session.undo()
+    assert session.project.state.lift_chart.top_limit is None
+    assert form.limit_auto.isChecked()

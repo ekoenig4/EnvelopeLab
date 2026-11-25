@@ -969,6 +969,13 @@ class MainWindow(QMainWindow):
             self,
             preview=self.preview_lift_chart,
         )
+        from envelopelab.export.lift_chart import top_temperature_limit
+
+        fabric = self.controller.attempt(
+            top_temperature_limit, session.design, self.controller.fabrics.catalog()
+        )
+        if fabric is not None:
+            dialog.form.set_fabric_limit(fabric.value, fabric.source)
         if not dialog.exec():
             return False
         self.settings.setValue("lift_chart/units", dialog.unit_system())

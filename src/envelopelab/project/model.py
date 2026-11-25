@@ -24,7 +24,7 @@ JSON file that wraps one design document (unchanged, in the design schema) with
 * the **lift-chart settings** (the curves the build-pack lift charts draw and the
   top-to-mean temperature offset, :mod:`envelopelab.project.lift_chart_settings`) since
   version 9, with the mean-temperature model and the mouth temperature rise since
-  version 10.
+  version 10 and the crown temperature limit since version 11.
 
 Version 1 files (no shapes) are read as version 2 files with no shapes (ADR-0020).
 
@@ -50,9 +50,9 @@ from envelopelab.project.shapes import ShapeSpec
 from envelopelab.project.symmetry import SymmetryAxis
 
 PROJECT_FORMAT: Literal["envelopelab.project"] = "envelopelab.project"
-PROJECT_FORMAT_VERSION: Literal[10] = 10
+PROJECT_FORMAT_VERSION: Literal[11] = 11
 #: Older versions :func:`load_project_text` still reads (see :func:`migrate_project_data`).
-READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+READABLE_FORMAT_VERSIONS: tuple[int, ...] = (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11)
 PROJECT_SUFFIX = ".elproj"
 
 NotchEdge = Literal["left", "right", "bottom", "top"]
@@ -533,7 +533,7 @@ class Project(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     format: Literal["envelopelab.project"] = PROJECT_FORMAT
-    format_version: Literal[10] = PROJECT_FORMAT_VERSION
+    format_version: Literal[11] = PROJECT_FORMAT_VERSION
     state: DesignState
     locks: ConstraintLocks = Field(default_factory=ConstraintLocks)
     profile_target: ProfileTarget | None = None
@@ -598,6 +598,8 @@ def migrate_project_data(raw: dict[str, Any]) -> dict[str, Any]:
     lift-chart settings (``lift_chart``); they read with the default settings
     (ADR-0059). Versions 1 to 9 have no mean-temperature model (``lift_chart.mean_model``,
     ``mouth_excess``); they read with the defaults, the envelope-shape model (ADR-0060).
+    Versions 1 to 10 have no crown temperature limit setting (``lift_chart.top_limit``);
+    they read with the limit from the fabrics (ADR-0061).
 
     Raises
     ------

@@ -117,7 +117,8 @@ class LiftChartInputs:
     fixed_mass_sources : tuple of str
         Source tags of the values behind ``fixed_mass``.
     top_limit : PhysicalConstant
-        Highest permitted top temperature, K, with its source (fabric service limit).
+        Highest permitted top temperature, K, with its source (the fabrics' service
+        temperature, or the project's own limit).
     top_to_mean : PhysicalConstant
         Top minus mean internal temperature, K, with its source: the offset itself
         without ``stratification``, its floor with it.
@@ -126,6 +127,9 @@ class LiftChartInputs:
         mean follows from the envelope's shape and an assumed temperature profile, never
         less than ``top_to_mean`` below the top. Its ``minimum_offset`` must be
         ``top_to_mean``. None: a fixed offset.
+    fabric_limit : PhysicalConstant, optional
+        Lowest service temperature of the design's fabrics, K, when ``top_limit`` was set
+        separately (for the warning when the limit exceeds it).
     """
 
     volume: float
@@ -135,6 +139,13 @@ class LiftChartInputs:
     top_limit: PhysicalConstant
     top_to_mean: PhysicalConstant = DEFAULT_TOP_TO_MEAN
     stratification: StratificationModel | None = None
+    fabric_limit: PhysicalConstant | None = None
+
+    @property
+    def limit_above_fabric(self) -> bool:
+        """Whether the top-temperature limit exceeds the fabrics' service temperature
+        (not conservative: every output says so)."""
+        return self.fabric_limit is not None and self.top_limit.value > self.fabric_limit.value
 
     def mean_of(self, top_temperature: float, ambient_temperature: float) -> float:
         """Mean gas temperature for a crown temperature, K (ambient K matters only with

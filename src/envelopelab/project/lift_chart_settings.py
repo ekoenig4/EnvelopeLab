@@ -37,6 +37,8 @@ AMBIENT_RANGE = (223.15, 333.15)
 ISA_OFFSET_RANGE = (-50.0, 50.0)
 #: Lowest top temperature tabulated may lie between, K (0 degC to 200 degC).
 TOP_RANGE = (273.15, 473.15)
+#: Crown temperature limit range, K (0 degC to 300 degC).
+LIMIT_RANGE = (273.15, 573.15)
 #: Top-to-mean offset range, K.
 OFFSET_RANGE = (0.0, 100.0)
 
@@ -101,6 +103,10 @@ class LiftChartSettings(BaseModel):
     mouth_excess : TaggedValue
         Temperature rise above ambient at the mouth as a fraction of the rise at the
         crown, dimensionless (0 to 1), with its source tag (``envelope_shape`` only).
+    top_limit : TaggedValue or None
+        Crown (top) temperature limit, K (0 degC to 300 degC), with its source tag; None
+        (default) takes the lowest service temperature of the design's fabrics
+        (ADR-0061). A limit above the fabrics' is allowed but flagged on every output.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -115,6 +121,7 @@ class LiftChartSettings(BaseModel):
     top_to_mean: TaggedValue = Field(default_factory=_default_offset)
     mean_model: MeanModel = "envelope_shape"
     mouth_excess: TaggedValue = Field(default_factory=_default_excess)
+    top_limit: TaggedValue | None = None
 
     @field_validator("altitudes")
     @classmethod
@@ -175,6 +182,13 @@ class LiftChartSettings(BaseModel):
             )
         if not 0.0 <= self.mouth_excess.value <= 1.0:
             raise ValueError("mouth temperature rise must lie between 0 % and 100 %")
+        if self.top_limit is not None:
+            lo, hi = LIMIT_RANGE
+            if not lo <= self.top_limit.value <= hi:
+                raise ValueError(
+                    f"crown temperature limit must lie between {lo - CELSIUS_OFFSET:.0f} degC "
+                    f"and {hi - CELSIUS_OFFSET:.0f} degC"
+                )
         return self
 
     def is_default(self) -> bool:
@@ -233,6 +247,12 @@ class DisplayedSettings:
         Source tag of ``mouth_excess``.
     mouth_note : str
         Reference of ``mouth_excess``.
+    top_limit : float or None
+        Crown temperature limit, degC or degF; None: from the fabrics.
+    limit_source : {"datasheet", "measured", "assumed"}
+        Source tag of ``top_limit``.
+    limit_note : str
+        Reference of ``top_limit``.
     """
 
     units: UnitSystem
@@ -248,6 +268,9 @@ class DisplayedSettings:
     mouth_excess: float = 50.0
     mouth_source: SourceTagName = "assumed"
     mouth_note: str = ""
+    top_limit: float | None = None
+    limit_source: SourceTagName = "datasheet"
+    limit_note: str = ""
 
 
 def _temp_out(kelvin: float, units: UnitSystem) -> float:
@@ -298,6 +321,11 @@ def displayed(settings: LiftChartSettings, units: UnitSystem) -> DisplayedSettin
         mouth_excess=100.0 * settings.mouth_excess.value,
         mouth_source=settings.mouth_excess.source,
         mouth_note=settings.mouth_excess.note,
+        top_limit=None
+        if settings.top_limit is None
+        else _temp_out(settings.top_limit.value, units),
+        limit_source="datasheet" if settings.top_limit is None else settings.top_limit.source,
+        limit_note="" if settings.top_limit is None else settings.top_limit.note,
     )
 
 
@@ -324,6 +352,13 @@ def from_displayed(values: DisplayedSettings) -> LiftChartSettings:
         mean_model=values.mean_model,
         mouth_excess=TaggedValue(
             value=values.mouth_excess / 100.0, source=values.mouth_source, note=values.mouth_note
+        ),
+        top_limit=None
+        if values.top_limit is None
+        else TaggedValue(
+            value=_temp_in(values.top_limit, units),
+            source=values.limit_source,
+            note=values.limit_note,
         ),
     )
 

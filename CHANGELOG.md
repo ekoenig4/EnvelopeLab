@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Added: the crown temperature limit of the lift charts can be set per project in the
+  Lift charts tab (*Crown temperature limit*, with its source tag). By default it is still
+  the lowest service temperature of the design's fabrics (120 °C *assumed* when a fabric
+  is not in the library). A limit above the fabrics' is flagged in red on the form, the
+  charts and the PDF. Project format 11 (ADR-0061); older projects take the limit from the
+  fabrics. No result changes by default.
 - Changed: the gross-lift chart is read against the **crown** temperature (the one the
   pilot measures) instead of the mean gas temperature, so the crown limit is one red line
   and the shaded region means what it says; each point's lift still uses the mean that

@@ -121,6 +121,7 @@ nav:
       - ADR-0058: adr/ADR-0058-blender-live-link.md
       - ADR-0059: adr/ADR-0059-lift-chart-settings.md
       - ADR-0060: adr/ADR-0060-envelope-shape-mean-temperature.md
+      - ADR-0061: adr/ADR-0061-lift-chart-crown-limit.md
 theme:
   name: material
 markdown_extensions:

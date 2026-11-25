@@ -81,6 +81,7 @@ with *Edit ▸ Undo* like any edit.
 | **Lowest top temperature** | The first crown temperature tabulated in the CSV (then every 10 °C to the limit) | 0 °C to 200 °C |
 | **Mean temperature** | *From envelope shape* (default): an assumed linear profile weighted by the design's volume; or *Fixed offset* | |
 | **Mouth temperature rise** | Shape model: the mouth's rise above ambient as a share of the crown's, with its source and a note (lower is more conservative) | 0 to 100 % |
+| **Crown temperature limit** | The highest crown temperature the charts allow (the red line). *From the fabrics* (default): the lowest maximum service temperature of the design's fabrics in the fabric library (120 °C *assumed* for a fabric not in it). Untick to set this project's own limit with its source and a note. A limit above the fabrics' is flagged in red: loads and ceilings at it are not conservative | 0 to 300 °C |
 | **Minimum top minus mean** / **Top minus mean temperature** | The floor of the shape model, or the fixed offset, with its source (*assumed*, *measured* or *datasheet*) and a note | 0 to 100 K |
 
 Type lists separated by commas, semicolons or spaces. Thousands separators are fine:
@@ -121,7 +122,7 @@ lift matches such a spreadsheet (within 0.3 %, from the spreadsheet's rounded co
 |---|---|---|
 | Envelope volume | the design's lofted profile (as drawn) | geometry |
 | Envelope + rigging mass | the mass estimate (Shape mode outputs) | the fabric, tape and line values |
-| Top-temperature limit | lowest service temperature of the design's fabrics | the fabric's tag; 120 °C *assumed* when not in the library |
+| Top-temperature limit | lowest service temperature of the design's fabrics, or the project's own *Crown temperature limit* | the fabric's tag (120 °C *assumed* when not in the library), or the limit's own tag |
 | Mean temperature | top − the offset of *Design ▸ Lift charts…* (20 K by default) | the offset's tag: *assumed* by default |
 
 **Load** means everything carried besides the envelope and rigging: basket, burners,

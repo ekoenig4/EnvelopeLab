@@ -32,7 +32,9 @@ from envelopelab.export.lift_chart import (
     DesignCharts,
     design_charts,
     input_lines,
+    limit_warning,
     theory_sections,
+    top_temperature_limit,
 )
 from envelopelab.project.lift_chart_settings import LiftChartSettings, UnitSystem
 from envelopelab_app.controller import WorkspaceController
@@ -285,11 +287,16 @@ class LiftChartsPanel(QWidget):
             message = "Lift charts need a standard-gore design."
         else:
             outputs = self.controller.outputs
+            catalog = self.controller.fabrics.catalog()
+            fabric = self.controller.attempt(top_temperature_limit, session.design, catalog)
+            self.form.set_fabric_limit(
+                None if fabric is None else fabric.value, "" if fabric is None else fabric.source
+            )
             charts = self.controller.attempt(
                 design_charts,
                 session.design,
                 outputs,
-                self.controller.fabrics.catalog(),
+                catalog,
                 chosen,
             )
             if charts is None:
@@ -330,12 +337,15 @@ class LiftChartsPanel(QWidget):
         self.theory.setHtml(theory_html(theory_sections(charts.inputs, charts.axes)))
         self.theory.verticalScrollBar().setValue(scroll)
         limit = charts.inputs.top_limit
+        warning = limit_warning(charts.inputs)
         self.status.setText(
             screen_text(
                 "Static equilibrium, still air. Red: above the top-temperature limit "
                 f"({limit.value - 273.15:.0f} degC, {limit.source}), not permitted."
+                + (f" {warning}" if warning else "")
             )
         )
+        self.status.setStyleSheet("color: #b3302f; font-weight: bold;" if warning else "")
         self.notes.setText("\n\n".join(screen_text(line) for line in input_lines(charts.inputs)))
 
     # -- export -------------------------------------------------------------------------

@@ -215,9 +215,17 @@ Points are never dropped. Each one carries a status:
 
 ## 9. Top-temperature limit
 
-The limit is the lowest `max_service_temperature` among the fabrics of the design's
-zones, with that fabric's source tag. A fabric not in the library gets the generic
-120 °C, tagged **assumed** (`project.simulation.membrane_for_fabric`).
+By default the limit is the lowest `max_service_temperature` among the fabrics of the
+design's zones, with that fabric's source tag (`export.lift_chart.top_temperature_limit`).
+A fabric not in the library gets the generic 120 °C, tagged **assumed**
+(`project.simulation.membrane_for_fabric`).
+
+A project can set its own limit instead (*Lift charts ▸ Crown temperature limit*,
+`LiftChartSettings.top_limit`, with its source tag; ADR-0061): for example a
+manufacturer's limit below the fabric's rating, or a datasheet value for a fabric that is
+not in the library. A limit **above** the fabrics' service temperature is allowed but not
+conservative: the form, the charts' status line, the inputs list and the PDF say so in
+red (`LiftChartInputs.limit_above_fabric`).
 
 ## 10. Assumptions and valid range
 

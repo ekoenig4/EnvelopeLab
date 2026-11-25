@@ -159,6 +159,37 @@ class LiftChartSettingsForm(QWidget):
         offset_row.addWidget(self.offset)
         offset_row.addWidget(self._unit_label("difference"))
         offset_row.addWidget(self.source)
+        self.limit_auto = QCheckBox("From the fabrics")
+        self.limit_auto.setObjectName("liftLimitAuto")
+        self.limit_auto.setToolTip(
+            "Use the lowest maximum service temperature of the design's fabrics (fabric "
+            "library); untick to set this project's own crown temperature limit."
+        )
+        self.limit = QDoubleSpinBox()
+        self.limit.setObjectName("liftLimit")
+        self.limit.setRange(-100.0, 700.0)
+        self.limit.setDecimals(0)
+        self.limit_source = QComboBox()
+        self.limit_source.setObjectName("liftLimitSource")
+        self.limit_source.addItems(("datasheet", "measured", "assumed"))
+        self.limit_note = QLineEdit()
+        self.limit_note.setObjectName("liftLimitNote")
+        self.limit_note.setPlaceholderText("Where the limit comes from (e.g. fabric datasheet)")
+        self.limit_hint = QLabel()
+        self.limit_hint.setObjectName("liftLimitHint")
+        self.limit_hint.setWordWrap(True)
+        self.limit_hint.setProperty("role", "muted")
+        self.limit_warning = QLabel()
+        self.limit_warning.setObjectName("liftLimitWarning")
+        self.limit_warning.setWordWrap(True)
+        self.limit_warning.setStyleSheet("color: #b3302f; font-weight: bold;")
+        #: Lowest fabric service temperature, K, and its source (set by the owner).
+        self._fabric_limit: tuple[float, str] | None = None
+        limit_row = QHBoxLayout()
+        limit_row.addWidget(self.limit)
+        limit_row.addWidget(self._unit_label("temperature"))
+        limit_row.addWidget(self.limit_auto, 1)
+        limit_row.addWidget(self.limit_source)
         mouth_row = QHBoxLayout()
         mouth_row.addWidget(self.mouth)
         mouth_row.addWidget(QLabel("of the crown's rise above ambient"), 1)
@@ -170,6 +201,11 @@ class LiftChartSettingsForm(QWidget):
         form.addRow("ISA deviations", self._with_unit(self.isa, "difference"))
         form.addRow("Load axis up to", load_row)
         form.addRow("Lowest top temperature", top_row)
+        form.addRow("Crown temperature limit", limit_row)
+        self.limit_note_label = QLabel("Limit source note")
+        form.addRow(self.limit_note_label, self.limit_note)
+        form.addRow("", self.limit_hint)
+        form.addRow("", self.limit_warning)
         form.addRow("Mean temperature", self.mean_model)
         self.mouth_label = QLabel("Mouth temperature rise")
         form.addRow(self.mouth_label, mouth_row)
@@ -193,12 +229,14 @@ class LiftChartSettingsForm(QWidget):
         self._units: UnitSystem = units
         self.show_settings(settings)
         self.units.currentIndexChanged.connect(self._units_changed)
-        for line in (self.altitudes, self.ambients, self.isa, self.note, self.mouth_note):
+        lines = (self.altitudes, self.ambients, self.isa, self.note, self.mouth_note)
+        for line in (*lines, self.limit_note):
             line.textChanged.connect(self._changed)
-        for spin in (self.max_load, self.lowest_top, self.offset, self.mouth):
+        for spin in (self.max_load, self.lowest_top, self.offset, self.mouth, self.limit):
             spin.valueChanged.connect(self._changed)
         self.auto_load.toggled.connect(self._changed)
-        for combo in (self.source, self.mean_model, self.mouth_source):
+        self.limit_auto.toggled.connect(self._changed)
+        for combo in (self.source, self.mean_model, self.mouth_source, self.limit_source):
             combo.currentIndexChanged.connect(self._changed)
 
     # -- layout helpers -----------------------------------------------------------------
@@ -233,6 +271,41 @@ class LiftChartSettingsForm(QWidget):
         """The units typed in."""
         return cast(UnitSystem, self.units.currentData())
 
+    def _shown_temperature(self, kelvin: float) -> float:
+        celsius = kelvin - 273.15
+        return celsius if self._units == "metric" else celsius * 1.8 + 32.0
+
+    def set_fabric_limit(self, kelvin: float | None, source: str = "") -> None:
+        """The lowest service temperature of the design's fabrics, K, and its source tag
+        (None: unknown): shown beside the limit and checked against a limit typed."""
+        self._fabric_limit = None if kelvin is None else (kelvin, source)
+        if self.limit_auto.isChecked() and kelvin is not None:
+            self._loading = True
+            try:
+                self.limit.setValue(self._shown_temperature(kelvin))
+            finally:
+                self._loading = False
+        self._show_limit_check(not self.limit_auto.isChecked())
+
+    def _show_limit_check(self, manual: bool) -> None:
+        unit = UNIT_LABELS[self._units]["temperature"]
+        if self._fabric_limit is None:
+            self.limit_hint.setText("")
+            self.limit_warning.setText("")
+            return
+        kelvin, source = self._fabric_limit
+        fabric = self._shown_temperature(kelvin)
+        self.limit_hint.setText(f"The design's fabrics allow {fabric:.0f} {unit} [{source}].")
+        typed = float(self.limit.value())
+        above = manual and typed > fabric + 1e-9
+        self.limit_warning.setText(
+            f"Above the fabrics' service temperature by {typed - fabric:.0f} "
+            f"{UNIT_LABELS[self._units]['difference']}: loads and ceilings at this limit are "
+            "not conservative."
+            if above
+            else ""
+        )
+
     def show_settings(self, settings: LiftChartSettings) -> None:
         """Fill the fields with ``settings`` (SI) in the current units; emits nothing."""
         self._loading = True
@@ -257,6 +330,13 @@ class LiftChartSettingsForm(QWidget):
             self.mouth.setValue(shown.mouth_excess)
             self.mouth_source.setCurrentText(shown.mouth_source)
             self.mouth_note.setText(shown.mouth_note)
+            self.limit_auto.setChecked(shown.top_limit is None)
+            if shown.top_limit is not None:
+                self.limit.setValue(shown.top_limit)
+            elif self._fabric_limit is not None:
+                self.limit.setValue(self._shown_temperature(self._fabric_limit[0]))
+            self.limit_source.setCurrentText(shown.limit_source)
+            self.limit_note.setText(shown.limit_note)
         finally:
             self._loading = False
         self._validate()
@@ -277,6 +357,9 @@ class LiftChartSettingsForm(QWidget):
             mouth_excess=float(self.mouth.value()),
             mouth_source=cast(SourceTagName, self.mouth_source.currentText()),
             mouth_note=self.mouth_note.text().strip(),
+            top_limit=None if self.limit_auto.isChecked() else float(self.limit.value()),
+            limit_source=cast(SourceTagName, self.limit_source.currentText()),
+            limit_note=self.limit_note.text().strip(),
         )
         return from_displayed(values)
 
@@ -291,6 +374,10 @@ class LiftChartSettingsForm(QWidget):
             self.mouth_note_label,
         ):
             widget.setEnabled(shape)
+        manual = not self.limit_auto.isChecked()
+        for widget in (self.limit, self.limit_source, self.limit_note, self.limit_note_label):
+            widget.setEnabled(manual)
+        self._show_limit_check(manual)
         # With the shape model the offset is a floor: the profile may need more.
         self.offset_label.setText(
             "Minimum top minus mean" if shape else "Top minus mean temperature"

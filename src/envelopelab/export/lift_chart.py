@@ -168,6 +168,7 @@ def chart_inputs(
     top_to_mean: PhysicalConstant = DEFAULT_TOP_TO_MEAN,
     stratify: bool = True,
     mouth_excess: PhysicalConstant = DEFAULT_MOUTH_EXCESS,
+    top_limit: PhysicalConstant | None = None,
 ) -> LiftChartInputs | None:
     """The lift-chart inputs of a gore design, or None when its mass is not estimated.
 
@@ -188,6 +189,10 @@ def chart_inputs(
         offset.
     mouth_excess : PhysicalConstant, optional
         Mouth temperature rise as a fraction of the crown's, dimensionless (``stratify``).
+    top_limit : PhysicalConstant, optional
+        Crown temperature limit, K, with its source; default the lowest service
+        temperature of the design's fabrics (:func:`top_temperature_limit`), which is
+        kept for comparison when a limit is given.
 
     Returns
     -------
@@ -195,6 +200,7 @@ def chart_inputs(
     """
     if outputs is None or outputs.envelope_mass is None:
         return None
+    fabric_limit = top_temperature_limit(design, fabrics)
     stratification = None
     if stratify:
         from envelopelab.project.gore_design import design_profile
@@ -210,9 +216,10 @@ def chart_inputs(
         volume_note="lofted design profile (as drawn, not a solved inflated shape)",
         fixed_mass=outputs.envelope_mass + (outputs.rigging_mass or 0.0),
         fixed_mass_sources=outputs.sources,
-        top_limit=top_temperature_limit(design, fabrics),
+        top_limit=fabric_limit if top_limit is None else top_limit,
         top_to_mean=top_to_mean,
         stratification=stratification,
+        fabric_limit=None if top_limit is None else fabric_limit,
     )
 
 
@@ -844,8 +851,7 @@ def input_lines(inputs: LiftChartInputs) -> list[str]:
         f"Envelope + rigging mass: {inputs.fixed_mass:,.1f} kg / {lb(inputs.fixed_mass):,.0f} lb "
         f"(sources: {sources}). "
         "Load = everything else: basket, burners, fuel, occupants.",
-        f"Top-temperature limit: {c_f(inputs.top_limit.value - CELSIUS_OFFSET)} "
-        f"[{inputs.top_limit.source}] - {inputs.top_limit.reference}.",
+        *limit_lines(inputs),
         *_mean_model_lines(inputs, short=True),
         "Equilibrium: V (rho_amb - rho_int) = envelope + rigging + load; dry air, ISA pressure "
         "at the pressure altitude, ambient temperature as given at that altitude; still "
@@ -855,6 +861,38 @@ def input_lines(inputs: LiftChartInputs) -> list[str]:
         "is slightly lower. Keep a margin: these are static equilibrium values.",
         SAFETY_NOTICE,
     ]
+
+
+def limit_lines(inputs: LiftChartInputs) -> list[str]:
+    """Where the crown temperature limit comes from, and a warning when it exceeds the
+    fabrics' service temperature."""
+    limit = inputs.top_limit
+    fabric = inputs.fabric_limit
+    if fabric is None:
+        return [
+            f"Top-temperature limit: {c_f(limit.value - CELSIUS_OFFSET)} "
+            f"[{limit.source}] - {limit.reference}."
+        ]
+    out = [
+        f"Top-temperature limit: {c_f(limit.value - CELSIUS_OFFSET)} set for this project "
+        f"[{limit.source}] - {limit.reference}. The fabrics' service temperature is "
+        f"{c_f(fabric.value - CELSIUS_OFFSET)} [{fabric.source}] - {fabric.reference}."
+    ]
+    if inputs.limit_above_fabric:
+        out.append(limit_warning(inputs))
+    return out
+
+
+def limit_warning(inputs: LiftChartInputs) -> str:
+    """The warning when the limit exceeds the fabrics' service temperature ("" if not)."""
+    if not inputs.limit_above_fabric or inputs.fabric_limit is None:
+        return ""
+    excess = inputs.top_limit.value - inputs.fabric_limit.value
+    return (
+        f"WARNING: the limit is {excess:.0f} K above the fabrics' service temperature "
+        f"{c_f(inputs.fabric_limit.value - CELSIUS_OFFSET)}: loads and ceilings at the limit "
+        "are not conservative."
+    )
 
 
 def _mean_model_lines(inputs: LiftChartInputs, short: bool = False) -> list[str]:
@@ -1013,8 +1051,7 @@ def theory_sections(
             [
                 f"Volume V = {inputs.volume:,.0f} m3 / {inputs.volume / M_PER_FT**3:,.0f} "
                 f"cu ft: {inputs.volume_note}.",
-                f"Top-temperature limit {c_f(limit - CELSIUS_OFFSET)} "
-                f"[{inputs.top_limit.source}: {inputs.top_limit.reference}].",
+                *limit_lines(inputs),
             ],
         ),
         (
@@ -1071,7 +1108,10 @@ def write_lift_chart_pdf(
     y = 225.0
     for line in input_lines(inputs):
         for text in _wrap(pdf_text(line), 150):
-            canvas.text(margin, y, text, 7.5, color=MUTED if line == SAFETY_NOTICE else (0, 0, 0))
+            colour = MUTED if line == SAFETY_NOTICE else (0.0, 0.0, 0.0)
+            if line.startswith("WARNING"):
+                colour = RED
+            canvas.text(margin, y, text, 7.5, colour == RED, colour)
             y -= 10
         y -= 2
     legend_x = margin + 560
@@ -1211,8 +1251,15 @@ def design_charts(
         s.mouth_excess.source,
         s.mouth_excess.note or "lift-chart settings",
     )
+    limit = (
+        None
+        if s.top_limit is None
+        else PhysicalConstant(
+            s.top_limit.value, "K", s.top_limit.source, s.top_limit.note or "lift-chart settings"
+        )
+    )
     inputs = chart_inputs(
-        design, outputs, fabrics, offset, s.mean_model == "envelope_shape", excess
+        design, outputs, fabrics, offset, s.mean_model == "envelope_shape", excess, limit
     )
     if inputs is None:
         return None
