@@ -41,6 +41,19 @@ TOP_RANGE = (273.15, 473.15)
 OFFSET_RANGE = (0.0, 100.0)
 
 
+MeanModel = Literal["envelope_shape", "fixed_offset"]
+
+
+def _default_excess() -> TaggedValue:
+    from envelopelab.stratification import DEFAULT_MOUTH_EXCESS
+
+    return TaggedValue(
+        value=DEFAULT_MOUTH_EXCESS.value,
+        source=DEFAULT_MOUTH_EXCESS.source,
+        note=DEFAULT_MOUTH_EXCESS.reference,
+    )
+
+
 def _default_offset() -> TaggedValue:
     return TaggedValue(
         value=DEFAULT_TOP_TO_MEAN.value,
@@ -78,7 +91,16 @@ class LiftChartSettings(BaseModel):
     lowest_top_temperature : float
         Lowest top temperature tabulated in the CSV, K (0 degC to 200 degC).
     top_to_mean : TaggedValue
-        Top minus mean internal gas temperature, K (0 to 100), with its source tag.
+        Top minus mean internal gas temperature, K (0 to 100), with its source tag: the
+        offset with ``fixed_offset``, its floor with ``envelope_shape``.
+    mean_model : {"envelope_shape", "fixed_offset"}
+        How the mean gas temperature follows from the crown temperature:
+        ``envelope_shape`` (default, ADR-0060) from the envelope's shape and an assumed
+        linear temperature profile (:mod:`envelopelab.stratification`), never less than
+        ``top_to_mean`` below the top; ``fixed_offset`` exactly ``top_to_mean`` below.
+    mouth_excess : TaggedValue
+        Temperature rise above ambient at the mouth as a fraction of the rise at the
+        crown, dimensionless (0 to 1), with its source tag (``envelope_shape`` only).
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -91,6 +113,8 @@ class LiftChartSettings(BaseModel):
     max_load: float | None = None
     lowest_top_temperature: float = 70.0 + CELSIUS_OFFSET
     top_to_mean: TaggedValue = Field(default_factory=_default_offset)
+    mean_model: MeanModel = "envelope_shape"
+    mouth_excess: TaggedValue = Field(default_factory=_default_excess)
 
     @field_validator("altitudes")
     @classmethod
@@ -149,6 +173,8 @@ class LiftChartSettings(BaseModel):
             raise ValueError(
                 f"top-to-mean temperature offset must lie between {lo:.0f} K and {hi:.0f} K"
             )
+        if not 0.0 <= self.mouth_excess.value <= 1.0:
+            raise ValueError("mouth temperature rise must lie between 0 % and 100 %")
         return self
 
     def is_default(self) -> bool:
@@ -199,6 +225,14 @@ class DisplayedSettings:
         Source tag of ``top_to_mean``.
     note : str
         Reference of ``top_to_mean``.
+    mean_model : {"envelope_shape", "fixed_offset"}
+        See :class:`LiftChartSettings`.
+    mouth_excess : float
+        Mouth temperature rise, % of the crown's rise above ambient.
+    mouth_source : {"datasheet", "measured", "assumed"}
+        Source tag of ``mouth_excess``.
+    mouth_note : str
+        Reference of ``mouth_excess``.
     """
 
     units: UnitSystem
@@ -210,6 +244,10 @@ class DisplayedSettings:
     top_to_mean: float
     source: SourceTagName
     note: str
+    mean_model: MeanModel = "envelope_shape"
+    mouth_excess: float = 50.0
+    mouth_source: SourceTagName = "assumed"
+    mouth_note: str = ""
 
 
 def _temp_out(kelvin: float, units: UnitSystem) -> float:
@@ -256,6 +294,10 @@ def displayed(settings: LiftChartSettings, units: UnitSystem) -> DisplayedSettin
         top_to_mean=_diff_out(settings.top_to_mean.value, units),
         source=settings.top_to_mean.source,
         note=settings.top_to_mean.note,
+        mean_model=settings.mean_model,
+        mouth_excess=100.0 * settings.mouth_excess.value,
+        mouth_source=settings.mouth_excess.source,
+        mouth_note=settings.mouth_excess.note,
     )
 
 
@@ -278,6 +320,10 @@ def from_displayed(values: DisplayedSettings) -> LiftChartSettings:
         lowest_top_temperature=_temp_in(values.lowest_top_temperature, units),
         top_to_mean=TaggedValue(
             value=_diff_in(values.top_to_mean, units), source=values.source, note=values.note
+        ),
+        mean_model=values.mean_model,
+        mouth_excess=TaggedValue(
+            value=values.mouth_excess / 100.0, source=values.mouth_source, note=values.mouth_note
         ),
     )
 

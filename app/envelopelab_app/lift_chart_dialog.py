@@ -36,6 +36,7 @@ from envelopelab.project.lift_chart_settings import (
     UNIT_LABELS,
     DisplayedSettings,
     LiftChartSettings,
+    MeanModel,
     UnitSystem,
     displayed,
     error_text,
@@ -49,6 +50,10 @@ UNIT_CHOICES: tuple[tuple[UnitSystem, str], ...] = (
     ("english", "English (ft, °F, lb)"),
 )
 SOURCES = ("assumed", "measured", "datasheet")
+MEAN_MODELS: tuple[tuple[MeanModel, str], ...] = (
+    ("envelope_shape", "From envelope shape (assumed linear profile)"),
+    ("fixed_offset", "Fixed offset below the crown"),
+)
 #: Load-axis end shown while the axis is automatic, kg.
 AUTOMATIC_START = 1000.0
 
@@ -117,6 +122,31 @@ class LiftChartSettingsForm(QWidget):
         self.note = QLineEdit()
         self.note.setObjectName("liftOffsetNote")
         self.note.setPlaceholderText("Where the value comes from")
+        self.mean_model = QComboBox()
+        self.mean_model.setObjectName("liftMeanModel")
+        for model_key, model_text in MEAN_MODELS:
+            self.mean_model.addItem(model_text, model_key)
+        self.mean_model.setToolTip(
+            "From envelope shape: the gas is assumed to warm linearly from the mouth to the "
+            "crown, and the mean is weighted by where the design's volume lies; never less "
+            "than the offset below the crown. Fixed offset: the mean is exactly the offset "
+            "below the crown."
+        )
+        self.mouth = QDoubleSpinBox()
+        self.mouth.setObjectName("liftMouthExcess")
+        self.mouth.setRange(0.0, 100.0)
+        self.mouth.setDecimals(0)
+        self.mouth.setSuffix(" %")
+        self.mouth.setToolTip(
+            "Temperature rise above ambient at the mouth, as a share of the crown's rise. "
+            "Lower means a cooler lower envelope: less lift, more conservative."
+        )
+        self.mouth_source = QComboBox()
+        self.mouth_source.setObjectName("liftMouthSource")
+        self.mouth_source.addItems(SOURCES)
+        self.mouth_note = QLineEdit()
+        self.mouth_note.setObjectName("liftMouthNote")
+        self.mouth_note.setPlaceholderText("Where the mouth value comes from")
         self._suffix: list[QLabel] = []
         load_row = QHBoxLayout()
         load_row.addWidget(self.max_load)
@@ -129,6 +159,10 @@ class LiftChartSettingsForm(QWidget):
         offset_row.addWidget(self.offset)
         offset_row.addWidget(self._unit_label("difference"))
         offset_row.addWidget(self.source)
+        mouth_row = QHBoxLayout()
+        mouth_row.addWidget(self.mouth)
+        mouth_row.addWidget(QLabel("of the crown's rise above ambient"), 1)
+        mouth_row.addWidget(self.mouth_source)
         form = QFormLayout()
         form.addRow("Units", self.units)
         form.addRow("Altitudes", self._with_unit(self.altitudes, "altitude"))
@@ -136,7 +170,13 @@ class LiftChartSettingsForm(QWidget):
         form.addRow("ISA deviations", self._with_unit(self.isa, "difference"))
         form.addRow("Load axis up to", load_row)
         form.addRow("Lowest top temperature", top_row)
-        form.addRow("Top minus mean temperature", offset_row)
+        form.addRow("Mean temperature", self.mean_model)
+        self.mouth_label = QLabel("Mouth temperature rise")
+        form.addRow(self.mouth_label, mouth_row)
+        self.mouth_note_label = QLabel("Mouth source note")
+        form.addRow(self.mouth_note_label, self.mouth_note)
+        self.offset_label = QLabel("Top minus mean temperature")
+        form.addRow(self.offset_label, offset_row)
         form.addRow("Source note", self.note)
         self.error = QLabel()
         self.error.setObjectName("liftError")
@@ -153,12 +193,13 @@ class LiftChartSettingsForm(QWidget):
         self._units: UnitSystem = units
         self.show_settings(settings)
         self.units.currentIndexChanged.connect(self._units_changed)
-        for line in (self.altitudes, self.ambients, self.isa, self.note):
+        for line in (self.altitudes, self.ambients, self.isa, self.note, self.mouth_note):
             line.textChanged.connect(self._changed)
-        for spin in (self.max_load, self.lowest_top, self.offset):
+        for spin in (self.max_load, self.lowest_top, self.offset, self.mouth):
             spin.valueChanged.connect(self._changed)
         self.auto_load.toggled.connect(self._changed)
-        self.source.currentIndexChanged.connect(self._changed)
+        for combo in (self.source, self.mean_model, self.mouth_source):
+            combo.currentIndexChanged.connect(self._changed)
 
     # -- layout helpers -----------------------------------------------------------------
 
@@ -210,6 +251,12 @@ class LiftChartSettingsForm(QWidget):
             self.offset.setValue(shown.top_to_mean)
             self.source.setCurrentText(shown.source)
             self.note.setText(shown.note)
+            self.mean_model.setCurrentIndex(
+                next(k for k, (m, _t) in enumerate(MEAN_MODELS) if m == shown.mean_model)
+            )
+            self.mouth.setValue(shown.mouth_excess)
+            self.mouth_source.setCurrentText(shown.mouth_source)
+            self.mouth_note.setText(shown.mouth_note)
         finally:
             self._loading = False
         self._validate()
@@ -226,11 +273,28 @@ class LiftChartSettingsForm(QWidget):
             top_to_mean=float(self.offset.value()),
             source=cast(SourceTagName, self.source.currentText()),
             note=self.note.text().strip(),
+            mean_model=cast(MeanModel, self.mean_model.currentData()),
+            mouth_excess=float(self.mouth.value()),
+            mouth_source=cast(SourceTagName, self.mouth_source.currentText()),
+            mouth_note=self.mouth_note.text().strip(),
         )
         return from_displayed(values)
 
     def _validate(self) -> None:
         self.max_load.setEnabled(not self.auto_load.isChecked())
+        shape = self.mean_model.currentData() == "envelope_shape"
+        for widget in (
+            self.mouth,
+            self.mouth_source,
+            self.mouth_note,
+            self.mouth_label,
+            self.mouth_note_label,
+        ):
+            widget.setEnabled(shape)
+        # With the shape model the offset is a floor: the profile may need more.
+        self.offset_label.setText(
+            "Minimum top minus mean" if shape else "Top minus mean temperature"
+        )
         try:
             self._result = self._read()
         except ValueError as exc:  # pydantic's ValidationError is a ValueError

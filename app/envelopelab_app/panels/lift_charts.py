@@ -48,6 +48,7 @@ UNITS_KEY = "lift_chart/units"
 CHART_TABS = (
     ("loading", "Maximum load"),
     ("gross", "Gross lift"),
+    ("stratification", "Stratification"),
     ("temperature", "Top temperature"),
     ("ceiling", "Ceiling"),
     ("theory", "Theory"),
@@ -146,6 +147,14 @@ class LiftChartsPanel(QWidget):
         self.ceiling = LiftChartView()
         self.ceiling.setObjectName("liftCeilingChart")
         self.temperatures = [LiftChartView() for _ in range(4)]
+        self.stratification = [LiftChartView() for _ in range(2)]
+        strat_page = QWidget()
+        strat_page.setObjectName("liftStratificationCharts")
+        strat_grid = QGridLayout(strat_page)
+        strat_grid.setContentsMargins(0, 0, 0, 0)
+        for k, view in enumerate(self.stratification):
+            view.setObjectName(f"liftStratificationChart{k}")
+            strat_grid.addWidget(view, 0, k)
         self.gross = [LiftChartView() for _ in range(4)]
         gross_page = QWidget()
         gross_page.setObjectName("liftGrossCharts")
@@ -166,7 +175,14 @@ class LiftChartsPanel(QWidget):
         self.tabs = QTabWidget()
         self.tabs.setObjectName("liftChartTabs")
         temperature_page.setObjectName("liftTemperatureCharts")
-        pages = (self.loading, gross_page, temperature_page, self.ceiling, self.theory)
+        pages = (
+            self.loading,
+            gross_page,
+            strat_page,
+            temperature_page,
+            self.ceiling,
+            self.theory,
+        )
         for (_name, label), page in zip(CHART_TABS, pages, strict=True):
             self.tabs.addTab(page, label)
         self.status = QLabel()
@@ -285,7 +301,8 @@ class LiftChartsPanel(QWidget):
     def _show(self, message: str) -> None:
         charts = self.charts
         if charts is None:
-            for view in (self.loading, self.ceiling, *self.temperatures, *self.gross):
+            every = (self.loading, self.ceiling, *self.temperatures, *self.gross)
+            for view in (*every, *self.stratification):
                 view.set_plot(None, message)
             self.status.setText(message)
             self.notes.setText("")
@@ -294,6 +311,13 @@ class LiftChartsPanel(QWidget):
         plots = charts.plots
         self.loading.set_plot(plots.loading)
         self.ceiling.set_plot(plots.ceiling)
+        if not plots.stratification:
+            note = "Fixed offset: no temperature profile (choose 'From envelope shape')."
+            for view in self.stratification:
+                view.set_plot(None, note)
+        else:
+            for view, plot in zip(self.stratification, plots.stratification, strict=True):
+                view.set_plot(plot)
         for views, shown in ((self.temperatures, plots.temperatures), (self.gross, plots.gross)):
             for k, view in enumerate(views):
                 if k < len(shown):

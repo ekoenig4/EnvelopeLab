@@ -3,6 +3,16 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed (changes results): the lift charts now take the mean gas temperature from the
+  envelope's shape by default (level-1 stratification, ADR-0060): an assumed linear
+  temperature profile from the mouth (50 % of the crown's rise above ambient, *assumed*)
+  to the crown, averaged over the design's volume by height, never less than the 20 K
+  offset below the crown (now a floor). On the generic test envelopes the offset at the
+  crown limit goes from 20 K to 31 / 27 / 23 K at 0 / 15 / 30 °C ambient, and the load at
+  the limit falls by 9 / 7 / 4 % (2,605 m³: 826 → 753 kg, 651 → 605 kg,
+  493 → 474 kg at sea level). *Fixed offset* restores the previous charts. New
+  Stratification chart (tab and PDF page) with the profile and its pressure. Project
+  format 10; older projects open with the defaults.
 - Added: the **gross lift vs mean envelope temperature** chart (the classic builders'
   lift chart; one per altitude, with the envelope + rigging and design-load lines and the
   mean temperature at which the crown reaches its limit) in the Lift charts tab and as

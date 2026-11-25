@@ -27,7 +27,8 @@ never hidden. The builder is responsible for airworthiness.
 
 ## 3. Repository layout
     src/envelopelab/   core library, installed as `envelopelab`
-                       (now: atmosphere, geometry, mass_estimate, lift_chart, design, materials,
+                       (now: atmosphere, geometry, mass_estimate, lift_chart,
+                       stratification, design, materials,
                        commands, validation, io, assembly, solvers (preview
                        dynamic-relaxation solver), features (special-shape
                        appendages and parametric primitives), report (Reality

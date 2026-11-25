@@ -96,8 +96,13 @@ KEYS: tuple[tuple[str, str], ...] = (
         "(K, 1 to 6), `isa_offsets` (K, 1 to 6 ISA deviations of the ceiling curves), "
         "`max_load` (kg end of the load axis; null: the most the balloon lifts), "
         "`lowest_top_temperature` (K) and `top_to_mean` (K, with `source` "
-        "`datasheet | measured | assumed` and `note`). Written only when they differ from "
-        "the defaults; older files read with the defaults.",
+        "`datasheet | measured | assumed` and `note`; the offset with `fixed_offset`, its "
+        "floor with `envelope_shape`), and from version 10 (ADR-0060) `mean_model` "
+        "(`envelope_shape`, the default: the mean gas temperature from the envelope's shape "
+        "and a linear temperature profile; or `fixed_offset`) and `mouth_excess` (the "
+        "mouth temperature rise as a fraction of the crown's rise above ambient, 0 to 1, "
+        "with `source` and `note`). Written only when they differ from the defaults; older "
+        "files read with the defaults.",
     ),
     ("`snapshots`", "Named copies of `state` with their design content hash."),
     ("`versions`", "Committed design versions (`version_id`, `parent_id`, message, state)."),

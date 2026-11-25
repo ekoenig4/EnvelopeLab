@@ -28,7 +28,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from envelopelab.atmosphere import CELSIUS_OFFSET, PhysicalConstant, isa
+from envelopelab.atmosphere import (
+    CELSIUS_OFFSET,
+    PhysicalConstant,
+    differential_pressure,
+    gas_density,
+    isa,
+)
 from envelopelab.export.documents import SAFETY_NOTICE, pdf_text
 from envelopelab.lift_chart import (
     DEFAULT_TOP_TO_MEAN,
@@ -40,6 +46,11 @@ from envelopelab.lift_chart import (
     lift_chart,
     lift_mass,
     nice_step,
+)
+from envelopelab.stratification import (
+    DEFAULT_MOUTH_EXCESS,
+    StratificationModel,
+    VolumeDistribution,
 )
 
 if TYPE_CHECKING:
@@ -154,6 +165,8 @@ def chart_inputs(
     outputs: GoreOutputs | None,
     fabrics: Any = None,
     top_to_mean: PhysicalConstant = DEFAULT_TOP_TO_MEAN,
+    stratify: bool = True,
+    mouth_excess: PhysicalConstant = DEFAULT_MOUTH_EXCESS,
 ) -> LiftChartInputs | None:
     """The lift-chart inputs of a gore design, or None when its mass is not estimated.
 
@@ -166,7 +179,14 @@ def chart_inputs(
     fabrics : FabricLibraryRepository or FabricCatalog, optional
         Fabric library for the top-temperature limit.
     top_to_mean : PhysicalConstant, optional
-        Top minus mean internal temperature, K.
+        Top minus mean internal temperature, K: the offset, or the floor when
+        ``stratify``.
+    stratify : bool, optional
+        Take the mean from the envelope's shape and an assumed linear temperature
+        profile (:mod:`envelopelab.stratification`; the default, ADR-0060); False: a fixed
+        offset.
+    mouth_excess : PhysicalConstant, optional
+        Mouth temperature rise as a fraction of the crown's, dimensionless (``stratify``).
 
     Returns
     -------
@@ -174,6 +194,16 @@ def chart_inputs(
     """
     if outputs is None or outputs.envelope_mass is None:
         return None
+    stratification = None
+    if stratify:
+        from envelopelab.project.gore_design import design_profile
+
+        profile = design_profile(design)
+        stratification = StratificationModel(
+            VolumeDistribution.from_profile(profile.r, profile.z, outputs.volume),
+            mouth_excess,
+            top_to_mean,
+        )
     return LiftChartInputs(
         volume=outputs.volume,
         volume_note="lofted design profile (as drawn, not a solved inflated shape)",
@@ -181,6 +211,7 @@ def chart_inputs(
         fixed_mass_sources=outputs.sources,
         top_limit=top_temperature_limit(design, fabrics),
         top_to_mean=top_to_mean,
+        stratification=stratification,
     )
 
 
@@ -594,14 +625,22 @@ def _gross_plot(
     payload: float | None,
 ) -> Plot:
     limit_c = inputs.top_limit.value - CELSIUS_OFFSET
-    offset = inputs.top_to_mean.value
-    mean_limit_c = limit_c - offset
     x_range = (MEAN_AXIS_START_C, 10.0 * math.ceil((limit_c + 10.0) / 10.0))
     xs = _sweep(*x_range)
     series = []
     highs = [inputs.fixed_mass + (payload or 0.0)]
+    # The mean at which the crown reaches its limit depends on the ambient temperature
+    # with stratification: each curve ends there (beyond is not permitted).
+    mean_limits = [
+        inputs.mean_of(inputs.top_limit.value, t) - CELSIUS_OFFSET
+        for t in axes.ambient_temperatures
+    ]
     for k, t_amb in enumerate(axes.ambient_temperatures):
-        pts = [(x, lift_mass(inputs.volume, altitude, t_amb, x + CELSIUS_OFFSET)) for x in xs]
+        end = mean_limits[k]
+        pts = [
+            (x, lift_mass(inputs.volume, altitude, t_amb, x + CELSIUS_OFFSET))
+            for x in sorted({*(x for x in xs if x < end), end})
+        ]
         highs += [y for _, y in pts]
         series.append(
             Series(f"ambient {c_f(t_amb - CELSIUS_OFFSET)}", pts, COLOURS[k % len(COLOURS)])
@@ -623,11 +662,103 @@ def _gross_plot(
         (0.0, _ceil_to(max(highs), step)),
         series,
         hlines=hlines,
-        vlines=[(mean_limit_c, f"crown {limit_c:.0f} degC = mean {mean_limit_c:.0f} degC", RED)],
-        shade_right=(mean_limit_c, "CROWN ABOVE LIMIT"),
+        vlines=[(min(mean_limits), _limit_label(limit_c, mean_limits), RED)],
+        # Shaded where the crown is above its limit at every ambient temperature shown.
+        shade_right=(max(mean_limits), "CROWN ABOVE LIMIT"),
         legend_left=True,
         x2=F_AXIS,
         y2=LB_AXIS,
+    )
+
+
+def _limit_label(limit_c: float, means: list[float]) -> str:
+    lo, hi = min(means), max(means)
+    span = f"{lo:.0f} degC" if round(hi) == round(lo) else f"{lo:.0f}-{hi:.0f} degC"
+    return f"crown {limit_c:.0f} degC = mean {span} (curve ends)"
+
+
+def half_volume_height(dist: VolumeDistribution) -> float:
+    """Height above the mouth below which half the gas volume lies, m."""
+    import numpy as np
+
+    cumulative = np.cumsum(dist.weights)
+    return float(np.interp(0.5, cumulative, dist.heights))
+
+
+def _profile_plot(
+    inputs: LiftChartInputs, axes: ChartAxes, box: tuple[float, float, float, float]
+) -> Plot | None:
+    strat = inputs.stratification
+    if strat is None:
+        return None
+    import numpy as np
+
+    top = inputs.top_limit.value
+    dist = strat.distribution
+    heights = np.linspace(0.0, dist.crown_height, 41)
+    series = []
+    for k, t_amb in enumerate(axes.ambient_temperatures):
+        t = strat.profile(top, t_amb, heights) - CELSIUS_OFFSET
+        mean = inputs.mean_of(top, t_amb) - CELSIUS_OFFSET
+        label = (
+            f"ambient {c_f(t_amb - CELSIUS_OFFSET)}: mean {mean:.0f} degC "
+            f"(top - {top - CELSIUS_OFFSET - mean:.0f} K)"
+        )
+        series.append(Series(label, list(zip(t, heights, strict=True)), COLOURS[k % 6]))
+    lo = 10.0 * math.floor((min(axes.ambient_temperatures) - CELSIUS_OFFSET) / 10.0)
+    half = half_volume_height(dist)
+    return Plot(
+        box,
+        f"Gas temperature by height with the crown at its limit {c_f(top - CELSIUS_OFFSET)}",
+        "Gas temperature (degC)",
+        "Height above the mouth (m)",
+        (lo, 10.0 * math.ceil((top - CELSIUS_OFFSET + 10.0) / 10.0)),
+        (0.0, dist.crown_height),
+        series,
+        hlines=[(half, f"half the volume lies below {half:.1f} m / {ft(half):.0f} ft", MUTED)],
+        legend_left=True,
+        x2=F_AXIS,
+        y2=FT_AXIS,
+    )
+
+
+def _pressure_plot(
+    inputs: LiftChartInputs, axes: ChartAxes, box: tuple[float, float, float, float]
+) -> Plot | None:
+    strat = inputs.stratification
+    if strat is None:
+        return None
+    import numpy as np
+
+    top = inputs.top_limit.value
+    t_amb = sorted(axes.ambient_temperatures)[len(axes.ambient_temperatures) // 2]
+    altitude = axes.altitudes[0]
+    pressure = isa(altitude).pressure
+    dist = strat.distribution
+    heights = np.linspace(0.0, dist.crown_height, 41)
+    layered = strat.pressure_profile(top, t_amb, pressure, heights)
+    mean = inputs.mean_of(top, t_amb)
+    rho_amb, rho_mean = gas_density(pressure, t_amb), gas_density(pressure, mean)
+    uniform = np.array([differential_pressure(float(h), 0.0, rho_amb, rho_mean) for h in heights])
+    return Plot(
+        box,
+        f"Pressure difference by height, ambient {c_f(t_amb - CELSIUS_OFFSET)}, "
+        f"{altitude:,.0f} m, crown at its limit",
+        "Internal minus ambient pressure (Pa)",
+        "Height above the mouth (m)",
+        (0.0, _ceil_to(float(max(layered.max(), uniform.max())) * 1.05, 5.0)),
+        (0.0, dist.crown_height),
+        [
+            Series("stratified (this profile)", list(zip(layered, heights, strict=True)), BLUE),
+            Series(
+                f"uniform at the same mean {c_f(mean - CELSIUS_OFFSET)}",
+                list(zip(uniform, heights, strict=True)),
+                MUTED,
+                dash=(4.0, 3.0),
+            ),
+        ],
+        legend_at_bottom=True,
+        y2=FT_AXIS,
     )
 
 
@@ -649,12 +780,16 @@ class ChartSet:
         Equilibrium altitude vs load at the limit, one curve per ISA deviation (page 4).
     gross : list of Plot
         Gross lift vs mean envelope temperature, one per altitude (page 2).
+    stratification : list of Plot
+        Gas temperature and pressure difference by height (page 3); empty with a fixed
+        offset.
     """
 
     loading: Plot
     temperatures: list[Plot]
     ceiling: Plot
     gross: list[Plot]
+    stratification: list[Plot] = field(default_factory=list)
 
 
 def chart_plots(inputs: LiftChartInputs, axes: ChartAxes, payload: float | None = None) -> ChartSet:
@@ -680,6 +815,14 @@ def chart_plots(inputs: LiftChartInputs, axes: ChartAxes, payload: float | None 
         [_temperature_plot(inputs, axes, h, UNIT_BOX, payload) for h in axes.altitudes],
         _ceiling_plot(inputs, axes, UNIT_BOX),
         [_gross_plot(inputs, axes, h, UNIT_BOX, payload) for h in axes.altitudes],
+        [
+            plot
+            for plot in (
+                _profile_plot(inputs, axes, UNIT_BOX),
+                _pressure_plot(inputs, axes, UNIT_BOX),
+            )
+            if plot is not None
+        ],
     )
 
 
@@ -705,9 +848,7 @@ def input_lines(inputs: LiftChartInputs) -> list[str]:
         "Load = everything else: basket, burners, fuel, occupants.",
         f"Top-temperature limit: {c_f(inputs.top_limit.value - CELSIUS_OFFSET)} "
         f"[{inputs.top_limit.source}] - {inputs.top_limit.reference}.",
-        f"Mean gas temperature = top - {inputs.top_to_mean.value:.0f} K "
-        f"({1.8 * inputs.top_to_mean.value:.0f} degF) "
-        f"[{inputs.top_to_mean.source}] - {inputs.top_to_mean.reference}.",
+        *_mean_model_lines(inputs, short=True),
         "Equilibrium: V (rho_amb - rho_int) = envelope + rigging + load; dry air, ISA pressure "
         "at the pressure altitude, ambient temperature as given at that altitude; still "
         "air, no climb or descent. Ceiling: ISA temperature profile shifted by the ISA "
@@ -715,6 +856,56 @@ def input_lines(inputs: LiftChartInputs) -> list[str]:
         "Humid air and combustion products are not modelled: on a humid day the real lift "
         "is slightly lower. Keep a margin: these are static equilibrium values.",
         SAFETY_NOTICE,
+    ]
+
+
+def _mean_model_lines(inputs: LiftChartInputs, short: bool = False) -> list[str]:
+    """How the mean gas temperature follows from the top, with this envelope's numbers."""
+    off = inputs.top_to_mean
+    strat = inputs.stratification
+    if strat is None:
+        return [
+            f"Mean gas temperature = top - {off.value:.0f} K ({1.8 * off.value:.0f} degF), a "
+            f"fixed offset [{off.source}: {off.reference}]."
+        ]
+    phi = strat.mouth_excess
+    dist = strat.distribution
+    limit = inputs.top_limit.value
+    examples = []
+    for t_c in (0.0, 15.0, 30.0):
+        t_amb = t_c + CELSIUS_OFFSET
+        eff = strat.effective_mean(limit, t_amb)
+        floor = " (floor applies)" if strat.floor_applies(limit, t_amb) else ""
+        examples.append(
+            f"ambient {t_c:.0f} degC: profile offset {limit - eff:.1f} K, "
+            f"used {strat.offset(limit, t_amb):.1f} K{floor}"
+        )
+    head = (
+        "Mean gas temperature from the envelope's shape (level 1): the gas temperature is "
+        "assumed to rise linearly from the mouth to the crown, the mouth "
+        f"{100.0 * phi.value:.0f} % of the crown's rise above ambient [{phi.source}: "
+        f"{phi.reference}]; lift uses its volume-weighted mean, 1/T_mean = (1/V) sum dV / T, "
+        f"never less than {off.value:.0f} K below the top [{off.source}: {off.reference}]."
+    )
+    if short:
+        return [head, "With the crown at its limit: " + "; ".join(examples) + "."]
+    half = half_volume_height(dist)
+    return [
+        head,
+        f"T(h) = T_amb + (T_top - T_amb) ({phi.value:.2f} + {1.0 - phi.value:.2f} h / H), "
+        f"h above the mouth, crown height H = {dist.crown_height:.2f} m "
+        f"({ft(dist.crown_height):.1f} ft). The volume by height comes from the design's "
+        "profile (each segment sweeps a frustum), scaled to the lofted volume: half the gas "
+        f"lies below {half:.2f} m ({100.0 * half / dist.crown_height:.0f} % of H).",
+        "With the crown at its limit "
+        + c_f(limit - CELSIUS_OFFSET)
+        + ": "
+        + "; ".join(examples)
+        + ". When the floor applies, the profile is taken with a "
+        "cooler mouth so that its mean meets the floor.",
+        "The pressure difference consistent with the profile grows faster near the hot "
+        "crown than a uniform envelope's (stratification chart); the structural solver "
+        "still assumes a uniform temperature.",
     ]
 
 
@@ -748,10 +939,10 @@ def theory_sections(
     r_si = R_DRY_AIR.value
     r_eng = r_si * KG_PER_LB / (4.4482216152605 * M_PER_FT) / 1.8
     limit = inputs.top_limit.value
-    offset = inputs.top_to_mean.value
     t15 = 15.0 + CELSIUS_OFFSET
+    mean15 = inputs.mean_of(limit, t15)
     uniform = lift_mass(inputs.volume, 0.0, t15, limit)
-    stratified = lift_mass(inputs.volume, 0.0, t15, limit - offset)
+    stratified = lift_mass(inputs.volume, 0.0, t15, mean15)
     altitudes = axes.altitudes if axes is not None else (0.0,)
     pressures = [
         f"{h:,.0f} m ({ft(h):,.0f} ft): p = {isa(h).pressure:,.0f} Pa "
@@ -792,18 +983,18 @@ def theory_sections(
             [
                 "Lift depends on the mean temperature of the gas in the whole envelope. "
                 "Pilots read, and the fabric limit applies to, the crown (top), which is "
-                "hotter. The charts use T_mean = T_top - "
-                f"{offset:.0f} K ({1.8 * offset:.0f} degF) "
-                f"[{inputs.top_to_mean.source}: {inputs.top_to_mean.reference}].",
+                "hotter.",
+                *_mean_model_lines(inputs),
                 "Spreadsheets that enter one 'envelope temperature' treat the envelope as "
                 "uniform: that temperature is the mean. Entering the crown reading there "
                 "overstates lift. For this envelope at sea level, 15 degC: with the crown "
-                f"at its limit {c_f(limit - CELSIUS_OFFSET)} the gross lift is "
+                f"at its limit {c_f(limit - CELSIUS_OFFSET)} (mean "
+                f"{mean15 - CELSIUS_OFFSET:.0f} degC) the gross lift is "
                 f"{kg_lb(stratified)}; a uniform envelope at that temperature would "
                 f"lift {kg_lb(uniform)} ({100.0 * (uniform / stratified - 1.0):+.0f} %).",
                 "The gross-lift chart is drawn against the mean temperature (directly "
-                "comparable with such spreadsheets); the red line marks the mean "
-                "temperature at which the crown reaches its limit.",
+                "comparable with such spreadsheets); each curve ends where the crown reaches "
+                "its limit, and the red line marks the lowest such mean (coldest ambient).",
             ],
         ),
         (
@@ -833,7 +1024,7 @@ def theory_sections(
                 "Static equilibrium in still air (no climb, descent, wind or drag); dry "
                 "air inside and out (humid air and combustion products, not modelled, "
                 "lower the real lift slightly); uniform densities over the envelope "
-                "height (< 0.4 % over 30 m); a constant top-to-mean offset; the volume "
+                "height (< 0.4 % over 30 m); the top-to-mean relation above (assumed); the volume "
                 "does not change with temperature. Valid from -5,000 m to 11,000 m.",
                 "Gross lift is not payload: subtract the envelope, rigging, basket, "
                 "burners, fuel and people. Keep a margin: these are equilibrium values, "
@@ -913,6 +1104,18 @@ def write_lift_chart_pdf(
         c, r = k % cols, k // cols
         box = (margin + 50 + c * (pw + 60), height - 285 - r * (ph + 70), pw, ph)
         draw_plot(canvas, _gross_plot(inputs, axes, altitude, box, payload))
+
+    if inputs.stratification is not None:
+        canvas.new_page()
+        header(
+            "Assumed temperature profile from the envelope's shape (level 1): linear from "
+            "mouth to crown; lift uses its volume-weighted mean. Not measured."
+        )
+        profile = _profile_plot(inputs, axes, (margin + 50, 120, 330, 360))
+        pressure = _pressure_plot(inputs, axes, (margin + 440, 120, 320, 360))
+        for plot in (profile, pressure):
+            if plot is not None:
+                draw_plot(canvas, plot)
 
     canvas.new_page()
     header("Top temperature that floats a load. Above the red line the fabric limit is exceeded.")
@@ -1003,7 +1206,15 @@ def design_charts(
     offset = PhysicalConstant(
         s.top_to_mean.value, "K", s.top_to_mean.source, s.top_to_mean.note or "lift-chart settings"
     )
-    inputs = chart_inputs(design, outputs, fabrics, offset)
+    excess = PhysicalConstant(
+        s.mouth_excess.value,
+        "-",
+        s.mouth_excess.source,
+        s.mouth_excess.note or "lift-chart settings",
+    )
+    inputs = chart_inputs(
+        design, outputs, fabrics, offset, s.mean_model == "envelope_shape", excess
+    )
     if inputs is None:
         return None
     axes = chart_axes(inputs, s)

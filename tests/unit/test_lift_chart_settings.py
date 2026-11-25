@@ -63,6 +63,8 @@ def test_values_are_sorted() -> None:
         ("max_load", 0.0, "above 0 kg"),
         ("lowest_top_temperature", 500.0, "between"),
         ("top_to_mean", {"value": -1.0, "source": "assumed"}, "between"),
+        ("mouth_excess", {"value": 1.5, "source": "assumed"}, "between 0 % and 100 %"),
+        ("mean_model", "guess", "envelope_shape"),
     ],
 )
 def test_bad_settings_are_refused_with_a_reason(field: str, value: object, message: str) -> None:
@@ -74,7 +76,7 @@ def test_default_settings_leave_file_and_fingerprints_unchanged(session: Project
     before = session.fingerprints()
     data = json.loads(dump_project(session.project))
     assert "lift_chart" not in data["state"]
-    assert data["format_version"] == 9
+    assert data["format_version"] == 10
     edits.set_lift_chart(session, CUSTOM)
     assert session.fingerprints()["export"] != before["export"]
     assert session.fingerprints()["simulation"] == before["simulation"]
@@ -97,7 +99,7 @@ def test_version_8_files_read_with_default_settings(session: ProjectSession) -> 
     data = json.loads(dump_project(session.project))
     data["format_version"] = 8
     project = load_project_text(json.dumps(data))
-    assert project.format_version == 9
+    assert project.format_version == 10
     assert project.state.lift_chart.is_default()
 
 
@@ -138,8 +140,52 @@ def test_build_pack_uses_the_project_settings(session: ProjectSession, tmp_path:
     loads = [r for r in rows if r["solved_for"] == "load"]
     assert {r["altitude_m"] for r in loads} == {"500.0", "1500.0"}
     assert {r["ambient_C"] for r in loads} == {"7.00", "27.00"}
-    # The measured 12 K offset is used: mean = top - 12 K.
-    first = loads[0]
-    assert float(first["top_C"]) - float(first["mean_C"]) == pytest.approx(12.0)
+    # Envelope-shape model: the measured 12 K is the floor, the profile may need more.
+    offsets = [float(r["top_C"]) - float(r["mean_C"]) for r in loads]
+    assert min(offsets) >= 12.0 - 1e-6
     ceilings = [r for r in rows if r["solved_for"] == "altitude"]
     assert {r["isa_offset_K"] for r in ceilings} == {"10.0"}
+    # With a fixed offset the measured 12 K is used exactly.
+    fixed = CUSTOM.model_copy(update={"mean_model": "fixed_offset"})
+    out2 = tmp_path / "fixed"
+    export_build_pack(
+        session.design,
+        [],
+        out2,
+        session.patterns,
+        extras=PackExtras(frozenset({"lift_chart"}), lift_chart=fixed),
+    )
+    (path2,) = out2.glob("*-lift-chart.csv")
+    rows2 = [r for r in csv.DictReader(path2.open(encoding="utf-8")) if r["solved_for"] == "load"]
+    assert {round(float(r["top_C"]) - float(r["mean_C"]), 6) for r in rows2} == {12.0}
+
+
+def test_mean_model_defaults_to_the_envelope_shape() -> None:
+    s = LiftChartSettings()
+    assert s.mean_model == "envelope_shape"
+    assert s.mouth_excess.value == 0.5 and s.mouth_excess.source == "assumed"
+    assert s.top_to_mean.value == 20.0  # the floor
+
+
+def test_version_9_custom_settings_read_with_the_shape_model(session: ProjectSession) -> None:
+    edits.set_lift_chart(session, CUSTOM)
+    data = json.loads(dump_project(session.project))
+    data["format_version"] = 9
+    for key in ("mean_model", "mouth_excess"):
+        del data["state"]["lift_chart"][key]
+    project = load_project_text(json.dumps(data))
+    assert project.state.lift_chart.mean_model == "envelope_shape"
+    assert project.state.lift_chart.altitudes == CUSTOM.altitudes
+
+
+def test_mouth_excess_is_entered_in_percent() -> None:
+    from envelopelab.project.lift_chart_settings import displayed, from_displayed
+
+    settings = LiftChartSettings(
+        mean_model="fixed_offset",
+        mouth_excess=TaggedValue(value=0.35, source="measured", note="flight 3"),
+    )
+    shown = displayed(settings, "english")
+    assert shown.mouth_excess == pytest.approx(35.0)
+    assert shown.mean_model == "fixed_offset" and shown.mouth_source == "measured"
+    assert from_displayed(shown) == settings

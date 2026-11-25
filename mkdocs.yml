@@ -26,6 +26,7 @@ nav:
   - Theory:
       - Atmosphere: theory/atmosphere.md
       - Lift charts and equilibrium: theory/lift-charts.md
+      - Gas temperature stratification: theory/stratification.md
       - Gore geometry: theory/gore-geometry.md
       - Virtual sewing: theory/virtual-sewing.md
       - Dynamic-relaxation solver: theory/dynamic-relaxation.md
@@ -119,6 +120,7 @@ nav:
       - ADR-0057: adr/ADR-0057-python-3-12-only.md
       - ADR-0058: adr/ADR-0058-blender-live-link.md
       - ADR-0059: adr/ADR-0059-lift-chart-settings.md
+      - ADR-0060: adr/ADR-0060-envelope-shape-mean-temperature.md
 theme:
   name: material
 markdown_extensions:

@@ -23,7 +23,7 @@ are editing, next to the settings of the curves they draw:
   top-temperature limit and top-to-mean offset the charts use, each with its source tag,
   and the safety notice.
 * **Charts** (right), one sub-tab each: **Maximum load**, **Gross lift** (one chart per
-  altitude), **Top temperature** (one chart per altitude, up to four) and **Ceiling**.
+  altitude), **Stratification** (the assumed temperature profile and its pressure), **Top temperature** (one chart per altitude, up to four) and **Ceiling**.
   These are the pages of the PDF below, drawn on screen with the same data. The region
   above the top-temperature limit is shaded red and labelled *not permitted*.
 * **Theory** (last sub-tab): how the charts are calculated, the equations, constants and
@@ -41,7 +41,8 @@ the envelope mass cannot be estimated, the tab says why instead of drawing.
 *File ▸ Export build pack…*, tick **Lift charts** (ticked by default). The pack then
 contains:
 
-* `<name>-lift-chart.pdf`, five A4 landscape pages:
+* `<name>-lift-chart.pdf`, six A4 landscape pages (five with a fixed offset); after the
+  gross-lift page comes the **stratification** page (temperature and pressure by height):
     1. **Maximum load at the top-temperature limit** vs ambient temperature, one curve
        per pressure altitude (by default 0, 1 000, 2 000 and 3 000 m). Go up from the ambient
        temperature at that altitude to the curve and read the most load that floats with
@@ -77,7 +78,9 @@ with *Edit ▸ Undo* like any edit.
 | **ISA deviations** | One curve each on the ceiling chart (0 is a standard day) | 1 to 6, −50 K to 50 K |
 | **Load axis up to** | The end of the load axis. *Automatic* uses the most the balloon lifts | above 0 |
 | **Lowest top temperature** | The first crown temperature tabulated in the CSV (then every 10 °C to the limit) | 0 °C to 200 °C |
-| **Top minus mean temperature** | The offset between crown and mean gas temperature, with its source (*assumed*, *measured* or *datasheet*) and a note | 0 to 100 K |
+| **Mean temperature** | *From envelope shape* (default): an assumed linear profile weighted by the design's volume; or *Fixed offset* | |
+| **Mouth temperature rise** | Shape model: the mouth's rise above ambient as a share of the crown's, with its source and a note (lower is more conservative) | 0 to 100 % |
+| **Minimum top minus mean** / **Top minus mean temperature** | The floor of the shape model, or the fixed offset, with its source (*assumed*, *measured* or *datasheet*) and a note | 0 to 100 K |
 
 Type lists separated by commas, semicolons or spaces. Thousands separators are fine:
 `0, 5,000, 10,000` reads as three altitudes. Anything that doesn't read, or is out of
@@ -91,9 +94,19 @@ to *measured*. The charts print the value with its source tag.
 ## Mean or crown temperature
 
 Lift depends on the **mean** temperature of the air in the whole envelope; your crown
-sensor reads the **top**, which is hotter. EnvelopeLab takes the mean as the top minus the
-*Top minus mean temperature* offset (20 K / 36 °F, *assumed*, until you enter a measured
-value). The maximum-load, top-temperature and ceiling charts are read with the crown
+sensor reads the **top**, which is hotter. By default EnvelopeLab works the mean out
+**from your envelope's shape**: it assumes the air warms evenly from the mouth (half as
+far above ambient as the crown, *assumed*) to the crown, and weights each layer by the
+volume the design puts there. The result is never less than the *Minimum top minus mean*
+(20 K / 36 °F, *assumed*) below the crown, so it is at least as conservative as before.
+Choose *Fixed offset* under *Mean temperature* to use exactly that offset instead.
+
+The **Stratification** tab shows the assumed temperature at each height for each ambient
+temperature, the mean it gives, the height below which half the volume lies, and the
+pressure difference that profile produces next to a uniform envelope's. A lower *Mouth
+temperature rise* is more conservative; an offset of 0 is the least conservative choice.
+These profiles are assumptions, not measurements: with a crown sensor and one sensor
+partway down you can measure the offset and enter it as *measured*. The maximum-load, top-temperature and ceiling charts are read with the crown
 temperature; the gross-lift chart with the mean.
 
 A lift spreadsheet that takes one "envelope temperature" (for example the Balloon

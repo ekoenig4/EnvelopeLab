@@ -149,6 +149,7 @@ def test_lift_charts_mode_shows_the_three_charts(gore_window: MainWindow) -> Non
     assert [panel.tabs.tabText(i) for i in range(panel.tabs.count())] == [
         "Maximum load",
         "Gross lift",
+        "Stratification",
         "Top temperature",
         "Ceiling",
         "Theory",
@@ -238,9 +239,9 @@ def test_gross_lift_charts_mark_where_the_crown_reaches_its_limit(
     assert "Gross lift vs mean envelope temperature" in plot.title
     assert panel.charts is not None
     inputs = panel.charts.inputs
-    assert plot.shade_right[0] == pytest.approx(
-        inputs.top_limit.value - inputs.top_to_mean.value - 273.15
-    )
+    ambients = panel.charts.axes.ambient_temperatures
+    highest = max(inputs.mean_of(inputs.top_limit.value, t) for t in ambients)
+    assert plot.shade_right[0] == pytest.approx(highest - 273.15)
 
 
 def test_theory_tab_states_the_equations_and_follows_the_offset(gore_window: MainWindow) -> None:
@@ -251,9 +252,40 @@ def test_theory_tab_states_the_equations_and_follows_the_offset(gore_window: Mai
     assert "L = V (ρamb - ρint) g" in text
     assert "53.352 ft lbf/(lb °R)" in text
     assert "°R = °F + 459.67" in text
-    assert "Tmean = Ttop - 20 K" in text
+    assert "never less than 20 K below the top" in text
     # A measured offset typed in the form shows in the theory at once.
     panel.form.offset.setValue(12.0)
     panel.form.source.setCurrentText("measured")
-    assert "Tmean = Ttop - 12 K" in panel.theory.toPlainText()
+    assert "never less than 12 K below the top" in panel.theory.toPlainText()
     assert "[measured" in panel.theory.toPlainText()
+
+
+def test_stratification_tab_and_mean_model_control(gore_window: MainWindow) -> None:
+    gore_window.set_mode("lift")
+    panel = gore_window.lift_charts
+    form = panel.form
+    # Default: from the envelope's shape; the offset is a minimum.
+    assert form.mean_model.currentData() == "envelope_shape"
+    assert form.mouth.value() == pytest.approx(50.0) and form.mouth.isEnabled()
+    assert form.offset_label.text() == "Minimum top minus mean"
+    profile, pressure = (v.plot for v in panel.stratification)
+    assert profile is not None and "Gas temperature by height" in profile.title
+    assert pressure is not None and len(pressure.series) == 2
+    assert "envelope's shape" in panel.theory.toPlainText()
+    # A cooler mouth lowers the mean at the limit (more conservative).
+    assert panel.charts is not None
+    limit = panel.charts.inputs.top_limit.value
+    before = panel.charts.inputs.mean_of(limit, 288.15)
+    form.mouth.setValue(30.0)
+    assert panel.charts is not None
+    assert panel.charts.inputs.mean_of(limit, 288.15) < before
+    # Fixed offset: the mouth fields are disabled and there is no profile to draw.
+    form.mean_model.setCurrentIndex(1)
+    assert not form.mouth.isEnabled()
+    assert form.offset_label.text() == "Top minus mean temperature"
+    assert all(v.plot is None for v in panel.stratification)
+    assert "Fixed offset" in panel.stratification[0].message
+    assert panel.apply_pending()
+    session = gore_window.controller.session
+    assert session is not None
+    assert session.project.state.lift_chart.mean_model == "fixed_offset"

@@ -49,6 +49,13 @@ absolute errors are in the unit shown.
 | Spreadsheet 92,000 ft3 (as published): 90 degF, 6,000 ft, envelope 200 degF | 887.147 | 889.37 | lb | 0.0025 | 0.005 | pass |
 | Spreadsheet 92,000 ft3 (exact constants): 90 degF, 6,000 ft, envelope 280 degF | 1366.61 | 1366.61 | lb | < 1e-06 | 0.0001 | pass |
 | Spreadsheet 92,000 ft3 (as published): 90 degF, 6,000 ft, envelope 280 degF | 1366.61 | 1369.89 | lb | 0.0024 | 0.005 | pass |
+| Stratification: cylinder volume pi r^2 H | 31.4159 | 31.4159 | m^3 | < 1e-06 | 1e-09 | pass |
+| Stratification: cylinder T_eff = b / ln(1 + b/a) | - | - | K | 3.9e-06 | 0.001 | pass |
+| Stratification: sphere T_eff vs quadrature | - | - | K | 3.9e-06 | 0.01 | pass |
+| Stratification: uniform envelope (phi = 1) has no offset | - | - | K | < 1e-06 K | 1e-09 | pass |
+| Stratification: crown pressure, closed form vs trapezoid | 25.6231 | 25.6231 | Pa | < 1e-06 | 1e-06 | pass |
+| Stratification: 30 K floor gives mean = top - 30 K | - | - | K | < 1e-06 K | 1e-06 | pass |
+| Stratification: floored profile reproduces the floored mean | - | - | K | < 1e-06 K | 1e-06 | pass |
 
 The ceiling row recomputes the spare lift at the solved altitude from the
 hand-written ISA formula; it must vanish to within 0.05 kg.
@@ -61,3 +68,9 @@ spreadsheet formula (92,000 ft3; its five ambient/altitude cases at 130, 200 and
 R = 53.34, 2116, 0.00198) the spreadsheet is 0.23 % to 0.27 % higher, almost all
 from +459; tolerance 0.5 %. The spreadsheet's single envelope temperature is the
 mean gas temperature; see docs/theory/lift-charts.md.
+
+The stratification rows check the level-1 temperature profile
+(`envelopelab.stratification`, docs/theory/stratification.md): ambient 15 degC,
+crown 120 degC, mouth excess 0.5; a cylinder r = 1 m, H = 10 m against the closed
+form, a sphere R = 5 m against adaptive quadrature, the consistent pressure at the
+crown against trapezoidal integration, and the offset floor.

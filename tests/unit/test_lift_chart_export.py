@@ -55,15 +55,17 @@ def test_lift_chart_is_a_pack_document(pack: Path) -> None:
 
 def test_pdf_shows_limit_inputs_and_assumptions(pack: Path) -> None:
     text = _text(pack / "lift-sample-lift-chart.pdf")
-    # One header per page: loading, gross lift, top temperature, ceiling, theory.
-    assert text.count("LIFT CHART") == 5
+    # One header per page: loading, gross lift, stratification, top temperature,
+    # ceiling, theory.
+    assert text.count("LIFT CHART") == 6
+    assert "Gas temperature by height" in text
     assert "Gross lift vs mean envelope temperature" in text
     assert "CROWN ABOVE LIMIT" in text
     assert "How these charts are calculated" in text
     assert "459.67" in text
     assert "LIMIT 120 degC" in text
     assert "ABOVE TOP-TEMPERATURE LIMIT - NOT PERMITTED" in text
-    assert "[assumed]" in text and "top - 20 K" in text
+    assert "[assumed" in text and "never less than 20 K below the top" in text
     assert "design load 300 kg / 661 lb" in text
     assert "LIMIT 120 degC / 248 degF" in text
     for unit in ("lb", "degF", "ft"):  # English scales; PDF escapes the parentheses
@@ -194,9 +196,20 @@ def test_gross_lift_chart_is_lift_against_mean_temperature() -> None:
     t_amb = charts.axes.ambient_temperatures[0]
     assert y == pytest.approx(lift_mass(inputs.volume, 0.0, t_amb, x + 273.15))
     # The crown reaches its limit at mean = limit - offset: marked and shaded beyond.
-    mean_limit = inputs.top_limit.value - inputs.top_to_mean.value - 273.15
+    mean_limit = (
+        min(inputs.mean_of(inputs.top_limit.value, t) for t in charts.axes.ambient_temperatures)
+        - 273.15
+    )
     assert first.vlines[0][0] == pytest.approx(mean_limit)
-    assert first.shade_right is not None and first.shade_right[0] == pytest.approx(mean_limit)
+    highest = (
+        max(inputs.mean_of(inputs.top_limit.value, t) for t in charts.axes.ambient_temperatures)
+        - 273.15
+    )
+    assert first.shade_right is not None and first.shade_right[0] == pytest.approx(highest)
+    # Each curve ends where its crown reaches the limit.
+    for series, t_amb in zip(first.series, charts.axes.ambient_temperatures, strict=True):
+        end = inputs.mean_of(inputs.top_limit.value, t_amb) - 273.15
+        assert series.points[-1][0] == pytest.approx(end)
     # Envelope + rigging, and with the design load: where a curve crosses, it floats.
     levels = [h[0] for h in first.hlines]
     assert levels == pytest.approx([inputs.fixed_mass, inputs.fixed_mass + 300.0])
@@ -211,7 +224,8 @@ def test_theory_text_states_equations_constants_and_this_envelope() -> None:
     text = " ".join(line for lines in sections.values() for line in lines)
     assert "L = V (rho_amb - rho_int) g" in text
     assert "R = 287.05287 J/(kg K)" in text and "53.352 ft lbf/(lb degR)" in text
-    assert "T_mean = T_top - 20 K" in text and "[assumed" in text
+    assert "from the envelope's shape" in text and "[assumed" in text
+    assert "never less than 20 K below the top" in text
     assert "101,325 Pa" in text and "79,495 Pa" in text  # ISA at 0 and 2,000 m
     assert f"{inputs.volume:,.0f} m3" in text
     assert "Gross lift is not payload" in text

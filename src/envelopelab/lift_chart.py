@@ -20,13 +20,17 @@ balloon can carry, its own envelope and rigging included.
 
 Pilots read the **top (crown) temperature**, and the fabric limit applies there; the gas
 below the crown is cooler, and the lift depends on the volume-mean temperature. The mean
-temperature is taken a fixed offset below the top (:data:`DEFAULT_TOP_TO_MEAN`,
-tagged ``assumed`` unless replaced by a measured value). A lift spreadsheet that enters
+temperature is either a fixed offset below the top (:data:`DEFAULT_TOP_TO_MEAN`,
+tagged ``assumed`` unless replaced by a measured value), or follows from the envelope's
+shape and an assumed linear temperature profile (:mod:`envelopelab.stratification`,
+``LiftChartInputs.stratification``), never less than that offset below the top
+(:meth:`LiftChartInputs.mean_of`). A lift spreadsheet that enters
 one uniform "envelope temperature" (e.g. the Balloon Builders Journal's) uses the mean
 temperature: with exact constants it equals :func:`lift_mass`
 (``envelopelab.validation.lift_chart``); reading the crown sensor into it overstates lift.
 
 .. math:: T_{mean} = T_{top} - \Delta T_{top \to mean}
+    \quad\text{or}\quad T_{mean} = \min(T_{eff}(T_{top}, T_{amb}),\ T_{top} - \Delta T_{min})
 
 Any three of top temperature, ambient temperature, altitude and load fix the fourth:
 
@@ -76,6 +80,7 @@ from typing import Literal
 from scipy.optimize import brentq
 
 from envelopelab.atmosphere import G0, R_DRY_AIR, PhysicalConstant, gas_density, isa
+from envelopelab.stratification import StratificationModel
 
 #: Crown (top) minus volume-mean gas temperature, K. A generic engineering assumption,
 #: not a measured value: a larger offset predicts less lift and a hotter crown, so a
@@ -114,7 +119,13 @@ class LiftChartInputs:
     top_limit : PhysicalConstant
         Highest permitted top temperature, K, with its source (fabric service limit).
     top_to_mean : PhysicalConstant
-        Top minus mean internal temperature, K, with its source.
+        Top minus mean internal temperature, K, with its source: the offset itself
+        without ``stratification``, its floor with it.
+    stratification : StratificationModel, optional
+        The envelope's level-1 stratification (:mod:`envelopelab.stratification`): the
+        mean follows from the envelope's shape and an assumed temperature profile, never
+        less than ``top_to_mean`` below the top. Its ``minimum_offset`` must be
+        ``top_to_mean``. None: a fixed offset.
     """
 
     volume: float
@@ -123,6 +134,20 @@ class LiftChartInputs:
     fixed_mass_sources: tuple[str, ...]
     top_limit: PhysicalConstant
     top_to_mean: PhysicalConstant = DEFAULT_TOP_TO_MEAN
+    stratification: StratificationModel | None = None
+
+    def mean_of(self, top_temperature: float, ambient_temperature: float) -> float:
+        """Mean gas temperature for a crown temperature, K (ambient K matters only with
+        stratification)."""
+        if self.stratification is None:
+            return mean_temperature(top_temperature, self.top_to_mean.value)
+        return self.stratification.mean_from_top(top_temperature, ambient_temperature)
+
+    def top_of(self, mean_temperature_k: float, ambient_temperature: float) -> float:
+        """Crown temperature for a mean gas temperature, K (inverse of :meth:`mean_of`)."""
+        if self.stratification is None:
+            return mean_temperature_k + self.top_to_mean.value
+        return self.stratification.top_from_mean(mean_temperature_k, ambient_temperature)
 
     def __post_init__(self) -> None:
         if not self.volume > 0.0:
@@ -133,6 +158,11 @@ class LiftChartInputs:
             raise ValueError("top-to-mean temperature offset must be non-negative (K)")
         if self.top_limit.value <= 0.0:
             raise ValueError("top temperature limit must be positive (K)")
+        if (
+            self.stratification is not None
+            and self.stratification.minimum_offset.value != self.top_to_mean.value
+        ):
+            raise ValueError("the stratification floor must be the top-to-mean offset")
 
 
 @dataclass(frozen=True)
@@ -181,6 +211,7 @@ def mean_temperature(top_temperature: float, top_to_mean: float) -> float:
     r"""Mean internal gas temperature from the top temperature.
 
     .. math:: T_{mean} = T_{top} - \Delta T_{top \to mean}
+    \quad\text{or}\quad T_{mean} = \min(T_{eff}(T_{top}, T_{amb}),\ T_{top} - \Delta T_{min})
 
     Parameters
     ----------
@@ -248,7 +279,7 @@ def equilibrium_load(
         ``load`` in kg (negative: cannot lift the envelope, status ``no_equilibrium``);
         status ``above_limit`` when ``top_temperature`` exceeds the limit.
     """
-    t_mean = mean_temperature(top_temperature, inputs.top_to_mean.value)
+    t_mean = inputs.mean_of(top_temperature, ambient_temperature)
     lift = lift_mass(inputs.volume, altitude, ambient_temperature, t_mean)
     load = lift - inputs.fixed_mass
     status: Status = "ok"
@@ -312,7 +343,7 @@ def equilibrium_top_temperature(
             "no_equilibrium",
         )
     t_mean = 1.0 / inverse
-    top = t_mean + inputs.top_to_mean.value
+    top = inputs.top_of(t_mean, ambient_temperature)
     return EquilibriumPoint(
         "top_temperature",
         altitude,
@@ -363,14 +394,18 @@ def equilibrium_altitude(
         spare lift at ``max_altitude``; ``above_limit`` when ``top_temperature``
         exceeds the limit (the altitude is still given).
     """
-    t_mean = mean_temperature(top_temperature, inputs.top_to_mean.value)
     total = inputs.fixed_mass + load
 
     def spare(h: float) -> float:
-        return lift_mass(inputs.volume, h, isa(h, isa_offset).temperature, t_mean) - total
+        # With stratification the mean depends on the ambient temperature at h.
+        t_amb = isa(h, isa_offset).temperature
+        return lift_mass(inputs.volume, h, t_amb, inputs.mean_of(top_temperature, t_amb)) - total
 
     def point(h: float, status: Status) -> EquilibriumPoint:
-        t_amb = isa(h, isa_offset).temperature if math.isfinite(h) else math.nan
+        t_amb = isa(h if math.isfinite(h) else start_altitude, isa_offset).temperature
+        t_mean = inputs.mean_of(top_temperature, t_amb)
+        if not math.isfinite(h):
+            t_amb = math.nan
         lift = total * G0.value if status != "no_equilibrium" else math.nan
         return EquilibriumPoint(
             "altitude", h, t_amb, top_temperature, t_mean, load, lift, status, isa_offset

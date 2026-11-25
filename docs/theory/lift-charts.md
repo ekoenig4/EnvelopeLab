@@ -43,20 +43,34 @@ density in the lift equation is the volume average, so the temperature in it is 
   temperature for the whole envelope. In the lift equation that temperature can only be
   the mean.
 
-EnvelopeLab relates top and mean by a fixed offset:
+EnvelopeLab relates top and mean in one of two ways (*Lift charts ▸ Mean temperature*,
+ADR-0060):
 
-\[
-T_{mean} = T_{top} - \Delta T_{top\to mean}
-\]
+* **From the envelope's shape** (the default, level 1;
+  [Gas temperature stratification](stratification.md)): the gas temperature is assumed to
+  rise linearly from the mouth (50 % of the crown's rise above ambient, *assumed*) to the
+  crown, and the mean is its volume-weighted harmonic mean over the design's volume
+  distribution, never less than a floor below the crown:
+  \[
+  T_{mean} = \min\bigl(T_{eff}(T_{top}, T_{amb}),\ T_{top} - \Delta T_{min}\bigr).
+  \]
+  The offset then depends on the envelope's shape and on the ambient temperature.
+* **Fixed offset**:
+  \[
+  T_{mean} = T_{top} - \Delta T_{top\to mean}.
+  \]
 
 `DEFAULT_TOP_TO_MEAN` is 20 K (36 °F), tagged **assumed**: a generic engineering value,
-not a measurement. Each project can set its own value and source tag (*Lift charts* tab,
-*Top minus mean temperature*); measure it on the envelope (crown sensor vs temperatures
-logged at several heights) and tag it **measured**. A larger offset predicts less lift and a
-hotter crown for the same load, so a generous offset errs on the safe side. An offset of
-0 reproduces a uniform-temperature spreadsheet exactly.
+not a measurement. It is the floor of the shape model and the offset of the fixed model.
+Each project can set its own value and source tag; measure it on the envelope (crown
+sensor vs temperatures logged at several heights) and tag it **measured**. A larger offset
+(or a cooler mouth) predicts less lift and a hotter crown for the same load, so it errs on
+the safe side. **An offset of 0 is the least conservative choice**: it reproduces a
+uniform-temperature spreadsheet exactly, overstating lift and understating the crown
+temperature of a real, stratified envelope.
 
-The distinction changes the numbers a lot. For a 92 000 ft³ envelope (2 605 m³):
+The distinction changes the numbers a lot. For a 92 000 ft³ envelope (2 605 m³), with a
+fixed 20 K offset (the shape model typically gives more):
 
 | Ambient, altitude | Temperature read | Uniform envelope at that temperature | Crown at that temperature, mean 20 K lower | Difference |
 |---|---|---|---|---|
@@ -146,6 +160,7 @@ is nearly vertical near sea level.
 |---|---|---|---|---|
 | Maximum load | ambient temperature at altitude | load at the limit | one per altitude | top, at its limit |
 | Gross lift | mean envelope temperature | gross lift \(L/g\) | one per ambient, one panel per altitude | mean; red line where the crown reaches its limit |
+| Stratification | gas temperature / pressure difference | height above the mouth | one per ambient (temperature); stratified vs uniform (pressure) | top, at its limit (shape model only) |
 | Top temperature | load | top temperature needed | one per ambient, one panel per altitude | top |
 | Ceiling | load | equilibrium altitude | one per ISA deviation | top, at its limit |
 | Theory | — | — | the text of this page's sections 1–5 with the design's own values | — |
@@ -210,8 +225,9 @@ zones, with that fabric's source tag. A fabric not in the library gets the gener
 * Dry ideal-gas air inside and out. Humidity and combustion products are not modelled.
   Humid ambient air is lighter, so on a humid day the real lift is slightly lower.
 * Internal pressure equals ambient (open mouth).
-* A constant top-to-mean offset. Real stratification depends on the burner pattern,
-  porosity and heat loss.
+* The top-to-mean relation: an assumed linear profile over the design's volume (default)
+  or a constant offset. Real stratification depends on the burner pattern, porosity, heat
+  loss, sun and wind ([Gas temperature stratification](stratification.md)).
 * A fixed volume: the design's lofted volume, not a solved inflated shape.
 * Valid for −5 000 m to 11 000 m and 200 K to 420 K.
 

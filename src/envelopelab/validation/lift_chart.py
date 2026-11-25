@@ -35,6 +35,8 @@ EnvelopeLab's mean gas temperature.
 
 from __future__ import annotations
 
+import math
+
 from envelopelab.atmosphere import PhysicalConstant
 from envelopelab.lift_chart import (
     LiftChartInputs,
@@ -52,6 +54,7 @@ from envelopelab.validation.analytic_geometry import (
 
 R_D = 287.05287  # J/(kg K), ISO 2533
 P0 = 101325.0  # Pa
+G0_VALUE = 9.80665  # m/s^2, ISO 2533
 T0 = 288.15  # K
 VOLUME = 2610.0  # m^3
 FIXED = 200.0  # kg
@@ -164,6 +167,106 @@ def _spreadsheet_benchmarks() -> list[BenchmarkResult]:
     return out
 
 
+def _stratification_benchmarks() -> list[BenchmarkResult]:
+    r"""Level-1 stratification vs closed forms and independent quadrature.
+
+    * Cylinder (radius 1 m, height 10 m), linear profile from :math:`a` (mouth) to
+      :math:`a + b` (crown): :math:`T_{eff} = b / \ln(1 + b/a)`.
+    * Sphere (radius 5 m, mouth at the bottom): :math:`1/T_{eff} = \int \pi (R^2 - y^2)
+      / T(y)\,dy \,/\, (4\pi R^3/3)` by adaptive quadrature (scipy ``quad``).
+    * Pressure at the crown: the closed form of :meth:`StratificationModel.pressure_profile`
+      vs trapezoidal integration of :math:`(\rho_{amb} - \rho(h))\,g`.
+    * Floor: with a 30 K floor on the cylinder, the mean is exactly 30 K below the crown.
+    """
+    import numpy as np
+    from scipy.integrate import quad
+
+    from envelopelab.stratification import StratificationModel, VolumeDistribution
+
+    t_amb, t_top, phi = 288.15, 393.15, 0.5
+    excess = PhysicalConstant(phi, "-", "assumed", "benchmark")
+    a = t_amb + (t_top - t_amb) * phi
+    b = t_top - a
+    zs = np.linspace(0.0, 10.0, 11)
+    cylinder = VolumeDistribution.from_profile(np.ones_like(zs), zs)
+    cyl = StratificationModel(cylinder, excess)
+    radius = 5.0
+    theta = np.linspace(-np.pi / 2, np.pi / 2, 4001)
+    sphere = StratificationModel(
+        VolumeDistribution.from_profile(radius * np.cos(theta), radius * np.sin(theta)), excess
+    )
+
+    def temp(y: float) -> float:  # y from the centre
+        return t_amb + (t_top - t_amb) * (phi + (1 - phi) * (y + radius) / (2 * radius))
+
+    integral, _err = quad(lambda y: math.pi * (radius**2 - y**2) / temp(y), -radius, radius)
+    sphere_ref = (4.0 / 3.0 * math.pi * radius**3) / integral
+    h = np.linspace(0.0, 10.0, 200001)
+    rho = P0 / (R_D * cyl.temperatures(t_top, t_amb, h))
+    trapezoid = float(np.trapezoid((P0 / (R_D * t_amb) - rho) * G0_VALUE, h))
+    floored = StratificationModel(cylinder, excess, PhysicalConstant(30.0, "K", "assumed", ""))
+    return [
+        BenchmarkResult(
+            "Stratification: cylinder volume pi r^2 H",
+            cylinder.total,
+            math.pi * 10.0,
+            "m^3",
+            "relative",
+            1e-9,
+        ),
+        BenchmarkResult(
+            "Stratification: cylinder T_eff = b / ln(1 + b/a)",
+            cyl.effective_mean(t_top, t_amb),
+            b / math.log(1.0 + b / a),
+            "K",
+            "absolute",
+            1e-3,
+        ),
+        BenchmarkResult(
+            "Stratification: sphere T_eff vs quadrature",
+            sphere.effective_mean(t_top, t_amb),
+            sphere_ref,
+            "K",
+            "absolute",
+            1e-2,
+        ),
+        BenchmarkResult(
+            "Stratification: uniform envelope (phi = 1) has no offset",
+            StratificationModel(cylinder, PhysicalConstant(1.0, "-", "assumed", "")).offset(
+                t_top, t_amb
+            ),
+            0.0,
+            "K",
+            "absolute",
+            1e-9,
+        ),
+        BenchmarkResult(
+            "Stratification: crown pressure, closed form vs trapezoid",
+            float(cyl.pressure_profile(t_top, t_amb, P0, [10.0])[0]),
+            trapezoid,
+            "Pa",
+            "relative",
+            1e-6,
+        ),
+        BenchmarkResult(
+            "Stratification: 30 K floor gives mean = top - 30 K",
+            floored.offset(t_top, t_amb),
+            30.0,
+            "K",
+            "absolute",
+            1e-6,
+        ),
+        BenchmarkResult(
+            "Stratification: floored profile reproduces the floored mean",
+            floored.effective_mean(t_top, t_amb, floored.excess_used(t_top, t_amb)),
+            t_top - 30.0,
+            "K",
+            "absolute",
+            1e-6,
+        ),
+    ]
+
+
 def run_benchmarks() -> list[BenchmarkResult]:
     """Run every lift-chart benchmark (display order)."""
     t15, t120 = 288.15, 393.15
@@ -244,6 +347,7 @@ def run_benchmarks() -> list[BenchmarkResult]:
             0.05,
         ),
         *_spreadsheet_benchmarks(),
+        *_stratification_benchmarks(),
     ]
 
 
@@ -287,6 +391,12 @@ def render_markdown(results: list[BenchmarkResult]) -> str:
         "R = 53.34, 2116, 0.00198) the spreadsheet is 0.23 % to 0.27 % higher, almost all",
         "from +459; tolerance 0.5 %. The spreadsheet's single envelope temperature is the",
         "mean gas temperature; see docs/theory/lift-charts.md.",
+        "",
+        "The stratification rows check the level-1 temperature profile",
+        "(`envelopelab.stratification`, docs/theory/stratification.md): ambient 15 degC,",
+        "crown 120 degC, mouth excess 0.5; a cylinder r = 1 m, H = 10 m against the closed",
+        "form, a sphere R = 5 m against adaptive quadrature, the consistent pressure at the",
+        "crown against trapezoidal integration, and the offset floor.",
         "",
     ]
     return "\n".join(lines)
