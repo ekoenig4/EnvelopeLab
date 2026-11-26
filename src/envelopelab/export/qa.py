@@ -12,6 +12,9 @@
   says, measured from the drawn geometry, and the label was generated from the same
   value (its numbers match);
 * every PDF page is as wide as the roll;
+* a scale-model pack (``scale_model`` in the index): every template page is one sheet of
+  its paper (either way up) or says in red that its piece is larger than the paper, and
+  states the scale;
 * every sheet header (piece, cut count, fabric, finished size) matches the index, and the
   finished size matches the ``SEW`` outline drawn in the DXF;
 * panel colours (ADR-0055): a sheet's colours account for every piece it cuts (their
@@ -365,6 +368,7 @@ def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> li
     if not templates:
         return findings
     roll_pt = index["roll_width_mm"] / 1000.0 * PT_PER_M
+    model = index.get("scale_model") or {}
     drawn: set[str] = set()
     by_sheet = {Path(e["file"]).stem: e for e in index["sheets"]}
     for t in templates:
@@ -390,8 +394,11 @@ def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> li
             # A piece larger than the roll stays whole on its page, which must then say so;
             # any other page is no wider than the roll (format 4: its width runs across
             # the roll; format 3: one side within it).
-            across = w if index.get("format") == PACK_FORMAT else min(w, h)
-            if across > roll_pt + 1.0 and "LARGER THAN THE" not in content:
+            if model:
+                findings += _check_paper_page(name, k, w, h, content, model)
+            elif (
+                w if index.get("format") == PACK_FORMAT else min(w, h)
+            ) > roll_pt + 1.0 and "LARGER THAN THE" not in content:
                 findings.append(
                     QAFinding(
                         name, "page size", f"page {k}: {w:.0f} x {h:.0f} pt, roll {roll_pt:.0f} pt"
@@ -406,6 +413,31 @@ def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> li
         if Path(entry["file"]).stem not in drawn:
             findings.append(QAFinding(entry["file"], "template", "on no template page"))
     return findings
+
+
+def _check_paper_page(
+    name: str, page: int, w: float, h: float, content: str, model: dict[str, Any]
+) -> list[QAFinding]:
+    """A scale-model page (pt) is one sheet of the pack's paper, portrait or landscape,
+    or is larger and says in red that its piece is larger than the paper; it states the
+    scale it was drawn at."""
+    pw = model["paper_width_mm"] / 1000.0 * PT_PER_M
+    ph = model["paper_height_mm"] / 1000.0 * PT_PER_M
+    out = []
+    paper = (abs(w - pw) <= 1.0 and abs(h - ph) <= 1.0) or (
+        abs(w - ph) <= 1.0 and abs(h - pw) <= 1.0
+    )
+    if not paper and "LARGER THAN THE" not in content:
+        out.append(
+            QAFinding(
+                name,
+                "page size",
+                f"page {page}: {w:.0f} x {h:.0f} pt, paper {pw:.0f} x {ph:.0f} pt",
+            )
+        )
+    if f"SCALE MODEL {model['scale']}" not in content:
+        out.append(QAFinding(name, "scale", f"page {page}: does not state {model['scale']}"))
+    return out
 
 
 #: A reference to a file or address outside the page (the 3D view must be self-contained).

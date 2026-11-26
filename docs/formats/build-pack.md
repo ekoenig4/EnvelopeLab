@@ -167,6 +167,7 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
                  {"colour": null, "count": 9, "numbers": [2, 3, 4, 6, 7, 8, 10, 11, 12]}]}
   ],
   "shape_groups": {"Head": ["face", "ear", "ear mirror"]},
+  "scale_model": null,
   "seam_pairs": [
     {"a": [{"file": "cad/ear-G1.dxf", "edge": "right"}],
      "b": [{"file": "cad/ear-G2.dxf", "edge": "left"}],
@@ -190,6 +191,25 @@ cloth per colour) and `<slug>-colour-cloth.csv` (`colour`, `pieces`, `finished_a
 `cut_area_m2`; `no colour chosen` last, the parachute included, so the totals equal the
 fabric totals).
 
+`scale_model` is `null` for a full-size pack. A **scale-model pack** (ADR-0062,
+`envelopelab.export.scale_model`) holds the same sheets with every length divided by n,
+and records:
+
+```json
+"scale_model": {"scale": "1:20", "denominator": 20.0, "factor": 0.05,
+                "paper": "US Letter (8.5 x 11 in)", "paper_width_mm": 215.9,
+                "paper_height_mm": 279.4, "margin_mm": 12.7, "seam_allowance_mm": 5.0}
+```
+
+(`seam_allowance_mm` `null`: the design's allowance scaled with the piece). Its title
+is `<design> model 1-<n>`, it has no documents, and each template page is one sheet of
+the paper, portrait or landscape, with the piece centred; its page record has
+`page_width_mm`, `page_height_mm` and `fits_paper` instead of `across_roll_mm` and
+`along_roll_mm`. Every sheet's first note is `SCALE MODEL 1:n - not a full-size
+pattern` and the page footer `SCALE MODEL 1:n - <paper> - <turn> - print at 100 %`. A
+piece larger than the printable area is drawn whole on a page grown to hold it, with
+`LARGER THAN THE <PAPER> PRINTABLE AREA AT 1:n` in red (`fits_paper` false).
+
 `shape_groups` lists the special shapes of every group (one object made of several
 shapes, ADR-0041) by name; it is empty when no shape is grouped, and each grouped shape's
 skin sheets name the object.
@@ -211,7 +231,9 @@ line, in every DXF and on every template page (across and along), measures what 
 label says; every piece is on one page of its own file, never split, listed with its
 sheet, no wider than the roll across it (format 4: the page width; format 3: one side)
 or with the red larger-than-the-roll note
-(formats 1 and 2: every `pattern.pdf` page is as wide as the roll); every sheet is drawn
+(formats 1 and 2: every `pattern.pdf` page is as wide as the roll; a scale-model pack:
+every page is one sheet of its paper, either way up, or carries the red larger-than-the-paper
+note, and states the scale); every sheet is drawn
 exactly once (a marking sheet over its row's panel); every header matches the index and the drawn `SEW` outline; a sheet's colours account
 for every piece it cuts (counts add up to the cut count, each gore or piece once) and its
 DXF label and every template page of it (`%COLOURS <line>` in the page stream) print the

@@ -29,6 +29,36 @@ panel); the pack format is described in [Build pack](../formats/build-pack.md).
 The pack is not written while a special shape is being placed or cannot be placed, so
 it never leaves a shape out without saying so.
 
+## Scale models on paper
+
+Tick **Scale model** in the export dialog to print a 1:n model of the envelope (and its
+special shapes and overlays) at home instead of the full-size pack. Every pattern length
+is divided by n, and every piece is printed whole on **one sheet** of the paper you
+choose, turned and set portrait or landscape to fit.
+
+* **Scale**: 1 : n. **Fit to paper** sets n to the largest whole number at which every
+  piece fits one sheet (for example 1:20 on Letter). The line under the settings says
+  whether every piece fits; when some do not, it names them in red. Such pieces are
+  still written, on a page enlarged to hold them and marked in red: choose a larger n.
+* **Paper**: US Letter (8.5 x 11 in), US Legal, Tabloid (11 x 17 in), A4 or A3.
+* **Margin**: the blank border your printer needs on every side (default 12.7 mm,
+  0.5 in).
+* **Seam allowance**: unticked, the design's allowance is scaled with the piece (an
+  exact 1:n copy, often only a millimetre or two); ticked, every piece gets the
+  allowance you type (default 5 mm) at model size, enough for glue or a seam.
+
+The pack holds the same files as a full-size pack's patterns, named
+`<design> model 1-n` (for example `generic-model-1-20-panel-A.pdf`), and no documents:
+those describe the full-size envelope. Every sheet says `SCALE MODEL 1:n - not a
+full-size pattern`, and every page's footer gives the scale and paper. **Print at 100 %
+(actual size)** and check the calibration lines with a ruler before cutting. The
+settings are remembered for the next export.
+
+A model shows the shape of the patterns as they will be sewn. It is not a structural
+test: lift scales with n⁻³ and skin weight with n⁻², and stresses do not scale, so a
+model says nothing about the full-size envelope's strength
+([Scale models](../theory/scale-models.md)).
+
 ## What is in the pack
 
 | File | Use it for |

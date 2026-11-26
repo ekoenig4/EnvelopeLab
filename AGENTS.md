@@ -35,7 +35,8 @@ never hidden. The builder is responsible for airworthiness.
                        Check), project (sessions, dependency graph, project
                        files), rigging (parachute, red
                        line, flying wires, turning vents), export (build packs:
-                       DXF, PDF, index and output QA))
+                       DXF, PDF, index and output QA;
+                       scale-model packs on paper))
     tests/             unit/, property/, benchmarks/, regression/, fixtures/, gui/
     docs/              MkDocs site: user/, theory/, validation/, dev/, formats/, adr/
     scripts/           dev utilities: verify.py, generate_validation_docs.py,

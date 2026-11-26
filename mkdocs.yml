@@ -35,6 +35,7 @@ nav:
       - Special-shape primitives: theory/special-shape-primitives.md
       - Mesh shape to revolved profile: theory/mesh-to-profile.md
       - Overlays (appliqués): theory/overlays.md
+      - Scale models: theory/scale-models.md
       - Balloon coordinates: theory/balloon-coordinates.md
       - Design editing and staleness: theory/design-editing.md
       - Profile editing, segments and simplify: theory/profile-editing.md
@@ -122,6 +123,7 @@ nav:
       - ADR-0059: adr/ADR-0059-lift-chart-settings.md
       - ADR-0060: adr/ADR-0060-envelope-shape-mean-temperature.md
       - ADR-0061: adr/ADR-0061-lift-chart-crown-limit.md
+      - ADR-0062: adr/ADR-0062-scale-model-packs.md
 theme:
   name: material
 markdown_extensions:

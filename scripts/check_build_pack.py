@@ -8,18 +8,21 @@ dome) cut as half gores and panel colours (ADR-0055) on envelope rows, halves, s
 and unsplit skin pieces and a tip disc, so the colour lines on the DXFs and templates, the
 colour plan and the cloth table are checked too, and three overlays (appliqués: across a
 gore seam, across a row seam, across the last-to-first gore seam) with their pieces,
-marking sheets and seam pairs. Exits non-zero when any check fails. Run
-by ``scripts/verify.py``.
+marking sheets and seam pairs; then that pack as a scale model, every piece on one sheet
+of US Letter at the largest whole scale that fits (ADR-0062). Exits non-zero when any
+check fails. Run by ``scripts/verify.py``.
 """
 
 from __future__ import annotations
 
 import sys
 import tempfile
+from dataclasses import replace
 
-from envelopelab.export.build_pack import PackExtras, export_build_pack
+from envelopelab.export.build_pack import PackExtras, export_build_pack, pack_sheets
 from envelopelab.export.documents import DOCUMENTS
 from envelopelab.export.qa import check_pack
+from envelopelab.export.scale_model import PAPER_SIZES, ScaleModel, fit_scale
 from envelopelab.features.primitives import (
     Dome,
     EnvelopeSurface,
@@ -122,6 +125,16 @@ def main() -> int:
             overlays=overlays,
         )
         findings += check_pack(out)
+        # The same pack as a scale model (ADR-0062): every piece on one Letter sheet at
+        # the largest whole scale that fits, with a fixed 5 mm allowance.
+        model = ScaleModel(1.0, PAPER_SIZES["letter"], seam_allowance=0.005)
+        sheets = pack_sheets(halved, shapes, colours=colours, overlays=overlays)[0]
+        model = replace(model, denominator=fit_scale(sheets, model))
+        with tempfile.TemporaryDirectory() as small:
+            export_build_pack(
+                halved, shapes, small, colours=colours, overlays=overlays, scale_model=model
+            )
+            findings += check_pack(small)
     for f in findings:
         print(f"FAIL {f.file}: {f.check}: {f.message}")
     print(f"build-pack QA: {len(findings)} finding(s)")

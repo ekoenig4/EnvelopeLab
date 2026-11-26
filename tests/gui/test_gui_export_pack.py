@@ -114,3 +114,61 @@ def test_each_special_shape_gets_its_own_3d_page(gore_window: MainWindow, tmp_pa
     assert [m["key"] for m in page["meshes"]] == ["shape:Dome"]
     assert page["status"]["title"] == "Not simulated."  # no metrics without a simulation
     assert (tmp_path / "pack" / f"{stem}-assembly-Dome.pdf").is_file()
+
+
+def test_scale_model_dialog_fits_the_paper(gore_window: MainWindow, qtbot: QtBot) -> None:
+    from envelopelab.export.scale_model import ScaleModel, fit_scale, oversize_pieces
+    from envelopelab_app.export_dialog import ExportPackDialog
+
+    sheets = gore_window.shapes.pack_sheets()
+    assert sheets
+    seen: list[ScaleModel] = []
+
+    def fit(model: ScaleModel) -> float:
+        seen.append(model)
+        return fit_scale(sheets, model)
+
+    dialog = ExportPackDialog(
+        gore_window, "/tmp/pack", fit=fit, check=lambda m: oversize_pieces(sheets, m)
+    )
+    qtbot.addWidget(dialog)
+    assert dialog.scale_model() is None and dialog.include() == frozenset(DOCUMENTS)
+    dialog.model_box.setChecked(True)
+    # The documents and the roll are the full-size pack's.
+    assert dialog.include() == frozenset()
+    assert not dialog.roll.isEnabled() and not dialog.checks["viewer"].isEnabled()
+    dialog.scale.setValue(2.0)
+    assert "larger than the paper at 1:2" in dialog.model_status.text()
+    n = dialog.fit_to_paper()
+    assert n is not None and n.is_integer() and dialog.scale.value() == n
+    assert dialog.model_status.text() == f"Every piece fits one sheet at 1:{n:g}."
+    model = dialog.scale_model()
+    assert model is not None and model.denominator == n and model.seam_allowance is None
+    assert model.paper.name.startswith("US Letter")
+    # A fixed allowance and A4 are passed on; the state round-trips.
+    dialog.fixed_allowance.setChecked(True)
+    dialog.allowance.setValue(4.0)
+    dialog.paper.setCurrentIndex(dialog.paper.findData("a4"))
+    model = dialog.scale_model()
+    assert model is not None and model.seam_allowance == pytest.approx(0.004)
+    assert model.paper.width == pytest.approx(0.210)
+    other = ExportPackDialog(gore_window, "/tmp/pack")
+    qtbot.addWidget(other)
+    other.set_model_state(dialog.model_state())
+    assert other.scale_model() == model
+    dialog.model_box.setChecked(False)
+    assert dialog.roll.isEnabled() and dialog.scale_model() is None
+
+
+def test_export_scale_model_writes_paper_pages(gore_window: MainWindow, tmp_path: Path) -> None:
+    import json
+
+    from envelopelab.export.scale_model import PAPER_SIZES, ScaleModel
+
+    model = ScaleModel(40.0, PAPER_SIZES["letter"], seam_allowance=0.005)
+    index = gore_window.export_scale_model(tmp_path / "model", model)
+    assert index is not None and check_pack(tmp_path / "model") == []
+    data = json.loads(index.read_text())
+    assert data["scale_model"]["scale"] == "1:40"
+    assert data["scale_model"]["seam_allowance_mm"] == 5.0
+    assert data["documents"] == []

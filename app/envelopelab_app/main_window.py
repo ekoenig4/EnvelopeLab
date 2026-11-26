@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab.design.model import DesignDocument
+from envelopelab.export.scale_model import ScaleModel
 from envelopelab.project.dependencies import artifact_inputs
 from envelopelab.project.model import PROJECT_SUFFIX
 from envelopelab.project.recovery import (
@@ -891,12 +892,56 @@ class MainWindow(QMainWindow):
             self.controller.editRejected.emit("a build pack needs a standard-gore design")
             return
         folder = str(self.settings.value("export/pack_folder", "") or "")
+        sheets: list[Any] = []
+
+        def full_size() -> list[Any] | None:
+            # Built once per dialog, when the scale model first needs them.
+            if not sheets:
+                sheets.extend(self.shapes.pack_sheets() or [])
+            return sheets or None
+
+        def fit(model: Any) -> float | None:
+            from envelopelab.export.scale_model import fit_scale
+
+            got = full_size()
+            return None if got is None else fit_scale(got, model)
+
+        def check(model: Any) -> list[str] | None:
+            from envelopelab.export.scale_model import oversize_pieces
+
+            got = full_size()
+            return None if got is None else oversize_pieces(got, model)
+
         dialog = ExportPackDialog(
-            self, folder, self.prefs.print_roll_width, lift_settings=self.lift_chart_dialog
+            self,
+            folder,
+            self.prefs.print_roll_width,
+            lift_settings=self.lift_chart_dialog,
+            fit=fit,
+            check=check,
         )
+        saved = self.settings.value("export/scale_model", {}) or {}
+        if isinstance(saved, dict):
+            dialog.set_model_state(saved)
         if dialog.exec():
             self.settings.setValue("export/pack_folder", str(dialog.path()))
-            self.export_build_pack(dialog.path(), dialog.include(), dialog.roll_width())
+            self.settings.setValue("export/scale_model", dialog.model_state())
+            model = dialog.scale_model()
+            if model is not None:
+                self.export_scale_model(dialog.path(), model)
+            else:
+                self.export_build_pack(dialog.path(), dialog.include(), dialog.roll_width())
+
+    def export_scale_model(self, out_dir: str | Path, model: ScaleModel) -> Path | None:
+        """Write a 1:n scale model of the design and its shapes: every piece scaled and
+        printed on one sheet of the model's paper (:mod:`envelopelab.export.scale_model`);
+        returns the index (None when refused)."""
+        session = self.controller.session
+        if session is None or session.design.gores is None:
+            return None
+        return self.shapes.export_pack(
+            out_dir, None, self.prefs.print_roll_width, scale_model=model
+        )
 
     def export_build_pack(
         self,

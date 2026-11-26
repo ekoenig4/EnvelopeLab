@@ -62,6 +62,7 @@ from envelopelab.solvers.membrane import FloatArray
 
 if TYPE_CHECKING:
     from envelopelab.design.model import DesignDocument
+    from envelopelab.export.scale_model import ScaleModel
     from envelopelab.features.primitives import PrimitiveDesign
     from envelopelab.project.colours import PanelColours
     from envelopelab.project.model import PatternSet
@@ -964,6 +965,7 @@ def write_pack(
     documents: Sequence[dict[str, str]] = (),
     provenance: dict[str, str] | None = None,
     shape_groups: dict[str, list[str]] | None = None,
+    scale_model: ScaleModel | None = None,
 ) -> Path:
     """Write a build pack: the 1:1 template PDFs at the top of ``out_dir``
     (:mod:`envelopelab.export.templates`) and, in ``cad/``, one DXF per sheet and
@@ -988,6 +990,10 @@ def write_pack(
         Where the pack comes from (:class:`envelopelab.export.documents.Provenance`).
     shape_groups : dict of str to list of str, optional
         Members of every shape group (object), listed in the index.
+    scale_model : ScaleModel, optional
+        The sheets are a scale model's, already at model size
+        (:mod:`envelopelab.export.scale_model`): every template page is one sheet of its
+        paper, and the index records the scale and the paper (``scale_model``).
 
     Returns
     -------
@@ -1029,7 +1035,7 @@ def write_pack(
     files = template_files(title, sheets)
     templates = []
     for tfile in files:
-        pages = write_template_pdf(tfile, out / tfile.name, roll_width)
+        pages = write_template_pdf(tfile, out / tfile.name, roll_width, scale_model)
         templates.append(
             {
                 "file": tfile.name,
@@ -1047,6 +1053,7 @@ def write_pack(
         "documents": list(documents),
         "sheets": entries,
         "shape_groups": shape_groups or {},
+        "scale_model": None if scale_model is None else _scale_entry(scale_model),
         "seam_pairs": [
             {
                 "a": [{"file": f"{CAD_DIR}/{n}.dxf", "edge": e} for n, e in pair.a],
@@ -1062,6 +1069,21 @@ def write_pack(
     return path
 
 
+def _scale_entry(model: ScaleModel) -> dict[str, Any]:
+    """The ``scale_model`` record of the index: the scale and the paper (mm)."""
+    allowance = model.seam_allowance
+    return {
+        "scale": model.label(),
+        "denominator": model.denominator,
+        "factor": model.factor,
+        "paper": model.paper.name,
+        "paper_width_mm": round(model.paper.width * MM, 3),
+        "paper_height_mm": round(model.paper.height * MM, 3),
+        "margin_mm": round(model.margin * MM, 3),
+        "seam_allowance_mm": None if allowance is None else round(allowance * MM, 3),
+    }
+
+
 def export_build_pack(
     design: DesignDocument,
     primitives: Sequence[PrimitiveDesign],
@@ -1075,6 +1097,7 @@ def export_build_pack(
     groups: dict[str, str] | None = None,
     colours: PanelColours | None = None,
     overlays: Sequence[OverlaySpec] = (),
+    scale_model: ScaleModel | None = None,
 ) -> Path:
     """Export the envelope rows, the parachute, and every primitive's pieces and marking
     sheets, and the documents chosen in ``extras``.
@@ -1112,11 +1135,90 @@ def export_build_pack(
         sheet per panel its outline crosses and a seam pair
         (:mod:`envelopelab.export.overlays`). The fabric of each is its own, else that of
         the row under its centre.
+    scale_model : ScaleModel, optional
+        Write a 1:n scale model instead (:mod:`envelopelab.export.scale_model`): every
+        sheet and seam pair scaled, each piece on one sheet of the model's paper. The
+        documents describe the full-size envelope, so none may be chosen with it.
 
     Returns
     -------
     Path
         ``index.json``.
+    """
+    if scale_model is not None and extras is not None and extras.include:
+        raise BuildPackError(
+            "a scale-model pack has no documents (they describe the full-size envelope)"
+        )
+    sheets, pairs, layouts = pack_sheets(
+        design,
+        primitives,
+        patterns,
+        skin_fabric,
+        marking_allowance,
+        hole_hem,
+        groups,
+        colours,
+        overlays,
+    )
+    if scale_model is not None:
+        from envelopelab.export.scale_model import scale_pack
+
+        sheets, pairs = scale_pack(sheets, pairs, scale_model)
+    documents: list[dict[str, str]] = []
+    prov = None
+    if extras is not None and extras.include:
+        documents, prov = write_documents(
+            design,
+            sheets,
+            pairs,
+            Path(out_dir),
+            extras,
+            patterns,
+            primitives,
+            roll_width,
+            colours,
+            layouts,
+        )
+    title = design.meta.name
+    if scale_model is not None:
+        title = f"{title} model 1-{scale_model.denominator:g}"
+    return write_pack(
+        sheets,
+        out_dir,
+        pairs,
+        roll_width,
+        title=title,
+        documents=documents,
+        provenance=None if prov is None else prov.as_dict(),
+        shape_groups=_group_lists(primitives, groups or {}),
+        scale_model=scale_model,
+    )
+
+
+def pack_sheets(
+    design: DesignDocument,
+    primitives: Sequence[PrimitiveDesign] = (),
+    patterns: PatternSet | None = None,
+    skin_fabric: str | dict[str, str] = "skin",
+    marking_allowance: float | None = None,
+    hole_hem: float | None = None,
+    groups: dict[str, str] | None = None,
+    colours: PanelColours | None = None,
+    overlays: Sequence[OverlaySpec] = (),
+) -> tuple[list[Sheet], list[SeamPair], list[Any]]:
+    """Every sheet of a build pack at full size, the seam pairs between them and the
+    overlay layouts (:func:`export_build_pack`, whose parameters these are).
+
+    Returns
+    -------
+    sheets : list of Sheet
+        Envelope rows, parachute, every primitive's pieces and marking sheets, overlays;
+        m.
+    pairs : list of SeamPair
+        Edges sewn together.
+    layouts : list
+        Overlay layouts (:func:`envelopelab.export.overlays.overlay_pack`) for the
+        documents.
     """
     hem, hole_tape = default_hole_hem(design)
     hem = hem if hole_hem is None else hole_hem
@@ -1155,31 +1257,7 @@ def export_build_pack(
         pairs += more_pairs
     gores = design.gores.count if design.gores is not None else 0
     sheet_colours(sheets, colours, gores, primitives)
-    documents: list[dict[str, str]] = []
-    prov = None
-    if extras is not None and extras.include:
-        documents, prov = write_documents(
-            design,
-            sheets,
-            pairs,
-            Path(out_dir),
-            extras,
-            patterns,
-            primitives,
-            roll_width,
-            colours,
-            layouts,
-        )
-    return write_pack(
-        sheets,
-        out_dir,
-        pairs,
-        roll_width,
-        title=design.meta.name,
-        documents=documents,
-        provenance=None if prov is None else prov.as_dict(),
-        shape_groups=_group_lists(primitives, groups or {}),
-    )
+    return sheets, pairs, layouts
 
 
 def _group_lists(

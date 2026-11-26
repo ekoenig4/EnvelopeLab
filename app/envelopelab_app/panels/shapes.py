@@ -74,6 +74,7 @@ from PySide6.QtWidgets import (
 )
 
 from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH, PackExtras
+from envelopelab.export.scale_model import ScaleModel
 from envelopelab.export.templates import MARGIN, roll_fit, turn_points
 from envelopelab.features.mesh_profile import ROUND_TOLERANCE, ProfileFit, fit_profile
 from envelopelab.features.metrics import REQUIRED_FOS
@@ -1606,21 +1607,10 @@ class ShapesPanel(QWidget):
         self._update_buttons()
         return started
 
-    def export_pack(
-        self,
-        out_dir: str | Path,
-        extras: PackExtras | None = None,
-        roll_width: float = DEFAULT_ROLL_WIDTH,
-    ) -> Path | None:
-        """Write the build pack of the envelope and every placed shape; returns the index.
-
-        Refused (None) while a shape is being placed or cannot be placed, so a pack never
-        silently leaves a shape out. ``extras`` chooses the documents written with the
-        sheets (:class:`envelopelab.export.build_pack.PackExtras`; default none);
-        ``roll_width`` is the fabric roll width, m.
-        """
-        from envelopelab.export.build_pack import export_build_pack
-
+    def _pack_inputs(self) -> tuple[list[Any], dict[str, Any], dict[str, str]] | None:
+        """The placed shapes, their skin fabrics and their groups for a build pack; None
+        (with a message) while a shape is not placed, so a pack never silently leaves a
+        shape out."""
         session = self.controller.session
         if session is None or session.design.gores is None:
             return None
@@ -1635,6 +1625,52 @@ class ShapesPanel(QWidget):
             placed.append(design)
             fabrics[spec.name] = shape_fabrics(spec, session.design, session.patterns, design)[1]
         groups = {s.name: s.group for s in session.state.shapes if s.group}
+        return placed, fabrics, groups
+
+    def pack_sheets(self) -> list[Any] | None:
+        """Every full-size sheet of the build pack
+        (:func:`envelopelab.export.build_pack.pack_sheets`), m; None when refused."""
+        from envelopelab.export.build_pack import pack_sheets
+
+        session = self.controller.session
+        inputs = self._pack_inputs()
+        if session is None or inputs is None:
+            return None
+        placed, fabrics, groups = inputs
+        out = self.controller.attempt(
+            pack_sheets,
+            session.design,
+            placed,
+            session.patterns,
+            fabrics,
+            groups=groups,
+            colours=session.state.colours,
+            overlays=session.state.overlays,
+        )
+        return None if out is None else list(out[0])
+
+    def export_pack(
+        self,
+        out_dir: str | Path,
+        extras: PackExtras | None = None,
+        roll_width: float = DEFAULT_ROLL_WIDTH,
+        scale_model: ScaleModel | None = None,
+    ) -> Path | None:
+        """Write the build pack of the envelope and every placed shape; returns the index.
+
+        Refused (None) while a shape is being placed or cannot be placed, so a pack never
+        silently leaves a shape out. ``extras`` chooses the documents written with the
+        sheets (:class:`envelopelab.export.build_pack.PackExtras`; default none);
+        ``roll_width`` is the fabric roll width, m; ``scale_model`` writes a 1:n scale
+        model on paper instead (:mod:`envelopelab.export.scale_model`; no documents).
+        """
+        from envelopelab.export.build_pack import export_build_pack
+
+        session = self.controller.session
+        inputs = self._pack_inputs()
+        if session is None or inputs is None:
+            return None
+        placed, fabrics, groups = inputs
         index = self.controller.attempt(
             export_build_pack,
             session.design,
@@ -1647,9 +1683,11 @@ class ShapesPanel(QWidget):
             groups=groups,
             colours=session.state.colours,
             overlays=session.state.overlays,
+            scale_model=scale_model,
         )
         if index is not None:
-            self.controller.message.emit(f"Build pack written to {out_dir}")
+            what = "Build pack" if scale_model is None else f"Scale model {scale_model.label()}"
+            self.controller.message.emit(f"{what} written to {out_dir}")
         return index
 
     def export_blender(self, path: str | Path, group: str | None = None) -> Path | None:

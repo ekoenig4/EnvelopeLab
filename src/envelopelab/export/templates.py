@@ -23,6 +23,12 @@ in parts). The bottom margin of every page says how it goes on the roll: an arro
 the page with its width and the roll's, and the piece's turn; the UP / warp arrow turns
 with the piece, so the template is laid on the cloth by its grain, not by the page.
 
+A scale model's pages (:mod:`envelopelab.export.scale_model`, ADR-0062) are instead one
+sheet of the chosen paper each (:func:`paper_layout`): portrait or landscape, the piece
+centred and turned to fit the printable area, the header, legend and calibration lines
+laid out in that area round a small piece, and a footer with the scale and paper; a piece
+larger than the printable area is drawn on a page grown to hold it and said so in red.
+
 A page shows the cut outline (solid), the sewn outline (dotted), feature marks in red
 (footprint lines, match marks, feed holes, side ticks), the finished widths and height in
 blue, the panel letter, cut count, fabric and finished size, the panel colours when the
@@ -49,6 +55,7 @@ from envelopelab.solvers.membrane import FloatArray
 
 if TYPE_CHECKING:
     from envelopelab.export.build_pack import Sheet
+    from envelopelab.export.scale_model import ScaleModel
     from envelopelab.features.primitives import DesignCheck
 
 PT_PER_M = 72.0 / 0.0254
@@ -437,19 +444,23 @@ def _edge_widths(hull: FloatArray, edges: FloatArray) -> FloatArray:
 class PageLayout:
     """How a sheet sits on its page, in the roll's frame (:class:`RollFit`): the turn
     (deg), the page width across the roll and height along it (m), and the lower-left
-    corner (m) of the turned cut outline, :data:`MARGIN` inside the page's corner."""
+    corner (m) of the turned cut outline, ``offset`` (m; :data:`MARGIN` on a roll page)
+    inside the page's corner. ``fits`` is False for a piece larger than its paper sheet
+    (a scale-model page, :func:`paper_layout`)."""
 
     angle: float
     width: float
     height: float
     origin: tuple[float, float]
+    offset: tuple[float, float] = (MARGIN, MARGIN)
+    fits: bool = True
 
     def to_page(self, x: float, y: float) -> tuple[float, float]:
         """Page coordinates (pt) of the sheet point ``(x, y)`` (m)."""
         ((px, py),) = turn_points(np.array([[x, y]]), self.angle)
         return (
-            (float(px) - self.origin[0] + MARGIN) * PT_PER_M,
-            (float(py) - self.origin[1] + MARGIN) * PT_PER_M,
+            (float(px) - self.origin[0] + self.offset[0]) * PT_PER_M,
+            (float(py) - self.origin[1] + self.offset[1]) * PT_PER_M,
         )
 
 
@@ -459,6 +470,25 @@ def layout(sheet: Sheet, roll_width: float) -> PageLayout:
     fit = roll_fit(sheet.cut, roll_width)
     lo = turn_points(sheet.cut, fit.angle).min(axis=0)
     return PageLayout(fit.angle, fit.across, fit.along, (float(lo[0]), float(lo[1])))
+
+
+def paper_layout(sheet: Sheet, model: ScaleModel) -> PageLayout:
+    """The page of an already scaled ``sheet`` on one sheet of the model's paper
+    (:func:`envelopelab.export.scale_model.paper_fit`): the page is the paper, portrait
+    or landscape, with the turned piece centred on it. A piece larger than the printable
+    area stays whole on a page grown to hold it (with the margin all round), and is
+    flagged (``fits`` False; the page says so in red)."""
+    from envelopelab.export.scale_model import paper_fit
+
+    fit = paper_fit(sheet.cut, model.printable)
+    pw, ph = model.paper.width, model.paper.height
+    if fit.landscape:
+        pw, ph = ph, pw
+    pw = max(pw, fit.width + 2 * model.margin)
+    ph = max(ph, fit.height + 2 * model.margin)
+    lo = turn_points(sheet.cut, fit.angle).min(axis=0)
+    offset = ((pw - fit.width) / 2, (ph - fit.height) / 2)
+    return PageLayout(fit.angle, pw, ph, (float(lo[0]), float(lo[1])), offset, fit.fits)
 
 
 def oversize(sheet: Sheet, roll_width: float) -> bool:
@@ -539,18 +569,24 @@ def dimensions(sheet: Sheet) -> list[tuple[str, float]]:
 
 
 def write_template_pdf(
-    tfile: TemplateFile, path: str | Path, roll_width: float
+    tfile: TemplateFile,
+    path: str | Path,
+    roll_width: float,
+    model: ScaleModel | None = None,
 ) -> list[dict[str, object]]:
     """Write one template file; returns a record of every page written (sheet, band,
     bands, turned, markings drawn over it). Sheet names are free text (a shape called
-    "left ear"), so the records are kept as data, never parsed back from the page."""
+    "left ear"), so the records are kept as data, never parsed back from the page.
+
+    With a scale ``model`` the sheets are already at model size and every page is one
+    sheet of its paper (:func:`paper_layout`) instead of a roll page."""
     from envelopelab.report.pdf import PdfCanvas
 
     canvas: PdfCanvas | None = None
     written: list[dict[str, object]] = []
     for tpage in tfile.pages:
         sheet = tpage.sheet
-        lay = layout(sheet, roll_width)
+        lay = layout(sheet, roll_width) if model is None else paper_layout(sheet, model)
         size = (lay.width * PT_PER_M, lay.height * PT_PER_M)
         if canvas is None:
             canvas = PdfCanvas(size)
@@ -558,21 +594,32 @@ def write_template_pdf(
             canvas.new_page(size)
         over = ",".join(o.source for o in tpage.overlays if o.source) or "-"
         canvas.comment(f"PAGE {sheet.name} 1 1 {lay.angle:g} {over}")
-        written.append(
-            {
-                "sheet": sheet.name,
-                "band": 1,
-                "bands": 1,
-                "turn_deg": lay.angle,
-                "across_roll_mm": round(lay.width * 1000.0, 1),
-                "along_roll_mm": round(lay.height * 1000.0, 1),
-                "markings": [o.source for o in tpage.overlays if o.source],
-            }
-        )
+        record: dict[str, object] = {
+            "sheet": sheet.name,
+            "band": 1,
+            "bands": 1,
+            "turn_deg": lay.angle,
+        }
+        if model is None:
+            record["across_roll_mm"] = round(lay.width * 1000.0, 1)
+            record["along_roll_mm"] = round(lay.height * 1000.0, 1)
+        else:
+            record["page_width_mm"] = round(lay.width * 1000.0, 1)
+            record["page_height_mm"] = round(lay.height * 1000.0, 1)
+            record["fits_paper"] = lay.fits
+        record["markings"] = [o.source for o in tpage.overlays if o.source]
+        written.append(record)
         if tpage.gore is not None:
             written[-1]["gore"] = tpage.gore
-        _draw_page(canvas, tpage, lay.to_page, size, 0, 1)
-        _draw_roll(canvas, lay, size, roll_width)
+        frame = None
+        if model is not None:
+            m = model.margin * PT_PER_M
+            frame = (m, m, size[0] - m, size[1] - m)
+        _draw_page(canvas, tpage, lay.to_page, size, 0, 1, frame)
+        if model is None:
+            _draw_roll(canvas, lay, size, roll_width)
+        else:
+            _draw_paper(canvas, lay, size, model)
     if canvas is None:
         raise ValueError(f"template {tfile.name} has no pages")
     canvas.save(path)
@@ -607,6 +654,31 @@ def _draw_roll(canvas: object, lay: PageLayout, size: tuple[float, float], roll:
     canvas.text(2.0 * s, y + 0.35 * s, text, size=size_t, bold=not fits, color=colour)
 
 
+def _draw_paper(
+    canvas: object, lay: PageLayout, size: tuple[float, float], model: ScaleModel
+) -> None:
+    """How a scale-model page prints, in its bottom margin: the scale, the paper and
+    "print at 100 %"; in red, with the piece's size, when the piece is larger than the
+    paper's printable area at any turn."""
+    from envelopelab.report.pdf import PdfCanvas
+
+    assert isinstance(canvas, PdfCanvas)
+    pw, _ph = size
+    colour = BLUE if lay.fits else RED
+    s = min(max(0.3 * model.margin * PT_PER_M, 5.0), 9.0)
+    y = max(0.35 * model.margin * PT_PER_M, 2.0)
+    turn = "upright" if lay.angle == 0.0 else f"piece turned {lay.angle:g} deg"
+    text = (
+        f"SCALE MODEL {model.label()} - {model.paper.name} - {turn} - print at 100 % "
+        "(actual size), check the calibration lines"
+        if lay.fits
+        else f"LARGER THAN THE {model.paper.name.upper()} PRINTABLE AREA AT {model.label()}: "
+        f"page {lay.width * 1000:.0f} x {lay.height * 1000:.0f} mm - choose a smaller scale"
+    )
+    size_t = min(s, 0.9 * (pw - 16.0) / max(len(text), 1) / 0.5)
+    canvas.text(8.0, y, text, size=size_t, bold=not lay.fits, color=colour)
+
+
 def _draw_page(
     canvas: object,
     tpage: TemplatePage,
@@ -614,7 +686,12 @@ def _draw_page(
     size: tuple[float, float],
     band: int,
     bands: int,
+    frame: tuple[float, float, float, float] | None = None,
 ) -> None:
+    """Draw one piece. The title, cut count, sizes and warp arrow sit inside the piece;
+    the header, notes, legend and calibration lines inside ``frame`` (x0, y0, x1, y1 in
+    pt; default the piece's own extent on the page), e.g. a paper sheet's printable area
+    round a small scale-model piece."""
     from envelopelab.export.build_pack import MM, calibration_label
     from envelopelab.project.colours import colour_rgb
     from envelopelab.report.pdf import PdfCanvas
@@ -662,7 +739,8 @@ def _draw_page(
         if name in sheet.edges:
             e = sheet.edges[name]
             a, b = e[0], e[-1]
-            inset = -0.04 if name == "top" else 0.04
+            inset = min(0.04, 0.1 * float(hi[1] - lo[1]))
+            inset = -inset if name == "top" else inset
             (ax, ay), (bx, by) = (
                 p(float(a[0]), float(a[1]) + inset),
                 p(float(b[0]), float(b[1]) + inset),
@@ -671,7 +749,7 @@ def _draw_page(
             mx, my = (ax + bx) / 2, (ay + by) / 2
             canvas.text(mx - 8 * u, my + 2 * u, f"{value * MM:.0f} mm", size=4 * u, color=BLUE)
         else:
-            x = float(hi[0]) - 0.06
+            x = float(hi[0]) - min(0.06, 0.15 * float(hi[0] - lo[0]))
             (ax, ay), (bx, by) = p(x, float(lo[1])), p(x, float(hi[1]))
             canvas.line(ax, ay, bx, by, color=BLUE, width=0.8)
             label = f"{value * MM:.0f} mm"
@@ -709,6 +787,10 @@ def _draw_page(
     canvas.line(gx2, gy2, gx2 - a * ux + b * uy, gy2 - a * uy - b * ux, width=1.0)
     canvas.line(gx2, gy2, gx2 - a * ux - b * uy, gy2 - a * uy + b * ux, width=1.0)
     canvas.text(gx2 + 3 * u, gy2 + 2 * u, "UP / warp", size=3.5 * u)
+    if frame is not None:
+        x0p, y0p, x1p, y1p = frame
+        cx, cy = (x0p + x1p) / 2, (y0p + y1p) / 2
+        span_x, span_y = x1p - x0p, y1p - y0p
     # Header (generated from the sheet data), notes and legend near the top of the piece.
     head = sheet.header() + (f"  [band {band + 1} of {bands}]" if bands > 1 else "")
     top = y1p - 0.12 * span_y
