@@ -304,8 +304,8 @@ def write_turning_vents(ctx: PackContext, out: Path) -> list[Path]:
                 mm(v.opening_width),
                 f"{r.jet.slot_length:.3f} m",
                 f"{r.jet.area:.3f} m2",
-                f"{r.jet.thrust:.1f} N / {r.jet.torque:.0f} N m",
-                f"{r.jet.mass_flow:.2f} kg/s, {r.jet.heat_loss / 1000:.0f} kW",
+                ctx.physics(f"{r.jet.thrust:.1f} N / {r.jet.torque:.0f} N m"),
+                ctx.physics(f"{r.jet.mass_flow:.2f} kg/s, {r.jet.heat_loss / 1000:.0f} kW"),
                 f"{r.control_line.length:.2f} m",
             ]
         )
@@ -329,8 +329,11 @@ def write_turning_vents(ctx: PackContext, out: Path) -> list[Path]:
     if rig is not None and rig.turning_vents:
         doc.kv(
             [
-                ("Net turning torque", f"{rig.net_torque:.0f} N m (all vents fully open)"),
-                ("Net side force", f"{rig.net_side_force:.1f} N"),
+                (
+                    "Net turning torque",
+                    ctx.physics(f"{rig.net_torque:.0f} N m (all vents fully open)"),
+                ),
+                ("Net side force", ctx.physics(f"{rig.net_side_force:.1f} N")),
             ]
         )
     first = doc.save(out / ctx.file("turning-vents.pdf"))
@@ -384,8 +387,8 @@ def write_parachute(ctx: PackContext, path: Path) -> Path:
             ("Parachute diameter", both(geo.diameter)),
             ("Radial panels", f"{pr.panel_count}"),
             ("Fabric", f"{geo.meridian_length:.3f} m edge to apex, {geo.area:.2f} m2"),
-            ("Crown pressure", f"{pr.crown_pressure:.1f} Pa"),
-            ("Shroud-line load (static)", f"{pr.force:.0f} N"),
+            ("Crown pressure", ctx.physics(f"{pr.crown_pressure:.1f} Pa")),
+            ("Shroud-line load (static)", ctx.physics(f"{pr.force:.0f} N")),
             ("Shroud lines", f"{both(pr.shroud.length)} x{pr.shroud.count}"),
             ("Centralising lines", f"{both(pr.centralizing.length)} x{pr.centralizing.count}"),
         ]
@@ -403,7 +406,7 @@ def write_parachute(ctx: PackContext, path: Path) -> Path:
             )
         )
     doc.kv(rows)
-    table = rigging_table(rig)
+    table = rigging_table(rig, ctx.scale is not None)
     keep = [k for k, r in enumerate(table.rows) if r[0] in ("parachute", "red line")]
     doc.heading("LINES AND RINGS", x=doc.margin)
     doc.table(
@@ -434,8 +437,8 @@ def write_scoop(ctx: PackContext, path: Path) -> Path:
                     f"{mm(sc.panel.top_width)} at the mouth, "
                     f"{mm(sc.panel.bottom_width)} at the bottom",
                 ),
-                ("Mass", f"{sc.mass.total_mass:.2f} kg"),
-                ("Wind load", "not assessed"),
+                ("Mass", ctx.physics(f"{sc.mass.total_mass:.2f} kg")),
+                ("Wind load", ctx.physics("not assessed")),
             ]
         )
     else:
@@ -445,15 +448,15 @@ def write_scoop(ctx: PackContext, path: Path) -> Path:
         doc.kv(
             [
                 ("Flying wires", f"{fw.wires.count}, {fw.geometry.group_size} load tapes each"),
-                ("Suspended weight", f"{fw.suspended_weight:.0f} N"),
-                ("Limit weight", f"{fw.limit_weight:.0f} N"),
+                ("Suspended weight", ctx.physics(f"{fw.suspended_weight:.0f} N")),
+                ("Limit weight", ctx.physics(f"{fw.limit_weight:.0f} N")),
             ]
         )
         doc.heading("FLYING-WIRE LENGTHS", x=doc.margin)
         doc.table(
             ["Wire", "Length", "English", "Limit tension"],
             [
-                [str(k), f"{length:.3f} m", ft_in(length), f"{t:.0f} N"]
+                [str(k), f"{length:.3f} m", ft_in(length), ctx.physics(f"{t:.0f} N")]
                 for k, (length, t) in enumerate(
                     zip(fw.geometry.wire_lengths, fw.wire_tensions, strict=False), start=1
                 )
@@ -461,7 +464,7 @@ def write_scoop(ctx: PackContext, path: Path) -> Path:
             [1, 2, 2, 2],
             row_height=14,
         )
-    table = rigging_table(rig)
+    table = rigging_table(rig, ctx.scale is not None)
     keep = [k for k, r in enumerate(table.rows) if r[0] == "flying wires"]
     if keep:
         doc.heading("WIRES AND LEGS", x=doc.margin)

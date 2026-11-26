@@ -32,27 +32,37 @@ it never leaves a shape out without saying so.
 ## Scale models on paper
 
 Tick **Scale model** in the export dialog to print a 1:n model of the envelope (and its
-special shapes and overlays) at home instead of the full-size pack. Every pattern length
-is divided by n, and every piece is printed whole on **one sheet** of the paper you
-choose, turned and set portrait or landscape to fit.
+special shapes and overlays) at home instead of the full-size pack. Every length is
+divided by n, in the patterns **and in every document**, and every piece is printed
+whole on **one sheet** of the paper you choose, turned and set portrait or landscape to
+fit.
 
 * **Scale**: 1 : n. **Fit to paper** sets n to the largest whole number at which every
   piece fits one sheet (for example 1:20 on Letter). The line under the settings says
   whether every piece fits; when some do not, it names them in red. Such pieces are
   still written, on a page enlarged to hold them and marked in red: choose a larger n.
-* **Paper**: US Letter (8.5 x 11 in), US Legal, Tabloid (11 x 17 in), A4 or A3.
+* **Paper**: US Letter (8.5 x 11 in), US Legal, Tabloid (11 x 17 in), A4, A3,
+  **Custom width x height** (type both under *Print size*), or **Maximum width only**
+  (type the width: for a roll or a strip, each page is that wide and as long as its
+  piece).
 * **Margin**: the blank border your printer needs on every side (default 12.7 mm,
   0.5 in).
-* **Seam allowance**: unticked, the design's allowance is scaled with the piece (an
-  exact 1:n copy, often only a millimetre or two); ticked, every piece gets the
-  allowance you type (default 5 mm) at model size, enough for glue or a seam.
+* **Seam allowance**: ticked (*Set at model size*, the default), every piece gets the
+  allowance you type (default 5 mm), enough for glue or a seam; unticked, the design's
+  allowance is scaled with the piece (an exact 1:n copy, often only a millimetre or two).
+* **Model**: the model's volume, height and widest diameter at the scale set (the volume
+  is the full-size volume / n³), updated as you change the scale.
 
-The pack holds the same files as a full-size pack's patterns, named
-`<design> model 1-n` (for example `generic-model-1-20-panel-A.pdf`), and no documents:
-those describe the full-size envelope. Every sheet says `SCALE MODEL 1:n - not a
-full-size pattern`, and every page's footer gives the scale and paper. **Print at 100 %
-(actual size)** and check the calibration lines with a ruler before cutting. The
-settings are remembered for the next export.
+The pack holds the same files as the full-size pack, named `<design> model 1-n` (for
+example `generic-model-1-20-panel-A.pdf`), with every document you tick: the build-pack
+index and build order, spec summary, layout and planning, sewing schedule, build log,
+picture assembly instructions, appendage procedures, parachute and scoop sheets,
+combined DXFs and 3D views, all at model size. Only the **lift charts** are left out.
+Weights, loads, strengths, lift and factors of safety are printed **n/a (scale model)**:
+they depend on the model's material and do not scale with the patterns. Every sheet says
+`SCALE MODEL 1:n - not a full-size pattern`, and every page's footer gives the scale and
+paper. **Print at 100 % (actual size)** and check the calibration lines with a ruler
+before cutting. The settings are remembered for the next export.
 
 A model shows the shape of the patterns as they will be sewn. It is not a structural
 test: lift scales with n⁻³ and skin weight with n⁻², and stresses do not scale, so a

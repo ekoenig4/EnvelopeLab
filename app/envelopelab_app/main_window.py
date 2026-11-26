@@ -912,6 +912,14 @@ class MainWindow(QMainWindow):
             got = full_size()
             return None if got is None else oversize_pieces(got, model)
 
+        def summary(model: Any) -> Any:
+            from envelopelab.export.scale_model import model_summary
+
+            out = self.controller.outputs
+            if out is None:
+                return None
+            return model_summary(out.volume, out.height, out.max_diameter, model)
+
         dialog = ExportPackDialog(
             self,
             folder,
@@ -919,6 +927,7 @@ class MainWindow(QMainWindow):
             lift_settings=self.lift_chart_dialog,
             fit=fit,
             check=check,
+            summary=summary,
         )
         saved = self.settings.value("export/scale_model", {}) or {}
         if isinstance(saved, dict):
@@ -928,19 +937,34 @@ class MainWindow(QMainWindow):
             self.settings.setValue("export/scale_model", dialog.model_state())
             model = dialog.scale_model()
             if model is not None:
-                self.export_scale_model(dialog.path(), model)
+                self.export_scale_model(dialog.path(), model, dialog.include())
             else:
                 self.export_build_pack(dialog.path(), dialog.include(), dialog.roll_width())
 
-    def export_scale_model(self, out_dir: str | Path, model: ScaleModel) -> Path | None:
-        """Write a 1:n scale model of the design and its shapes: every piece scaled and
-        printed on one sheet of the model's paper (:mod:`envelopelab.export.scale_model`);
-        returns the index (None when refused)."""
+    def export_scale_model(
+        self, out_dir: str | Path, model: ScaleModel, include: frozenset[str] | None = None
+    ) -> Path | None:
+        """Write a 1:n scale model of the design and its shapes: every piece and document
+        at model size, each piece printed on one sheet of the model's paper
+        (:mod:`envelopelab.export.scale_model`); ``include`` chooses the documents
+        (default: all but the lift charts, which a model never has). The 3D views are
+        drawn from the scaled design, never from a full-size run. Returns the index (None
+        when refused)."""
+        from envelopelab.export.build_pack import PackExtras
+        from envelopelab.export.documents import DOCUMENTS, provenance
+
         session = self.controller.session
         if session is None or session.design.gores is None:
             return None
+        chosen = (frozenset(DOCUMENTS) if include is None else include) - {"lift_chart"}
+        extras = PackExtras(
+            include=chosen,
+            provenance=provenance(
+                session.content_hash(), session.path.name if session.path else ""
+            ),
+        )
         return self.shapes.export_pack(
-            out_dir, None, self.prefs.print_roll_width, scale_model=model
+            out_dir, extras, self.prefs.print_roll_width, scale_model=model
         )
 
     def export_build_pack(

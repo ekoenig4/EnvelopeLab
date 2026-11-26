@@ -1301,6 +1301,34 @@ class DesignCheck:
         return self.severity == "info"
 
 
+@dataclass(frozen=True)
+class DesignInputs:
+    """The arguments of :func:`design_primitive` besides the primitive and its surface.
+
+    Attributes
+    ----------
+    seam_allowance : float
+        Seam allowance round every skin piece, m.
+    feed_hole_radius : float or None
+        Radius of the feed hole under the feature, m.
+    tolerance : float
+        Length tolerance of the pattern checks, m.
+    samples : int
+        Footprint samples round the axis.
+    feed_holes : tuple of (float, float, float)
+        Extra feed holes: tape position (m), azimuth (rad) and radius (m).
+    seam_clearance : float
+        Least distance from a feed hole's edge to its panel's seams, m.
+    """
+
+    seam_allowance: float
+    feed_hole_radius: float | None
+    tolerance: float
+    samples: int
+    feed_holes: tuple[tuple[float, float, float], ...]
+    seam_clearance: float
+
+
 @dataclass
 class PrimitiveDesign:
     """Everything derived from one primitive on its envelope (SI units).
@@ -1361,6 +1389,10 @@ class PrimitiveDesign:
     #: A drawing preview (:func:`preview_primitive`): no pieces, attachment, marks or
     #: checks; never a design result.
     preview: bool = False
+    #: The arguments :func:`design_primitive` was given besides the primitive and its
+    #: surface (lengths m), so the shape can be designed again on another envelope (a
+    #: scale model, :mod:`envelopelab.export.scale_model`); None for a preview.
+    inputs: DesignInputs | None = None
 
     @property
     def feed_holes(self) -> tuple[FeedHoleMark, ...]:
@@ -2815,6 +2847,14 @@ def design_primitive(
         base too large for the local curvature).
     """
     primitive.validate()
+    inputs = DesignInputs(
+        float(seam_allowance),
+        None if feed_hole_radius is None else float(feed_hole_radius),
+        float(tolerance),
+        int(samples),
+        tuple((float(a), float(b), float(c)) for a, b, c in feed_holes),
+        float(seam_clearance),
+    )
     pl = primitive.placement
     if not 1 <= pl.gore <= surface.gore_count:
         raise PrimitiveError(f"{primitive.name}: gore must be within 1..{surface.gore_count}")
@@ -2839,6 +2879,7 @@ def design_primitive(
             feed_holes,
         )
         placed.checks += _seam_clearance_checks(placed, seam_clearance)
+        placed.inputs = inputs
         return placed
     skin = _Skin(primitive, surface, base, axis, b1, b2, samples)
     fp = skin.at(np.zeros(samples), skin.phi)
@@ -3003,6 +3044,7 @@ def design_primitive(
     design.extra_feed_holes = _extra_feed_holes(design, feed_holes, g_centre)
     design.checks = _checks(design, pieces, tolerance)
     design.checks += _seam_clearance_checks(design, seam_clearance)
+    design.inputs = inputs
     return design
 
 

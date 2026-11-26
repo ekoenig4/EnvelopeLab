@@ -418,15 +418,20 @@ def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> li
 def _check_paper_page(
     name: str, page: int, w: float, h: float, content: str, model: dict[str, Any]
 ) -> list[QAFinding]:
-    """A scale-model page (pt) is one sheet of the pack's paper, portrait or landscape,
-    or is larger and says in red that its piece is larger than the paper; it states the
-    scale it was drawn at."""
+    """A scale-model page (pt) is one sheet of the pack's paper, portrait or landscape (a
+    print size with only a width: exactly that wide, any length), or is larger and says
+    in red that its piece is larger than the paper; it states the scale it was drawn
+    at."""
     pw = model["paper_width_mm"] / 1000.0 * PT_PER_M
-    ph = model["paper_height_mm"] / 1000.0 * PT_PER_M
     out = []
-    paper = (abs(w - pw) <= 1.0 and abs(h - ph) <= 1.0) or (
-        abs(w - ph) <= 1.0 and abs(h - pw) <= 1.0
-    )
+    if model.get("paper_height_mm") is None:  # only a width: any length
+        ph = h
+        paper = abs(w - pw) <= 1.0
+    else:
+        ph = model["paper_height_mm"] / 1000.0 * PT_PER_M
+        paper = (abs(w - pw) <= 1.0 and abs(h - ph) <= 1.0) or (
+            abs(w - ph) <= 1.0 and abs(h - pw) <= 1.0
+        )
     if not paper and "LARGER THAN THE" not in content:
         out.append(
             QAFinding(

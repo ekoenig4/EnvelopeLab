@@ -273,8 +273,12 @@ def rigging_lines(out: RiggingOutputs) -> list[tuple[str, LineResult, bool]]:
     return lines
 
 
-def rigging_table(out: RiggingOutputs | None) -> Table:
-    """Every line and ring: lengths (rings: diameter), limit load, strength, FoS, mass."""
+def rigging_table(out: RiggingOutputs | None, model: bool = False) -> Table:
+    """Every line and ring: lengths (rings: diameter), limit load, strength, FoS, mass.
+
+    For a scale ``model`` (ADR-0063) the lengths are the model's and the limit load,
+    strength, factor of safety, check and mass are ``n/a (scale model)``: they do not
+    scale with the patterns."""
     table = Table(
         "Lines and rings",
         [
@@ -294,9 +298,30 @@ def rigging_table(out: RiggingOutputs | None) -> Table:
     )
     if out is None:
         return table
+    from envelopelab.export.scale_model import NOT_APPLICABLE
+
     for element, line, ring in rigging_lines(out):
         fos = line.safety_factor
         length = f"dia {line.length / math.pi:.3f}" if ring else f"{line.length:.3f}"
+        if model:
+            na = NOT_APPLICABLE
+            table.rows.append(
+                [
+                    element,
+                    line.name,
+                    str(line.count),
+                    length,
+                    f"{line.total_length:.3f}",
+                    na,
+                    na,
+                    "-",
+                    na,
+                    "-",
+                    na,
+                    na,
+                ]
+            )
+            continue
         if fos is None:
             check = "not assessed"
         else:

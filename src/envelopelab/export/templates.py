@@ -472,6 +472,11 @@ def layout(sheet: Sheet, roll_width: float) -> PageLayout:
     return PageLayout(fit.angle, fit.across, fit.along, (float(lo[0]), float(lo[1])))
 
 
+#: Shortest page of a print size with only a width, m (the 100 mm calibration line along
+#: the page, the header and the legend fit; source: assumed).
+STRIP_MIN_LENGTH = 0.18
+
+
 def paper_layout(sheet: Sheet, model: ScaleModel) -> PageLayout:
     """The page of an already scaled ``sheet`` on one sheet of the model's paper
     (:func:`envelopelab.export.scale_model.paper_fit`): the page is the paper, portrait
@@ -481,7 +486,10 @@ def paper_layout(sheet: Sheet, model: ScaleModel) -> PageLayout:
     from envelopelab.export.scale_model import paper_fit
 
     fit = paper_fit(sheet.cut, model.printable)
-    pw, ph = model.paper.width, model.paper.height
+    pw = model.paper.width
+    # Only a width set: each page is as long as its piece and the margins, and long
+    # enough for the calibration line along it, its header and legend.
+    ph = model.paper.height if model.paper.height is not None else STRIP_MIN_LENGTH
     if fit.landscape:
         pw, ph = ph, pw
     pw = max(pw, fit.width + 2 * model.margin)

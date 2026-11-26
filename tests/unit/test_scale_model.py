@@ -1,4 +1,5 @@
-"""Scale-model build packs: scaling the sheets, fitting the paper, the paper pages."""
+"""Scale-model build packs: scaling the design and sheets, fitting the paper, the paper
+pages and the documents at model size."""
 
 from __future__ import annotations
 
@@ -13,14 +14,15 @@ from envelopelab.export.build_pack import (
     PT_PER_M,
     BuildPackError,
     PackExtras,
-    SeamPair,
     Sheet,
     export_build_pack,
     pack_sheets,
 )
+from envelopelab.export.documents import DOCUMENTS
 from envelopelab.export.qa import _page_boxes, check_pack
 from envelopelab.export.scale_model import (
     INCH,
+    NOT_APPLICABLE,
     PAPER_SIZES,
     PaperSize,
     ScaleModel,
@@ -28,15 +30,30 @@ from envelopelab.export.scale_model import (
     oversize_pieces,
     paper_fit,
     piece_scale_limit,
-    scale_pack,
-    scale_seam_pair,
+    scale_design,
+    scale_inputs,
+    scale_overlay,
+    scale_patterns,
+    scale_primitive,
     scale_sheet,
 )
-from envelopelab.geometry.polygon import offset_polygon
-from envelopelab.project.gore_design import standard_gore_design
+from envelopelab.features.primitives import (
+    Dome,
+    EnvelopeSurface,
+    Placement,
+    Revolved,
+    Tube,
+    design_primitive,
+)
+from envelopelab.geometry.polygon import offset_polygon, signed_area
+from envelopelab.project.gore_design import gore_outputs, standard_gore_design
+from envelopelab.project.model import PatternSet, RowPattern
+from envelopelab.project.overlays import OverlaySpec
+from envelopelab.project.shapes import ShapePlacement
 
 DESIGN = standard_gore_design("generic", 2000.0, 17.0, 16.0, 12, 6)
 LETTER = PAPER_SIZES["letter"]
+LETTER_H = 11.0 * 0.0254  # m
 
 
 def _rect(w: float, h: float) -> np.ndarray:
@@ -68,7 +85,15 @@ def test_paper_sizes_are_the_standards() -> None:
     assert (PAPER_SIZES["a4"].width, PAPER_SIZES["a4"].height) == (0.210, 0.297)
     assert PAPER_SIZES["tabloid"].height == pytest.approx(17 * INCH)
     with pytest.raises(BuildPackError):
-        PaperSize("wrong way", 0.3, 0.2)
+        PaperSize("no width", 0.0, 0.2)
+    with pytest.raises(BuildPackError):
+        PaperSize("no height", 0.2, -1.0)
+    assert PaperSize.custom(0.3, 0.45).name == "custom 300 x 450 mm"
+    strip = PaperSize.custom(0.6)
+    assert strip.unbounded and strip.height is None
+    assert strip.name == "max width 600 mm, any length"
+    pw, ph = ScaleModel(10.0, strip, 0.01).printable
+    assert pw == pytest.approx(0.58) and ph == math.inf
 
 
 def test_scale_model_validates_and_labels() -> None:
@@ -118,12 +143,6 @@ def test_fixed_allowance_offsets_the_scaled_finished_outline() -> None:
     assert bare.cut == pytest.approx(bare.finished)
 
 
-def test_seam_ease_scales() -> None:
-    pair = SeamPair((("a", "left"),), (("b", "right"),), ease=0.03)
-    assert scale_seam_pair(pair, 0.05).ease == pytest.approx(0.0015)
-    assert scale_seam_pair(pair, 0.05).a == pair.a
-
-
 def test_paper_fit_turns_and_lands_the_piece() -> None:
     printable = ScaleModel(1.0).printable  # 190.5 x 254.0 mm
     upright = paper_fit(_rect(0.15, 0.25), printable)
@@ -169,15 +188,6 @@ def test_fit_scale_finds_the_largest_whole_scale_that_fits() -> None:
         fit_scale([], ScaleModel(1.0))
 
 
-def test_scale_pack_notes_the_scale_on_every_sheet() -> None:
-    sheets, pairs, _ = pack_sheets(DESIGN)
-    scaled, scaled_pairs = scale_pack(sheets, pairs, ScaleModel(25.0))
-    assert len(scaled) == len(sheets) and len(scaled_pairs) == len(pairs)
-    for full, model in zip(sheets, scaled, strict=True):
-        assert model.notes[0] == "SCALE MODEL 1:25 - not a full-size pattern"
-        assert np.array(model.finished_size) == pytest.approx(np.array(full.finished_size) / 25)
-
-
 def test_scale_model_pack_passes_qa_on_paper_pages(tmp_path: Path) -> None:
     full = tmp_path / "full"
     export_build_pack(DESIGN, [], full)
@@ -198,7 +208,7 @@ def test_scale_model_pack_passes_qa_on_paper_pages(tmp_path: Path) -> None:
         for key in ("finished_width_mm", "finished_height_mm"):
             assert s[key] == pytest.approx(big[s["file"]][key] / model.denominator, abs=1e-3)
     # Every page is one Letter sheet, either way up, and says how to print it.
-    paper = {(round(LETTER.width * PT_PER_M), round(LETTER.height * PT_PER_M))}
+    paper = {(round(LETTER.width * PT_PER_M), round(LETTER_H * PT_PER_M))}
     paper |= {(h, w) for w, h in paper}
     for t in index["templates"]:
         assert t["file"].startswith("generic-model-")
@@ -237,12 +247,222 @@ def test_qa_catches_a_page_that_is_not_the_paper(tmp_path: Path) -> None:
     assert {"page size", "scale"} <= checks
 
 
-def test_scale_model_pack_has_no_documents(tmp_path: Path) -> None:
-    with pytest.raises(BuildPackError, match="no documents"):
+def test_scale_design_scales_every_length_and_keeps_the_rest() -> None:
+    model = ScaleModel(20.0)
+    small = scale_design(DESIGN, model)
+    g, sg = DESIGN.gores, small.gores
+    assert g is not None and sg is not None
+    assert small.meta.name == "generic model 1-20"
+    for a, b in zip(
+        g.meridian_profile_control_points, sg.meridian_profile_control_points, strict=True
+    ):
+        assert (b.x, b.y) == pytest.approx((a.x / 20, a.y / 20))
+    for ra, rb in zip(g.panel_rows, sg.panel_rows, strict=True):
+        assert rb.finished_height == pytest.approx(ra.finished_height / 20)
+    for key in ("mouth_diameter", "crown_ring", "parachute_hole_diameter", "seal_overlap"):
+        assert getattr(sg, key) == pytest.approx(getattr(g, key) / 20)
+    assert small.tapes.vertical.width == pytest.approx(DESIGN.tapes.vertical.width / 20)
+    assert small.seam_types[0].allowance == pytest.approx(DESIGN.seam_types[0].allowance / 20)
+    assert DESIGN.parachute is not None and small.parachute is not None
+    assert small.parachute.shroud_attachment == pytest.approx(
+        DESIGN.parachute.shroud_attachment / 20
+    )
+    # Not geometric: kept, and never printed for the model.
+    assert small.tapes.vertical.strength == DESIGN.tapes.vertical.strength
+    assert small.operating == DESIGN.operating
+    assert (sg.count, sg.loft) == (g.count, g.loft)
+    # Volume k^3, height and area as lengths.
+    full = gore_outputs(DESIGN, PatternSet())
+    out = gore_outputs(small, PatternSet())
+    assert out.volume == pytest.approx(full.volume / 20**3, rel=1e-9)
+    assert out.height == pytest.approx(full.height / 20, rel=1e-9)
+    assert out.area == pytest.approx(full.area / 20**2, rel=1e-9)
+    fixed = scale_design(DESIGN, ScaleModel(20.0, seam_allowance=0.004))
+    assert {s.allowance for s in fixed.seam_types} == {0.004}
+
+
+def test_scaled_design_cuts_the_scaled_sheets() -> None:
+    model = ScaleModel(25.0)
+    full = pack_sheets(DESIGN)[0]
+    small = pack_sheets(scale_design(DESIGN, model))[0]
+    assert [s.name for s in small] == [s.name for s in full]
+    for a, b in zip(full, small, strict=True):
+        ref = scale_sheet(a, model.factor)
+        assert b.finished == pytest.approx(ref.finished, abs=1e-9)
+        assert b.cut == pytest.approx(ref.cut, abs=1e-9)
+        for name, edge in ref.edges.items():
+            assert b.edges[name] == pytest.approx(edge, abs=1e-9)
+
+
+def test_patterns_and_overlays_scale() -> None:
+    model = ScaleModel(10.0)
+    rows = PatternSet(rows={"A": RowPattern(seam_allowance=0.02)})
+    assert scale_patterns(rows, model).rows["A"].seam_allowance == pytest.approx(0.002)
+    blank = PatternSet(rows={"B": RowPattern()})
+    fixed = scale_patterns(blank, ScaleModel(10.0, seam_allowance=0.003))
+    assert fixed.rows["B"].seam_allowance == 0.003
+    spec = OverlaySpec(
+        name="sun",
+        placement=ShapePlacement(gore=2, tape_position=8.0, across=0.25),
+        width=1.5,
+        height=0.5,
+        outline="polygon",
+        points=[(0.0, 0.5), (0.5, 0.0), (0.0, -0.5)],
+        hem=0.02,
+    )
+    small = scale_overlay(spec, model)
+    assert small.placement.tape_position == pytest.approx(0.8)
+    assert small.placement.across == 0.25
+    assert (small.width, small.height, small.hem) == pytest.approx((0.15, 0.05, 0.002))
+    want = np.array([[0.0, 0.05], [0.05, 0.0], [0.0, -0.05]])
+    assert np.array(small.points) == pytest.approx(want)
+
+
+def test_scale_primitive_scales_lengths_only() -> None:
+    dome = Dome("d", Placement(3, 12.0, across=0.5, lean_deg=10.0), 1.0, 1.2, 16, cap_radius=0.2)
+    small = scale_primitive(dome, 0.1)
+    assert isinstance(small, Dome)
+    pl = small.placement
+    assert (pl.gore, pl.tape_position, pl.across, pl.lean_deg) == pytest.approx((3, 1.2, 0.5, 10.0))
+    assert (small.base_radius, small.height, small.cap_radius) == pytest.approx((0.1, 0.12, 0.02))
+    assert small.gores == 16
+    tube = scale_primitive(Tube("t", Placement(1, 10.0), 0.8, 0.3, 2.0), 0.5)
+    assert isinstance(tube, Tube)
+    assert (tube.base_radius, tube.tip_radius, tube.length) == pytest.approx((0.4, 0.15, 1.0))
+    rev = scale_primitive(Revolved("r", Placement(1, 9.0), ((0.4, 0.0), (0.0, 1.2))), 0.5)
+    assert isinstance(rev, Revolved)
+    assert rev.profile == ((0.2, 0.0), (0.0, 0.6))
+
+
+SURFACE = EnvelopeSurface.from_design(DESIGN)
+SHAPES = [
+    design_primitive(
+        Dome("ear", Placement(3, 12.0, across=0.5), 1.0, 1.2, gores=12), SURFACE, 0.0125
+    ),
+    design_primitive(Tube("horn", Placement(7, 10.0, lean_deg=20), 0.8, 0.3, 2.0), SURFACE),
+]
+
+
+def test_shapes_designed_again_at_model_size_match_the_scaled_pieces() -> None:
+    model = ScaleModel(20.0)
+    scaled = scale_inputs(DESIGN, SHAPES, None, [], model)
+    for full, small in zip(SHAPES, scaled.primitives, strict=True):
+        assert small.inputs is not None and full.inputs is not None
+        assert small.inputs.seam_allowance == pytest.approx(full.inputs.seam_allowance / 20)
+        assert small.footprint_length == pytest.approx(full.footprint_length / 20, rel=1e-6)
+        assert len(small.pieces) == len(full.pieces) and len(small.marks) == len(full.marks)
+        for a, b in zip(full.pieces, small.pieces, strict=True):
+            # The skin is flattened again at model size: the same piece within 0.1 % in
+            # area and in the length of every sewn edge.
+            assert abs(signed_area(b.finished)) == pytest.approx(
+                abs(signed_area(a.finished)) / 400, rel=1e-3
+            )
+            for name, edge in a.edges.items():
+                la = float(np.linalg.norm(np.diff(edge, axis=0), axis=1).sum())
+                lb = float(np.linalg.norm(np.diff(b.edges[name], axis=0), axis=1).sum())
+                assert lb == pytest.approx(la / 20, rel=1e-3)
+
+
+@pytest.mark.slow
+def test_model_pack_writes_every_document_at_model_size(tmp_path: Path) -> None:
+    out = tmp_path / "model"
+    model = ScaleModel(20.0, LETTER, seam_allowance=0.005)
+    include = frozenset(DOCUMENTS) - {"lift_chart"}
+    export_build_pack(DESIGN, SHAPES, out, extras=PackExtras(include), scale_model=model)
+    assert check_pack(out) == []
+    index = json.loads((out / "cad" / "index.json").read_text())
+    files = {d["file"] for d in index["documents"]}
+    stem = "generic-model-1-20"
+    for name in (
+        "00-BUILD-PACK-INDEX.pdf",
+        "spec-summary.pdf",
+        "sewing-schedule.html",
+        "build-log.pdf",
+        "assembly-envelope.pdf",
+        "assembly-ear.pdf",
+        "ear-build.pdf",
+        "parachute.pdf",
+        "scoop.pdf",
+        "3d.html",
+        "ear-3d.html",
+        "panel-dimensions.csv",
+    ):
+        assert f"{stem}-{name}" in files
+    assert not any("lift-chart" in f for f in files)
+    # Dimensions at model size: every panel's finished height in the CSV is the sheet's.
+    rows = (out / f"{stem}-panel-dimensions.csv").read_text().splitlines()
+    heights = {r.split(",")[0]: int(r.split(",")[3]) for r in rows[1:]}
+    for s in index["sheets"]:
+        if s["kind"] == "envelope panel" and "half" not in s["file"]:
+            letter = s["piece"].removeprefix("row ")
+            assert abs(heights[letter] - s["finished_height_mm"]) <= 1
+    # Physics: never printed for a model, said to be n/a.
+    from envelopelab.export.shop import PackContext, spec_rows
+    from envelopelab.export.templates import template_files
+
+    small = scale_design(DESIGN, model)
+    sheets = pack_sheets(small)[0]
+    ctx = PackContext(
+        small,
+        gore_outputs(small, PatternSet()),
+        sheets,
+        [],
+        [],
+        template_files(small.meta.name, sheets),
+        model.printable[0],
+        scale=model,
+    )
+    spec = {name: (metric, english) for name, metric, english, _note in spec_rows(ctx)}
+    assert spec["Gross lift"] == (NOT_APPLICABLE, NOT_APPLICABLE)
+    assert spec["Lift margin"] == (NOT_APPLICABLE, NOT_APPLICABLE)
+    assert spec["Total volume"][0] == "0.25 m3"
+    html = (out / f"{stem}-sewing-schedule.html").read_text()
+    assert "5 mm" in html
+
+
+def test_model_documents_mark_physics_not_applicable() -> None:
+    from envelopelab.export.documents import rigging_table
+
+    out = gore_outputs(scale_design(DESIGN, ScaleModel(20.0)), PatternSet())
+    table = rigging_table(out.rigging, model=True)
+    assert table.rows and not table.fails
+    for row in table.rows:
+        assert row[5] == row[6] == row[8] == row[10] == row[11] == NOT_APPLICABLE
+        assert float(row[4]) > 0.0  # lengths are given
+
+
+def test_scale_model_pack_has_no_lift_charts(tmp_path: Path) -> None:
+    with pytest.raises(BuildPackError, match="no lift charts"):
         export_build_pack(
             DESIGN,
             [],
             tmp_path,
-            extras=PackExtras(include=frozenset({"planning"})),
+            extras=PackExtras(include=frozenset({"planning", "lift_chart"})),
             scale_model=ScaleModel(20.0),
         )
+
+
+def test_width_only_print_gives_pages_of_that_width(tmp_path: Path) -> None:
+    strip = PaperSize.custom(0.20)
+    model = ScaleModel(1.0, strip, 0.005)
+    sheets = pack_sheets(DESIGN)[0]
+    n = fit_scale(sheets, model)
+    # A strip as wide as Letter but of any length never needs a smaller model.
+    wide = fit_scale(sheets, ScaleModel(1.0, PaperSize.custom(LETTER.width), 0.005))
+    assert wide <= fit_scale(sheets, ScaleModel(1.0, LETTER, 0.005))
+    out = tmp_path / "strip"
+    export_build_pack(DESIGN, [], out, scale_model=ScaleModel(n, strip, 0.005))
+    assert check_pack(out) == []
+    index = json.loads((out / "cad" / "index.json").read_text())
+    assert index["scale_model"]["paper_height_mm"] is None
+    for t in index["templates"]:
+        for (w, _h, _c), page in zip(_page_boxes(out / t["file"]), t["pages"], strict=True):
+            assert w == pytest.approx(0.20 * PT_PER_M, abs=1.0)
+            assert page["fits_paper"] is True
+
+
+def test_model_summary_is_geometrically_similar() -> None:
+    from envelopelab.export.scale_model import model_summary
+
+    s = model_summary(2000.0, 17.0, 16.0, ScaleModel(20.0))
+    assert (s.volume, s.height, s.max_diameter) == pytest.approx((0.25, 0.85, 0.8))

@@ -42,6 +42,7 @@ from envelopelab.export.documents import (
 if TYPE_CHECKING:
     from envelopelab.design.model import DesignDocument
     from envelopelab.export.build_pack import SeamPair, Sheet
+    from envelopelab.export.scale_model import ScaleModel
     from envelopelab.export.templates import TemplateFile
     from envelopelab.features.primitives import PrimitiveDesign
     from envelopelab.project.colours import PanelColours
@@ -64,13 +65,25 @@ RULE = (0.80, 0.83, 0.86)
 GROUPS = ("START HERE", "LAYOUT & PLANNING", "PANEL TEMPLATES", "APPENDAGES", "TOP & BOTTOM / CAD")
 
 
+#: The note every scale model's spec summary carries (ADR-0063).
+SCALE_MODEL_NOTICE = (
+    "Scale model {scale}: every length in this pack is at model size. Weights, loads, "
+    "strengths, lift and factors of safety are not given (n/a): they depend on the model's "
+    "material and do not scale with the patterns. A model shows the shape of the patterns "
+    "as sewn; it is not a structural test of the full-size envelope."
+)
+
+
 # --------------------------------------------------------------------------------------
 # Units at the output boundary
 # --------------------------------------------------------------------------------------
 
 
 def ft_in(metres: float) -> str:
-    """``metres`` as feet and whole inches, e.g. ``60 ft 2 in``."""
+    """``metres`` as feet and whole inches, e.g. ``60 ft 2 in``; under a foot in inches
+    to a tenth (a scale model's lengths, e.g. ``3.4 in``)."""
+    if abs(metres) < 12 * INCH:
+        return f"{metres / INCH:.1f} in"
     inches = round(metres / INCH)
     feet, rest = divmod(inches, 12)
     return f"{feet} ft {rest} in" if feet else f"{rest} in"
@@ -82,8 +95,23 @@ def inches(metres: float, digits: int = 1) -> str:
 
 
 def mm(metres: float) -> str:
-    """``metres`` in whole millimetres with a thousands separator, e.g. ``18,338 mm``."""
+    """``metres`` in whole millimetres with a thousands separator, e.g. ``18,338 mm``;
+    under 10 mm to a tenth (a scale model's tapes and allowances, e.g. ``1.3 mm``)."""
+    if abs(metres) < 0.01:
+        return f"{metres * 1000:.1f} mm"
     return f"{metres * 1000:,.0f} mm"
+
+
+def volume_m3(m3: float) -> str:
+    """A volume in m3: whole m3 from 100 m3 (``2,610 m3``), else three significant
+    figures (a scale model's, e.g. ``0.326 m3``)."""
+    return f"{m3:,.0f} m3" if m3 >= 100.0 else f"{m3:.3g} m3"
+
+
+def volume_cu_ft(m3: float) -> str:
+    """A volume in cubic feet, as :func:`volume_m3` (``92,171 cu ft``, ``11.5 cu ft``)."""
+    cu = m3 / CUBIC_FOOT
+    return f"{cu:,.0f} cu ft" if cu >= 100.0 else f"{cu:.3g} cu ft"
 
 
 def both(metres: float) -> str:
@@ -93,8 +121,8 @@ def both(metres: float) -> str:
 
 
 def volume_both(m3: float) -> str:
-    """``2,610 m3 / 92,171 cu ft``."""
-    return f"{m3:,.0f} m3 / {m3 / CUBIC_FOOT:,.0f} cu ft"
+    """``2,610 m3 / 92,171 cu ft`` (:func:`volume_m3`, :func:`volume_cu_ft`)."""
+    return f"{volume_m3(m3)} / {volume_cu_ft(m3)}"
 
 
 # --------------------------------------------------------------------------------------
@@ -156,6 +184,17 @@ class PackContext:
     colours: PanelColours | None = None
     #: Overlays laid on the envelope (``OverlayLayout``, ADR-0056).
     overlays: list[Any] = field(default_factory=list)
+    #: The scale model the pack is (ADR-0063; None: full size). Its design, sheets and
+    #: shapes are already at model size; values that do not scale geometrically are
+    #: printed :data:`~envelopelab.export.scale_model.NOT_APPLICABLE`.
+    scale: ScaleModel | None = None
+
+    def physics(self, text: str) -> str:
+        """``text`` (a weight, load, strength, lift or factor of safety), or ``n/a (scale
+        model)`` in a scale model's pack."""
+        from envelopelab.export.scale_model import NOT_APPLICABLE
+
+        return text if self.scale is None else NOT_APPLICABLE
 
     def shape_pieces(self, shape: str) -> str:
         """The template files of a special shape's skin pieces, as a range in words."""
@@ -320,6 +359,22 @@ def shop_limits(ctx: PackContext) -> list[str]:
     """The shop limits the pack is built to, and whether every piece keeps to them."""
     short, long, name = largest_piece(ctx.sheets)
     roll, table = ctx.roll_width, ctx.table_length
+    if ctx.scale is not None:
+        m = ctx.scale
+        lines = [
+            f"Scale {m.label()}: every length is the full-size length / {m.denominator:g}.",
+            f"Paper {m.paper.name}, {mm(m.margin)} margin: printable {mm(roll)} x "
+            + (mm(table) if math.isfinite(table) else "any length")
+            + f" - the largest cut piece is {mm(short)} x {mm(long)} ({name}).",
+            "Cut every piece from its own sheet; lay it on the model material by its UP / "
+            "warp arrow.",
+        ]
+        if short > roll or long > table:
+            lines.append(
+                f"WARNING: some pieces may not fit one sheet square to it ({name}); their "
+                "pages say so in red if they do not fit at any turn."
+            )
+        return lines
     lines = [
         f"Cloth {both(roll)} bolt - the largest cut piece is {mm(short)} across ({name}).",
         f"Table {both(table)} - the longest cut piece is {mm(long)}.",
@@ -338,6 +393,19 @@ def shop_limits(ctx: PackContext) -> list[str]:
 
 def printing_rules(ctx: PackContext) -> list[str]:
     """Printing rules for the 1:1 sheets."""
+    if ctx.scale is not None:
+        return [
+            "All 1:1 sheets print at 100 % (actual size) - NEVER 'fit to page'.",
+            "Measure BOTH calibration lines (across and along) on every 1:1 sheet before you cut.",
+            (
+                f"Every 1:1 sheet is one sheet of {ctx.scale.paper.name}, portrait or landscape"
+                if not ctx.scale.paper.unbounded
+                else f"Every 1:1 sheet is {mm(ctx.scale.paper.width)} wide and as long as its piece"
+            )
+            + " (its bottom margin gives the scale); a piece may be turned on its page - lay "
+            "it on the material by its UP / warp arrow.",
+            "Solid = CUT. Dotted = SEW (finished). Red = feature marks. Blue = finished sizes.",
+        ]
     return [
         "All 1:1 sheets print at 100 % - NEVER 'fit to page' or 'shrink oversized pages'.",
         "Measure BOTH calibration lines (across and along) on every 1:1 sheet before you cut.",
@@ -679,8 +747,12 @@ def write_index(ctx: PackContext, path: str | Path) -> Path:
     doc.title("BUILD PACK - FILE INDEX")
     doc.text_centre(
         doc.y + 6,
-        f"1:1 = print actual size on a {inches(ctx.roll_width, 0)} roll - every page carries "
-        "calibration lines. REF = reading, any printer. CAD = DXF.",
+        (
+            f"1:1 = print actual size on a {inches(ctx.roll_width, 0)} roll"
+            if ctx.scale is None
+            else f"1:1 = print actual size on {ctx.scale.paper.name}"
+        )
+        + " - every page carries calibration lines. REF = reading, any printer. CAD = DXF.",
         9,
         color=MUTED,
     )
@@ -749,8 +821,8 @@ def spec_rows(ctx: PackContext) -> list[tuple[str, str, str, str]]:
         rows += [
             (
                 "Total volume",
-                f"{out.volume:,.0f} m3",
-                f"{out.volume / CUBIC_FOOT:,.0f} cu ft",
+                volume_m3(out.volume),
+                volume_cu_ft(out.volume),
                 "lofted design surface",
             ),
             ("Envelope height", mm(out.height), ft_in(out.height), "design shape (as cut)"),
@@ -799,7 +871,13 @@ def spec_rows(ctx: PackContext) -> list[tuple[str, str, str, str]]:
                 "route plus spare",
             )
         )
-    if out is not None:
+    if out is not None and ctx.scale is not None:
+        na = ctx.physics("")
+        rows += [
+            ("Gross lift", na, na, "lift does not scale with the patterns"),
+            ("Lift margin", na, na, "weights depend on the model's material"),
+        ]
+    elif out is not None:
         rows.append(
             (
                 "Gross lift",
@@ -843,10 +921,28 @@ def configuration(ctx: PackContext) -> list[tuple[str, str]]:
             f"hole {d.tapes.hole.tape_class}",
         ),
         ("Fabric zones", ", ".join(f"{z}: {f}" for z, f in d.zones.items())),
-        ("Cloth width", f"{both(ctx.roll_width)} bolt"),
-        ("Cutting table", both(ctx.table_length)),
-        ("Panel orientation", "ROW HEIGHT across the bolt, gore width along the roll"),
     ]
+    if ctx.scale is not None:
+        m = ctx.scale
+        allowance = (
+            "the design's, scaled"
+            if m.seam_allowance is None
+            else f"{mm(m.seam_allowance)} on every piece"
+        )
+        out += [
+            (
+                "Scale",
+                f"{m.label()} model: every length is the full-size length / {m.denominator:g}",
+            ),
+            ("Paper", f"{m.paper.name}, {mm(m.margin)} margin, one piece per sheet"),
+            ("Seam allowance", allowance),
+        ]
+    else:
+        out += [
+            ("Cloth width", f"{both(ctx.roll_width)} bolt"),
+            ("Cutting table", both(ctx.table_length)),
+            ("Panel orientation", "ROW HEIGHT across the bolt, gore width along the roll"),
+        ]
     out += features(ctx)
     return out
 
@@ -864,7 +960,15 @@ def write_spec_summary(ctx: PackContext, path: str | Path) -> Path:
     doc.table(["", "METRIC", "ENGLISH", ""], [list(r) for r in rows], [3, 2, 2, 4], fails, 15)
     doc.heading("CONFIGURATION", x=doc.margin)
     doc.table(["", ""], [list(r) for r in configuration(ctx)], [2, 7], row_height=14)
-    if ctx.outputs is not None and ctx.outputs.rigging is not None:
+    if ctx.scale is not None:
+        doc.heading("RIGGING FACTORS OF SAFETY", x=doc.margin)
+        doc.table(
+            ["", ""],
+            [["Every line and ring", ctx.physics("") + ": loads and strengths do not scale"]],
+            [2, 7],
+            row_height=14,
+        )
+    elif ctx.outputs is not None and ctx.outputs.rigging is not None:
         doc.heading("RIGGING FACTORS OF SAFETY", x=doc.margin)
         lines = rigging_lines(ctx.outputs.rigging)
         table = []
@@ -893,8 +997,10 @@ def write_spec_summary(ctx: PackContext, path: str | Path) -> Path:
             7,
         )
     doc.y -= 4
-    assumed = assumed_values(ctx.design, ctx.outputs)
+    assumed = [] if ctx.scale is not None else assumed_values(ctx.design, ctx.outputs)
     notes = [SAFETY_NOTICE]
+    if ctx.scale is not None:
+        notes.append(SCALE_MODEL_NOTICE.format(scale=ctx.scale.label()))
     if assumed:
         notes.append("Values tagged 'assumed': " + "; ".join(assumed) + ".")
     for note in notes:
@@ -977,6 +1083,8 @@ def build_log_sheets(ctx: PackContext) -> list[tuple[str, str, list[tuple[str, s
             length = f"dia {line.length / math.pi:.3f} m" if ring else f"{line.length:.3f} m"
             fos = line.safety_factor
             check = "" if fos is None else (" - FoS ok" if line.passes else " - FoS FAILS")
+            if ctx.scale is not None:
+                check = ""
             final.append((f"{element}: {line.name} x{line.count}", length + check))
     final += [
         ("Mouth hemmed", f"O{mm(d.gores.mouth_diameter)} over the rim tape" if d.gores else "-"),

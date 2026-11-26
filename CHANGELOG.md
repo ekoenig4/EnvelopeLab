@@ -4,14 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 - Added: **scale-model packs**. *Scale model* in **File ▸ Export build pack…** writes a
-  1:n model of the envelope, its special shapes and overlays with every piece whole on
-  one sheet of paper (US Letter, Legal, Tabloid, A4 or A3; portrait or landscape, turned
-  to fit). **Fit to paper** finds the largest whole-number scale at which every piece
-  fits; pieces that do not fit are named in the dialog and marked in red on their pages.
-  The seam allowance is scaled with the piece or set at model size (default 5 mm). No
-  documents (they describe the full-size envelope). `index.json` gains `scale_model`
-  (`null` for full-size packs; ADR-0062). Full-size results are unchanged; on pieces
-  under 0.4 m the blue dimension lines' inset now scales with the piece.
+  1:n model of the envelope, its special shapes and overlays: every length of the design
+  divided by n, every piece whole on one sheet (US Letter, Legal, Tabloid, A4, A3, a
+  custom width x height, or a maximum width of any length; turned to fit), and every
+  document of the full-size pack at model size except the lift charts. Weights, loads,
+  strengths, lift and factors of safety are printed *n/a (scale model)*. **Fit to paper**
+  finds the largest whole-number scale at which every piece fits; pieces that do not fit
+  are named in the dialog and marked in red on their pages. The seam allowance is set at
+  model size (default 5 mm) or scaled with the piece, and the dialog shows the model's
+  volume, height and width. `index.json` gains `scale_model` (`null` for full-size
+  packs; ADR-0062, ADR-0063). Full-size results are unchanged; documents print values
+  under 10 mm to 0.1 mm, under a foot to 0.1 in and volumes under 100 m³ to three
+  significant figures, and on pieces under 0.4 m the blue dimension lines' inset scales
+  with the piece.
 - Added: the crown temperature limit of the lift charts can be set per project in the
   Lift charts tab (*Crown temperature limit*, with its source tag). By default it is still
   the lowest service temperature of the design's fabrics (120 °C *assumed* when a fabric

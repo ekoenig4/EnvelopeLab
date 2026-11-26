@@ -11,8 +11,24 @@ L_\text{model} = k\,L, \qquad A_\text{model} = k^2 A, \qquad V_\text{model} = k^
 
 Finished outlines, sewn edges, match marks, footprint lines, feed holes and the planned
 seam ease all scale by \( k \), so the sewn model is geometrically similar to the
-patterns the full-size envelope is sewn from. The model is made from the flat sheets
-after the full-size patterns are built, not by scaling the design.
+patterns the full-size envelope is sewn from.
+
+The model is made by scaling the **inputs** (ADR-0063): every length of the design (the
+meridian control points, row heights and seam bows, mouth, crown ring, parachute hole and
+seal overlap, tape widths, seam allowances, rigging and parachute lengths, scoop, vent
+openings), of the row annotations, of the overlays and of every special shape (its
+position up the tape, radii, heights, profile, mesh, cap and crown outline). Angles,
+counts, lofts, tapers and relative widths are dimensionless and kept. The gore geometry
+is homogeneous of degree one in these lengths, so the envelope and parachute sheets cut
+from the scaled design equal the scaled full-size sheets to rounding (a test). A special
+shape is designed again on the scaled envelope, with its seam allowance, feed holes,
+check tolerance and feed-hole clearance scaled: its skin is flattened again at model
+size and agrees with the scaled full-size pieces within 0.1 % in area and in every sewn
+edge's length (a test), though a piece may lie turned slightly in the plane.
+
+The documents are made from the scaled inputs by the same code as the full-size pack.
+Volume, height and widest diameter follow the similarity above (\( V_m = k^3 V \);
+`model_summary`, shown in the export dialog).
 
 ## Seam allowance
 
@@ -25,7 +41,9 @@ offset, `envelopelab.geometry.polygon.offset_polygon`). A 25 mm allowance at 1:2
 
 Each piece is printed whole on one sheet, inside a printer margin \( m \) on every side:
 the printable area is \( W \times H = (w_p - 2m) \times (h_p - 2m) \) for paper
-\( w_p \times h_p \). A cut outline turned by \( \theta \) with bounding box
+\( w_p \times h_p \) (a standard size or a custom one). For a print size limited only
+in width (a roll or strip), \( H = \infty \) and the sheet is not turned landscape: a
+piece fits when \( a(\theta) \le W \). A cut outline turned by \( \theta \) with bounding box
 \( a(\theta) \times b(\theta) \) fits when
 
 \[
@@ -58,6 +76,8 @@ dialog uses this.
 
 ## Assumptions and valid range
 
+* Weights, loads, strengths, factors of safety, lift and flows are printed *n/a (scale
+  model)* in the model's documents, and the lift charts are left out (below).
 * Geometric similarity only. A model in paper, tissue or film is **not** dynamically or
   structurally similar to the full-size envelope: lift scales with \( k^3 \) while skin
   mass scales with \( k^2 \) (times the model material's areal mass), and membrane

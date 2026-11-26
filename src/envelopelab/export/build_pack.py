@@ -1078,7 +1078,9 @@ def _scale_entry(model: ScaleModel) -> dict[str, Any]:
         "factor": model.factor,
         "paper": model.paper.name,
         "paper_width_mm": round(model.paper.width * MM, 3),
-        "paper_height_mm": round(model.paper.height * MM, 3),
+        "paper_height_mm": None
+        if model.paper.height is None
+        else round(model.paper.height * MM, 3),
         "margin_mm": round(model.margin * MM, 3),
         "seam_allowance_mm": None if allowance is None else round(allowance * MM, 3),
     }
@@ -1136,18 +1138,28 @@ def export_build_pack(
         (:mod:`envelopelab.export.overlays`). The fabric of each is its own, else that of
         the row under its centre.
     scale_model : ScaleModel, optional
-        Write a 1:n scale model instead (:mod:`envelopelab.export.scale_model`): every
-        sheet and seam pair scaled, each piece on one sheet of the model's paper. The
-        documents describe the full-size envelope, so none may be chosen with it.
+        Write a 1:n scale model instead (:mod:`envelopelab.export.scale_model`,
+        ADR-0063): the design, shapes, row annotations and overlays scaled first, so every
+        sheet and document is made at model size, each piece on one sheet of the model's
+        paper. Every document but the lift charts may be chosen; values that do not scale
+        geometrically (weights, loads, strengths, factors of safety, lift) are printed
+        ``n/a (scale model)``.
 
     Returns
     -------
     Path
         ``index.json``.
     """
-    if scale_model is not None and extras is not None and extras.include:
-        raise BuildPackError(
-            "a scale-model pack has no documents (they describe the full-size envelope)"
+    if scale_model is not None:
+        design, primitives, patterns, overlays, marking_allowance, hole_hem, extras = _model_inputs(
+            scale_model,
+            design,
+            primitives,
+            patterns,
+            overlays,
+            marking_allowance,
+            hole_hem,
+            extras,
         )
     sheets, pairs, layouts = pack_sheets(
         design,
@@ -1161,9 +1173,10 @@ def export_build_pack(
         overlays,
     )
     if scale_model is not None:
-        from envelopelab.export.scale_model import scale_pack
-
-        sheets, pairs = scale_pack(sheets, pairs, scale_model)
+        roll_width = scale_model.printable[0]
+        note = f"SCALE MODEL {scale_model.label()} - not a full-size pattern"
+        for sheet in sheets:
+            sheet.notes = [note, *sheet.notes]
     documents: list[dict[str, str]] = []
     prov = None
     if extras is not None and extras.include:
@@ -1178,20 +1191,87 @@ def export_build_pack(
             roll_width,
             colours,
             layouts,
+            scale_model,
         )
-    title = design.meta.name
-    if scale_model is not None:
-        title = f"{title} model 1-{scale_model.denominator:g}"
     return write_pack(
         sheets,
         out_dir,
         pairs,
         roll_width,
-        title=title,
+        title=design.meta.name,
         documents=documents,
         provenance=None if prov is None else prov.as_dict(),
         shape_groups=_group_lists(primitives, groups or {}),
         scale_model=scale_model,
+    )
+
+
+def _model_inputs(
+    model: ScaleModel,
+    design: DesignDocument,
+    primitives: Sequence[PrimitiveDesign],
+    patterns: PatternSet | None,
+    overlays: Sequence[OverlaySpec],
+    marking_allowance: float | None,
+    hole_hem: float | None,
+    extras: PackExtras | None,
+) -> tuple[
+    DesignDocument,
+    list[PrimitiveDesign],
+    PatternSet,
+    list[OverlaySpec],
+    float | None,
+    float | None,
+    PackExtras | None,
+]:
+    """The inputs of :func:`export_build_pack` at the model's size
+    (:func:`envelopelab.export.scale_model.scale_inputs`), and its documents: every one
+    but the lift charts (refused: lift does not scale with the patterns), made from the
+    scaled design (its outputs computed again, the 3D views drawn from the scaled design
+    and shapes, never from a full-size solver run), with the full-size design's
+    provenance."""
+    from dataclasses import replace
+
+    from envelopelab.export import documents as docs
+    from envelopelab.export.scale_model import scale_inputs
+    from envelopelab.export.viewer import model_shape_scene
+
+    if extras is not None and "lift_chart" in extras.include:
+        raise BuildPackError(
+            "a scale model has no lift charts: lift does not scale with the patterns"
+        )
+    k = model.factor
+    scaled = scale_inputs(design, primitives, patterns, overlays, model)
+    if marking_allowance is not None:
+        marking_allowance = (
+            model.seam_allowance if model.seam_allowance is not None else marking_allowance * k
+        )
+    if hole_hem is not None:
+        hole_hem *= k
+    if extras is not None:
+        extras = replace(
+            extras,
+            outputs=None,
+            scene=None,
+            shape_scenes={
+                p.primitive.name: model_shape_scene(scaled.design, p, model.label())
+                for p in scaled.primitives
+            },
+            provenance=extras.provenance or docs.provenance(design.compute_content_hash()),
+            status=f"Scale model {model.label()}: patterns and dimensions only, no structural "
+            "result",
+            # The documents' "bolt" and "table" are the paper's printable area: their
+            # fit checks then compare each piece with one sheet.
+            table_length=model.printable[1],
+        )
+    return (
+        scaled.design,
+        scaled.primitives,
+        scaled.patterns,
+        scaled.overlays,
+        marking_allowance,
+        hole_hem,
+        extras,
     )
 
 
@@ -1324,6 +1404,7 @@ def write_documents(
     roll_width: float = DEFAULT_ROLL_WIDTH,
     colours: PanelColours | None = None,
     overlays: Sequence[Any] = (),
+    scale_model: ScaleModel | None = None,
 ) -> tuple[list[dict[str, str]], Any]:
     """Write the documents of ``extras`` into ``out``; returns their index entries and the
     provenance used. The build-pack index is written last: it lists every file. With
@@ -1370,6 +1451,7 @@ def write_documents(
         stem,
         colours=None if colours is None or colours.is_empty() else colours,
         overlays=list(overlays),
+        scale=scale_model,
     )
     written: list[tuple[Path, str, str, str, str]] = []  # path, kind, group, tag, what
 
@@ -1382,7 +1464,10 @@ def write_documents(
         scene = extras.scene
         if scene is None:
             scene = design_scene(
-                design, None if outputs is None else outputs.rigging, colours=ctx.colours
+                design,
+                None if outputs is None else outputs.rigging,
+                colours=ctx.colours,
+                model=scale_model,
             )
         add("viewer", write_viewer(scene, out / docs.document_files(stem, "viewer")[0]))
         from envelopelab.export.templates import piece_name

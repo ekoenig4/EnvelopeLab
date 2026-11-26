@@ -25,12 +25,29 @@ from PySide6.QtWidgets import (
 
 from envelopelab.export.build_pack import DEFAULT_ROLL_WIDTH
 from envelopelab.export.documents import DOCUMENTS
-from envelopelab.export.scale_model import DEFAULT_PAPER_MARGIN, PAPER_SIZES, ScaleModel
+from envelopelab.export.scale_model import (
+    DEFAULT_PAPER_MARGIN,
+    PAPER_SIZES,
+    ModelSummary,
+    PaperSize,
+    ScaleModel,
+)
 from envelopelab_app.theme import STATUS_STYLES
 
 INCH = 0.0254  # m
 MM = 0.001  # m
 DEFAULT_MODEL_ALLOWANCE = 0.005  # m (a 5 mm glue or sewing tab on a model; source: assumed)
+CUSTOM = "custom"  # print size: width and height typed
+WIDTH_ONLY = "width"  # print size: only a maximum width (any length)
+CUBIC_FOOT = 0.3048**3  # m^3 (exact, by definition)
+
+
+def format_volume(m3: float) -> str:
+    """A volume for the dialog, metric and English: ``0.250 m3 (8.83 cu ft)``."""
+    cu = m3 / CUBIC_FOOT
+    metric = f"{m3:,.0f} m3" if m3 >= 100.0 else f"{m3:.3g} m3"
+    english = f"{cu:,.0f} cu ft" if cu >= 100.0 else f"{cu:.3g} cu ft"
+    return f"{metric} ({english})"
 
 
 class ExportPackDialog(QDialog):
@@ -44,11 +61,17 @@ class ExportPackDialog(QDialog):
     written; the documents are optional.
 
     *Scale model* writes a 1:n model instead (:mod:`envelopelab.export.scale_model`):
-    every piece scaled and printed on one sheet of the chosen paper, without documents.
+    every piece and document at model size, each piece printed on one sheet of the
+    chosen paper; the lift charts are left out (lift does not scale with the patterns).
     ``fit`` returns the scale denominator of the largest model whose pieces all fit
     (*Fit to paper*) and ``check`` the pieces that do not fit at a scale (the status
     line); both get the :class:`ScaleModel` set in the dialog and return None when the
-    design gives no sheets.
+    design gives no sheets. ``summary`` gives the model's volume, height and width at
+    the scale set (:func:`envelopelab.export.scale_model.model_summary`; None: unknown).
+
+    The print size is a standard paper, a custom width and height, or a maximum width
+    only (a roll or strip: each page as long as its piece). The seam allowance is either
+    set at model size (default 5 mm) or the design's, scaled with the piece.
     """
 
     def __init__(
@@ -59,6 +82,7 @@ class ExportPackDialog(QDialog):
         lift_settings: Callable[[], object] | None = None,
         fit: Callable[[ScaleModel], float | None] | None = None,
         check: Callable[[ScaleModel], list[str] | None] | None = None,
+        summary: Callable[[ScaleModel], ModelSummary | None] | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Export build pack")
@@ -106,7 +130,7 @@ class ExportPackDialog(QDialog):
                 continue
             docs.addWidget(box)
         form.addRow("Include", docs)
-        self._fit, self._check = fit, check
+        self._fit, self._check, self._summary = fit, check, summary
         self.model_box = self._model_box()
         note = QLabel(
             "The 3D view shows the run chosen in the 3D view, with its status; a stale or "
@@ -133,7 +157,8 @@ class ExportPackDialog(QDialog):
         box.setCheckable(True)
         box.setChecked(False)
         box.setToolTip(
-            "Write a scale model's templates instead of the full-size pack (no documents)"
+            "Write the pack as a scale model: every piece and document at model size, no "
+            "lift charts"
         )
         self.scale = QDoubleSpinBox()
         self.scale.setObjectName("modelScale")
@@ -154,6 +179,23 @@ class ExportPackDialog(QDialog):
         self.paper.setObjectName("modelPaper")
         for key, paper in PAPER_SIZES.items():
             self.paper.addItem(paper.name, key)
+        self.paper.addItem("Custom width x height", CUSTOM)
+        self.paper.addItem("Maximum width only (any length)", WIDTH_ONLY)
+        self.print_width = QDoubleSpinBox()
+        self.print_width.setObjectName("modelPrintWidth")
+        self.print_height = QDoubleSpinBox()
+        self.print_height.setObjectName("modelPrintHeight")
+        for spin, value in ((self.print_width, 215.9), (self.print_height, 279.4)):
+            spin.setRange(20.0, 10000.0)
+            spin.setDecimals(1)
+            spin.setSuffix(" mm")
+            spin.setValue(value)
+        self.print_width.setToolTip("Widest the printer prints, across the paper")
+        self.print_height.setToolTip("Longest page the printer takes")
+        size_row = QHBoxLayout()
+        size_row.addWidget(self.print_width, 1)
+        size_row.addWidget(QLabel("x"))
+        size_row.addWidget(self.print_height, 1)
         self.margin = QDoubleSpinBox()
         self.margin.setObjectName("modelMargin")
         self.margin.setRange(0.0, 50.0)
@@ -161,11 +203,13 @@ class ExportPackDialog(QDialog):
         self.margin.setSuffix(" mm")
         self.margin.setValue(DEFAULT_PAPER_MARGIN / MM)
         self.margin.setToolTip("Blank border the printer needs on every side of the sheet")
-        self.fixed_allowance = QCheckBox("Fixed")
+        self.fixed_allowance = QCheckBox("Set at model size")
         self.fixed_allowance.setObjectName("modelFixedAllowance")
+        self.fixed_allowance.setChecked(True)
         self.fixed_allowance.setToolTip(
-            "Unchecked: the design's seam allowance is scaled with the piece (exact 1:n "
-            "copy). Checked: every piece gets this allowance at model size."
+            "Checked: every piece gets this allowance at model size. Unchecked: the "
+            "design's seam allowance is scaled with the piece (an exact 1:n copy, often "
+            "too narrow to sew or glue)."
         )
         self.allowance = QDoubleSpinBox()
         self.allowance.setObjectName("modelAllowance")
@@ -176,47 +220,68 @@ class ExportPackDialog(QDialog):
         allowance_row = QHBoxLayout()
         allowance_row.addWidget(self.fixed_allowance)
         allowance_row.addWidget(self.allowance, 1)
+        self.model_size = QLabel("")
+        self.model_size.setObjectName("modelSize")
+        self.model_size.setWordWrap(True)
         self.model_status = QLabel("")
         self.model_status.setObjectName("modelStatus")
         self.model_status.setWordWrap(True)
         note = QLabel(
             "A model shows the shape of the patterns; it is not structurally similar to "
-            "the full-size envelope and says nothing about its strength."
+            "the full-size envelope. Its documents give weights, loads, strengths and "
+            "factors of safety as n/a, and it has no lift charts."
         )
         note.setWordWrap(True)
         note.setProperty("role", "muted")
         form = QFormLayout(box)
         form.addRow("Scale", scale_row)
         form.addRow("Paper", self.paper)
+        form.addRow("Print size", size_row)
         form.addRow("Margin", self.margin)
         form.addRow("Seam allowance", allowance_row)
+        form.addRow("Model", self.model_size)
         form.addRow(self.model_status)
         form.addRow(note)
         box.toggled.connect(self._model_toggled)
         self.fixed_allowance.toggled.connect(self.allowance.setEnabled)
-        self.allowance.setEnabled(False)
-        for spin in (self.scale, self.margin, self.allowance):
+        for spin in (self.scale, self.margin, self.allowance, self.print_width, self.print_height):
             spin.valueChanged.connect(self.update_model_status)
-        self.paper.currentIndexChanged.connect(self.update_model_status)
+        self.paper.currentIndexChanged.connect(self._paper_changed)
+        self._enable_size()
         self.fixed_allowance.toggled.connect(self.update_model_status)
         return box
 
     def _model_toggled(self, on: bool) -> None:
-        # The documents and the roll describe the full-size envelope.
+        # A model is printed on paper, not a roll, and has no lift charts (lift does not
+        # scale with the patterns); every other document is written at model size.
         self.roll.setEnabled(not on)
-        for box in self.checks.values():
-            box.setEnabled(not on)
+        if "lift_chart" in self.checks:
+            self.checks["lift_chart"].setEnabled(not on)
         if on:
             self.update_model_status()
 
+    def _enable_size(self) -> None:
+        # The print size is typed for a custom size (both) or a maximum width (width).
+        key = str(self.paper.currentData())
+        self.print_width.setEnabled(key in (CUSTOM, WIDTH_ONLY))
+        self.print_height.setEnabled(key == CUSTOM)
+
+    def _paper_changed(self) -> None:
+        self._enable_size()
+        self.update_model_status()
+
+    def paper_size(self) -> PaperSize:
+        """The print size chosen: a standard paper, a custom one or a maximum width."""
+        key = str(self.paper.currentData())
+        if key == CUSTOM:
+            return PaperSize.custom(self.print_width.value() * MM, self.print_height.value() * MM)
+        if key == WIDTH_ONLY:
+            return PaperSize.custom(self.print_width.value() * MM)
+        return PAPER_SIZES[key]
+
     def _paper_model(self, denominator: float) -> ScaleModel:
         allowance = self.allowance.value() * MM if self.fixed_allowance.isChecked() else None
-        return ScaleModel(
-            denominator,
-            PAPER_SIZES[str(self.paper.currentData())],
-            self.margin.value() * MM,
-            allowance,
-        )
+        return ScaleModel(denominator, self.paper_size(), self.margin.value() * MM, allowance)
 
     def fit_to_paper(self) -> float | None:
         """*Fit to paper*: set the scale to the largest whole-number 1:n at which every
@@ -238,11 +303,25 @@ class ExportPackDialog(QDialog):
         return n
 
     def update_model_status(self) -> None:
-        """Say whether every piece fits its sheet at the scale set (red when not)."""
-        if not self.model_box.isChecked() or self._check is None:
+        """Show the model's size at the scale set and say whether every piece fits its
+        sheet (red when not)."""
+        if not self.model_box.isChecked():
             return
         try:
             model = self._paper_model(self.scale.value())
+        except ValueError as exc:
+            self._status(str(exc), ok=False)
+            return
+        size = None if self._summary is None else self._summary(model)
+        self.model_size.setText(
+            ""
+            if size is None
+            else f"volume {format_volume(size.volume)}, height {size.height * 1000:,.0f} mm, "
+            f"widest {size.max_diameter * 1000:,.0f} mm"
+        )
+        if self._check is None:
+            return
+        try:
             big = self._check(model)
         except ValueError as exc:
             self._status(str(exc), ok=False)
@@ -280,11 +359,14 @@ class ExportPackDialog(QDialog):
                 return default
 
         self.scale.setValue(number("scale", self.scale.value()))
+        self.print_width.setValue(number("print_width_mm", self.print_width.value()))
+        self.print_height.setValue(number("print_height_mm", self.print_height.value()))
         k = self.paper.findData(str(state.get("paper", "letter")))
         self.paper.setCurrentIndex(max(k, 0))
         self.margin.setValue(number("margin_mm", self.margin.value()))
         self.allowance.setValue(number("allowance_mm", self.allowance.value()))
-        self.fixed_allowance.setChecked(str(state.get("fixed", "")).lower() in ("1", "true"))
+        fixed = str(state.get("fixed", "true")).lower()
+        self.fixed_allowance.setChecked(fixed in ("1", "true"))
         self.model_box.setChecked(str(state.get("enabled", "")).lower() in ("1", "true"))
 
     def model_state(self) -> dict[str, object]:
@@ -293,6 +375,8 @@ class ExportPackDialog(QDialog):
             "enabled": self.model_box.isChecked(),
             "scale": self.scale.value(),
             "paper": str(self.paper.currentData()),
+            "print_width_mm": self.print_width.value(),
+            "print_height_mm": self.print_height.value(),
             "margin_mm": self.margin.value(),
             "fixed": self.fixed_allowance.isChecked(),
             "allowance_mm": self.allowance.value(),
@@ -308,10 +392,9 @@ class ExportPackDialog(QDialog):
             self.accept()
 
     def include(self) -> frozenset[str]:
-        """The documents checked (none for a scale model)."""
-        if self.model_box.isChecked():
-            return frozenset()
-        return frozenset(k for k, box in self.checks.items() if box.isChecked())
+        """The documents checked (a scale model: all but the lift charts)."""
+        chosen = frozenset(k for k, box in self.checks.items() if box.isChecked())
+        return chosen - {"lift_chart"} if self.model_box.isChecked() else chosen
 
     def roll_width(self) -> float:
         """The roll width, m."""

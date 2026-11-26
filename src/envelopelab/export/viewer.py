@@ -35,6 +35,8 @@ from envelopelab.solvers.membrane import FloatArray
 
 if TYPE_CHECKING:
     from envelopelab.design.model import DesignDocument
+    from envelopelab.export.scale_model import ScaleModel
+    from envelopelab.features.primitives import PrimitiveDesign
     from envelopelab.rigging import RiggingOutputs
 
 VIEWER_FORMAT = "envelopelab-viewer/1"
@@ -263,6 +265,7 @@ def design_scene(
     rigging: RiggingOutputs | None = None,
     status: SceneStatus | None = None,
     colours: Any = None,
+    model: ScaleModel | None = None,
 ) -> Scene:
     """The parts a design gives without a solver run.
 
@@ -277,6 +280,9 @@ def design_scene(
     colours : PanelColours, optional
         Panel colours (ADR-0055): coloured panels are drawn in their colour, the others
         in the design colour.
+    model : ScaleModel, optional
+        ``design`` is a scale model's (already scaled): the banner says so (unless
+        ``status`` is given) and the basket is drawn at the model's scale.
 
     Returns
     -------
@@ -288,6 +294,8 @@ def design_scene(
 
     surface = display_surface(design)
     scene = Scene(title=design.meta.name or "EnvelopeLab design")
+    if status is None and model is not None:
+        status = model_status(model.label())
     if status is not None:
         scene.status = status
     shade = np.array(_rgb(DESIGN_COLOR), dtype=np.float64)
@@ -344,7 +352,59 @@ def design_scene(
             scene.lines.append(SceneLines("rigging", "Rigging", "Rigging", flat, RIGGING_COLOR))
         wires = lines.get("flying_wires", [])
         if wires:
-            scene.meshes.append(basket(min(float(np.min(w[:, 2])) for w in wires)))
+            scale = 1.0 if model is None else model.factor
+            scene.meshes.append(basket(min(float(np.min(w[:, 2])) for w in wires), scale))
+    return scene
+
+
+def model_status(scale: str) -> SceneStatus:
+    """The banner of a scale model's 3D view (``scale`` e.g. ``1:20``)."""
+    return SceneStatus(
+        "info",
+        f"Scale model {scale}.",
+        "Designed shape at model size; no simulation results (loads and stresses do not "
+        "scale with the patterns).",
+    )
+
+
+def model_shape_scene(design: DesignDocument, shape: PrimitiveDesign, scale: str) -> Scene:
+    """The 3D view of one special shape of a scale model: the shape as designed at model
+    size (:func:`envelopelab.features.scene.designed_display`, m) with its seams, and the
+    scale-model banner (:func:`model_status`); never a simulation result.
+
+    Parameters
+    ----------
+    design : DesignDocument
+        The scaled design (its name titles the view).
+    shape : PrimitiveDesign
+        The shape placed on the scaled envelope.
+    scale : str
+        The scale, e.g. ``1:20``.
+    """
+    from envelopelab.features.scene import designed_display
+
+    display = designed_display(shape)
+    name = shape.primitive.name
+    scene = Scene(title=f"{design.meta.name} - {name}")
+    scene.meshes.append(
+        SceneMesh(
+            f"shape:{name}",
+            f"{name} (designed)",
+            "Design",
+            np.asarray(display.points),
+            np.asarray(display.triangles),
+            DESIGN_COLOR,
+            role="design",
+        )
+    )
+    seams = [np.asarray(q) for q in display.seams]
+    if len(display.rim):
+        seams.append(np.asarray(display.rim))
+    if seams:
+        scene.lines.append(
+            SceneLines(f"shape:{name}:seams", "Seams (designed)", "Design", seams, role="design")
+        )
+    scene.status = model_status(scale)
     return scene
 
 
@@ -353,10 +413,11 @@ BASKET_SIZE = (1.3, 1.3, 1.1)
 BASKET_COLOR = "#a8743a"
 
 
-def basket(frame_height: float) -> SceneMesh:
-    """A basket box (display only) hanging under the burner frame at ``frame_height`` m."""
-    w, d, h = BASKET_SIZE
-    top = frame_height - 0.25
+def basket(frame_height: float, scale: float = 1.0) -> SceneMesh:
+    """A basket box (display only) hanging under the burner frame at ``frame_height`` m,
+    its size times ``scale`` (dimensionless; a scale model's factor)."""
+    w, d, h = (scale * v for v in BASKET_SIZE)
+    top = frame_height - 0.25 * scale
     x, y = w / 2, d / 2
     pts = np.array(
         [[sx * x, sy * y, top - h * sz] for sz in (0, 1) for sy in (-1, 1) for sx in (-1, 1)]

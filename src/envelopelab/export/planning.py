@@ -150,7 +150,7 @@ def dimension_rows(ctx: PackContext) -> list[list[object]]:
                 round(across * 1000),
                 round(along * 1000),
                 round((roll - across) * 1000),
-                round((table - along) * 1000),
+                round((table - along) * 1000) if math.isfinite(table) else "",
                 s.cut_count,
                 s.fabric,
             ]
@@ -326,6 +326,12 @@ def write_dimensions(ctx: PackContext, out: Path) -> list[Path]:
     sub = (
         f"finished and cut sizes of every panel (mm); bolt {mm(ctx.roll_width)}, table "
         f"{mm(ctx.table_length)}; a negative spare means the piece does not fit"
+        if ctx.scale is None
+        else f"finished and cut sizes of every panel (mm) of the {ctx.scale.label()} model; "
+        f"'bolt' and 'table' are the {mm(ctx.roll_width)} x "
+        + (mm(ctx.table_length) if math.isfinite(ctx.table_length) else "any length")
+        + f" printable area of {ctx.scale.paper.name}; a negative spare means the piece "
+        "does not fit the sheet square to it"
     )
     from envelopelab.export.documents import fabric_totals
 
