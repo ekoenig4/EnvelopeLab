@@ -27,6 +27,10 @@ size and agrees with the scaled full-size pieces within 0.1 % in area and in eve
 edge's length (a test), though a piece may lie turned slightly in the plane.
 
 The documents are made from the scaled inputs by the same code as the full-size pack.
+The 3D views are the full-size views (designed and inflated) with every position
+multiplied by \( k \) (`envelopelab.export.viewer.scale_scene`, ADR-0065): a shape scales
+exactly under similarity, but the stress, factor-of-safety and other analysis colourings
+do not, so they are left out.
 Volume, height and widest diameter follow the similarity above (\( V_m = k^3 V \);
 `model_summary`, shown in the export dialog).
 

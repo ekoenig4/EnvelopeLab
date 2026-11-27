@@ -203,6 +203,28 @@ def scene_from_view(view: View3DPanel) -> Scene:
                     obj=obj,
                 )
             )
+    # The envelope's panel details and the symmetry axes, as the view draws them.
+    for key, obj, state, group in (
+        ("marks", "envelope", "design", "Design"),
+        ("symmetry", "symmetry", None, "Design"),
+    ):
+        layer = view.layers.get(key)
+        if layer is None:
+            continue
+        polylines = [p for lines in layer.polylines.values() for p in lines]
+        if polylines:
+            scene.lines.append(
+                SceneLines(
+                    key,
+                    layer.short,
+                    group,
+                    polylines,
+                    LAYER_COLORS[key],
+                    role="design",
+                    obj=obj,
+                    state=state,
+                )
+            )
     scene.statuses["design"] = SceneStatus(
         "info", "Design only.", "No solver result shown: the shape as cut and sewn, not inflated."
     )
@@ -256,6 +278,19 @@ def scene_from_view(view: View3DPanel) -> Scene:
                             on, shared("deviation")
                         )
             scene.meshes.append(mesh)
+            seams = [p for lines in layer.polylines.values() for p in lines]
+            if seams:  # the seams the view draws on the inflated part
+                scene.lines.append(
+                    SceneLines(
+                        f"{key}:seams",
+                        f"{layer.short} seams",
+                        "Result",
+                        seams,
+                        role="result",
+                        obj=object_of(key),
+                        state=state,
+                    )
+                )
         main = state if state in keys else keys[0]
         banner = banner_for(view.run_state(main))
         if banner is not None:
@@ -365,6 +400,19 @@ def shape_scenes_from_view(view: View3DPanel) -> dict[str, Scene]:
                     np.asarray(field.values, dtype=float),
                 )
         scene.meshes.append(mesh)
+        sim_seams = [q for lines in sim.polylines.values() for q in lines]
+        if sim_seams:
+            scene.lines.append(
+                SceneLines(
+                    f"{sim_key}:seams",
+                    "Seams (inflated)",
+                    "Result",
+                    sim_seams,
+                    role="result",
+                    obj=key,
+                    state=mesh.state,
+                )
+            )
         banner = banner_for(view.run_state(sim_key))
         if banner is not None:
             scene.status = SceneStatus(banner.kind, banner.title, banner.message)

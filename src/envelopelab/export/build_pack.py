@@ -1228,14 +1228,15 @@ def _model_inputs(
     """The inputs of :func:`export_build_pack` at the model's size
     (:func:`envelopelab.export.scale_model.scale_inputs`), and its documents: every one
     but the lift charts (refused: lift does not scale with the patterns), made from the
-    scaled design (its outputs computed again, the 3D views drawn from the scaled design
-    and shapes, never from a full-size solver run), with the full-size design's
-    provenance."""
+    scaled design (its outputs computed again), with the full-size design's provenance.
+    The 3D views are ``extras``' full-size views scaled
+    (:func:`envelopelab.export.viewer.scale_scene`: inflated shapes too, without the
+    analysis colourings, which do not scale), else drawn from the scaled design."""
     from dataclasses import replace
 
     from envelopelab.export import documents as docs
     from envelopelab.export.scale_model import scale_inputs
-    from envelopelab.export.viewer import model_shape_scene
+    from envelopelab.export.viewer import model_shape_scene, scale_scene
 
     if extras is not None and "lift_chart" in extras.include:
         raise BuildPackError(
@@ -1250,12 +1251,19 @@ def _model_inputs(
     if hole_hem is not None:
         hole_hem *= k
     if extras is not None:
+        full = dict(extras.shape_scenes or {})
         extras = replace(
             extras,
             outputs=None,
-            scene=None,
+            # The full-size 3D views (the application's 3D view: every object in every
+            # Shape state) scaled to the model; without them, the scaled design.
+            scene=None if extras.scene is None else scale_scene(extras.scene, k, model.label()),
             shape_scenes={
-                p.primitive.name: model_shape_scene(scaled.design, p, model.label())
+                p.primitive.name: (
+                    scale_scene(full[p.primitive.name], k, model.label())
+                    if p.primitive.name in full
+                    else model_shape_scene(scaled.design, p, model.label())
+                )
                 for p in scaled.primitives
             },
             provenance=extras.provenance or docs.provenance(design.compute_content_hash()),

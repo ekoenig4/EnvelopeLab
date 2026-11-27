@@ -496,6 +496,99 @@ def model_status(scale: str) -> SceneStatus:
     )
 
 
+def scale_scene(scene: Scene, factor: float, scale: str) -> Scene:
+    """A full-size 3D view at a scale model's size: every object in every Shape state of
+    ``scene`` (designed and inflated), the same objects, rows and states, geometrically
+    scaled.
+
+    Lengths scale by ``factor``; loads, stresses and factors of safety do not, so every
+    analysis colouring is dropped (the fabric colours stay) and each inflated state's
+    banner says it is the full-size run's shape scaled, keeping the run's own status
+    kind (a stale, unconverged or failing run still shows as such) and its part notes.
+
+    Parameters
+    ----------
+    scene : Scene
+        The full-size view (positions in m).
+    factor : float
+        Model length / full-size length, -, in (0, 1].
+    scale : str
+        The model's label, e.g. ``1:20``.
+
+    Returns
+    -------
+    Scene
+        A new scene, positions in m at model size; ``scene`` is not changed.
+    """
+    if not 0.0 < factor <= 1.0:
+        raise ValueError(f"scale factor must be in (0, 1], got {factor}")
+    na = (
+        "Shape of the full-size run scaled by the model's factor; loads, stresses and "
+        "factors of safety are n/a for a scale model."
+    )
+    out = Scene(
+        title=f"{scene.title} - scale model {scale}",
+        labels=[(t, np.asarray(p, dtype=np.float64) * factor) for t, p in scene.labels],
+        notes=[
+            f"Scale model {scale}: every object is drawn at model size. The inflated "
+            "shapes are the full-size runs' shapes scaled; their analysis colourings are "
+            "left out (they do not scale).",
+            *scene.notes,
+        ],
+        initial="",
+        state=scene.state,
+    )
+    for m in scene.meshes:
+        out.meshes.append(
+            SceneMesh(
+                m.key,
+                m.name,
+                m.group,
+                np.asarray(m.points, dtype=np.float64) * factor,
+                np.asarray(m.triangles),
+                m.color,
+                m.visible,
+                m.note,
+                None if m.face_rgb is None else np.asarray(m.face_rgb),
+                {},
+                m.role,
+                m.smooth,
+                m.obj,
+                m.state,
+            )
+        )
+    for ln in scene.lines:
+        out.lines.append(
+            SceneLines(
+                ln.key,
+                ln.name,
+                ln.group,
+                [np.asarray(p, dtype=np.float64) * factor for p in ln.polylines],
+                ln.color,
+                ln.visible,
+                ln.role,
+                ln.obj,
+                ln.state,
+            )
+        )
+    out.statuses["design"] = model_status(scale)
+    for state in out.states():
+        if state == "design":
+            continue
+        full = scene.statuses.get(state, scene.status)
+        kind = full.kind if full.kind not in ("ok", "info") else "info"
+        message = f"{full.title} {full.message}".strip()
+        out.statuses[state] = SceneStatus(
+            kind, f"Scale model {scale}: {_state_title(state)}.", f"{na} Full-size run: {message}"
+        )
+    out.status = out.statuses.get(out.opening_state(), out.statuses["design"])
+    return out
+
+
+def _state_title(state: str) -> str:
+    return dict(STATES).get(state, state)
+
+
 def model_shape_scene(design: DesignDocument, shape: PrimitiveDesign, scale: str) -> Scene:
     """The 3D view of one special shape of a scale model: the shape as designed at model
     size (:func:`envelopelab.features.scene.designed_display`, m) with its seams, and the

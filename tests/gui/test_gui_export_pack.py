@@ -217,3 +217,77 @@ def test_export_scale_model_writes_every_document(gore_window: MainWindow, tmp_p
     assert not any("lift-chart" in f for f in files)
     scene = read_scene(tmp_path / "model" / next(f for f in files if f.endswith("-3d.html")))
     assert scene["status"]["title"] == "Scale model 1:40."
+
+
+@pytest.mark.slow
+def test_pack_3d_views_have_every_part_of_the_3d_tab(
+    gore_window: MainWindow, qtbot: QtBot, tmp_path: Path
+) -> None:
+    """A simulated shape, an overlay and an envelope run: the full-size pack's 3D page
+    has every object and state of the 3D tab (inflated shapes and seams too), and the
+    scale model's page has the same, scaled, without analysis colours."""
+    import json
+
+    import numpy as np
+
+    from envelopelab.export.scale_model import PAPER_SIZES, ScaleModel
+    from envelopelab.export.templates import slug
+    from envelopelab.export.viewer import decoded
+
+    w = gore_window
+    session = w.controller.session
+    assert session is not None
+    w.show_panel("shapes")
+    assert w.shapes.add_shape("dome") == "Dome"
+    assert w.controller.shapes.wait(120_000)
+    w.shapes.set_value(("feed_hole_radius",), 0.07)
+    assert w.controller.shapes.wait(120_000)
+    w.shapes.mesh_spin.setValue(80.0)
+    assert w.shapes.simulate_selected()
+    assert w.controller.shape_simulator.wait(600_000)
+    qtbot.waitUntil(lambda: len(session.project.shape_runs) == 1, timeout=10_000)
+    assert w.shapes.add_overlay() is not None
+    assert w.controller.shapes.wait(120_000)
+    assert w.simulation.start(PREVIEW)
+    assert w.simulation.wait(600_000)
+    qtbot.waitUntil(lambda: len(session.project.runs) == 1, timeout=10_000)
+    view = w.view3d
+    view.refresher.run()
+    state = "envelopelab-preview"
+    tab = {(o, k) for o in view.objects() for k in view.object_layers(o, state)}
+    assert ("shape:Dome", "shape-sim:Dome") in tab  # the 3D tab shows the inflated Dome
+    stem = slug(session.design.meta.name)
+
+    assert w.export_build_pack(tmp_path / "full", frozenset({"viewer"})) is not None
+    full = read_scene(tmp_path / "full" / f"{stem}-3d.html")
+    parts = {(m["object"], m["key"], m["state"]) for m in full["meshes"]}
+    for obj, key in tab:
+        if obj in ("envelope", "shape:Dome", "overlay:overlay"):
+            assert (obj, key, state if key in (state, "shape-sim:Dome") else "design") in parts
+    lines = {(ln["key"], ln["state"]) for ln in full["lines"]}
+    assert {("shape-sim:Dome:seams", state), (f"{state}:seams", state)} <= lines
+    assert [o["key"] for o in full["objects"]] == ["envelope", "shape:Dome", "overlay:overlay"]
+    sim = next(m for m in full["meshes"] if m["key"] == "shape-sim:Dome")
+    assert sim["colorings"]  # the shape's metrics at full size
+    shape_page = read_scene(tmp_path / "full" / f"{stem}-Dome-3d.html")
+    assert ("shape-sim:Dome:seams", state) in {(x["key"], x["state"]) for x in shape_page["lines"]}
+
+    model = ScaleModel(20.0, PAPER_SIZES["letter"])
+    index = w.export_scale_model(tmp_path / "model", model, frozenset({"viewer"}))
+    assert index is not None
+    name = next(
+        d["file"]
+        for d in json.loads(index.read_text())["documents"]
+        if d["file"].endswith("-3d.html") and "Dome" not in d["file"]
+    )
+    small = read_scene(tmp_path / "model" / name)
+    assert [(m["key"], m["object"], m["state"]) for m in small["meshes"]] == [
+        (m["key"], m["object"], m["state"]) for m in full["meshes"]
+    ]
+    assert small["objects"] == full["objects"] and small["states"] == full["states"]
+    assert small["colorings"] == {} and all(m["colorings"] == {} for m in small["meshes"])
+    assert small["statuses"][state]["title"] == "Scale model 1:20: Inflated (preview)."
+    small_sim = next(m for m in small["meshes"] if m["key"] == "shape-sim:Dome")
+    np.testing.assert_allclose(decoded(small_sim), decoded(sim) / 20.0, rtol=1e-5, atol=1e-6)
+    small_shape = next(p for p in (tmp_path / "model").glob("*Dome-3d.html"))
+    assert state in [k for k, _t in read_scene(small_shape)["states"]]

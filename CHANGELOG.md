@@ -3,6 +3,12 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Fixed: a scale model's 3D page now has every object and Shape of the application's 3D
+  view, scaled: the inflated preview and CalculiX envelope and special shapes, and the
+  overlays (it drew only the scaled design). Analysis colours are left out (they do not
+  scale); each inflated Shape's banner says it is the full-size run's shape (ADR-0065).
+- Fixed: the build pack's 3D page draws the seams of the inflated envelope and special
+  shapes, the envelope's panel details and the symmetry axes, as the 3D view does.
 - Changed: a build pack's printable 1:1 templates are in their own folder, `print/`, and
   nothing else is: send that folder to the printer. Pack format 5 (ADR-0064); the index,
   the documents and the QA give the new paths.

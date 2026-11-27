@@ -60,6 +60,10 @@ example `generic-model-1-20-panel-A.pdf`), with every document you tick: the bui
 index and build order, spec summary, layout and planning, sewing schedule, build log,
 picture assembly instructions, appendage procedures, parachute and scoop sheets,
 combined DXFs and 3D views, all at model size. Only the **lift charts** are left out.
+The model's 3D views have every object and Shape of the application's 3D view, scaled:
+the inflated preview and CalculiX shapes of the envelope and its special shapes, the
+overlays and the rigging. Their analysis colours are left out, since loads and stresses
+do not scale, and each inflated Shape's banner says it is the full-size run's shape.
 Weights, loads, strengths, lift and factors of safety are printed **n/a (scale model)**:
 they depend on the model's material and do not scale with the patterns. Every sheet says
 `SCALE MODEL 1:n - not a full-size pattern`, and every page's footer gives the scale and
@@ -124,9 +128,10 @@ application's 3D view:
   those runs. The page opens on the Shape the application's 3D view showed when you
   exported. An object a run did not solve (a special shape simulated only with the
   preview, say) is drawn as designed, and its row says so.
-* **Objects** turns each part of the balloon on and off: the **envelope** (with its seams
-  and gore numbers G1…), each **special shape** (or all of them with the *Special shapes*
-  box), each **overlay** and the **rigging**.
+* **Objects** turns each part of the balloon on and off: the **envelope** (with its seams,
+  panel details and gore numbers G1…), each **special shape** (or all of them with the
+  *Special shapes* box), each **overlay**, the **rigging** and the **symmetry** axes. The
+  inflated envelope and shapes carry their seams, as in the application.
 * **Colour by** (for an inflated Shape) gives the application's fields: factor of safety
   (banded against the requirement, everything below it orange and labelled FAIL),
   resultants, wrinkling, displacement and **deviation from design** (drawn on the design

@@ -947,9 +947,10 @@ class MainWindow(QMainWindow):
         """Write a 1:n scale model of the design and its shapes: every piece and document
         at model size, each piece printed on one sheet of the model's paper
         (:mod:`envelopelab.export.scale_model`); ``include`` chooses the documents
-        (default: all but the lift charts, which a model never has). The 3D views are
-        drawn from the scaled design, never from a full-size run. Returns the index (None
-        when refused)."""
+        (default: all but the lift charts, which a model never has). The 3D views are the
+        3D view's (every object in every Shape state) scaled to the model, without the
+        analysis colourings (:func:`envelopelab.export.viewer.scale_scene`). Returns the
+        index (None when refused)."""
         from envelopelab.export.build_pack import PackExtras
         from envelopelab.export.documents import DOCUMENTS, provenance
 
@@ -957,8 +958,13 @@ class MainWindow(QMainWindow):
         if session is None or session.design.gores is None:
             return None
         chosen = (frozenset(DOCUMENTS) if include is None else include) - {"lift_chart"}
+        scenes = self._view_scenes(chosen)
+        if scenes is None:
+            return None
         extras = PackExtras(
             include=chosen,
+            scene=scenes[0],
+            shape_scenes=scenes[1],
             provenance=provenance(
                 session.content_hash(), session.path.name if session.path else ""
             ),
@@ -966,6 +972,22 @@ class MainWindow(QMainWindow):
         return self.shapes.export_pack(
             out_dir, extras, self.prefs.print_roll_width, scale_model=model
         )
+
+    def _view_scenes(self, chosen: frozenset[str]) -> tuple[Any, dict[str, Any]] | None:
+        """The pack's 3D views taken from the 3D view (every object in every Shape state,
+        :mod:`envelopelab_app.pack_scene`): the main scene and one per special shape;
+        (None, {}) when the 3D view is not chosen, None when it cannot be built."""
+        from envelopelab_app.pack_scene import scene_from_view, shape_scenes_from_view
+
+        if "viewer" not in chosen:
+            return None, {}
+        # The view may never have been shown (or not since the last change): build its
+        # layers from the current state before taking the scene from it.
+        self.view3d.refresher.run()
+        scene = self.controller.attempt(scene_from_view, self.view3d)
+        if scene is None:
+            return None
+        return scene, self.controller.attempt(shape_scenes_from_view, self.view3d) or {}
 
     def export_build_pack(
         self,
@@ -988,27 +1010,20 @@ class MainWindow(QMainWindow):
         """
         from envelopelab.export.build_pack import PackExtras
         from envelopelab.export.documents import DOCUMENTS, provenance
-        from envelopelab_app.pack_scene import scene_from_view, shape_scenes_from_view, status_line
+        from envelopelab_app.pack_scene import status_line
 
         session = self.controller.session
         if session is None or session.design.gores is None:
             return None
         chosen = frozenset(DOCUMENTS) if include is None else include
-        scene = None
-        shape_scenes: dict[str, Any] = {}
-        if "viewer" in chosen:
-            # The view may never have been shown (or not since the last change): build its
-            # layers from the current state before taking the scene from it.
-            self.view3d.refresher.run()
-            scene = self.controller.attempt(scene_from_view, self.view3d)
-            shape_scenes = self.controller.attempt(shape_scenes_from_view, self.view3d) or {}
-            if scene is None:
-                return None
+        scenes = self._view_scenes(chosen)
+        if scenes is None:
+            return None
         extras = PackExtras(
             include=chosen,
             outputs=self.controller.outputs,
-            scene=scene,
-            shape_scenes=shape_scenes,
+            scene=scenes[0],
+            shape_scenes=scenes[1],
             provenance=provenance(
                 session.content_hash(), session.path.name if session.path else ""
             ),
