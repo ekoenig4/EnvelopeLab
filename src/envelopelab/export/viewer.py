@@ -39,7 +39,18 @@ if TYPE_CHECKING:
     from envelopelab.features.primitives import PrimitiveDesign
     from envelopelab.rigging import RiggingOutputs
 
-VIEWER_FORMAT = "envelopelab-viewer/1"
+VIEWER_FORMAT = "envelopelab-viewer/2"
+#: What the balloon can be drawn as, in the order the page offers them (the
+#: application's 3D view *Shape* choice): every object as designed, or as inflated by
+#: the latest preview or CalculiX run.
+STATES: tuple[tuple[str, str], ...] = (
+    ("design", "Designed"),
+    ("envelopelab-preview", "Inflated (preview)"),
+    ("calculix", "Inflated (CalculiX)"),
+)
+#: The state a page opens on when the caller gives none: the first, in this order, that
+#: some object has (CalculiX's inflated shape, else the preview's, else the design).
+OPENING_ORDER = ("calculix", "envelopelab-preview", "design")
 #: Banner colours per status (background, border, text), the same as the application's
 #: theme (``envelopelab_app.theme.STATUS_STYLES``; a test keeps them equal).
 STATUS_COLORS = {
@@ -52,6 +63,8 @@ STATUS_COLORS = {
 STATUS_SYMBOLS = {"ok": "✓", "info": "i", "stale": "◷", "fail": "▲", "error": "✕"}
 #: Layer colours of the parts the design alone gives (hex).
 DESIGN_COLOR = "#b8c4d0"
+#: A special shape as designed (the application's shape layer colour).
+SHAPE_COLOR = "#e7298a"
 SEAM_COLOR = "#44505c"
 RIGGING_COLOR = "#7b4fa6"
 
@@ -93,8 +106,16 @@ class SceneMesh:
 
     ``note`` is the layer's status ("", "stale", "not converged", "preview" ...), shown
     on its row; a stale or unconverged result is given no colourings. ``role`` is
-    ``design`` (shown for the deviation from design, hidden for a result field, as in the
-    application), ``result`` (the reverse) or ``other`` (left as it is).
+    ``design``, ``result`` or ``other``.
+
+    ``obj`` is the object on the balloon it draws (the page's *Objects* list, as in the
+    application's 3D view): ``envelope``, ``shape:<name>``, ``overlay:<name>`` or
+    ``rigging``. ``state`` is what it draws that object as: ``design``, or a solver's
+    inflated result (``envelopelab-preview``, ``calculix``); None for a part drawn in
+    every state (the rigging). The page shows, for each ticked object, its parts of the
+    chosen state, else (that run did not solve it) its designed parts. A colouring key
+    ``<field>@<state>`` on a designed part is that state's field drawn on the design
+    (the deviation).
     """
 
     key: str
@@ -109,11 +130,14 @@ class SceneMesh:
     colorings: dict[str, Coloring] = field(default_factory=dict)
     role: str = "other"
     smooth: bool = True
+    obj: str = "envelope"
+    state: str | None = "design"
 
 
 @dataclass
 class SceneLines:
-    """Polylines (m), each of shape (k, 3), drawn in one colour."""
+    """Polylines (m), each of shape (k, 3), drawn in one colour; ``obj`` and ``state``
+    as for :class:`SceneMesh`."""
 
     key: str
     name: str
@@ -122,6 +146,8 @@ class SceneLines:
     color: str = SEAM_COLOR
     visible: bool = True
     role: str = "other"
+    obj: str = "envelope"
+    state: str | None = "design"
 
 
 @dataclass(frozen=True)
@@ -151,6 +177,11 @@ class Scene:
         Lines under the viewer (what is shown, provenance, safety notice).
     initial : str
         Colouring shown when the page opens ("" for layer colours).
+    state : str
+        What the balloon is drawn as when the page opens (keys of :data:`STATES`; ""
+        picks the first of :data:`OPENING_ORDER` that some part has).
+    statuses : dict of str to SceneStatus
+        The banner of each state (the run it shows); ``status`` for a state not listed.
     """
 
     title: str
@@ -162,13 +193,56 @@ class Scene:
     )
     notes: list[str] = field(default_factory=list)
     initial: str = ""
+    state: str = ""
+    statuses: dict[str, SceneStatus] = field(default_factory=dict)
 
     def coloring_titles(self) -> dict[str, str]:
-        """Every colouring key with its title, in first-seen order."""
+        """Every colouring key with its title, in first-seen order (a field drawn on the
+        design for one state, ``<field>@<state>``, is listed as its field)."""
         out: dict[str, str] = {}
         for mesh in self.meshes:
             for key, c in mesh.colorings.items():
-                out.setdefault(key, c.title)
+                out.setdefault(key.split("@", 1)[0], c.title)
+        return out
+
+    def states(self) -> list[str]:
+        """The states some part is drawn in, in :data:`STATES` order (``design``
+        always)."""
+        have = {m.state for m in self.meshes} | {ln.state for ln in self.lines}
+        return [k for k, _t in STATES if k == "design" or k in have]
+
+    def opening_state(self) -> str:
+        """The state the page opens on (:attr:`state`, else :data:`OPENING_ORDER`)."""
+        states = self.states()
+        if self.state in states:
+            return self.state
+        return next(k for k in OPENING_ORDER if k in states)
+
+    def objects(self) -> list[tuple[str, str, str]]:
+        """Every object with a part: (key, label, group), envelope first, then the
+        special shapes, the overlays and the rest (the application's Objects list)."""
+        keys: list[str] = []
+        for obj in [*(m.obj for m in self.meshes), *(ln.obj for ln in self.lines)]:
+            if obj not in keys:
+                keys.append(obj)
+
+        def rank(key: str) -> int:
+            if key == "envelope":
+                return 0
+            if key.startswith("shape:"):
+                return 1
+            if key.startswith("overlay:"):
+                return 2
+            return 3
+
+        out = []
+        for key in sorted(keys, key=rank):
+            if key.startswith("shape:"):
+                out.append((key, key.removeprefix("shape:"), "Special shapes"))
+            elif key.startswith("overlay:"):
+                out.append((key, key.removeprefix("overlay:"), "Overlays"))
+            else:
+                out.append((key, key.capitalize(), ""))
         return out
 
 
@@ -203,6 +277,8 @@ def scene_data(scene: Scene) -> dict[str, Any]:
             "group": m.group,
             "note": m.note,
             "role": m.role,
+            "object": m.obj,
+            "state": m.state,
             "smooth": m.smooth,
             "visible": m.visible,
             "color": _rgb(m.color),
@@ -232,6 +308,8 @@ def scene_data(scene: Scene) -> dict[str, Any]:
                 "name": ln.name,
                 "group": ln.group,
                 "role": ln.role,
+                "object": ln.obj,
+                "state": ln.state,
                 "visible": ln.visible,
                 "color": _rgb(ln.color),
                 "vertices": len(seg),
@@ -251,12 +329,20 @@ def scene_data(scene: Scene) -> dict[str, Any]:
         "labels": [{"text": t, "at": np.asarray(p, dtype=float).tolist()} for t, p in scene.labels],
         "colorings": scene.coloring_titles(),
         "initial": scene.initial if scene.initial in scene.coloring_titles() else "",
-        "status": {
-            "kind": scene.status.kind,
-            "symbol": STATUS_SYMBOLS[scene.status.kind],
-            "title": scene.status.title,
-            "message": scene.status.message,
-        },
+        "status": _status(scene.status),
+        "states": [[k, t] for k, t in STATES if k in scene.states()],
+        "state": scene.opening_state(),
+        "statuses": {k: _status(v) for k, v in scene.statuses.items()},
+        "objects": [{"key": k, "label": t, "group": g} for k, t, g in scene.objects()],
+    }
+
+
+def _status(status: SceneStatus) -> dict[str, str]:
+    return {
+        "kind": status.kind,
+        "symbol": STATUS_SYMBOLS[status.kind],
+        "title": status.title,
+        "message": status.message,
     }
 
 
@@ -266,6 +352,7 @@ def design_scene(
     status: SceneStatus | None = None,
     colours: Any = None,
     model: ScaleModel | None = None,
+    shapes: Sequence[PrimitiveDesign] = (),
 ) -> Scene:
     """The parts a design gives without a solver run.
 
@@ -283,6 +370,9 @@ def design_scene(
     model : ScaleModel, optional
         ``design`` is a scale model's (already scaled): the banner says so (unless
         ``status`` is given) and the basket is drawn at the model's scale.
+    shapes : sequence of PrimitiveDesign
+        Special shapes placed on the design, drawn as designed (:func:`shape_parts`),
+        each an object of its own.
 
     Returns
     -------
@@ -349,12 +439,51 @@ def design_scene(
         lines = rigging_polylines(design, rigging)
         flat = [p for kind in lines.values() for p in kind]
         if flat:
-            scene.lines.append(SceneLines("rigging", "Rigging", "Rigging", flat, RIGGING_COLOR))
+            scene.lines.append(
+                SceneLines(
+                    "rigging", "Rigging", "Rigging", flat, RIGGING_COLOR, obj="rigging", state=None
+                )
+            )
         wires = lines.get("flying_wires", [])
         if wires:
             scale = 1.0 if model is None else model.factor
             scene.meshes.append(basket(min(float(np.min(w[:, 2])) for w in wires), scale))
+    for shape in shapes:
+        mesh, seams = shape_parts(shape)
+        scene.meshes.append(mesh)
+        if seams is not None:
+            scene.lines.append(seams)
     return scene
+
+
+def shape_parts(shape: PrimitiveDesign) -> tuple[SceneMesh, SceneLines | None]:
+    """A special shape as designed (:func:`envelopelab.features.scene.designed_display`,
+    m): its skin, object ``shape:<name>`` in state ``design``, and its seams and rim
+    (None when it has none)."""
+    from envelopelab.features.scene import designed_display
+
+    display = designed_display(shape)
+    name = shape.primitive.name
+    obj = f"shape:{name}"
+    mesh = SceneMesh(
+        obj,
+        f"{name} (designed)",
+        "Design",
+        np.asarray(display.points),
+        np.asarray(display.triangles),
+        SHAPE_COLOR,
+        role="design",
+        obj=obj,
+    )
+    seams = [np.asarray(q) for q in display.seams]
+    if len(display.rim):
+        seams.append(np.asarray(display.rim))
+    lines = (
+        SceneLines(f"{obj}:seams", f"{name} seams", "Design", seams, role="design", obj=obj)
+        if seams
+        else None
+    )
+    return mesh, lines
 
 
 def model_status(scale: str) -> SceneStatus:
@@ -381,29 +510,12 @@ def model_shape_scene(design: DesignDocument, shape: PrimitiveDesign, scale: str
     scale : str
         The scale, e.g. ``1:20``.
     """
-    from envelopelab.features.scene import designed_display
-
-    display = designed_display(shape)
     name = shape.primitive.name
     scene = Scene(title=f"{design.meta.name} - {name}")
-    scene.meshes.append(
-        SceneMesh(
-            f"shape:{name}",
-            f"{name} (designed)",
-            "Design",
-            np.asarray(display.points),
-            np.asarray(display.triangles),
-            DESIGN_COLOR,
-            role="design",
-        )
-    )
-    seams = [np.asarray(q) for q in display.seams]
-    if len(display.rim):
-        seams.append(np.asarray(display.rim))
-    if seams:
-        scene.lines.append(
-            SceneLines(f"shape:{name}:seams", "Seams (designed)", "Design", seams, role="design")
-        )
+    mesh, seams = shape_parts(shape)
+    scene.meshes.append(mesh)
+    if seams is not None:
+        scene.lines.append(seams)
     scene.status = model_status(scale)
     return scene
 
@@ -424,7 +536,17 @@ def basket(frame_height: float, scale: float = 1.0) -> SceneMesh:
     )
     quads = [(0, 1, 3, 2), (4, 6, 7, 5), (0, 4, 5, 1), (2, 3, 7, 6), (0, 2, 6, 4), (1, 5, 7, 3)]
     tris = np.array([t for a, b, c, e in quads for t in ((a, b, c), (a, c, e))])
-    return SceneMesh("basket", "Basket", "Rigging", pts, tris, BASKET_COLOR, smooth=False)
+    return SceneMesh(
+        "basket",
+        "Basket",
+        "Rigging",
+        pts,
+        tris,
+        BASKET_COLOR,
+        smooth=False,
+        obj="rigging",
+        state=None,
+    )
 
 
 def _escape_json(data: Mapping[str, Any]) -> str:

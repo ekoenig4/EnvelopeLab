@@ -1,6 +1,9 @@
 """1:1 pattern templates of a build pack (PDF): one file per piece, one page per file.
 
-Every piece to cut gets its own PDF, as a builder cuts them (ADR-0038):
+Every template is written in the pack's ``print/`` folder (:data:`PRINT_DIR`, pack format
+5, ADR-0064), so the files to send to the printer are that folder and nothing else; the
+names below are relative to it. Every piece to cut gets its own PDF, as a builder cuts
+them (ADR-0038):
 
 * ``<slug>-panel-<R>.pdf``: envelope row ``R``, clean (cut once per gore);
 * ``<slug>-panel-<R>-gore-<g>.pdf``: the panel ``R`` of gore ``g`` when a special shape
@@ -59,6 +62,9 @@ if TYPE_CHECKING:
     from envelopelab.features.primitives import DesignCheck
 
 PT_PER_M = 72.0 / 0.0254
+#: Folder of a pack that holds every printable 1:1 template (pack format 5, ADR-0064): the
+#: files to send to the printer, and nothing else.
+PRINT_DIR = "print"
 MARGIN = 0.02  # m round the cut outline (the header, legend and scales sit inside the piece)
 CAL_LENGTHS = (0.5, 0.3, 0.2, 0.1)  # m, the longest that fits is drawn
 BLACK = (0.0, 0.0, 0.0)
@@ -248,14 +254,15 @@ def template_files(name: str, sheets: Sequence[Sheet]) -> list[TemplateFile]:
                     [TemplatePage(s, s.piece.upper())],
                 )
             )
-    return files
+    # Every template lies in the print folder (format 5): its path in the pack is its name.
+    return [TemplateFile(f"{PRINT_DIR}/{t.name}", t.description, t.pages) for t in files]
 
 
 def shape_piece_files(name: str, sheets: Sequence[Sheet], shape: str) -> list[str]:
     """The template files of a special shape's skin pieces, in order."""
     stem = slug(name)
     return [
-        f"{stem}-{piece_name(s.name)}.pdf"
+        f"{PRINT_DIR}/{stem}-{piece_name(s.name)}.pdf"
         for s in sheets
         if s.kind == "skin piece" and s.name.rsplit("-", 1)[0] == shape
     ]

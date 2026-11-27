@@ -80,12 +80,19 @@ def test_export_after_a_run_colours_the_result_and_keeps_its_status(
     run = next(m for m in scene["meshes"] if m["role"] == "result")
     assert {"fos_warp", "deviation"} <= set(run["colorings"])
     assert "preview" in run["note"]
+    assert (run["object"], run["state"]) == ("envelope", "envelopelab-preview")
     design = next(m for m in scene["meshes"] if m["key"] == "design")
-    assert not design["visible"] and "deviation" in design["colorings"]
+    assert (design["object"], design["state"]) == ("envelope", "design")
+    assert "deviation@envelopelab-preview" in design["colorings"]
+    # The page offers the view's Shape choices and opens on the one the view shows.
+    assert [k for k, _t in scene["states"]] == ["design", "envelopelab-preview"]
+    assert scene["state"] == view.state() == "envelopelab-preview"
+    assert scene["statuses"]["design"]["title"] == "Design only."
     assert scene["initial"] == ""  # opens in fabric colours; FoS is a Colour-by mode
     assert run["base"]  # the inflated envelope in its zones' fabric colours
     assert scene["status"]["kind"] == view.banner.kind
     assert scene["status"]["title"] == view.banner.title.text()
+    assert scene["statuses"]["envelopelab-preview"]["title"] == view.banner.title.text()
     # A stale run is never coloured as a result, and says so.
     r, z = control_arrays(session.design)
     w.controller.edit(
@@ -112,6 +119,12 @@ def test_each_special_shape_gets_its_own_3d_page(gore_window: MainWindow, tmp_pa
     assert check_pack(tmp_path / "pack") == []
     page = read_scene(tmp_path / "pack" / f"{stem}-Dome-3d.html")
     assert [m["key"] for m in page["meshes"]] == ["shape:Dome"]
+    # The pack's main 3D view has the shape too, as an object of its own.
+    main = read_scene(tmp_path / "pack" / f"{stem}-3d.html")
+    assert {"key": "shape:Dome", "label": "Dome", "group": "Special shapes"} in main["objects"]
+    assert main["objects"][0]["key"] == "envelope"
+    dome = next(m for m in main["meshes"] if m["object"] == "shape:Dome")
+    assert dome["state"] == "design"
     assert page["status"]["title"] == "Not simulated."  # no metrics without a simulation
     assert (tmp_path / "pack" / f"{stem}-assembly-Dome.pdf").is_file()
 

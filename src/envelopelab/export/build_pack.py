@@ -70,7 +70,7 @@ if TYPE_CHECKING:
 
 MM = 1000.0  # mm per m
 PT_PER_M = 72.0 / 0.0254  # PDF points per m
-PACK_FORMAT = "envelopelab-build-pack/4"
+PACK_FORMAT = "envelopelab-build-pack/5"
 CAD_DIR = "cad"
 INDEX = "index.json"
 DEFAULT_ROLL_WIDTH = 60 * 0.0254  # m (60 in roll, AGENTS.md example)
@@ -1035,6 +1035,7 @@ def write_pack(
     files = template_files(title, sheets)
     templates = []
     for tfile in files:
+        (out / tfile.name).parent.mkdir(parents=True, exist_ok=True)
         pages = write_template_pdf(tfile, out / tfile.name, roll_width, scale_model)
         templates.append(
             {
@@ -1418,7 +1419,7 @@ def write_documents(
         write_index,
         write_spec_summary,
     )
-    from envelopelab.export.templates import slug, template_files
+    from envelopelab.export.templates import PRINT_DIR, slug, template_files
     from envelopelab.export.viewer import design_scene, write_viewer
 
     unknown = set(extras.include) - set(docs.DOCUMENTS)
@@ -1468,6 +1469,7 @@ def write_documents(
                 None if outputs is None else outputs.rigging,
                 colours=ctx.colours,
                 model=scale_model,
+                shapes=primitives,
             )
         add("viewer", write_viewer(scene, out / docs.document_files(stem, "viewer")[0]))
         from envelopelab.export.templates import piece_name
@@ -1607,6 +1609,15 @@ def write_documents(
             FileEntry(
                 f"{CAD_DIR}/", "TOP & BOTTOM / CAD", "CAD", "one DXF per piece (mm), index.json"
             )
+        )
+        files.insert(
+            1,
+            FileEntry(
+                f"{PRINT_DIR}/",
+                "START HERE",
+                "1:1",
+                "every 1:1 template to print, one PDF per piece - send this folder to the printer",
+            ),
         )
         ctx.files = files
         write_index(ctx, out / index_name)

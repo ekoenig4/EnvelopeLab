@@ -3,6 +3,15 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: a build pack's printable 1:1 templates are in their own folder, `print/`, and
+  nothing else is: send that folder to the printer. Pack format 5 (ADR-0064); the index,
+  the documents and the QA give the new paths.
+- Changed: the build pack's 3D page works like the application's 3D view: a **Shape**
+  choice (Designed, Inflated (preview), Inflated (CalculiX), as the project has them;
+  opening on the one the view showed) and an **Objects** list that turns the envelope,
+  each special shape, each overlay and the rigging on and off. The special shapes are now
+  always drawn (inflated when the run solved them, else as designed, and their row says
+  so). Each Shape has its run's banner. Viewer format 2.
 - Added: **scale-model packs**. *Scale model* in **File ▸ Export build pack…** writes a
   1:n model of the envelope, its special shapes and overlays: every length of the design
   divided by n, every piece whole on one sheet (US Letter, Legal, Tabloid, A4, A3, a

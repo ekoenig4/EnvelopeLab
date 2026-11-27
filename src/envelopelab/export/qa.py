@@ -3,6 +3,7 @@
 :func:`check_pack` reads a pack written by :mod:`envelopelab.export.build_pack` and checks:
 
 * every file in ``index.json`` exists and every file in the directory is listed;
+* format 5: every template is in ``print/`` and ``print/`` holds nothing else;
 * format 3: every piece is on one page of its own file (never split), listed with its
   sheet; the page has one side no longer than the roll, or says in red that the piece
   is larger than the roll both ways; it carries both calibration lines (across and
@@ -362,6 +363,7 @@ def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> li
     or marked as larger than the roll, both calibration lines measured, every sheet drawn
     once."""
     from envelopelab.export.build_pack import PACK_FORMAT
+    from envelopelab.export.templates import PRINT_DIR
 
     findings: list[QAFinding] = []
     templates = index.get("templates", [])
@@ -397,7 +399,7 @@ def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> li
             if model:
                 findings += _check_paper_page(name, k, w, h, content, model)
             elif (
-                w if index.get("format") == PACK_FORMAT else min(w, h)
+                w if index.get("format") in ROLL_FRAME_FORMATS else min(w, h)
             ) > roll_pt + 1.0 and "LARGER THAN THE" not in content:
                 findings.append(
                     QAFinding(
@@ -412,7 +414,21 @@ def _check_templates(root: Path, index: dict[str, Any], present: set[str]) -> li
     for entry in index["sheets"]:
         if Path(entry["file"]).stem not in drawn:
             findings.append(QAFinding(entry["file"], "template", "on no template page"))
+    if index.get("format") == PACK_FORMAT:
+        # Format 5: the print folder is the templates, all of them and nothing else.
+        listed = {t["file"] for t in templates}
+        for name in sorted(listed):
+            if not name.startswith(f"{PRINT_DIR}/"):
+                findings.append(QAFinding(name, "print folder", f"not in {PRINT_DIR}/"))
+        for name in sorted(present):
+            if name.startswith(f"{PRINT_DIR}/") and name not in listed:
+                findings.append(QAFinding(name, "print folder", "not a template"))
     return findings
+
+
+#: Pack formats whose template pages are drawn in the roll's frame (ADR-0042): the page
+#: width runs across the roll.
+ROLL_FRAME_FORMATS = ("envelopelab-build-pack/4", "envelopelab-build-pack/5")
 
 
 def _check_paper_page(

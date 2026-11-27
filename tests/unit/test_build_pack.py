@@ -192,6 +192,20 @@ def test_qa_catches_missing_and_unlisted_files(pack: Path, tmp_path: Path) -> No
     assert ("cad/horn-P1.dxf", "index") in found and ("notes.txt", "index") in found
 
 
+def test_qa_keeps_the_print_folder_to_the_templates(pack: Path, tmp_path: Path) -> None:
+    p = _copy(pack, tmp_path)
+    (p / "print" / "readme.txt").write_text("x", encoding="utf-8")
+    index_path = p / "cad" / "index.json"
+    index = json.loads(index_path.read_text())
+    moved = index["templates"][0]["file"]
+    (p / moved).rename(p / Path(moved).name)
+    index["templates"][0]["file"] = Path(moved).name
+    index_path.write_text(json.dumps(index))
+    found = {(f.file, f.check) for f in check_pack(p)}
+    assert ("print/readme.txt", "print folder") in found
+    assert (Path(moved).name, "print folder") in found
+
+
 def test_qa_catches_wrong_units_and_calibration(pack: Path, tmp_path: Path) -> None:
     p = _copy(pack, tmp_path)
     doc = readfile(p / "cad" / "ear-G1.dxf")
@@ -466,5 +480,5 @@ def test_shape_names_with_spaces_export(tmp_path: Path) -> None:
     )
     export_build_pack(DESIGN, [shape], tmp_path / "spaces")
     assert check_pack(tmp_path / "spaces") == []
-    names = {p.name for p in (tmp_path / "spaces").iterdir()}
+    names = {p.name for p in (tmp_path / "spaces" / "print").iterdir()}
     assert "generic-eye-pod-left-G1.pdf" in names

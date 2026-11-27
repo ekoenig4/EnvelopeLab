@@ -45,6 +45,8 @@ footer ul { margin:4px 0; padding-left:18px; }
 <body>
 <header>
   <h1>__TITLE__</h1>
+  <label for="state">Shape</label>
+  <select id="state"></select>
   <label for="colour">Colour by</label>
   <select id="colour"><option value="">Fabric colours</option></select>
   <div class="views">
@@ -56,7 +58,7 @@ footer ul { margin:4px 0; padding-left:18px; }
 <main>
   <div id="view"><canvas id="gl"></canvas><div id="labels"></div></div>
   <aside>
-    <h2>Layers</h2><div id="layers"></div>
+    <h2>Objects</h2><div id="layers"></div>
     <h2>Legend</h2><div id="legend"><small>Fabric colours.</small></div>
     <h2>Mouse</h2>
     <small>Drag: rotate. Shift-drag or right-drag: pan. Wheel: zoom.</small>
@@ -69,7 +71,13 @@ footer ul { margin:4px 0; padding-left:18px; }
 const S = JSON.parse(document.getElementById("scene").textContent);
 const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const b = document.getElementById("banner");
-b.innerHTML = "<b>" + esc(S.status.symbol + " " + S.status.title) + "</b>" + esc(S.status.message);
+const stateSel = document.getElementById("state");
+for (const [k, t] of S.states) { const o = document.createElement("option");
+  o.value = k; o.textContent = t; stateSel.appendChild(o); }
+stateSel.value = S.state;
+// The banner of the run the chosen Shape shows (the design's when it has none).
+function banner() { const st = (S.statuses || {})[stateSel.value] || S.status;
+  b.innerHTML = "<b>" + esc(st.symbol + " " + st.title) + "</b>" + esc(st.message); }
 function bytes(s) { const r = atob(s); const a = new Uint8Array(r.length);
   for (let i = 0; i < r.length; i++) a[i] = r.charCodeAt(i); return a; }
 function floats(s) { const u = bytes(s); return new Float32Array(u.buffer, u.byteOffset, u.length / 4); }
@@ -179,7 +187,8 @@ function draw() {
   const key = colourBy.value;
   for (const part of parts) { if (!part.visible) continue;
     bind(part, loc.p, part.p, 3, gl.FLOAT, false); bind(part, loc.n, part.n, 3, gl.FLOAT, false);
-    const colours = (part.kind === "mesh" && key && part.colours[key]) || part.base;
+    const colours = (part.kind === "mesh" && key &&
+      (part.colours[key + "@" + stateSel.value] || part.colours[key])) || part.base;
     bind(part, loc.c, colours, 3, gl.UNSIGNED_BYTE, false);
     gl.uniform1f(loc.lit, part.kind === "mesh" ? 1 : 0);
     gl.drawArrays(part.kind === "mesh" ? gl.TRIANGLES : gl.LINES, 0, part.count); }
@@ -188,45 +197,81 @@ function draw() {
     const z = m[3]*p[0]+m[7]*p[1]+m[11]*p[2]+m[15];
     // A gore number on the far side of the envelope is hidden (it would show through).
     const facing = (p[0]-centre[0])*M.eye[0] + (p[1]-centre[1])*M.eye[1] > 0 || Math.abs(M.eye[2]) > 0.9;
-    const el = labelEls[i]; if (z <= 0 || !facing) { el.style.display = "none"; return; }
+    // Gore numbers belong to the envelope: hidden with it.
+    const el = labelEls[i]; if (z <= 0 || !facing || checked.envelope === false) {
+      el.style.display = "none"; return; }
     el.style.display = ""; el.style.left = ((x/z+1)/2*w) + "px"; el.style.top = ((1-y/z)/2*h) + "px"; }); }
 function legend() {
   const box = document.getElementById("legend"), key = colourBy.value;
-  const m = S.meshes.find((x) => x.colorings[key]);
+  const shown = parts.filter((p) => p.kind === "mesh" && p.visible).map((p) => p.meta);
+  const m = shown.find((x) => x.colorings[key]);
   if (!key || !m) { box.innerHTML = "<small>Fabric colours.</small>"; return; }
   const lg = m.colorings[key].legend;
-  const missing = S.meshes.filter((x) => x.visible !== undefined && !x.colorings[key] && x.group === "Result");
+  const missing = shown.filter((x) => !x.colorings[key] && x.role === "result");
   box.innerHTML = "<div><b>" + esc(lg.title) + "</b></div>" + lg.entries.slice().reverse().map(
     (e) => "<div><span class='swatch' style='background:" + esc(e[0]) + "'></span>" + esc(e[1]) + "</div>").join("") +
     (missing.length ? "<div><small>Not coloured: " + missing.map((x) => esc(x.name) +
       (x.note ? " (" + esc(x.note) + ")" : "")).join(", ") + "</small></div>" : ""); }
-const layersBox = document.getElementById("layers"); const groups = {};
-const boxes = new Map();
-const ORDER = ["Design", "Result", "Rigging"];
-const rank = (g) => (ORDER.indexOf(g) < 0 ? ORDER.length : ORDER.indexOf(g));
-parts.slice().sort((a, b) => rank(a.meta.group) - rank(b.meta.group)).forEach((part) => {
-  const g = part.meta.group;
-  if (!groups[g]) { const d = document.createElement("div"); d.className = "group"; d.textContent = g;
-    layersBox.appendChild(d); groups[g] = true; }
+// The Objects list and the Shape choice, as in the application's 3D view: each ticked
+// object is drawn as the chosen Shape (its parts of that state), else as designed when
+// that run did not solve it; the deviation from design is drawn on the design too.
+const layersBox = document.getElementById("layers");
+const checked = {}; const rows = {}; const groupBoxes = {};
+S.objects.forEach((o) => { checked[o.key] = true; });
+const membersOf = (obj) => parts.filter((p) => p.meta.object === obj);
+function shownParts(obj) {
+  const st = stateSel.value, members = membersOf(obj);
+  const always = members.filter((p) => p.meta.state === null);
+  const own = members.filter((p) => p.meta.state === st);
+  const designed = members.filter((p) => p.meta.state === "design");
+  let show = own.length ? own : designed;
+  if (st !== "design" && own.length && colourBy.value === "deviation") show = own.concat(designed);
+  return {parts: always.concat(show), fallback: st !== "design" && !own.length && designed.length > 0};
+}
+function applyState() {
+  const st = stateSel.value;
+  colourBy.disabled = st === "design";
+  if (st === "design") colourBy.value = "";
+  parts.forEach((p) => { p.visible = false; });
+  for (const o of S.objects) {
+    const s = shownParts(o.key);
+    if (checked[o.key]) s.parts.forEach((p) => { p.visible = true; });
+    const notes = s.parts.map((p) => p.meta.note).filter((n) => n);
+    if (s.fallback) notes.push("drawn as designed: not solved by this run");
+    rows[o.key].note.textContent = notes.length ? " " + Array.from(new Set(notes)).join(", ") : ""; }
+  banner(); legend(); draw(); }
+function addRow(o, parent) {
   const row = document.createElement("label"); row.className = "layer";
-  const box = document.createElement("input"); box.type = "checkbox"; box.checked = part.visible;
-  box.addEventListener("change", () => { part.visible = box.checked; draw(); });
-  boxes.set(part, box);
-  const c = part.meta.color; row.appendChild(box);
+  const box = document.createElement("input"); box.type = "checkbox"; box.checked = true;
+  box.dataset.object = o.key;
+  box.addEventListener("change", () => { checked[o.key] = box.checked; syncGroups(); applyState(); });
+  const first = membersOf(o.key).find((p) => p.kind === "mesh") || membersOf(o.key)[0];
+  const c = first ? first.meta.color : [128, 128, 128];
+  row.appendChild(box);
   row.insertAdjacentHTML("beforeend", "<span class='swatch' style='background:rgb(" + c.join(",") +
-    ")'></span>" + esc(part.meta.name) + (part.meta.note ? " <small>" + esc(part.meta.note) + "</small>" : ""));
-  layersBox.appendChild(row); });
-// As in the application: a result field hides the design surfaces, the deviation from
-// design is drawn on them (and hides the results).
-function roles() { const key = colourBy.value; if (!key) return;
-  const onDesign = key === "deviation";
-  parts.forEach((part) => { const role = part.meta.role;
-    if (role !== "design" && role !== "result") return;
-    const show = (role === "design") === onDesign;
-    const colours = part.meta.colorings || {};
-    if (show && role === "design" && part.kind === "mesh" && !colours[key]) return;
-    part.visible = show; const box = boxes.get(part); if (box) box.checked = show; }); }
-colourBy.addEventListener("change", () => { roles(); legend(); draw(); });
+    ")'></span>" + esc(o.label));
+  const note = document.createElement("small"); row.appendChild(note);
+  rows[o.key] = {box: box, note: note}; parent.appendChild(row); }
+function syncGroups() {
+  for (const [g, box] of Object.entries(groupBoxes)) {
+    const keys = S.objects.filter((o) => o.group === g).map((o) => o.key);
+    const on = keys.filter((k) => checked[k]).length;
+    box.checked = on === keys.length; box.indeterminate = on > 0 && on < keys.length; } }
+S.objects.forEach((o) => {
+  if (!o.group) { addRow(o, layersBox); return; }
+  if (!groupBoxes[o.group]) {
+    const head = document.createElement("label"); head.className = "group";
+    const box = document.createElement("input"); box.type = "checkbox"; box.checked = true;
+    box.dataset.group = o.group;
+    box.addEventListener("change", () => {
+      S.objects.filter((x) => x.group === o.group).forEach((x) => {
+        checked[x.key] = box.checked; rows[x.key].box.checked = box.checked; });
+      syncGroups(); applyState(); });
+    head.appendChild(box); head.insertAdjacentText("beforeend", " " + o.group);
+    layersBox.appendChild(head); groupBoxes[o.group] = box; }
+  addRow(o, layersBox); });
+stateSel.addEventListener("change", applyState);
+colourBy.addEventListener("change", applyState);
 document.querySelectorAll("[data-view]").forEach((x) => x.addEventListener("click", () => {
   const v = VIEWS[x.dataset.view]; cam.az = v[0]; cam.el = v[1]; cam.pan = [0, 0, 0]; draw(); }));
 let drag = null;
@@ -243,8 +288,8 @@ canvas.addEventListener("pointerup", () => { drag = null; });
 canvas.addEventListener("wheel", (e) => { e.preventDefault();
   cam.dist *= Math.exp(e.deltaY * 0.001); draw(); }, {passive: false});
 window.addEventListener("resize", draw);
-if (S.initial) { colourBy.value = S.initial; roles(); }
-legend(); draw();
+if (S.initial) colourBy.value = S.initial;
+applyState();
 </script>
 </body>
 </html>

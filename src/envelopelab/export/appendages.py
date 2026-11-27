@@ -369,8 +369,12 @@ def write_parachute(ctx: PackContext, path: Path) -> Path:
     doc.title(
         "PARACHUTE - PATTERN DATA & RIGGING",
         "",
-        f"cut from {ctx.file('parachute-panel.pdf')}"
-        + (f" and {ctx.file('parachute-centre.pdf')}" if pr is not None and pr.centre_panel else "")
+        f"cut from {ctx.template_for('parachute-panel')}"
+        + (
+            f" and {ctx.template_for('parachute-centre')}"
+            if pr is not None and pr.centre_panel
+            else ""
+        )
         if pr is not None
         else "no parachute",
     )

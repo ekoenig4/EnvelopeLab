@@ -76,7 +76,7 @@ def _index(pack: Path) -> dict:  # type: ignore[type-arg]
 def test_every_document_is_written_listed_and_passes_the_qa(pack: Path) -> None:
     assert check_pack(pack) == []
     index = _index(pack)
-    assert index["format"] == PACK_FORMAT == "envelopelab-build-pack/4"
+    assert index["format"] == PACK_FORMAT == "envelopelab-build-pack/5"
     files = {d["file"] for d in index["documents"]}
     expected = {f"documents-sample-{f}" for spec in DOCUMENTS.values() for f, _what in spec.files}
     expected |= {"documents-sample-ear.pdf", "documents-sample-ear-build.pdf"}  # appendages
@@ -93,6 +93,12 @@ def test_every_document_is_written_listed_and_passes_the_qa(pack: Path) -> None:
         )
     }
     assert files == expected
+    # The printable templates, and only they, are in print/ (format 5): no document is.
+    printed = {f"print/{p.name}" for p in (pack / "print").iterdir()}
+    assert printed == {t["file"] for t in index["templates"]}
+    assert all(p.suffix == ".pdf" for p in (pack / "print").iterdir())
+    assert not any(f.startswith("print/") for f in files)
+    assert not list(pack.glob("*-panel-*.pdf"))
     assert index["documents"][0]["file"] == "documents-sample-00-BUILD-PACK-INDEX.pdf"
     prov = index["provenance"]
     assert prov["design_hash"] == DESIGN.compute_content_hash()
@@ -210,10 +216,13 @@ def test_pdf_text_is_latin1() -> None:
 def test_design_scene_has_the_surface_seams_gore_numbers_and_rigging(pack: Path) -> None:
     scene = read_scene(pack / "documents-sample-3d.html")
     keys = [m["key"] for m in scene["meshes"]]
-    assert keys == ["design", "basket"]  # a basket under the flying wires (display only)
+    # a basket under the flying wires (display only), then each special shape
+    assert keys == ["design", "basket", "shape:ear"]
+    ear = next(m for m in scene["meshes"] if m["key"] == "shape:ear")
+    assert ear["object"] == "shape:ear" and ear["state"] == "design"
     basket = next(m for m in scene["meshes"] if m["key"] == "basket")
     assert basket["smooth"] is False and basket["group"] == "Rigging"
-    assert {ln["key"] for ln in scene["lines"]} == {"seams", "rigging"}
+    assert {ln["key"] for ln in scene["lines"]} == {"seams", "rigging", "shape:ear:seams"}
     assert [lb["text"] for lb in scene["labels"]] == [f"G{k}" for k in range(1, 13)]
     assert scene["status"]["kind"] == "info" and "Design only" in scene["status"]["title"]
     positions = decoded(scene["meshes"][0])

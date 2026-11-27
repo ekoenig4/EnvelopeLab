@@ -9,7 +9,9 @@ panel); the pack format is described in [Build pack](../formats/build-pack.md).
 
 * **Folder**: where the pack is written (created if needed; files of the same names are
   replaced). The last folder is remembered.
-* **Roll width**: the width of the roll you print on (default 60 in). Every piece has its
+* **Roll width**: the width of the roll you print on (default 60 in). The 1:1 templates
+  are written in the pack's `print/` folder, so the files to send for printing are that
+  folder and nothing else. Every piece has its
   own 1:1 PDF whose one page shows the whole piece. **The page width runs across the
   roll and is never wider than it; the page height runs along the roll, as long as the
   piece needs.** Print every page at 100 % with the page width across the roll, without
@@ -77,13 +79,14 @@ model says nothing about the full-size envelope's strength
 | `<name>-spec-summary.pdf` | The design at a glance, metric and English: size, volume, mouth, parachute hole and overlap, line lengths, lift and lift margin, configuration, rigging factors of safety, and **every value tagged *assumed*** (check these against datasheets before building) |
 | `<name>-lift-chart.pdf` / `.csv` | [Lift charts](lift-charts.md): the load the balloon floats at the top-temperature limit, the top temperature a load needs, and the ceiling, over ambient temperature and altitude; points above the limit are shaded and marked |
 | `<name>-build-log.pdf` | Sign-off sheets for the floor: panel cutting, each special shape, the turning vents, and the parachute, rigging and final inspection |
-| `<name>-panel-A.pdf`, `<name>-panel-B.pdf`, … | Cutting the envelope: one PDF per panel, the whole panel at 1:1 on one page |
-| `<name>-panel-C-left-half.pdf`, `<name>-panel-C-right-half.pdf`, … | Rows cut as **half gores** (Shape mode, *Panels and print roll*): one PDF per half instead of the panel's; cut each once per gore and sew each pair together along the centre seam first (the sewing schedule lists these seams first) |
-| `<name>-panel-H-gore-3.pdf`, … | Marking: one PDF per envelope panel that carries a special shape or a feed hole, with the lines where the shape is sewn on, the numbered marks and the feed holes drawn on it |
+| `print/` | **Everything to print, and nothing else**: every 1:1 template below. Send this folder to the printer (or the print shop) |
+| `print/<name>-panel-A.pdf`, `print/<name>-panel-B.pdf`, … | Cutting the envelope: one PDF per panel, the whole panel at 1:1 on one page |
+| `print/<name>-panel-C-left-half.pdf`, `print/<name>-panel-C-right-half.pdf`, … | Rows cut as **half gores** (Shape mode, *Panels and print roll*): one PDF per half instead of the panel's; cut each once per gore and sew each pair together along the centre seam first (the sewing schedule lists these seams first) |
+| `print/<name>-panel-H-gore-3.pdf`, … | Marking: one PDF per envelope panel that carries a special shape or a feed hole, with the lines where the shape is sewn on, the numbered marks and the feed holes drawn on it |
 | `<name>-assembly-envelope.pdf`, `<name>-assembly-<shape>.pdf` | Building: picture instructions, step by step, for the base envelope and for each special shape |
 | `<name>-<shape>-3d.html` | Each special shape in 3D, designed and inflated, with its simulation's metrics |
-| `<name>-<shape>-G1.pdf`, … | Cutting each special shape: one PDF per skin piece, the whole piece at 1:1 |
-| `<name>-parachute-panel.pdf`, `<name>-parachute-centre.pdf` | Cutting the parachute |
+| `print/<name>-<shape>-G1.pdf`, … | Cutting each special shape: one PDF per skin piece, the whole piece at 1:1 |
+| `print/<name>-parachute-panel.pdf`, `print/<name>-parachute-centre.pdf` | Cutting the parachute |
 | `<name>-panels.dxf`, `<name>-panel-templates.dxf`, `<name>-appendage-patterns.dxf` (+ PNG previews) | CAD: the whole envelope developed with its features, the panels on a grid, and the appendage and parachute pieces, in mm |
 | `cad/` | One DXF per piece (mm) and `index.json`, for CAD programs and the automatic checks |
 | `<name>-layout-diagram.html` | The whole envelope as a gore x row grid in its fabric colours, with every feature located |
@@ -113,31 +116,35 @@ says. Solid = cut, dotted = sew (finished), red = feature marks, blue = finished
 ## The 3D view page
 
 `<name>-3d.html` opens in a **realistic look**: the balloon in its fabric colours with
-smooth shading, sky and ground, and a basket under the flying wires. It shows what the
-application's 3D view shows for the run chosen there:
+smooth shading, sky and ground, and a basket under the flying wires. It works like the
+application's 3D view:
 
-* the **design surface** (the shape as cut and sewn, in the row fabrics, with its seams
-  and gore numbers G1…), the **rigging**, and the special shapes as designed;
-* the **result** of the chosen run (the envelope and the shapes solved with it), with the
-  *Colour by* list of the application: factor of safety (banded against the
-  requirement, everything below it orange and labelled FAIL), resultants, wrinkling,
-  displacement and **deviation from design** (drawn on the design surface, red outside
-  and blue inside). A result field hides the design surface and the deviation shows it,
-  as in the application;
-* the same **status banner** as the application: a preview run says it is not verified
-  with CalculiX, a stale run is grey and never coloured, an unconverged run says its
-  values are not final.
+* **Shape** chooses what the balloon is drawn as: **Designed** (the shape as cut and
+  sewn), **Inflated (preview)** or **Inflated (CalculiX)**, as far as the project has
+  those runs. The page opens on the Shape the application's 3D view showed when you
+  exported. An object a run did not solve (a special shape simulated only with the
+  preview, say) is drawn as designed, and its row says so.
+* **Objects** turns each part of the balloon on and off: the **envelope** (with its seams
+  and gore numbers G1…), each **special shape** (or all of them with the *Special shapes*
+  box), each **overlay** and the **rigging**.
+* **Colour by** (for an inflated Shape) gives the application's fields: factor of safety
+  (banded against the requirement, everything below it orange and labelled FAIL),
+  resultants, wrinkling, displacement and **deviation from design** (drawn on the design
+  surface, red outside and blue inside; the design is shown with the result for it).
+* The **status banner** is the application's for the chosen Shape: a preview run says it
+  is not verified with CalculiX, a stale run is grey and never coloured, an unconverged
+  run says its values are not final.
 
 Drag to rotate, shift-drag or right-drag to pan, use the wheel to zoom; **Front**,
-**Side**, **Top** and **Isometric** set the view; the parts list turns parts on and off.
-The page needs WebGL (every current browser has it) and nothing else: it can be sent by
-e-mail or opened from a USB stick.
+**Side**, **Top** and **Isometric** set the view. The page needs WebGL (every current
+browser has it) and nothing else: it can be sent by e-mail or opened from a USB stick.
 
-Without a run (or with only the sheets exported from a script) the page shows the design
-and its rigging, with the banner *Design only*. Each special shape has its own page
-(`<name>-<shape>-3d.html`) with the same colour modes for its simulation. **Re-run the
-preview and the shape simulations before exporting** when you have changed the design:
-stale results are drawn grey and never coloured.
+Without a run (or with only the sheets exported from a script) the page offers
+*Designed* only: the design, its special shapes and its rigging, with the banner *Design
+only*. Each special shape also has its own page (`<name>-<shape>-3d.html`) with the
+colour modes of its simulation. **Re-run the preview and the shape simulations before
+exporting** when you have changed the design: stale results are drawn grey and never
+coloured.
 
 ## Checking a pack
 

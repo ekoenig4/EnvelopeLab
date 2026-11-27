@@ -386,7 +386,7 @@ def write_envelope_assembly(ctx: PackContext, path: Path) -> Path:
     doc = Frames(
         f"{d.meta.name} - BASE ENVELOPE ASSEMBLY",
         f"{ctx.gores} gores x {len(rows)} panels - work from the 1:1 panel sheets "
-        f"{ctx.file('panel-*.pdf')}",
+        f"print/{ctx.file('panel-*.pdf')}",
     )
     doc.frame(
         f"Parts: cut {rows[0].cut_count if rows else 0} of each panel",

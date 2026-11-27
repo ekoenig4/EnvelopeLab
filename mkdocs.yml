@@ -125,6 +125,7 @@ nav:
       - ADR-0061: adr/ADR-0061-lift-chart-crown-limit.md
       - ADR-0062: adr/ADR-0062-scale-model-packs.md
       - ADR-0063: adr/ADR-0063-scale-model-documents-and-print-size.md
+      - ADR-0064: adr/ADR-0064-print-folder-and-3d-view-objects.md
 theme:
   name: material
 markdown_extensions:

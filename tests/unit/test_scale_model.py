@@ -211,7 +211,7 @@ def test_scale_model_pack_passes_qa_on_paper_pages(tmp_path: Path) -> None:
     paper = {(round(LETTER.width * PT_PER_M), round(LETTER_H * PT_PER_M))}
     paper |= {(h, w) for w, h in paper}
     for t in index["templates"]:
-        assert t["file"].startswith("generic-model-")
+        assert t["file"].startswith("print/generic-model-")
         for (w, h, content), page in zip(_page_boxes(out / t["file"]), t["pages"], strict=True):
             assert (round(w), round(h)) in paper
             assert page["fits_paper"] is True

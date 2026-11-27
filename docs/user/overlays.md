@@ -67,7 +67,7 @@ piece and of the line marked on each panel. The build pack has the same files.
 
 ## In the build pack
 Each overlay gets its 1:1 template `<name>-<overlay>-overlay.pdf` (cut once, with its
-colour) and every panel its outline crosses gets a marking page (`…-panel-<row>-gore-<g>.pdf`)
+colour) and every panel its outline crosses gets a marking page (`print/…-panel-<row>-gore-<g>.pdf`)
 with the line to sew it on and the same numbered marks. The colour plan draws the
 overlays over the gores and the cloth table counts them. The index lists every overlay
 among the features, and its build order says when to cut them (**CUT OVERLAYS**) and

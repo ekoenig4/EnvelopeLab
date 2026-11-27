@@ -108,11 +108,11 @@ def test_index_lists_the_colours_of_every_row_and_skin_piece(pack: Path) -> None
 def test_dxf_and_template_print_the_colour_line(pack: Path) -> None:
     dxf = _read_dxf(pack / "cad" / f"envelope-row-{ROWS[-1]}.dxf")
     assert dxf["label"][1].startswith("colours: cut 3 in #c00000 (gores 1, 5, 9)")
-    page = next(pack.glob(f"*-panel-{ROWS[-1]}.pdf"))
+    page = next(pack.glob(f"print/*-panel-{ROWS[-1]}.pdf"))
     (_w, _h, content) = _page_boxes(page)[0]
     assert "%COLOURS colours: cut 3 in #c00000" in content
     # The marking page of one panel names that panel's colour only.
-    marked = next(pack.glob(f"*-panel-{ROWS[3]}-gore-3.pdf"))
+    marked = next(pack.glob(f"print/*-panel-{ROWS[3]}-gore-3.pdf"))
     assert "%COLOURS colour of this panel (gore 3): #0070c0" in _page_boxes(marked)[0][2]
 
 

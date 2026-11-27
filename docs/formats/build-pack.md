@@ -4,18 +4,20 @@ A build pack is a directory written by `envelopelab.export.build_pack.export_bui
 (or `write_pack`). It holds everything needed to cut and mark the cloth at 1:1. From
 format 3 (`envelopelab-build-pack/3`, ADR-0037) its top level is laid out as a shop
 works, with every file named after the design (`<slug>` = the design name in lower
-case, words joined by hyphens), and the machine-readable files are in `cad/`.
+case, words joined by hyphens), and the machine-readable files are in `cad/`. From
+format 5 (`envelopelab-build-pack/5`, ADR-0064) the printable templates are in their own
+folder, `print/`, and nothing else is: the files to send for printing are that folder.
 
-**1:1 templates** (`envelopelab.export.templates`), at the top level: **one PDF per piece,
-one page each** (ADR-0038):
+**1:1 templates** (`envelopelab.export.templates`), in `print/` (format 3 and 4: at the
+top level): **one PDF per piece, one page each** (ADR-0038):
 
 | File | Content |
 |---|---|
-| `<slug>-panel-<R>.pdf` | Envelope row `R`, clean, cut once per gore |
-| `<slug>-panel-<R>-gore-<g>.pdf` | The panel `R` of gore `g` when a shape is sewn on it or a feed hole is cut in it: the same panel with that panel's footprint lines, side ticks, numbered match marks and feed holes (every shape's marks on that panel), *mark only* (ADR-0039) |
-| `<slug>-parachute-panel.pdf`, `<slug>-parachute-centre.pdf` | The parachute radial panel and centre panel |
-| `<slug>-<shape>-<piece>.pdf` | Every skin piece of every special shape (e.g. `<slug>-eye-G1.pdf`, `<slug>-horn-TIP.pdf`) |
-| `<slug>-<overlay>-overlay.pdf` | Every overlay (appliqué, ADR-0056), cut once; its outline is marked on the panel pages of every panel it crosses (`<slug>-panel-<R>-gore-<g>.pdf`) |
+| `print/<slug>-panel-<R>.pdf` | Envelope row `R`, clean, cut once per gore |
+| `print/<slug>-panel-<R>-gore-<g>.pdf` | The panel `R` of gore `g` when a shape is sewn on it or a feed hole is cut in it: the same panel with that panel's footprint lines, side ticks, numbered match marks and feed holes (every shape's marks on that panel), *mark only* (ADR-0039) |
+| `print/<slug>-parachute-panel.pdf`, `print/<slug>-parachute-centre.pdf` | The parachute radial panel and centre panel |
+| `print/<slug>-<shape>-<piece>.pdf` | Every skin piece of every special shape (e.g. `print/<slug>-eye-G1.pdf`, `print/<slug>-horn-TIP.pdf`) |
+| `print/<slug>-<overlay>-overlay.pdf` | Every overlay (appliqué, ADR-0056), cut once; its outline is marked on the panel pages of every panel it crosses (`<slug>-panel-<R>-gore-<g>.pdf`) |
 
 The page is the piece's cut outline plus 20 mm, so the **whole piece is on one page,
 never split**. From format 4 (ADR-0042) the page is in the print roll's frame: **the page
@@ -91,17 +93,27 @@ PDF documents are A4 portrait, Helvetica (Latin-1 text: `>=` for ≥, `!` for �
 
 One HTML page with its own small WebGL renderer: no library, no network, nothing fetched
 (the QA checks it). The scene is embedded as JSON in
-`<script id="scene" type="application/json">` (format `envelopelab-viewer/1`):
+`<script id="scene" type="application/json">` (format `envelopelab-viewer/2`, ADR-0064;
+`/1` had no objects or states):
 
 | Key | Content |
 |---|---|
-| `meshes[]` | `key`, `name`, `group` (Design, Result, Rigging), `role` (`design`, `result`, `other`), `smooth` (smooth shading; false for the basket), `note` (e.g. `preview`, `stale: …`, `NOT CONVERGED: …`), `visible`, `color` (RGB), `triangles` (count), `positions` (base64 little-endian float32, m, 3 vertices per triangle), optional `base` (uint8 RGB per vertex: the fabric colours), `colorings` |
-| `meshes[].colorings` | Per field key (`fos_warp`, `deviation`, …): `rgb` (uint8 RGB per vertex) and `legend` (`title`, `entries`: colour and label, lowest first) |
-| `lines[]` | `key`, `name`, `group`, `role`, `visible`, `color`, `vertices`, `positions` (segment end points, float32, m) |
+| `meshes[]` | `key`, `name`, `group` (Design, Result, Rigging), `role` (`design`, `result`, `other`), `object` (`envelope`, `shape:<name>`, `overlay:<name>`, `rigging`), `state` (`design`, `envelopelab-preview`, `calculix`; `null`: every state), `smooth` (smooth shading; false for the basket), `note` (e.g. `preview`, `stale: …`, `NOT CONVERGED: …`), `visible`, `color` (RGB), `triangles` (count), `positions` (base64 little-endian float32, m, 3 vertices per triangle), optional `base` (uint8 RGB per vertex: the fabric colours), `colorings` |
+| `meshes[].colorings` | Per field key (`fos_warp`, `deviation`, …; on a designed part, `<field>@<state>`: that state's field drawn on the design): `rgb` (uint8 RGB per vertex) and `legend` (`title`, `entries`: colour and label, lowest first) |
+| `lines[]` | `key`, `name`, `group`, `role`, `object`, `state`, `visible`, `color`, `vertices`, `positions` (segment end points, float32, m) |
+| `objects[]` | The *Objects* list: `key` (as `object`), `label`, `group` (`Special shapes`, `Overlays`, or "" for a row of its own); envelope first |
+| `states` | The *Shape* choices there are, `[key, label]` in the order Designed, Inflated (preview), Inflated (CalculiX) |
+| `state` | The Shape the page opens on: the one the application's 3D view showed, else the first of CalculiX, preview, design that the scene has |
+| `statuses` | The banner of each state (as `status`) |
 | `labels[]` | `text` (gore numbers `G1`…) and `at` (m) |
 | `colorings` | Field key to its title (the *Colour by* list) |
 | `initial` | Colouring shown first ("" for layer colours) |
-| `status` | `kind` (`ok`, `info`, `stale`, `fail`, `error`), `symbol`, `title`, `message`: the banner |
+| `status` | `kind` (`ok`, `info`, `stale`, `fail`, `error`), `symbol`, `title`, `message`: the banner when `statuses` has none for the chosen state |
+
+Each ticked object is drawn as the chosen Shape: its parts of that state (and the parts of
+every state), else, when that run did not solve it, its designed parts (its row says
+so); with the deviation chosen, its designed parts too. This is the application's 3D
+view's rule.
 
 The page opens in the **realistic look**: every part in its fabric colours (the
 inflated envelope coloured by its zones' fabrics), smooth shading under a sun, sky and
@@ -140,14 +152,14 @@ every page, preceded by a `%CAL L T` comment in the page's content stream.
 
 ```json
 {
-  "format": "envelopelab-build-pack/4",
+  "format": "envelopelab-build-pack/5",
   "title": "design name",
   "units": "mm",
   "roll_width_mm": 1524.0,
   "provenance": {"app_version": "0.1.0", "git_commit": "2753321…", "design_hash": "…",
                  "created": "2026-11-03T20:56:43+00:00", "project": "balloon.elproj"},
   "templates": [
-    {"file": "sample-panel-A.pdf", "description": "panel A, cut 20",
+    {"file": "print/sample-panel-A.pdf", "description": "panel A, cut 20",
      "pages": [{"sheet": "envelope-row-A", "band": 1, "bands": 1, "turn_deg": 90.0,
                 "across_roll_mm": 1440.2, "along_roll_mm": 2693.7,
                 "markings": []}, "…"]}
@@ -234,7 +246,8 @@ marks (checked per mark interval when the shape is designed).
 `envelopelab.export.qa.check_pack` checks a pack from its files alone (AGENTS.md §6.6):
 the index and the directory list the same files; every DXF is in mm; every calibration
 line, in every DXF and on every template page (across and along), measures what its
-label says; every piece is on one page of its own file, never split, listed with its
+label says; format 5: every template is in `print/` and `print/` holds nothing else;
+every piece is on one page of its own file, never split, listed with its
 sheet, no wider than the roll across it (format 4: the page width; format 3: one side)
 or with the red larger-than-the-roll note
 (formats 1 and 2: every `pattern.pdf` page is as wide as the roll; a scale-model pack:

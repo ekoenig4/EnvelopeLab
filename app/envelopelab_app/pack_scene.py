@@ -150,7 +150,18 @@ def _zone_colours(view: View3DPanel, layer: object) -> np.ndarray | None:
 
 
 def scene_from_view(view: View3DPanel) -> Scene:
-    """The build pack's 3D scene from the view (see the module docstring)."""
+    """The build pack's 3D scene from the view (see the module docstring).
+
+    Every object the view lists (the envelope, each special shape, each overlay, the
+    rigging) in every Shape state the view has (designed, inflated by the latest
+    preview, inflated by the latest CalculiX run), so the page offers the same *Shape*
+    choice and *Objects* list as the view. Each state carries the banner of its run and
+    the colourings of every field the view can show for its parts, on one shared scale
+    per field and state. The page opens on the state the view shows.
+    """
+    from envelopelab_app.panels.view3d import RESULT_KINDS, object_of, state_of
+    from envelopelab_app.result_view import banner_for
+
     controller = view.controller
     design = controller.design
     if design is None or design.gores is None:
@@ -166,6 +177,7 @@ def scene_from_view(view: View3DPanel) -> Scene:
     for key, layer in view.layers.items():
         if not key.startswith(("shape:", "overlay:")):
             continue
+        obj = object_of(key)
         scene.meshes.append(
             SceneMesh(
                 key,
@@ -176,78 +188,100 @@ def scene_from_view(view: View3DPanel) -> Scene:
                 LAYER_COLORS["shape"],
                 face_rgb=layer.face_colors,
                 role="design",
+                obj=obj,
             )
         )
         seams = [p for lines in layer.polylines.values() for p in lines]
         if seams:
             scene.lines.append(
-                SceneLines(f"{key}:seams", f"{layer.short} seams", "Design", seams, role="design")
+                SceneLines(
+                    f"{key}:seams",
+                    f"{layer.short} seams",
+                    "Design",
+                    seams,
+                    role="design",
+                    obj=obj,
+                )
             )
-    parts = view.parts()
-    for part in parts:
-        layer = view.layers[part]
-        notes = []
-        if not layer.converged:
-            notes.append("NOT CONVERGED: values are not final")
-        if layer.stale:
-            notes.append("stale: the design has changed since this run")
-        if layer.kind == "envelopelab-preview" or (
-            part.startswith("shape-sim:") and "preview" in layer.label.lower()
-        ):
-            notes.append("preview")
-        face_rgb = layer.face_colors
-        if face_rgb is None and not layer.stale:
-            face_rgb = _zone_colours(view, layer)
-        mesh = SceneMesh(
-            part,
-            layer.short,
-            "Result",
-            layer.points,
-            layer.faces,
-            "#c7c7c7" if layer.stale else LAYER_COLORS[layer.kind],
-            note=", ".join(notes),
-            face_rgb=None if layer.stale else face_rgb,
-            role="result",
-        )
-        fields = view.part_fields.get(part, {})
-        for name, field in fields.items():
-            mesh.colorings[name] = coloring(field, view._shared_values(name))
-            if name == "deviation":
-                design_key = view._design_key(part)
-                design_mesh = next((m for m in scene.meshes if m.key == design_key), None)
-                if design_mesh is not None and not layer.stale:
-                    on_design = interpolate_on_mesh(
-                        design_mesh.points, layer.points, layer.faces, field.values
-                    )
-                    on = ResultField("deviation", "node", on_design, "m", field.description)
-                    design_mesh.colorings["deviation"] = coloring(
-                        on, view._shared_values("deviation")
-                    )
-        scene.meshes.append(mesh)
-    if parts:  # a run is shown: its results, not the design surfaces under them
-        for mesh_item in scene.meshes:
-            if mesh_item.role == "design":
-                mesh_item.visible = False
-        for line_item in scene.lines:
-            if line_item.role == "design":
-                line_item.visible = False
-    scene.status = SceneStatus(
-        view.banner.kind or "info",
-        view.banner.title.text() if view.banner.kind else "Design only.",
-        view.banner.message.text() if view.banner.kind else "No solver result shown.",
+    scene.statuses["design"] = SceneStatus(
+        "info", "Design only.", "No solver result shown: the shape as cut and sewn, not inflated."
     )
-    record = view._records.get(parts[0]) if parts else None
-    if record is not None:
-        scene.notes.append(
-            f"Run {record.run_id}: {record.status}, {record.iterations} iterations, residual "
-            f"{record.residual:.2e}, mesh {record.n_nodes} nodes / {record.n_elements} "
-            f"elements, load case {record.load_case}, materials "
-            f"{', '.join(record.material_sources) or '-'}."
+    for state in RESULT_KINDS:
+        keys = [k for k in view.layers if state_of(k) == state]
+        if not keys:
+            continue
+        fields = {k: view._fields_of(k)[0] for k in keys}
+
+        def shared(name: str, fields: dict[str, dict[str, ResultField]] = fields) -> np.ndarray:
+            values = [np.asarray(f[name].values, dtype=float) for f in fields.values() if name in f]
+            return np.concatenate(values) if values else np.zeros(0)
+
+        for key in keys:
+            layer = view.layers[key]
+            notes = []
+            if not layer.converged:
+                notes.append("NOT CONVERGED: values are not final")
+            if layer.stale:
+                notes.append("stale: the design has changed since this run")
+            if state == "envelopelab-preview":
+                notes.append("preview")
+            face_rgb = layer.face_colors
+            if face_rgb is None and not layer.stale:
+                face_rgb = _zone_colours(view, layer)
+            mesh = SceneMesh(
+                key,
+                layer.short,
+                "Result",
+                layer.points,
+                layer.faces,
+                "#c7c7c7" if layer.stale else LAYER_COLORS[layer.kind],
+                note=", ".join(notes),
+                face_rgb=None if layer.stale else face_rgb,
+                role="result",
+                obj=object_of(key),
+                state=state,
+            )
+            for name, field in fields[key].items():
+                mesh.colorings[name] = coloring(field, shared(name))
+                if name == "deviation" and not layer.stale:
+                    design_mesh = next(
+                        (m for m in scene.meshes if m.key == view._design_key(key)), None
+                    )
+                    if design_mesh is not None:
+                        on_design = interpolate_on_mesh(
+                            design_mesh.points, layer.points, layer.faces, field.values
+                        )
+                        on = ResultField("deviation", "node", on_design, "m", field.description)
+                        design_mesh.colorings[f"deviation@{state}"] = coloring(
+                            on, shared("deviation")
+                        )
+            scene.meshes.append(mesh)
+        main = state if state in keys else keys[0]
+        banner = banner_for(view.run_state(main))
+        if banner is not None:
+            scene.statuses[state] = SceneStatus(banner.kind, banner.title, banner.message)
+        record = view._records.get(main)
+        if record is not None:
+            scene.notes.append(
+                f"{'Preview' if state == 'envelopelab-preview' else 'CalculiX'} run "
+                f"{record.run_id}: {record.status}, {record.iterations} iterations, residual "
+                f"{record.residual:.2e}, mesh {record.n_nodes} nodes / {record.n_elements} "
+                f"elements, load case {record.load_case}, materials "
+                f"{', '.join(record.material_sources) or '-'}."
+            )
+    # Opens on the Shape the view shows, with the view's banner for it.
+    scene.state = view.state()
+    if view.banner.kind:
+        scene.statuses[scene.state] = SceneStatus(
+            view.banner.kind, view.banner.title.text(), view.banner.message.text()
         )
+    scene.status = scene.statuses.get(scene.state, scene.statuses["design"])
     scene.notes.append(
-        "The design surface is the shape as cut and sewn (not inflated); the result layers "
-        "are solver results. Factors of safety are banded against the required "
-        f"{FOS_LIMIT:g} ({FOS_LIMIT_SOURCE}); anything below it is orange and labelled FAIL."
+        "Shape: Designed is the shape as cut and sewn (not inflated); Inflated (preview) "
+        "and Inflated (CalculiX) are solver results. An object a run did not solve is drawn "
+        "as designed and its row says so. Factors of safety are banded against the "
+        f"required {FOS_LIMIT:g} ({FOS_LIMIT_SOURCE}); anything below it is orange and "
+        "labelled FAIL."
     )
     scene.notes.append(
         "EnvelopeLab is a design aid, not certified engineering software. The builder is "
@@ -264,6 +298,7 @@ def shape_scenes_from_view(view: View3DPanel) -> dict[str, Scene]:
     simulation, as sewn and inflated with every metric the view can show for it (on the
     shape's own scale), and the banner of that simulation (stale, not converged,
     failing, preview only). Keyed by the shape's name."""
+    from envelopelab_app.panels.view3d import state_of
     from envelopelab_app.result_view import banner_for
 
     out: dict[str, Scene] = {}
@@ -284,12 +319,15 @@ def shape_scenes_from_view(view: View3DPanel) -> dict[str, Scene]:
                 LAYER_COLORS["shape"],
                 face_rgb=layer.face_colors,
                 role="design",
+                obj=key,
             )
         )
         seams = [q for lines in layer.polylines.values() for q in lines]
         if seams:
             scene.lines.append(
-                SceneLines(f"{key}:seams", "Seams (designed)", "Design", seams, role="design")
+                SceneLines(
+                    f"{key}:seams", "Seams (designed)", "Design", seams, role="design", obj=key
+                )
             )
         sim_key = view.sim_key_for(name)
         sim = view.layers.get(sim_key)
@@ -315,22 +353,23 @@ def shape_scenes_from_view(view: View3DPanel) -> dict[str, Scene]:
             note=", ".join(notes),
             face_rgb=None if sim.stale else sim.face_colors,
             role="result",
+            obj=key,
+            state=state_of(sim_key) or "envelopelab-preview",
         )
         for field_name, field in fields.items():
             mesh.colorings[field_name] = coloring(field, np.asarray(field.values, dtype=float))
             if field_name == "deviation" and not sim.stale:
                 on = interpolate_on_mesh(layer.points, sim.points, sim.faces, field.values)
-                scene.meshes[0].colorings["deviation"] = coloring(
+                scene.meshes[0].colorings[f"deviation@{mesh.state}"] = coloring(
                     ResultField("deviation", "node", on, "m", field.description),
                     np.asarray(field.values, dtype=float),
                 )
         scene.meshes.append(mesh)
-        scene.meshes[0].visible = False
-        for ln in scene.lines:
-            ln.visible = False
         banner = banner_for(view.run_state(sim_key))
         if banner is not None:
             scene.status = SceneStatus(banner.kind, banner.title, banner.message)
+            if mesh.state is not None:
+                scene.statuses[mesh.state] = scene.status
         record = view._records.get(sim_key)
         if record is not None:
             scene.notes.append(
