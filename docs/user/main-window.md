@@ -35,8 +35,12 @@ title is drawn in red.
 
 ## Moving around the 3D view
 
-Drag with the left mouse button to orbit, the right button or the wheel to zoom, and the
-middle button (or Shift and the left button) to pan. Click a face or an axis of the
+The mouse works as on the build pack's 3D page. Drag with the left mouse button to turn
+the balloon: a sideways drag turns it about its vertical axis, a drag up or down tilts it
+(it stops just short of looking straight down or up). The balloon always stays upright on
+screen, and a drag back to where it started brings the view back exactly. Drag with the
+right or middle button (or Shift and the left button) to pan, so the balloon follows the
+pointer, and turn the wheel to zoom. Click a face or an axis of the
 **orientation cube** in the top right corner to look along it. The tools on the left of
 the view are **Probe** (click an element for its zone and values), **Drag** (move special
 shapes), **Profile** (edit the profile with the spline widget), **Section** (clip the

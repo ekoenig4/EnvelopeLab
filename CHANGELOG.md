@@ -3,6 +3,11 @@
 All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
+- Changed: the 3D view turns with the mouse as the build pack's 3D page does. The balloon
+  turns about its vertical axis and tilts, but never rolls, so it no longer slowly tips
+  away from upright. It turns 0.01 rad per pixel (faster than before), the right button
+  pans (it used to zoom), and a drag is drawn once per pass of the event loop, so the
+  view keeps up with the mouse on a slow renderer.
 - Fixed: a scale model's 3D page now has every object and Shape of the application's 3D
   view, scaled: the inflated preview and CalculiX envelope and special shapes, and the
   overlays (it drew only the scaled design). Analysis colours are left out (they do not

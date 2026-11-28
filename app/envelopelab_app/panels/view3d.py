@@ -105,6 +105,7 @@ from envelopelab_app.camera import (
     view_pose,
 )
 from envelopelab_app.controller import WorkspaceController
+from envelopelab_app.navigation import Turntable
 from envelopelab_app.refresh import Refresher
 from envelopelab_app.result_view import (
     CONTINUOUS_CMAP,
@@ -534,7 +535,8 @@ class View3DPanel(QWidget):
         )
         self.drag_shapes.toggled.connect(self._toggle_drag)
         self.drag: ShapeDrag | None = None
-        self._drag_observers: list[tuple[Any, int]] = []
+        #: The mouse navigation of the render widget (None without a renderer).
+        self.turntable: Turntable | None = None
         reset = _tool_button("Reset", "Reset camera", checkable=False)
         reset.clicked.connect(self._reset_camera)
         rail = QWidget()
@@ -763,6 +765,7 @@ class View3DPanel(QWidget):
             self.plotter = interactor
             self.renderer_widget = interactor
             _add_view_cube(interactor)
+            self.turntable = Turntable(interactor)
         else:
             self.renderer_widget = QLabel(NO_RENDERER_TEXT)
             self.renderer_widget.setWordWrap(True)
@@ -843,6 +846,7 @@ class View3DPanel(QWidget):
         self.plotter = interactor
         self.renderer_widget = interactor
         _add_view_cube(interactor)
+        self.turntable = Turntable(interactor)
         self.redraw()
         if self.drag_shapes.isChecked():
             self._toggle_drag(True)  # ticked before the renderer was there
@@ -2422,6 +2426,8 @@ class View3DPanel(QWidget):
             plotter.enable_cell_picking(callback=self._picked, through=False, show_message=False)
         else:
             plotter.disable_picking()
+        if self.turntable is not None:
+            self.turntable.attach()  # picking replaces the interactor style
 
     def part_at(self, point: np.ndarray) -> str | None:
         """The part of the chosen run whose surface ``point`` (m) lies on (the nearest),
@@ -2558,28 +2564,14 @@ class View3DPanel(QWidget):
     def _toggle_drag(self, on: bool) -> None:
         if on:
             self.pick.setChecked(False)
-        self._remove_drag_observers()
+        turntable = self.turntable
+        if turntable is not None:
+            # A press on a special shape drags it; elsewhere the camera turns as usual.
+            turntable.press_hook = self._drag_press if on else None
+            turntable.move_hook = self._drag_move if on else None
+            turntable.release_hook = self.end_shape_drag if on else None
         if not on:
             self.cancel_shape_drag()
-            return
-        plotter = self.plotter
-        if plotter is None:
-            return
-        # Observers on the interactor style replace its default handling of these
-        # events; each handler calls the default itself unless a shape is being dragged,
-        # so the camera still orbits when the press misses every shape.
-        style = plotter.iren.interactor.GetInteractorStyle()
-        for event, handler in (
-            ("LeftButtonPressEvent", self._vtk_press),
-            ("MouseMoveEvent", self._vtk_move),
-            ("LeftButtonReleaseEvent", self._vtk_release),
-        ):
-            self._drag_observers.append((style, style.AddObserver(event, handler)))
-
-    def _remove_drag_observers(self) -> None:
-        for style, tag in self._drag_observers:
-            style.RemoveObserver(tag)
-        self._drag_observers = []
 
     def _pick(self, keys: list[str]) -> tuple[str, np.ndarray] | None:
         """Layer key and point (m) under the mouse among the actors of ``keys``."""
@@ -2606,27 +2598,21 @@ class View3DPanel(QWidget):
     def _shape_keys(self) -> list[str]:
         return [k for k, layer in self.layers.items() if layer.kind == "shape" and layer.visible]
 
-    def _vtk_press(self, style: Any, _event: str) -> None:
+    def _drag_press(self) -> bool:
+        """Start dragging the special shape under the mouse; False when the press misses
+        every shape (the camera then turns)."""
         # The design surface is in the pick list so a shape hidden behind it is not hit.
         hit = self._pick([*self._shape_keys(), "design"])
         if hit is None or not hit[0].startswith("shape:"):
-            style.OnLeftButtonDown()
-            return
-        self.begin_shape_drag(hit[0].removeprefix("shape:"))
+            return False
+        return self.begin_shape_drag(hit[0].removeprefix("shape:"))
 
-    def _vtk_move(self, style: Any, _event: str) -> None:
+    def _drag_move(self) -> None:
         if self.drag is None:
-            style.OnMouseMove()
             return
         hit = self._pick(["design"])
         if hit is not None:
             self.drag_shape_to(hit[1])
-
-    def _vtk_release(self, style: Any, _event: str) -> None:
-        if self.drag is None:
-            style.OnLeftButtonUp()
-            return
-        self.end_shape_drag()
 
     def _reset_camera(self) -> None:
         if self.plotter is not None:
@@ -2828,7 +2814,9 @@ class View3DPanel(QWidget):
 
     def close_renderer(self) -> None:
         """Release the VTK render window."""
-        self._remove_drag_observers()
+        if self.turntable is not None:
+            self.turntable.close()
+            self.turntable = None
         if self.plotter is not None:
             self.plotter.close()
             self.plotter = None

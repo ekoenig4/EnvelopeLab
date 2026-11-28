@@ -169,3 +169,115 @@ def gore_step(gore_count: int) -> float:
     if gore_count < 1:
         raise ValueError("an envelope has at least one gore")
     return 2.0 * math.pi / gore_count
+
+
+# -- mouse navigation: a turntable, as on the build pack's 3D page ---------------------
+
+#: Turn of the camera per pixel of mouse travel, rad (the build pack's 3D page's rate).
+ORBIT_RAD_PER_PIXEL = 0.01
+#: Highest elevation of the camera above (or below) the scene centre, rad: just short of
+#: the axis, where the azimuth would be undefined and the view would flip.
+MAX_ELEVATION = 1.55
+#: Zoom per wheel notch: the distance is multiplied by exp(-ZOOM_PER_NOTCH) per notch
+#: forward (the build pack's page: exp(0.001 * 100) per notch of 100 browser units).
+ZOOM_PER_NOTCH = 0.1
+
+
+def azimuth_elevation(pose: CameraPose) -> tuple[float, float]:
+    """Azimuth and elevation of the camera about its focal point, rad.
+
+    The azimuth is measured from +x counter-clockwise seen from above, the elevation up
+    from the horizontal plane. Looking straight along the axis (the top and bottom
+    views), the azimuth is the one whose turntable view has the same view-up on screen.
+    """
+    sight = np.asarray(pose.position - pose.focal_point, dtype=np.float64)
+    distance = float(np.linalg.norm(sight))
+    if distance == 0.0:
+        return 0.0, 0.0
+    d = sight / distance
+    elevation = math.asin(max(-1.0, min(1.0, float(d[2]))))
+    horizontal = math.hypot(float(d[0]), float(d[1]))
+    if horizontal > 1e-9:
+        return math.atan2(float(d[1]), float(d[0])), elevation
+    # Along the axis: a turntable camera just short of it sees the view-up point away from
+    # its own azimuth when above the scene and towards it when below.
+    up = np.asarray(pose.view_up, dtype=np.float64)
+    sign = -1.0 if d[2] > 0.0 else 1.0
+    return math.atan2(sign * float(up[1]), sign * float(up[0])), elevation
+
+
+def turntable_pose(
+    focal_point: npt.ArrayLike,
+    distance: float,
+    azimuth_rad: float,
+    elevation_rad: float,
+    parallel_scale: float,
+) -> CameraPose:
+    """The camera ``distance`` from ``focal_point`` at the given azimuth and elevation,
+    with the envelope axis (+z) up on screen."""
+    ce, se = math.cos(elevation_rad), math.sin(elevation_rad)
+    ca, sa = math.cos(azimuth_rad), math.sin(azimuth_rad)
+    focal = np.array(focal_point, dtype=np.float64)
+    eye = np.array([ca * ce, sa * ce, se], dtype=np.float64)
+    up = np.array([-ca * se, -sa * se, ce], dtype=np.float64)  # +z square to the sight
+    return CameraPose(focal + distance * eye, focal, up, parallel_scale)
+
+
+def orbit(pose: CameraPose, dx_px: float, dy_px: float) -> CameraPose:
+    """The camera after a rotating drag of ``(dx_px, dy_px)`` pixels (y down).
+
+    A turntable, as on the build pack's 3D page: a sideways drag turns the camera about
+    the vertical axis through the focal point, a drag down raises it, by
+    :data:`ORBIT_RAD_PER_PIXEL` per pixel; the elevation stops at
+    :data:`MAX_ELEVATION`. The envelope axis stays up on screen, so the view never rolls
+    and a drag back to where it started returns the same view.
+    """
+    azimuth, elevation = azimuth_elevation(pose)
+    azimuth -= dx_px * ORBIT_RAD_PER_PIXEL
+    elevation = max(-MAX_ELEVATION, min(MAX_ELEVATION, elevation + dy_px * ORBIT_RAD_PER_PIXEL))
+    distance = float(np.linalg.norm(pose.position - pose.focal_point))
+    return turntable_pose(pose.focal_point, distance, azimuth, elevation, pose.parallel_scale)
+
+
+def pan(
+    pose: CameraPose,
+    dx_px: float,
+    dy_px: float,
+    height_px: float,
+    view_angle_deg: float = 30.0,
+    parallel: bool = False,
+) -> CameraPose:
+    """The camera slid across the screen by a panning drag of ``(dx_px, dy_px)`` pixels
+    (y down) in a view ``height_px`` pixels high: a point at the focal distance follows
+    the mouse."""
+    sight = np.asarray(pose.focal_point - pose.position, dtype=np.float64)
+    distance = float(np.linalg.norm(sight))
+    if distance == 0.0 or height_px <= 0.0:
+        return pose
+    forward = sight / distance
+    up = np.asarray(pose.view_up, dtype=np.float64)
+    up = up - float(np.dot(up, forward)) * forward
+    up /= np.linalg.norm(up)
+    right = np.cross(forward, up)
+    if parallel:
+        metres_per_px = 2.0 * pose.parallel_scale / height_px
+    else:
+        metres_per_px = 2.0 * distance * math.tan(math.radians(view_angle_deg) / 2.0) / height_px
+    shift = (-dx_px * right + dy_px * up) * metres_per_px
+    return CameraPose(pose.position + shift, pose.focal_point + shift, up, pose.parallel_scale)
+
+
+def zoom(pose: CameraPose, notches: float) -> CameraPose:
+    """The camera after ``notches`` wheel notches (forward positive: closer).
+
+    The distance to the focal point and the parallel scale are both multiplied by
+    :math:`e^{-0.1 n}` (:data:`ZOOM_PER_NOTCH`), so a notch forward and one back cancel.
+    """
+    factor = math.exp(-notches * ZOOM_PER_NOTCH)
+    sight = np.asarray(pose.position - pose.focal_point, dtype=np.float64)
+    return CameraPose(
+        pose.focal_point + factor * sight,
+        pose.focal_point,
+        pose.view_up,
+        pose.parallel_scale * factor,
+    )

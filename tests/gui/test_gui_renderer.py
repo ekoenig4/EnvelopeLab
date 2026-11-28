@@ -494,3 +494,139 @@ def test_placement_view_draws_a_shape_by_its_panels(qtbot: QtBot, settings: QSet
     after = np.asarray(plotter.actors["shape:Dome"].mapper.dataset.cell_data["panel"])
     assert not np.array_equal(colours, after)
     w.close()
+
+
+def _mouse_drag(
+    widget: Any, path: list[tuple[int, int]], button: Any, modifier: Any = None
+) -> None:
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    mods = modifier if modifier is not None else Qt.KeyboardModifier.NoModifier
+    QTest.mousePress(widget, button, mods, QPoint(*path[0]))
+    for x, y in path[1:]:
+        QTest.mouseMove(widget, QPoint(x, y))
+    QTest.mouseRelease(widget, button, mods, QPoint(*path[-1]))
+
+
+def test_dragging_the_view_turns_it_like_the_build_pack_page(
+    qtbot: QtBot, settings: QSettings
+) -> None:
+    """The mouse turns the camera about the envelope axis (no roll, no drift), pans and
+    zooms as on the build pack's 3D page, and the view is drawn once per pass of the event
+    loop."""
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QApplication
+
+    from envelopelab_app.camera import azimuth_elevation
+
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.resize(1400, 900)
+    w.show()
+    assert w.open_project(GORE_PROJECT) is not None
+    view, plotter = w.view3d, w.view3d.plotter
+    assert plotter is not None and view.turntable is not None
+    view.view_buttons["iso"].click()
+    start = view.turntable.pose()
+    az0, el0 = azimuth_elevation(start)
+    renders: list[int] = []
+    real = plotter.render
+
+    def counted() -> None:
+        renders.append(1)
+        real()
+
+    plotter.render = counted
+    cx, cy = plotter.width() // 2, plotter.height() // 2
+    path = [(cx + 4 * k, cy) for k in range(11)]
+    _mouse_drag(plotter, path, Qt.MouseButton.LeftButton)
+    QApplication.processEvents()
+    pose = view.turntable.pose()
+    az, el = azimuth_elevation(pose)
+    # 40 px right: the azimuth turns back by 0.4 rad, the elevation stays.
+    assert az == pytest.approx(az0 - 0.4, abs=1e-6)
+    assert el == pytest.approx(el0, abs=1e-9)
+    assert 1 <= len(renders) <= 2  # one draw for the whole drag, not one per move
+    # A loop of drags comes back to the starting view, upright.
+    loop = [(cx, cy), (cx + 40, cy), (cx + 40, cy + 30), (cx, cy + 30), (cx, cy)]
+    for _ in range(5):
+        _mouse_drag(plotter, loop, Qt.MouseButton.LeftButton)
+    _mouse_drag(plotter, path[::-1], Qt.MouseButton.LeftButton)
+    QApplication.processEvents()
+    back = view.turntable.pose()
+    np.testing.assert_allclose(back.position, start.position, atol=1e-6)
+    assert np.cross(back.focal_point - back.position, back.view_up)[2] == pytest.approx(0.0)
+    # Right drag pans (the focal point moves, the direction does not); the wheel zooms.
+    _mouse_drag(plotter, [(cx, cy), (cx + 50, cy)], Qt.MouseButton.RightButton)
+    QApplication.processEvents()
+    panned = view.turntable.pose()
+    assert np.linalg.norm(panned.focal_point - back.focal_point) > 0.0
+    np.testing.assert_allclose(
+        panned.position - panned.focal_point, back.position - back.focal_point, atol=1e-9
+    )
+    d0 = np.linalg.norm(panned.position - panned.focal_point)
+    wheel = QWheelEvent(
+        QPointF(cx, cy),
+        QPointF(plotter.mapToGlobal(QPoint(cx, cy))),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+    QApplication.sendEvent(plotter, wheel)
+    QApplication.processEvents()
+    zoomed = view.turntable.pose()
+    assert np.linalg.norm(zoomed.position - zoomed.focal_point) == pytest.approx(d0 * np.exp(-0.1))
+    plotter.render = real
+    w.close()
+
+
+def test_the_turntable_survives_picking_and_lets_the_drag_tool_move_shapes(
+    qtbot: QtBot, settings: QSettings
+) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QApplication
+
+    w = MainWindow(settings, enable_3d=True, interactive=False)
+    qtbot.addWidget(w)
+    w.resize(1400, 900)
+    w.show()
+    assert w.open_project(GORE_PROJECT) is not None
+    view, plotter = w.view3d, w.view3d.plotter
+    assert plotter is not None and view.turntable is not None
+    cx, cy = plotter.width() // 2, plotter.height() // 2
+    # The Probe tool replaces the interactor style; the turntable moves to the new one.
+    view.pick.setChecked(True)
+    view.view_buttons["iso"].click()
+    before = view.turntable.pose()
+    _mouse_drag(plotter, [(cx, cy), (cx + 30, cy)], Qt.MouseButton.LeftButton)
+    QApplication.processEvents()
+    after = view.turntable.pose()
+    assert not np.allclose(after.position, before.position)
+    assert np.cross(after.focal_point - after.position, after.view_up)[2] == pytest.approx(0.0)
+    view.pick.setChecked(False)
+    # The Drag tool: a press on a shape is the hook's; a press on empty space turns the view.
+    view.drag_shapes.setChecked(True)
+    presses: list[bool] = []
+
+    def take() -> bool:
+        presses.append(True)
+        return True
+
+    view.turntable.press_hook = take
+    moves: list[int] = []
+    view.turntable.move_hook = lambda: moves.append(1)
+    released: list[int] = []
+    view.turntable.release_hook = lambda: released.append(1)
+    still = view.turntable.pose()
+    _mouse_drag(plotter, [(cx, cy), (cx + 20, cy), (cx + 40, cy)], Qt.MouseButton.LeftButton)
+    QApplication.processEvents()
+    assert presses and len(moves) == 2 and released == [1]
+    np.testing.assert_allclose(view.turntable.pose().position, still.position)
+    view.drag_shapes.setChecked(False)
+    assert view.turntable.press_hook is None
+    w.close()

@@ -7,7 +7,7 @@ import math
 import numpy as np
 import pytest
 
-from envelopelab_app.camera import VIEWS, gore_step, turn_about_axis, view_pose
+from envelopelab_app.camera import VIEWS, CameraPose, gore_step, turn_about_axis, view_pose
 from envelopelab_app.main_window import MainWindow
 
 BOUNDS = (-9.0, 9.0, -9.0, 9.0, 0.0, 15.0)  # a full-size envelope, m
@@ -115,3 +115,99 @@ def test_face_zoom_and_saved_view_controls_are_harmless_without_a_renderer(
     assert view.seam_number.maximum() == 8  # the fixture's gores
     assert not view.save_view("somewhere")
     assert view.saved() == []
+
+
+# -- mouse navigation: the build pack page's turntable ----------------------------------
+
+
+def _sight_angles(pose: CameraPose) -> tuple[float, float, float]:
+    """Azimuth, elevation and roll (deg) of a camera; roll 0 means +z up on screen."""
+    from envelopelab_app.camera import azimuth_elevation
+
+    az, el = azimuth_elevation(pose)
+    forward = pose.focal_point - pose.position
+    forward = forward / np.linalg.norm(forward)
+    right = np.cross(forward, pose.view_up)
+    return math.degrees(az), math.degrees(el), float(right[2])
+
+
+def test_a_drag_turns_about_the_axis_and_never_rolls() -> None:
+    from envelopelab_app.camera import ORBIT_RAD_PER_PIXEL, orbit
+
+    pose = view_pose(BOUNDS, "iso")
+    az0, el0, _ = _sight_angles(pose)
+    turned = orbit(pose, 30.0, -12.0)
+    az, el, roll = _sight_angles(turned)
+    # The build pack page's rates: 0.01 rad per pixel; a drag right turns the azimuth back.
+    assert az == pytest.approx(az0 - math.degrees(30 * ORBIT_RAD_PER_PIXEL))
+    assert el == pytest.approx(el0 - math.degrees(12 * ORBIT_RAD_PER_PIXEL))
+    assert roll == pytest.approx(0.0, abs=1e-12)  # the envelope axis stays up
+    np.testing.assert_allclose(turned.focal_point, pose.focal_point)
+    assert np.linalg.norm(turned.position - turned.focal_point) == pytest.approx(
+        np.linalg.norm(pose.position - pose.focal_point)
+    )
+
+
+def test_a_drag_round_a_loop_comes_back_to_the_same_view() -> None:
+    """The trackball drifts (a closed mouse path leaves the camera rolled and turned); the
+    turntable returns exactly to where it started."""
+    from envelopelab_app.camera import orbit
+
+    start = view_pose(BOUNDS, "iso")
+    pose = start
+    for dx, dy in [(40, 0), (0, 25), (-40, 0), (0, -25)] * 20:
+        for _ in range(10):
+            pose = orbit(pose, dx / 10, dy / 10)
+    np.testing.assert_allclose(pose.position, start.position, atol=1e-9)
+    np.testing.assert_allclose(pose.view_up, start.view_up, atol=1e-9)
+
+
+def test_the_camera_stops_short_of_the_axis_and_leaves_the_top_view_smoothly() -> None:
+    from envelopelab_app.camera import MAX_ELEVATION, orbit
+
+    pose = orbit(view_pose(BOUNDS, "front"), 0.0, 10_000.0)
+    assert _sight_angles(pose)[1] == pytest.approx(math.degrees(MAX_ELEVATION))
+    assert _sight_angles(orbit(pose, 0.0, -20_000.0))[1] == pytest.approx(
+        -math.degrees(MAX_ELEVATION)
+    )
+    # From the top view (looking down the axis) the first drag keeps the view's up on
+    # screen: the picture only tilts a little, it does not spin.
+    top = view_pose(BOUNDS, "top")
+    moved = orbit(top, 0.0, 0.0)
+    assert float(np.dot(moved.view_up, top.view_up)) > 0.99
+    bottom = view_pose(BOUNDS, "bottom")
+    assert float(np.dot(orbit(bottom, 0.0, 0.0).view_up, bottom.view_up)) > 0.99
+
+
+@pytest.mark.parametrize("parallel", [False, True])
+def test_a_pan_moves_the_scene_with_the_mouse(parallel: bool) -> None:
+    from envelopelab_app.camera import pan
+
+    pose = view_pose(BOUNDS, "front", 30.0)
+    moved = pan(pose, 100.0, 50.0, 800.0, 30.0, parallel)
+    shift = moved.focal_point - pose.focal_point
+    np.testing.assert_allclose(moved.position - pose.position, shift)
+    distance = float(np.linalg.norm(pose.position - pose.focal_point))
+    per_px = (
+        2 * pose.parallel_scale / 800
+        if parallel
+        else 2 * distance * math.tan(math.radians(15)) / 800
+    )
+    # Front view: screen right is +x, screen up is +z; the scene follows the mouse, so the
+    # camera moves the other way (left for a drag right, up for a drag down).
+    np.testing.assert_allclose(shift, [-100 * per_px, 0.0, 50 * per_px], atol=1e-12)
+
+
+def test_wheel_notches_zoom_by_the_same_factor_both_ways() -> None:
+    from envelopelab_app.camera import ZOOM_PER_NOTCH, zoom
+
+    pose = view_pose(BOUNDS, "iso")
+    closer = zoom(pose, 1.0)
+    d0 = np.linalg.norm(pose.position - pose.focal_point)
+    assert np.linalg.norm(closer.position - closer.focal_point) == pytest.approx(
+        d0 * math.exp(-ZOOM_PER_NOTCH)
+    )
+    assert closer.parallel_scale == pytest.approx(pose.parallel_scale * math.exp(-ZOOM_PER_NOTCH))
+    back = zoom(closer, -1.0)
+    np.testing.assert_allclose(back.position, pose.position)
+    assert back.parallel_scale == pytest.approx(pose.parallel_scale)
